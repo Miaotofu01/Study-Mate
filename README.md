@@ -6,13 +6,14 @@
 
 <p align="center">
 <img src="https://img.shields.io/badge/DSH-%E5%AD%A6%E4%B9%A0%E6%A8%A1%E5%BC%8F%E9%A2%84%E8%AE%BE-1c5a40" alt="DSH 学习模式预设">
+<img src="https://img.shields.io/badge/Antigravity-%E5%A4%9A%E6%99%BA%E8%83%BD%E4%BD%93%E6%8F%92%E4%BB%B6-4285f4" alt="Antigravity 插件">
 <img src="https://img.shields.io/badge/python-3.9%2B-3776ab" alt="Python">
 <img src="https://img.shields.io/github/license/Miaotofu01/Study-Mate" alt="MIT License">
 </p>
 
 <p align="center"><sub> StudyMate 是面向数学与计算机科目学习的助手，原则是「learn with doing」</sub></p>
 
-<p align="center"><a href="#快速开始">快速开始</a> · <a href="#它是什么">它是什么</a> · <a href="#核心功能">核心功能</a> · <a href="#常见问题">常见问题</a> · <a href="docs/使用说明.md">使用说明</a></p>
+<p align="center"><a href="#快速开始">快速开始</a> · <a href="#它是什么">它是什么</a> · <a href="#核心功能">核心功能</a> · <a href="#常见问题">常见问题</a> · <a href="docs/使用说明.md">使用说明</a> · <a href="docs/Antigravity.md">Antigravity 说明</a></p>
 
 <p align="center"><img src="docs/images/taitou.png" width="860" alt="StudyMate：看板娘 + 手写体品牌字 + 覆盖科目（线代／微积分／概率论／C++／Python／机器学习／深度学习）+「任何科目，一站式搞定 / Learn With Doing」"></p>
 
@@ -51,9 +52,19 @@ dsh web
 
 **更新时下载最新版 ZIP，找到已有的插件链接，在浏览器中打开，选择上传新版本**
 
+### Google Antigravity
+
+在项目根目录运行以下命令一键构建并安装：
+
+```bash
+node bin/studymate.mjs build-antigravity --install
+```
+
+或者通过 `npm run build:antigravity` 构建 ZIP 包手动导入（详见 [Antigravity 说明](docs/Antigravity.md)）。
+
 ## 它是什么
 
-StudyMate 是一套**数学/计算机学习工作流、SKILL 与 HTML 课件引擎**，支持 DSH（DeepSeek Harness）的「学习模式」预设，也可打包为 Codex 和 ChatGPT Work 插件。它按需组织收集资料、采图、课程设计、讲解、练习评估五个角色；宿主支持时可委派给子代理，否则依次完成各角色工作。
+StudyMate 是一套**数学/计算机学习工作流、SKILL 与 HTML 课件引擎**，支持 DSH（DeepSeek Harness）的「学习模式」预设、Google Antigravity 原生多智能体插件，也可打包为 Codex 和 ChatGPT Work 插件。它按需组织收集资料、采图、课程设计、讲解、练习评估五个角色；宿主支持时可委派给子代理，否则依次完成各角色工作。
 
 - **课程组成：讲解|练习|项目实操**：每门课一份大纲——知识点按前置依赖排成路线图，每个知识点标课的类型「概念课 | 实操课 | 实验课」（大纲里写 `概念`／`实操`／`实验`）。学习进度落在文件里，每次新对话可继承已有进度。
 - **跨科目共享记忆**：记住你的现有水平、哪种讲法有效、常见卡点，下一门课不用重新自我介绍。
@@ -117,7 +128,9 @@ npm test                                     # 与 Actions 共用的功能回归
 
 ```text
 StudyMate/                     ← 本仓库：系统源码（引擎），学习时只读
-├── bin/studymate.mjs          # npx 安装入口 + OpenAI 插件构建入口
+├── bin/studymate.mjs          # npx 安装入口 + OpenAI / Antigravity 插件构建入口
+├── bin/antigravity-plugin.mjs # Antigravity 插件构建与安装逻辑
+├── antigravity/studymate/     # Antigravity 插件模板与清单（plugin.json / AGENTS.md）
 ├── .dsh/skills/               # 12 个技能：总控 learning-system + 5 个角色 + 6 个协议
 │   ├── learning-system/       #   总控（主教练）：开场、盘问、调度、档案
 │   ├── resource-scout/        #   角色：收集资料（权威教材与官方文档 → 资源清单）
@@ -136,6 +149,7 @@ StudyMate/                     ← 本仓库：系统源码（引擎），学习
 ├── templates/                 # 页面骨架（主页、科目页、课件壳）与前端资源 assets/
 ├── scripts/                   # 主页生成 + 课件渲染器 + 四道校验检查（用法见上）+ tests/ 回归测试
 ├── dist/studymate/            # build:plugin 生成的 OpenAI 插件，含适配后的 12 个技能（不入库）
+├── dist/antigravity/          # build-antigravity 生成的 Antigravity 插件目录与 ZIP（不入库）
 ├── examples/                  # 示例学习工作区：线性代数 + 计算机网络，页面已生成，clone 即可点开
 ├── docs/                      # 使用说明、课件内容格式、设计方案、工程约束、文件归属、方向探索指南与验收、docs/images/ 截图
 └── workspace/                 # 可选的本地学习工作区（已被 .gitignore 忽略）
@@ -168,7 +182,7 @@ Python 不自带 PyYAML。请在系统终端复制安装器给出的依赖安装
 - **项目交流群**(QQ)：161914370
 - **参与开发**：[CONTRIBUTING.md](CONTRIBUTING.md)（改哪块先读哪份、本地怎么验、提交信息规范）
 - **变更日志**：[CHANGELOG.md](CHANGELOG.md)
-- **文档**：[使用说明](docs/使用说明.md)（日常怎么用、课型与题型、检查与档案规则）· [Codex 与 ChatGPT](docs/Codex与ChatGPT.md)（OpenAI 插件构建、安装与工作区）· [课件内容格式](docs/课件内容格式.md)（内容文件与题目位置的语法）· [文件归属](docs/文件归属.md)（代称 ↔ 路径 ↔ 维护者）· [设计方案](docs/设计方案.md)（产品视角）· [工程约束](docs/工程约束.md)（目录约定、占位符契约、脚本一览、技术选型）· [模板说明](templates/README.md) · [前端资源契约](templates/assets/README.md)
+- **文档**：[使用说明](docs/使用说明.md)（日常怎么用、课型与题型、检查与档案规则）· [Codex 与 ChatGPT](docs/Codex与ChatGPT.md)（OpenAI 插件构建、安装与工作区）· [Antigravity 说明](docs/Antigravity.md)（Antigravity 插件构建、多智能体协同与安装）· [课件内容格式](docs/课件内容格式.md)（内容文件与题目位置的语法）· [文件归属](docs/文件归属.md)（代称 ↔ 路径 ↔ 维护者）· [设计方案](docs/设计方案.md)（产品视角）· [工程约束](docs/工程约束.md)（目录约定、占位符契约、脚本一览、技术选型）· [模板说明](templates/README.md) · [前端资源契约](templates/assets/README.md)
 
 ### 提改动前先跑这几条
 
