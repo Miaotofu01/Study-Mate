@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { adaptSkill } from './skill-compat.mjs';
 import { buildOpenAiPlugin } from './openai-plugin.mjs';
+import { buildAntigravityPlugin } from './antigravity-plugin.mjs';
 
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const metadata = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'));
@@ -17,6 +18,7 @@ https://github.com/Miaotofu01/Study-Mate/releases/latest/download/studymate-open
 
 用法：studymate [install] [--workspace <目录>] [--profile <名称>] [--mode standalone|native]
       studymate build-plugin [--output <目录>]（开发者构建）
+      studymate build-antigravity [--output <目录>] [--install]（Antigravity 插件构建）
       studymate --help | --version
 
 将学习模式和引擎安装到 DSH_HOME（默认 ~/.dsh）。
@@ -327,6 +329,20 @@ export function main(args = process.argv.slice(2)) {
       }
       const result = buildOpenAiPlugin({ output: args[2], python: findPython() });
       console.log(`StudyMate ${result.version} OpenAI 插件已构建。\n插件目录：${result.plugin}\n插件 ZIP：${result.archive}\n安装方法见插件目录中的 README.md。`);
+    }
+    else if (args[0] === 'build-antigravity') {
+      let output;
+      for (let i = 1; i < args.length; i++) {
+        if (args[i] === '--output' && args[i + 1] && !args[i + 1].startsWith('--')) {
+          output = args[++i];
+        } else if (args[i] === '--install') {
+          output = path.join(os.homedir(), '.gemini', 'config', 'plugins', 'studymate');
+        } else {
+          throw new Error('用法：studymate build-antigravity [--output <目录>] [--install]');
+        }
+      }
+      const result = buildAntigravityPlugin({ output, python: findPython() });
+      console.log(`StudyMate ${result.version} Antigravity 插件已构建。\n插件目录：${result.plugin}\n插件 ZIP：${result.archive}`);
     }
     else {
       if (args[0] === 'install') args.shift();

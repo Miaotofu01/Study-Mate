@@ -1,7 +1,7 @@
 {
   "name": "@yunmiao/studymate",
   "version": "0.2.0",
-  "description": "StudyMate learning skills and lesson engine for DeepSeek Harness, Codex and ChatGPT Work.",
+  "description": "StudyMate learning skills and lesson engine for DeepSeek Harness, Google Antigravity, Codex and ChatGPT Work.",
   "bin": {
     "studymate": "bin/studymate.mjs"
   },
@@ -21,6 +21,7 @@
     "openai/studymate/requirements.txt",
     "openai/studymate/scripts/*.py",
     "openai/studymate/skills/learning-system/references/*.md",
+    "antigravity/studymate/**",
     ".dsh/skills/**",
     "preset/learning/**",
     "scripts/*.py",
@@ -34,8 +35,10 @@
   ],
   "scripts": {
     "build:plugin": "node bin/studymate.mjs build-plugin",
+    "build:antigravity": "node bin/studymate.mjs build-antigravity",
     "test": "npm run test:installer && npm run test:openai && node scripts/release/checks.mjs",
     "test:openai": "node --test scripts/tests/test_openai_plugin.mjs",
+    "test:antigravity": "node --test scripts/tests/test_antigravity_plugin.mjs",
     "test:installer": "node --test scripts/tests/test_installer.mjs scripts/tests/test_bundle.mjs",
     "test:static": "node scripts/release/checks.mjs --static",
     "test:browser": "node scripts/release/checks.mjs --browser",
@@ -62,6 +65,7 @@
     "studymate",
     "learning",
     "education",
+    "antigravity",
     "codex",
     "chatgpt"
   ],
