@@ -51,7 +51,7 @@ function adaptController(body) {
     '按第 9 步衔接下一节点', 'next node handoff');
   result = replaceRequired(result, /→ 开始第一课（仍按「对话节奏」问"开始吗"）[^\n]*/,
     '→ 按用户已表达的范围继续第一课或交付大纲', 'parallel chain end');
-  result = replaceRequired(result, /   4\. 派 `curriculum-designer` 产大纲[^\n]+/,
+  result = replaceRequired(result, /   4\. 派 `curriculum-designer` 产大纲[^\n]*/,
     '   4. 接收第 3 步已经派发的 `curriculum-designer` 大纲并校验；不再次派同一份大纲任务。采图缺失按 Gaps 处理，不让可选图片阻塞已可交付的课程', 'single curriculum handoff');
   result = replaceRequired(result, /^\s*- 再 `xdg-open` \/ `open` 作补充[^\n]*/m,
     '有可用浏览器/页面预览工具时打开页面作补充，并按“Codex 对话衔接”交付当前材料与一个学生行动', 'page open + handoff');

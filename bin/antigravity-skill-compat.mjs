@@ -338,7 +338,7 @@ function adaptAntigravityController(body) {
 
   result = replaceRequired(
     result,
-    /   4\. 派 `curriculum-designer` 产大纲[^\n]+/,
+    /   4\. 派 `curriculum-designer` 产大纲[^\n]*/,
     '   4. 接收已派发的 `curriculum-designer` 大纲产物并执行校验；不重复派发同一大纲任务。采图缺失按 Gaps 处理，不阻塞可用大纲。',
     'curriculum handoff'
   );

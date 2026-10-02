@@ -47,8 +47,17 @@ def main():
     check('规格仍要求术语表两节（docs/规范/文件归属.md）', ok, f'缺 {missing}')
 
     ok, missing = has_all(read('.dsh/skills/learning-system/SKILL.md'),
-                          ['## Why', '## Success looks like', '## Constraints'])
-    check('规格仍要求使命三节（learning-system 建课顺序）', ok, f'缺 {missing}')
+                          ['## Why', '## Success looks like', '## Constraints', '## Out of scope'])
+    check('规格仍要求使命四节（learning-system 建课顺序）', ok, f'缺 {missing}')
+
+    # 总控点名的落点必须在模板里有家：说「共享记忆」的某个条目，模板里就得真有那串字，
+    # 否则学生按指示去找、找不到（「各领域当前水平」是「我是谁」下面的一个条目，不是小节）。
+    system = read('.dsh/skills/learning-system/SKILL.md')
+    memory_tpl = read('templates/MEMORY.md')
+    for term in ['各领域当前水平']:
+        check(f'总控点名的「{term}」在 templates/MEMORY.md 里有家',
+              term in system and term in memory_tpl,
+              f'总控{"有" if term in system else "没有"}、模板{"有" if term in memory_tpl else "没有"}')
 
     ok, missing = has_all(read('docs/使用/使用说明.md'),
                           ['我是谁 / 教学偏好 / 学习习惯 / 跨科目观察'])
