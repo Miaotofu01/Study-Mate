@@ -19,7 +19,7 @@ npm test
 | `npm run test:openai` | OpenAI 插件 ZIP、完整性、独立运行与导出保护 |
 | `npm run test:antigravity` | Antigravity 插件 ZIP、原生 agents、导出保护与重复构建 |
 | `npm run test:release` | 版本、changelog、重试和发布保护 |
-| `npm run test:static` | Python 语法、提示词与模板文案契约、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
+| `npm run test:static` | Python 语法、技能调用面与提示词规则归属、提示词与模板文案契约、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
 | `npm run test:browser` | 三套真实 Chrome 渲染测试，需要 `google-chrome` |
 | `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录 |
 | `npm run test:dsh-cli` | 真实 DSH CLI 安装、更新、卸载，还需要 `pnpm` |
@@ -53,6 +53,17 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_render_lesson.py`、`test_attachment_render.py` | 课件和附件渲染、题库锚点、转义、数学式、输出与检查器对接 |
 | `quiz_dom_test.js`、`toc_dom_test.js` | 题目判分、展开、代码和公式展示，侧栏目录与移动端行为 |
 | `scripts/release/release.test.mjs` | 版本计算、更新记录、历史 tag、PR 去重、制品校验与重试保护 |
+
+## 提示词规则归属
+
+`test_skill_rules.py` 逐条断言「旧版里的可执行规则还在」。片段**住在哪**由 `rule-owners.json` 声明，不由它挂在哪个技能下决定：
+
+| 键 | 是什么 | 怎么写 |
+| --- | --- | --- |
+| `reaches` | 谁加载谁（`learning-system` → 它开场加载的三份协议；角色 → 它自己加载的规范） | 只在真有加载关系时写；名字写错、指向不存在的技能会当场报错 |
+| `moved` | 某条规则的正文其实住在哪个协议里：`{技能: {规则说明: owner}}` | 把一条规则从总控搬进它加载的协议时，提示词改一处 + 这里加一行，**断言不用动** |
+
+断言问的是「这个技能够不够得着这条规则」：owner 默认是键所在的技能，声明过 `moved` 就按声明走，且 owner 必须在该技能的 `reaches` 名单里。表里的死条目（说明写错、owner 够不着）也会报错，不让声明悄悄空转。
 
 ## DSH 实际安装与启动
 
