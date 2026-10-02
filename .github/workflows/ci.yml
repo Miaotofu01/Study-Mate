@@ -21,6 +21,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # 版本 tag 要能被 test_release_metadata.py 读到：它比对 package.json 与最新可达的
+          # v* tag，拦住「stale 分支合并把 release 元数据冲回去」（2026-09-30 的 53f33d3）。
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
