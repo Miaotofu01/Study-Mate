@@ -371,35 +371,23 @@ function adaptAntigravityController(body) {
     'role error retry'
   );
 
-  // The DSH staging rule explains bwrap namespace behaviour; Antigravity has no
-  // such sandbox, so keep the staging policy and drop the DSH-only rationale.
-  result = replaceRequired(
-    result,
-    /：bash 的 `\/tmp` 每条命令新建（bwrap 的 `--tmpfs \/tmp`），文件工具的 `\/tmp` bash 又看不见，两个命名空间都会丢文件；只有会话目录（bwrap 的 `--bind`）两边共享。/,
-    '：新科目先建在会话目录里，课程全部生成并校验通过之前不碰工作区外的目录、不触发写授权。',
-    'DSH staging rationale'
-  );
 
-  result = result.replace('直接进下一节点', '按第 9 步衔接下一节点');
-  result = result.replace('→ 开始第一课（仍按「对话节奏」问"开始吗"）', '→ 按用户已表达的范围继续第一课或交付大纲');
-  result = result.replace('并按「对话节奏」给下一步', '并按“Antigravity 对话衔接”交付当前材料与一个学生行动');
-  result = result.replace(
-    '1. **你亲自确认**（"所以目标从 A 变成 B，对吗？"），确认后才动文件',
-    '1. **核对变更意图**：学生明确要求从 A 改成 B 就执行该范围变更；目标含糊或扩大范围时调用 `ask_question` 澄清一次'
-  );
-  result = result.replace(
-    '- 单会话推进 1-2 个节点；会话变长时主动建议"今天就到这"',
-    '- 按学生当前请求推进节点；课件交付后等待学生阅读与练习，不替学生自动刷课。学生要继续就保持衔接'
-  );
-  result = result.replace('**建池与拟大纲并行**——「资源清单」落位后，同时派下面两个（别串着等）：',
-    '**建池与拟大纲并发派发**——「资源清单」落位后，通过 `invoke_subagent` 数组同时派发下面两个角色：');
-  result = result.replace('→ 同时派两个：', '→ 通过 `invoke_subagent` 并发派发两角色：');
-  result = result.replace('（`present` 呈上更好）', '（在回复中输出可点击的本地文件链接，并生成 Markdown Artifact）');
-  result = result.replace(
-    '`present` 呈上页面 + 文字写明**绝对路径**（`xdg-open` 可能失败，链接才是一定拿得到页面的路）',
-    '在回复中输出课件的**绝对路径超链接**（`[打开课件](file://...)`），并可在 `<appDataDir>/brain/<conversation-id>/` 写入伴读 Artifact'
-  );
-  result = result.replace('再 `xdg-open` / `open` 作补充', '提示学生使用浏览器打开绝对链接');
+  result = replaceRequired(result, /直接进下一节点[^\n]*/,
+    '按第 9 步衔接下一节点', 'next node handoff');
+  result = replaceRequired(result, /→ 开始第一课（仍按「对话节奏」问"开始吗"）[^\n]*/,
+    '→ 按用户已表达的范围继续第一课或交付大纲', 'parallel chain end');
+  result = replaceRequired(result, /^\s*- 再 `xdg-open` \/ `open` 作补充[^\n]*/m,
+    '提示学生使用浏览器打开绝对链接，并按“Antigravity 对话衔接”交付当前材料与一个学生行动', 'page open + handoff');
+  result = replaceRequired(result, /^1\. \*\*你亲自确认\*\*[^\n]*/m,
+    '1. **核对变更意图**：学生明确要求从 A 改成 B 就执行该范围变更；目标含糊或扩大范围时调用 `ask_question` 澄清一次',
+    'mission change intent');
+  result = replaceRequired(result, /\*\*建池与拟大纲并行\*\*[^\n]*/,
+    '**建池与拟大纲并发派发**——「资源清单」落位后，通过 `invoke_subagent` 数组同时派发下面两个角色：', 'parallel pool + outline');
+  result = replaceRequired(result, /→ 同时派两个[^\n]*/,
+    '→ 通过 `invoke_subagent` 并发派发两角色：', 'parallel dispatch arrow');
+  result = replaceRequired(result,
+    /^\s*- \*\*回复里给出可点的页面\*\*[^\n]*/m,
+    '在回复中输出课件的**绝对路径超链接**（`[打开课件](file://...)`），并可在 `<appDataDir>/brain/<conversation-id>/` 写入伴读 Artifact', 'page delivery');
 
   result = result.replaceAll('~/.dsh/studymate-config.yaml', '宿主的全局工作区配置');
   result = result.replaceAll("'<学习工作区>'", "'<WS>'");
@@ -422,7 +410,7 @@ export function adaptAntigravitySkill(content, name) {
   } else if (name === 'record-keeping') {
     adaptedBody = replaceRequired(
       adaptedBody,
-      /：bash 的 `\/tmp` 每条命令新建（bwrap 的 `--tmpfs \/tmp`），文件工具的 `\/tmp` bash 又看不见，两者不是同一个命名空间；只有会话目录两边共享；/,
+      /别拿 `\/tmp` 当中转[^\n]*/,
       '：需要后续步骤读到的内容写进学习工作区，临时目录只放不需要留存的中间文件；',
       'DSH staging rationale'
     );

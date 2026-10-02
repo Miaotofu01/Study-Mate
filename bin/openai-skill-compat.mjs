@@ -47,15 +47,16 @@ function adaptController(body) {
     '1. 学生明确选择当前节点或已说开始/继续 → 直接进入当前节点并将状态置为“学习中”；先检查已生成材料与断点，只补未完成步骤，不重复确认或重新生成。', 'node start');
   result = replaceRequired(result, /^9\. 刷新主页，然后问学生[^\n]+/m,
     '9. 刷新主页并保存交互断点。学生已明确继续时推进对应下一步；只报告“学完了”而未选择后续时，给一次“下一课 / 补练 / 暂停”选择，不再叠加开始确认。', 'node boundary');
-  result = result.replace('直接进下一节点', '按第 9 步衔接下一节点');
-  result = result.replace('→ 开始第一课（仍按「对话节奏」问"开始吗"）', '→ 按用户已表达的范围继续第一课或交付大纲');
+  result = replaceRequired(result, /直接进下一节点[^\n]*/,
+    '按第 9 步衔接下一节点', 'next node handoff');
+  result = replaceRequired(result, /→ 开始第一课（仍按「对话节奏」问"开始吗"）[^\n]*/,
+    '→ 按用户已表达的范围继续第一课或交付大纲', 'parallel chain end');
   result = replaceRequired(result, /   4\. 派 `curriculum-designer` 产大纲[^\n]+/,
     '   4. 接收第 3 步已经派发的 `curriculum-designer` 大纲并校验；不再次派同一份大纲任务。采图缺失按 Gaps 处理，不让可选图片阻塞已可交付的课程', 'single curriculum handoff');
-  result = result.replace('并按「对话节奏」给下一步', '并按“Codex 对话衔接”交付当前材料与一个学生行动');
-  result = result.replace('1. **你亲自确认**（"所以目标从 A 变成 B，对吗？"），确认后才动文件',
-    '1. **核对变更意图**：学生明确要求从 A 改成 B 就执行该范围的变更；只有目标含糊或会扩大范围时才澄清一次，不重复确认已经清楚的指令');
-  result = result.replace('- 单会话推进 1-2 个节点；会话变长时主动建议"今天就到这"',
-    '- 按学生当前请求推进节点；课件交付后等阅读与证据，不替学生自动刷完整门课。学生要继续就保持衔接，不以回合数强制结束');
+  result = replaceRequired(result, /^\s*- 再 `xdg-open` \/ `open` 作补充[^\n]*/m,
+    '有可用浏览器/页面预览工具时打开页面作补充，并按“Codex 对话衔接”交付当前材料与一个学生行动', 'page open + handoff');
+  result = replaceRequired(result, /^1\. \*\*你亲自确认\*\*[^\n]*/m,
+    '1. **核对变更意图**：学生明确要求从 A 改成 B 就执行该范围的变更；只有目标含糊或会扩大范围时才澄清一次，不重复确认已经清楚的指令', 'mission change intent');
   result = replaceRequired(result,
     /  1\. \*\*角色规格的绝对路径\*\*：[^\n]+/,
     '  1. **角色规格的绝对路径**：`<root>/skills/<角色>/SKILL.md`，明说“先用文件读取工具读它、照它执行”；只有下游没有文件工具时才退回内联全文',
@@ -68,15 +69,14 @@ function adaptController(body) {
     /- \*\*角色不写 `<root>`\*\*：[^\n]+/,
     '- **插件根目录只读**：总控与角色均不在 `<root>` 或插件缓存写临时脚本、数据或环境。派发时明确“临时脚本与中间产物写 `<STUDYMATE_SCRATCH>`；学习产物按角色归属写 `subject_path` 或暂存目录”。发现异常文件先报告，不自动删除或收编插件目录中的文件。',
     'plugin cache writes');
-  result = result.replace('**建池与拟大纲并行**——「资源清单」落位后，同时派下面两个（别串着等）：',
-    '**建池与拟大纲可并行**——「资源清单」落位后，有委派工具时同时派下面两个；没有时按角色规格串行完成：');
-  result = result.replace('→ 同时派两个：', '→ 有委派工具时并行、否则串行执行两角色：');
+  result = replaceRequired(result, /\*\*建池与拟大纲并行\*\*[^\n]*/,
+    '**建池与拟大纲可并行**——「资源清单」落位后，有委派工具时同时派下面两个；没有时按角色规格串行完成：', 'parallel pool + outline');
+  result = replaceRequired(result, /→ 同时派两个[^\n]*/,
+    '→ 有委派工具时并行、否则串行执行两角色：', 'parallel dispatch arrow');
   result = result.replace(/- \*\*验收不过就退回[^\n]+/,
     '- **验收不过由产出角色自己改**：有角色消息/继续执行工具时，向原角色发送失败原文证据；串行模式切回同一角色规范修正。不要用总控身份代改；无法继续原子 agent 时，重新执行该角色并给原产物路径与失败证据。');
-  result = result.replace('（`present` 呈上更好）', '（使用宿主可用的文件预览或附件展示）');
-  result = result.replace('`present` 呈上页面 + 文字写明**绝对路径**（`xdg-open` 可能失败，链接才是一定拿得到页面的路）',
-    '使用宿主文件预览或附件呈上页面 + 文字写明**实际保存位置**并给可点击的文件链接');
-  result = result.replace('再 `xdg-open` / `open` 作补充', '有可用浏览器/页面预览工具时打开页面作补充');
+  result = replaceRequired(result, /^\s*- \*\*回复里给出可点的页面\*\*[^\n]*/m,
+    '使用宿主文件预览或附件呈上页面 + 文字写明**实际保存位置**并给可点击的文件链接', 'page delivery');
   return result;
 }
 
@@ -108,15 +108,17 @@ export function adaptOpenAiSkill(content, name) {
     // 本插件不读 DSH 的 studymate-config.yaml，工作区根一律记作 `<LEARN_WORKSPACE>`
     body = body.replaceAll('~/.dsh/studymate-config.yaml', '宿主的全局工作区配置')
       .replaceAll('<WS>', '<LEARN_WORKSPACE>');
-    body = body.replace('`goal` 先跟学生确认', '`goal` 以学生明确指令为准，有歧义才澄清');
-    body = body.replace('`current` 变了先跟学生确认', '`current` 按学生明确选择更新，有歧义才澄清');
-    body = body.replace('同时在对话里给一条 `memory_updates` 建议，学生确认后写进「共享记忆」',
-      '需要确认的 `memory_updates` 先保留在摘要，不在学生结束时追加弹窗；仅在获得实际确认后写入共享记忆');
+    body = replaceRequired(body, /^\s*- `current` 变了先跟学生确认[^\n]*/m,
+      '`current` 按学生明确选择更新，有歧义才澄清', 'record-keeping project current');
+    body = replaceRequired(body, /同时在对话里给一条 `memory_updates` 建议[^\n]*/,
+      '需要确认的 `memory_updates` 先保留在摘要，不在学生结束时追加弹窗；仅在获得实际确认后写入共享记忆', 'record-keeping memory updates');
     body += `\n\n${RECORD_CONTINUITY}`;
   }
   if (name === 'learning-system') {
-    body = body.replace('`goal` 先跟学生确认', '`goal` 以学生明确指令为准，有歧义才澄清');
-    body = body.replace('必须学生确认；旧使命留痕', '按学生明确变更指令执行，歧义才澄清；旧使命留痕');
+    body = replaceRequired(body, /`goal` 先跟学生确认[^\n]*/,
+      '`goal` 以学生明确指令为准，有歧义才澄清', 'controller goal confirmation');
+    body = replaceRequired(body, /必须学生确认；旧使命留痕[^\n]*/,
+      '按学生明确变更指令执行，歧义才澄清；旧使命留痕', 'mission change confirmation');
     // 暂存模式：本插件不读 DSH 的 studymate-config.yaml，工作区根一律记作 `<LEARN_WORKSPACE>`。
     // 中文占位符 `<学习工作区>` 先换成 `<WS>`，否则下面 python 命令的占位符替换会把它
     // 拆成「去尖括号 + 保留原引号」的 `''<学习工作区>''`。
