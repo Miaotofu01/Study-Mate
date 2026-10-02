@@ -25,14 +25,14 @@ issue 与 spec 都活在 GitHub Issues（`Miaotofu01/Study-Mate`），全部操�
 
 ### Domain docs
 
-**单上下文**布局：领域词表在仓库根 `GLOSSARY.md`（**已建立**——用到领域词就按词表里的叫法），架构决策在 `docs/adr/`（**按需创建**——有决策才建；动到已决策的区域先读相关 ADR）。见 [docs/agents/domain.md](docs/agents/domain.md)。
+**单上下文**布局：领域词表在仓库根 `GLOSSARY.md`，架构决策在 `docs/adr/`。两者都已建立——用到领域词就按词表里的叫法，动到已决策的区域先读对应 ADR。见 [docs/agents/domain.md](docs/agents/domain.md)。
 
 ## 文档在哪
 
 `docs/` 每个目录放什么、路径与维护者是谁，唯一出处是[工程约束](docs/规范/工程约束.md) §二 与[文件归属](docs/规范/文件归属.md)。这里只记怎么找：
 
 - 约束类看 **`docs/规范/`**——它是唯一约束来源
-- 决策类看 **`docs/adr/`**——按需创建，有决策才建；动到已决策的区域先读相关 ADR
+- 决策类看 **`docs/adr/`**——已建立，动到已决策的区域先读对应 ADR
 - 面向学生与维护者的用法看 **`docs/使用/`**
 
 **未完成的事走 GitHub Issues**。
