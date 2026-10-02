@@ -154,6 +154,7 @@ StudyMate/                     ← 本仓库：系统源码（引擎），学习
 ├── dist/studymate/            # build:plugin 生成的 OpenAI 插件，含适配后的 12 个技能（不入库）
 ├── dist/antigravity/          # build-antigravity 生成的 Antigravity 插件目录与 ZIP（不入库）
 ├── examples/                  # 示例学习工作区：线性代数 + 计算机网络，页面已生成，clone 即可点开
+├── study-mate-web/            # StudyMate Web：独立 Web 运行时（社区子项目，见下文与它的 README）
 ├── docs/                      # 文档，按用途分四类（见下）
 │   ├── 使用/                  #   安装、使用说明、Antigravity、Codex 与 ChatGPT、发布流程
 │   ├── 设计/                  #   设计方案、方向探索指南与验收
@@ -166,6 +167,12 @@ StudyMate/                     ← 本仓库：系统源码（引擎），学习
 DSH 安装到 `~/.dsh/studymate/engine/`，预设与工作区配置也由安装器管理。学习数据默认位于独立的 `~/StudyMate`，无需保留源码仓库；详见 [安装说明](docs/使用/安装.md)。
 
 学习工作区里面长什么样（科目文件夹、课件、lab、档案、课型与题型、模板与生成器的契约），见 [使用说明 §六](docs/使用/使用说明.md#六学习数据存在哪)。
+
+## StudyMate Web
+
+> 尚在开发测试中，相关功能可能不如插件途径稳定
+
+仓库还包含子项目 [`study-mate-web/`](study-mate-web/)：StudyMate 的**独立 Web 运行时**（FastAPI 后端 + Next.js 16 前端），把课程图谱、掌握度状态机与流式对话搬进浏览器；可通过 `STUDYMATE_WORKSPACE` 直接挂载已有的 `.learning` 静态工作区，在网页里零改动学习已有课件（页内判分、开放题判分、评估记录与静态工作区导出）。自包含工程，与上方的插件安装方式互不依赖。**部署与使用**见其 [README](study-mate-web/README.md)（一键启动脚本 + 手动启动 + E2E 测试）。
 
 ## 常见问题
 
