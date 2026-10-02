@@ -634,5 +634,21 @@ contract('对话场景有用户输入、后续回复、停止条件和独立判�
     and isinstance(case.get('max_user_turns'), int) and case['max_user_turns'] > 0
     for case in cases))
 
+# 引擎脚本调用要经两个宿主适配器改写（bin/openai-skill-compat.mjs、bin/antigravity-skill-compat.mjs），
+# 而两份正则都只认 `python3 [-B] <root>/scripts/x.py` 这种**不带引号**的脚本路径：路径一旦被引号
+# 包住，转换会静默跳过那一行，产物里就留下宿主跑不动的调用（#39 的 learning-system 正是这么漏的，
+# 且只在 OpenAI 一侧看得出来）。在源码层拦，两个宿主一起管，也不用等构建。
+quoted_calls = []
+unquoted_calls = 0
+for skill_path in sorted(Path(SK).glob('*/SKILL.md')):
+    for number, line in enumerate(skill_path.read_text(encoding='utf-8').splitlines(), 1):
+        for match in re.finditer(r"""python3\s+(?:-[A-Za-z]+\s+)*(['"]?)(<root>/scripts/[\w-]+\.py)""", line):
+            if match.group(1):
+                quoted_calls.append(f'{skill_path.parent.name}:{number}')
+            else:
+                unquoted_calls += 1
+contract(f'引擎脚本调用不带引号（适配器只认这种写法）{quoted_calls or ""}', not quoted_calls)
+contract(f'引擎脚本调用仍存在（守卫自身不空转）：{unquoted_calls} 处', unquoted_calls >= 5)
+
 print(f'\n合计 {total - bad}/{total} 条规则在位')
 sys.exit(1 if bad else 0)
