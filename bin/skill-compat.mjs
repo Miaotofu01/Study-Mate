@@ -37,9 +37,9 @@ export function adaptSkill(text, { platform, pythonExecutable, configFile, tempD
 
   // Replace source references before inserting real paths, which may themselves
   // be below /tmp (for example in tests or a custom Python installation).
-  // `/tmp` 在源技能里只剩两处：暂存模式的探测路径与 image-scout 的临时文件；
-  // 角色产出的暂存目录改成了科目内的 `.stage/`（它在写边界里，bwrap 下也不会被清），
-  // 所以这里不再有 practice-evaluator 的 cp 改写。
+  // `/tmp` 在源技能里只剩 record-keeping 的「工作区根与落点交付」一处（跨工具接力那条，
+  // 说明为什么不能拿它当中转）；角色产出的暂存目录是科目内的 `.stage/`（它在写边界里，
+  // bwrap 下也不会被清），所以这里不再有 practice-evaluator 的 cp 改写。
   let adapted = text.replaceAll('/tmp', temp);
   adapted = replaceConfig(adapted, portable(configFile));
   adapted = adapted.replace(/python3 ((?:-[A-Za-z]+\s+)*)(<root>\/scripts\/[\w-]+\.py)([^`\r\n]*)/g,

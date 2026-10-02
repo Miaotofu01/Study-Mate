@@ -105,6 +105,29 @@ export function adaptOpenAiSkill(content, name) {
       '路径以 `<LEARN_WORKSPACE>`（总控开场按用户目录、环境变量、显式配置或既有学习数据确定）为前缀；下面所有路径里的 `<LEARN_WORKSPACE>` 都指这一个值：',
       'record-keeping workspace');
     body = body.replace('绝不写会话目录', '不写插件缓存或工作区之外的会话目录');
+    // 暂存与落点是宿主差异最大的一块：DSH 的「会话目录暂存 + 沙箱模式名」在这里换成
+    // 「OpenAI 宿主约定」的工作区与 `<STUDYMATE_SCRATCH>` 口径。规则正文在 record-keeping，
+    // 这里只改写法——不改「先暂存、结束前问一次落点」这套流程本身。
+    body = replaceRequired(body,
+      /^\*\*工作区根 `<WS>`\*\*：[^\n]*/m,
+      '**工作区根**：按「OpenAI 宿主约定」选定 `<LEARN_WORKSPACE>`（用户本次指定目录 → 环境变量 → 显式配置 → 既有学习数据），不假定操作系统临时目录路径；暂存与中间产物写本会话的 `<STUDYMATE_SCRATCH>`（或工作区内专用暂存目录），需要后续步骤读到的内容一律写进 `<LEARN_WORKSPACE>`。',
+      'record-keeping workspace root');
+    body = replaceRequired(body,
+      /^- \*\*暂时写不进去\*\*[^\n]*/m,
+      '- **暂时写不进去**（工作区不可写）→ 只询问学生保存位置，并说明缺的是哪一项能力；**不要靠反复提权推进**',
+      'record-keeping write fallback');
+    body = replaceRequired(body,
+      /^- \*\*别拿 `\/tmp` 当中转站\*\*[^\n]*/m,
+      '- **别拿临时目录当中转站**：需要后续步骤读到的内容写进 `<LEARN_WORKSPACE>` 或 `<subject_path>/.stage/`，临时目录只放不需要留存的中间文件',
+      'record-keeping staging rationale');
+    body = replaceRequired(body,
+      /^- \*\*落点偏好开场恢复\*\*[^\n]*/m,
+      '- **落点偏好开场恢复**：顺手读一次 `<STUDYMATE_SCRATCH>/prefs.md` 的 `default_delivery`——有、且那个目录还在 → 记成**默认落点**，收尾时它排在第一项、**不再重复问**；没有或路径已失效 → 照常问一次',
+      'record-keeping prefs restore');
+    body = replaceRequired(body,
+      /^- \*\*落点要记住（这是持久化那一步，别漏）\*\*[^\n]*/m,
+      '- **落点要记住（这是持久化那一步，别漏）**：搬完用 `write` 把偏好写进 **`<STUDYMATE_SCRATCH>/prefs.md`**，形如 `default_delivery: <绝对路径>`；已有这个文件就**只改这一行**，别整文件覆盖',
+      'record-keeping prefs write');
     // 本插件不读 DSH 的 studymate-config.yaml，工作区根一律记作 `<LEARN_WORKSPACE>`
     body = body.replaceAll('~/.dsh/studymate-config.yaml', '宿主的全局工作区配置')
       .replaceAll('<WS>', '<LEARN_WORKSPACE>');

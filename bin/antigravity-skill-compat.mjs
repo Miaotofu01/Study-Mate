@@ -410,9 +410,15 @@ export function adaptAntigravitySkill(content, name) {
   } else if (name === 'record-keeping') {
     adaptedBody = replaceRequired(
       adaptedBody,
-      /别拿 `\/tmp` 当中转[^\n]*/,
-      '：需要后续步骤读到的内容写进学习工作区，临时目录只放不需要留存的中间文件；',
+      /^- \*\*别拿 `\/tmp` 当中转站\*\*[^\n]*/m,
+      '- **别拿临时目录当中转站**：需要后续步骤读到的内容写进学习工作区或 `<subject_path>/.stage/`，临时目录只放不需要留存的中间文件',
       'DSH staging rationale'
+    );
+    adaptedBody = replaceRequired(
+      adaptedBody,
+      /^- \*\*暂时写不进去\*\*[^\n]*/m,
+      '- **暂时写不进去**（会话目录不可写）→ 跟学生说清缺的是哪一项可写位置，由学生指定一个可写目录；**不要靠反复提权推进**',
+      'DSH sandbox fallback'
     );
     adaptedBody = replaceRequired(
       adaptedBody,
