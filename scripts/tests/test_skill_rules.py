@@ -3,6 +3,11 @@
 
 每条 = (技能, 说明, 必须出现的片段)。片段取自旧版原文里**承载规则**的词
 （阈值、字段名、文件名、命令、时机、禁止项），不是文风词。
+
+**片段住在哪由 `rule-owners.json` 声明**，不由它挂在哪个技能下决定：`reaches` 说谁加载谁，
+`moved` 说某条规则的正文其实住在哪个协议里。断言问的是「这个技能够不够得着这条规则」，
+所以把一条规则从总控搬进它加载的协议时，改提示词 + 在表里加一行就够，断言不用动。
+表自身的形状（名字写错、条目失效、owner 够不着）也在这里守。
 """
 import json
 import os
@@ -10,7 +15,32 @@ import re
 import sys
 from pathlib import Path
 
-SK = str(Path(__file__).resolve().parents[2] / '.dsh' / 'skills')
+SKILLS_DIR = Path(__file__).resolve().parents[2] / '.dsh' / 'skills'
+SK = str(SKILLS_DIR)
+
+# 规则归属声明表（说明见 scripts/tests/README.md「提示词规则归属」）
+_owners = json.loads((Path(__file__).parent / 'rule-owners.json').read_text(encoding='utf-8'))
+REACHES = _owners['reaches']
+MOVED = _owners['moved']
+SKILL_TEXT = {p.parent.name: p.read_text(encoding='utf-8') for p in SKILLS_DIR.glob('*/SKILL.md')}
+
+
+def owner_of(skill, desc, moved=None):
+    """这条规则的正文住在哪个技能里；没声明过就是它自己。"""
+    return (MOVED if moved is None else moved).get(skill, {}).get(desc, skill)
+
+
+def reachable(skill):
+    """这个技能够得着的技能：它自己 + 它加载的协议。"""
+    return [skill, *REACHES.get(skill, [])]
+
+
+def contract(label, condition):
+    global bad, total
+    total += 1
+    bad += not condition
+    print(f"{'PASS' if condition else 'FAIL'}  {label}")
+
 
 RULES = {
 'learning-system': [
@@ -569,24 +599,52 @@ RULES = {
 
 bad = 0
 total = 0
+
+# 归属表自身的守卫：技能名写错、条目失效、owner 够不着，都要当场报出来——
+# 否则一条声明写歪了只会让断言悄悄放过，比没有声明更糟。
+for skill, targets in REACHES.items():
+    contract(f'归属表：{skill} 是真实技能', skill in SKILL_TEXT)
+    for target in targets:
+        contract(f'归属表：{skill} 加载的 {target} 是真实技能', target in SKILL_TEXT)
+for skill, overrides in MOVED.items():
+    contract(f'归属表：moved 的键 {skill} 是真实技能', skill in SKILL_TEXT)
+    known = {desc for desc, _ in RULES.get(skill, [])}
+    for desc, owner in overrides.items():
+        contract(f'归属表：moved 的条目 {desc!r} 在 {skill} 的规则表里', desc in known)
+        contract(f'归属表：{desc!r} 的 owner {owner} 是真实技能', owner in SKILL_TEXT)
+        contract(f'归属表：{owner} 在 {skill} 的可达名单里', owner in reachable(skill))
+
+# 机制自检（合成数据）：`moved` 现在是空表，但解析与可达判定得先证明是活的——
+# 否则它只是一段没人跑过的声明，下一次搬规则时才发现写歪了。
+_SYNTHETIC = {'learning-system': {'合成规则': 'record-keeping'}}
+contract('机制自检：moved 把 owner 解析到协议',
+         owner_of('learning-system', '合成规则', _SYNTHETIC) == 'record-keeping')
+contract('机制自检：没声明的规则 owner 是它自己',
+         owner_of('learning-system', '没声明过', _SYNTHETIC) == 'learning-system')
+contract('机制自检：record-keeping 在总控的可达名单里',
+         'record-keeping' in reachable('learning-system'))
+contract('机制自检：未加载的协议不在可达名单里',
+         'lesson-design' not in reachable('learning-system'))
+
 for skill, rules in RULES.items():
-    text = open(os.path.join(SK, skill, 'SKILL.md'), encoding='utf-8').read()
-    missing = [(desc, frag) for desc, frag in rules if frag not in text]
+    missing = []
+    for desc, frag in rules:
+        owner = owner_of(skill, desc)
+        if owner not in reachable(skill):
+            missing.append((desc, frag, f'{owner} 不在 {skill} 的可达名单里'))
+        elif frag not in SKILL_TEXT.get(owner, ''):
+            where = owner if owner == skill else f'{owner}（{skill} 加载的协议）'
+            missing.append((desc, frag, f'不在 {where}'))
     total += len(rules)
     if missing:
         bad += len(missing)
         print(f'FAIL {skill}: {len(missing)}/{len(rules)} 条规则在新版里找不到')
-        for desc, frag in missing:
-            print(f'       · {desc}  （找的是 {frag!r}）')
+        for desc, frag, why in missing:
+            print(f'       · {desc}  （找的是 {frag!r}；{why}）')
     else:
         print(f'PASS {skill}: {len(rules)} 条规则全部在位')
 
 # 这是静态协议检查，不执行模型，也不能证明真实对话会遵守问数与写入边界。
-def contract(label, condition):
-    global bad, total
-    total += 1
-    bad += not condition
-    print(f"{'PASS' if condition else 'FAIL'}  {label}")
 
 
 discovery_dir = Path(SK) / 'learning-discovery'

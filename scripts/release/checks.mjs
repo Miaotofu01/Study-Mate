@@ -76,7 +76,7 @@ const groups = {
     tests: ['scripts/release/release.test.mjs'],
   },
   '--static': {
-    python: ['test_python_syntax.py', 'test_skill_rules.py', 'test_templates.py'],
+    python: ['test_python_syntax.py', 'test_skill_frontmatter.py', 'test_skill_rules.py', 'test_templates.py'],
     tests: ['scripts/tests/test_openai_skills.mjs', 'scripts/tests/test_openai_skill_ui.mjs', 'scripts/tests/test_antigravity_skills.mjs'],
   },
   '--browser': {
