@@ -12,3 +12,4 @@ frontend/playwright-report/
 frontend/tests/explorer/.env
 frontend/tests/explorer/runs/
 frontend/tsconfig.tsbuildinfo
+frontend/tests/explorer/env-dump.json
