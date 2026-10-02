@@ -1,5 +1,353 @@
 # 更新日志
 
+<!-- studymate-release:v0.3.0 -->
+## [0.3.0](https://github.com/Miaotofu01/Study-Mate/releases/tag/v0.3.0) - 2026-09-30
+
+### 已合并的 Pull Request
+
+- Integrate/learning discovery ([#20](https://github.com/Miaotofu01/Study-Mate/pull/20))
+- feat: 修改落盘位置，统一将workspace-write下的授权放在课程生成最后，优化对bash工具的时间限制 ([#23](https://github.com/Miaotofu01/Study-Mate/pull/23))
+- refactor(提示词): 配图不指定画法，渲染器职责独立成章 ([#24](https://github.com/Miaotofu01/Study-Mate/pull/24))
+- feat(插件): 支持 Google Antigravity 原生多智能体插件包 ([#26](https://github.com/Miaotofu01/Study-Mate/pull/26))
+-  feat(resources): 支持本地参考资料与教材路径导入 (fixes \#21) ([#27](https://github.com/Miaotofu01/Study-Mate/pull/27))
+- fix(插件): 兼容 Windows CRLF 换行符下的 Antigravity 插件构建 ([#28](https://github.com/Miaotofu01/Study-Mate/pull/28))
+- feat(讲解): 落笔前先读本节点的来源原文 ([#29](https://github.com/Miaotofu01/Study-Mate/pull/29))
+- Refactor/architecture review ([#30](https://github.com/Miaotofu01/Study-Mate/pull/30))
+- fix(发布): 打包白名单补上 antigravity，Release 不再自己拦自己 ([#31](https://github.com/Miaotofu01/Study-Mate/pull/31))
+
+### 所有提交
+
+- Add optional learning direction exploration and usage guide ([a2cb264](https://github.com/Miaotofu01/Study-Mate/commit/a2cb264efbedb1f0c80a8878ced74d74859e8949))
+- Refine discovery handoff and add reproducible dialogue evaluation ([f3865f8](https://github.com/Miaotofu01/Study-Mate/commit/f3865f8f20743c98c38de67bcabc4d2c5838be30))
+- Merge pull request \#10 from lyk05212007/learning-direction-exploration ([b26578f](https://github.com/Miaotofu01/Study-Mate/commit/b26578f800acea809e5512cfdc0e8abdf1ab58a9))
+
+  > Add optional learning direction exploration
+
+- fix(readme)：移除其他安装方式，增加安装说明 ([d8274f9](https://github.com/Miaotofu01/Study-Mate/commit/d8274f957503ffeded121ed89db8e371cd94287a))
+- docs: 新增CONTRIBUTING.md ([7bd1a3b](https://github.com/Miaotofu01/Study-Mate/commit/7bd1a3bc0ed9ae978c8e35b9ae267e5ede9199e3))
+- feat(学习流程): 接入可选的学习方向探索（集成分支） ([c6ab750](https://github.com/Miaotofu01/Study-Mate/commit/c6ab750d8c6d2db6beb9d94bbcd037a28a4a7477))
+
+  > 把 origin/test 上 PR \#10 的方向探索功能整合到 main，并补上 main 这 43 个提交
+  > 之后必须做的适配。
+  > 
+  > 为什么不能直接合：test 分支停在旧命名与旧文件结构上，直接合会让 main 倒退——文档
+  > 术语回到「落盘／共享记忆」，装回已删除的 install.sh，并让 47 条词表断言失败。
+  > 
+  > 做法：以 main 侧为基准，把 test 的新增语义用 main 当前术语重述。
+  > 
+  > - 新增 \`learning-discovery\` 协议：入口挂在总控「会话开场」，探索只维护会话状态；
+  >   术语与 main 对齐（写盘／共享记忆），不引入 \`MEMORY.md\` 直称
+  > - 技能数 11 → 12、协议 5 → 6，各文档计数与目录树统一
+  > - 丢弃 test 文档/测试对 \`install.sh\` / \`install.ps1\` 的引用（main 已改 npx 安装）
+  > - OpenAI 插件侧同步：\`bin/openai-skill-ui.mjs\` 补新技能元数据，三处写死的技能数
+  >   断言 11 → 12
+  > - \`docs/learning-discovery-guide.md\` 改为从本仓库源码试用（原先指向个人 fork 与
+  >   开发分支的克隆命令，合并后就是死指引）
+  > - 修正 \`docs/learning-discovery-validation.md\` 里「项目没有 npm test」的失真记述
+  > 
+  > 验证：npm test / test:static / test:browser 三套全绿；词表 486/486、模板 8/8、
+  > OpenAI 技能 9/9。
+
+- Merge pull request \#20 from Miaotofu01/integrate/learning-discovery ([884314c](https://github.com/Miaotofu01/Study-Mate/commit/884314cf2148598e0a364417a77b486aee1aac4b))
+
+  > Integrate/learning discovery
+  > 合并test分支
+
+- feat: 修改落盘位置，统一将workspace-write下的授权放在课程生成最后，优化对bash工具的时间限制 ([5d537cf](https://github.com/Miaotofu01/Study-Mate/commit/5d537cf72a9244f9e49976f5f8ddc4c353b1c8de))
+
+  > 源自 \#19（原作者 @ClauBloom，署名保留）。原 PR 的 base 停在 v0.1.5，与 main
+  > 分叉导致 GitHub 判定 dirty；本提交是把它移植到当前 main 的结果，语义不变、
+  > 措辞按 main 现状重述。
+  > 
+  > 为什么需要这个改动：会话能写哪由 DSH 沙箱模式定，\`workspace-write\` 的可写集是
+  > 「会话启动目录 + 系统临时目录」，配置里的 \`workspace\` 只是数据、沙箱不认。开场
+  > 直接写它只会换来一串提权请求；bash 与文件工具的 \`/tmp\` 又不是同一个命名空间
+  > （bwrap 的 \`--tmpfs /tmp\` vs 宿主 \`/tmp\`），拿它当中转站会丢文件。所以改成：
+  > 课程先在 \`&lt;SESSION\_DIR&gt;/.studymate-stage/&lt;slug&gt;\` 建完，收尾时问一次落点再整体搬。
+  > 
+  > 移植时的调整：
+  > - 术语按 main 现状：\`MEMORY.md\`/\`curriculum.yaml\` 在角色规格里用「共享记忆」
+  >   「课程大纲」等代称；「落盘」统一为「写盘」
+  > - 丢弃 \`install.sh\` / \`install.ps1\` / \`test\_install.py\` 的改动（main 已删除，
+  >   安装改走 npx）；丢弃 \`.idea/\`（IDE 配置，另已加进 .gitignore）
+  > - 保留 \`&lt;SESSION\_DIR&gt;\` 占位符定义（原 PR 引用了它在 main 上不存在的 0.5 步）
+  > - \`bin/openai-skill-compat.mjs\` 同步：record-keeping 的工作区改写锚点、\`&lt;WS&gt;\` →
+  >   \`&lt;LEARN\_WORKSPACE&gt;\`、DSH 专属配置路径改成中性说法、\`-B\` 标志纳入 python 命令
+  >   改写、\`practice-evaluator\` 的 cp 改写指向 \`.stage/\` 路径
+  > - \`-B\` 新增后 \`test\_openai\_skills.mjs\` 的命令正则与 gen\_home 数量断言同步
+  > - 规则断言按 main 措辞对齐；\`test\_installer.mjs\` 增加「安装完必须说明会话开在哪」
+  >   与「装出的技能副本是暂存口径」两条
+  > 
+  > 验证：npm test / test:static / test:browser 三套全绿；词表 514/514。
+
+- Merge pull request \#23 from Miaotofu01/feat/write-boundary-staging ([fdb5072](https://github.com/Miaotofu01/Study-Mate/commit/fdb50725450473752a499c83d4cb191cdcbe1695))
+
+  > feat: 修改落盘位置，统一将workspace-write下的授权放在课程生成最后，优化对bash工具的时间限制
+
+- refactor(提示词): 配图不指定画法，渲染器职责独立成章 ([6c7a30d](https://github.com/Miaotofu01/Study-Mate/commit/6c7a30d7dc561786b5dd55d8fcc87b7f3ea41ac6))
+
+  > 两处过度提示：
+  > 
+  > 一、配图路线表替讲解角色指定了画法——「库自带样例数据（skimage.data.\*、
+  > cv2.samples、matplotlib.cbook.get\_sample\_data）」「自己画：matplotlib 脚本」
+  > 「手写内联 ::: svg」，lesson-design 还把示意图和 ::: svg 绑死。用哪个库、写
+  > 脚本还是内联 SVG，是实现细节，讲解按内容挑更合适。现在只留「来源」（自产／
+  > 图片库／交总控派 image-scout），画法由它定。实测同一知识点，它自己选了内联
+  > SVG——那条指定确实是多余的。
+  > 
+  > 二、渲染器的职责散在六处，「你别写 XX」的否定句跟着散在六处。集中成一节
+  > 「渲染器负责的部分」（页面结构／上下节课指针／图注编号／来源许可／公式排版／
+  > 成品样式），其余章节只写讲解要做什么。渲染器的真契约不变：::: 指令、alt:、
+  > 图注一句话、公式 TeX 都在。
+  > 
+  > 顺带：讲解规格里复述派工的三段（渲染分工、改课件、被打回怎么办）删掉——派工
+  > prompt 自然带上下文，规格里不该复述。image-scout 的「自己产图走另一条路」
+  > 与使用说明的配图段同步去掉工具指定。
+  > 
+  > 验证：词表 514/514；npm test、test:static、test:browser 全绿。
+
+- fix:删除课件强制中英对照讲解 ([a40b359](https://github.com/Miaotofu01/Study-Mate/commit/a40b3596887b19ba8dcf669f6240ea67168bbd7c))
+- Merge pull request \#24 from Miaotofu01/refactor/prompt-配图 ([22e2159](https://github.com/Miaotofu01/Study-Mate/commit/22e2159f2098751b05a152f2844c65fc79d3507d))
+
+  > refactor(提示词): 配图不指定画法，渲染器职责独立成章
+
+- feat(插件): 支持 Google Antigravity 原生多智能体插件包 ([b0c4dc4](https://github.com/Miaotofu01/Study-Mate/commit/b0c4dc481a9e6093be7674089f2293e285ba5b7c))
+
+  > - 新增 Antigravity 插件构建入口 \`studymate build-antigravity \[--install\]\` 与分发打包
+  > - 基于 Antigravity 原生能力适配 5 个专用子智能体 (agents/\*.md) 与 12 个完整技能规范
+  > - 规范 \`ask\_question\` 交互模态与 \`invoke\_subagent\` 异步多智能体协同
+  > - 完善 \`docs/Antigravity.md\` 与自动化回归测试
+  > 
+  > Signed-off-by: 東洋化學 &lt;yuukireina2023@gmail.com&gt;
+  > 
+  > 原作者 YuukiReina2023；合入前由维护者补了 4 处收尾修正：
+  > - 删掉被打进插件却始终为空的 references/antigravity-interaction.md 与两处引用，测试改为禁止 0 字节文件
+  > - 给 &lt;STUDYMATE\_SCRATCH&gt; 补上定义，并去掉只对 DSH 沙箱成立的 bwrap 说明（原来同一份文件里「不许用」与「所有临时文件写」互相矛盾）
+  > - 输出目录保护与 OpenAI 版对齐：已被非构建文件占用的目录不再被静默清空
+  > - test:antigravity 挂进 npm test，并新增 test\_antigravity\_skills.mjs 覆盖技能转换
+  > 
+  > 谨以此纪念原作者 @YuukiReina2023（東洋化學）——这份实现会一直署着他的名字。
+
+- Merge pull request \#26 from Miaotofu01/feat/antigravity-support ([328cf8e](https://github.com/Miaotofu01/Study-Mate/commit/328cf8ef0a99fe8892c902c4ef900b7bbbec7ad8))
+
+  > feat(插件): 支持 Google Antigravity 原生多智能体插件包
+
+- feat(resources): support custom local materials and textbook paths (fixes \#21) ([6f2d80d](https://github.com/Miaotofu01/Study-Mate/commit/6f2d80d47e83e27a851fa6d095c820b54221d585))
+- fix(渲染器): 围栏语言带白名单，写错标签带行号报错 ([92d8154](https://github.com/Miaotofu01/Study-Mate/commit/92d8154424991e8bd04363038ffda45840ccf8b5))
+- fix(模板): 代码高亮补 python 配色器，别名 py/bash 一并认 ([cf2c4e1](https://github.com/Miaotofu01/Study-Mate/commit/cf2c4e1300b6c1c6eddca8d24b9435c6a12ed136))
+- test(模板): 钉住渲染器围栏白名单与前端配色表相等 ([5efdd5d](https://github.com/Miaotofu01/Study-Mate/commit/5efdd5d52f3a9e4683871eac26fb59c80912e0f9))
+- docs(格式): 代码围栏列出支持的语言标签与报错口径 ([d7acd55](https://github.com/Miaotofu01/Study-Mate/commit/d7acd55971da245bd800948fb6bf43f49fdf381f))
+- chore(示例): 重跑 examples 同步共享层（python 高亮生效） ([a666071](https://github.com/Miaotofu01/Study-Mate/commit/a666071fcbea6a27fbbad025f739481836736f5b))
+- test(校验): 相等断言进 CI，并盯住 examples 共享层副本 ([35883f8](https://github.com/Miaotofu01/Study-Mate/commit/35883f8be336aa57e0419a0ae1e4603f5d752ddf))
+- fix(渲染器): 围栏白名单收下常见语言标签，detect 猜测走同一张表 ([7696008](https://github.com/Miaotofu01/Study-Mate/commit/7696008de29f0b048235820246d7b3f9b4907df2))
+- fix(插件): 兼容 Windows CRLF 换行符下的 Antigravity 插件构建 ([9b7d09f](https://github.com/Miaotofu01/Study-Mate/commit/9b7d09f6cfe956f38553aa88a4d9a65335a27b81))
+
+  > Windows 环境下检出源文件带有 CRLF（\\r\\n）换行符时，\`adaptAntigravitySkill\` 与 \`adaptAntigravityAgent\` 中的部分严格匹配 \\n 的正则（如会话结束正则）会触发 \`Antigravity skill adaptation error: Antigravity session end\` 阻断构建。
+  > 
+  > - 在 \`adaptAntigravitySkill\` 与 \`adaptAntigravityAgent\` 入口处统一将 CRLF 归一化为 LF
+  > - 会话结束正则增加对可选 \\r 的兼容
+  > - 增加 CRLF 换行输入下技能与子智能体转换无残留回车的单元测试
+
+- feat(讲解): 落笔前先读本节点的来源原文 ([b750059](https://github.com/Miaotofu01/Study-Mate/commit/b750059da7b1210254723018ebec2166b22c7240))
+- feat(调度): 放开角色派工，边界改由各角色规格约束 ([1123d0d](https://github.com/Miaotofu01/Study-Mate/commit/1123d0d81da2d7959089f5e99abd2c919da9806c))
+- Merge pull request \#27 from yMvvL/feat/custom-local-materials ([554e9fc](https://github.com/Miaotofu01/Study-Mate/commit/554e9fccee075072d7cc1ad7713ab53310a48129))
+
+  > feat(resources): 支持本地参考资料与教材路径导入 (fixes \#21)
+
+- Merge branch 'fix/lesson-code-highlight' ([2e677f1](https://github.com/Miaotofu01/Study-Mate/commit/2e677f125c1609f5036f2b0ad530bd3c84c82cd7))
+
+  > 课件代码块高亮：渲染器围栏语言白名单、前端补 python 配色器、防漂移断言进 CI
+
+- Merge branch 'feat/role-dispatch' ([ce1c458](https://github.com/Miaotofu01/Study-Mate/commit/ce1c45840d3c166388d60996674c63daf670311e))
+
+  > 放开角色派工：显式 maxDepth 2，边界改由各角色规格约束
+
+- Merge pull request \#29 from Miaotofu01/feat/coach-source-reading ([2ec594e](https://github.com/Miaotofu01/Study-Mate/commit/2ec594e96d479beb1366b452987b161435e73e4b))
+
+  > feat(讲解): 落笔前先读本节点的来源原文
+
+- feat(资料): 本地教材与在线来源都在收集阶段转成 Markdown ([88c5f79](https://github.com/Miaotofu01/Study-Mate/commit/88c5f792a8f8d7681c0dab14d0ac3d2f2e5ca1cb))
+- feat(讲解): Antigravity 导出给讲解配抓取工具 ([42b9a56](https://github.com/Miaotofu01/Study-Mate/commit/42b9a56bf0349a9c4dab3a044117e5b70098f469))
+- feat(讲解): 本地落盘的来源原文直接读 ([0447a37](https://github.com/Miaotofu01/Study-Mate/commit/0447a37744d4d0f6701bc4b006a88dd568dfabfe))
+- feat(讲解): 讲法与语气以来源为准，教科书语体降为兜底 ([26629f8](https://github.com/Miaotofu01/Study-Mate/commit/26629f8c8572415588eff6d29dc6db4fa256d7e9))
+- fix(插件): Antigravity 的工具说明改由工具表生成，修掉讲解角色不知道能抓来源 ([238035e](https://github.com/Miaotofu01/Study-Mate/commit/238035e4920fdc0eb0283d4cd84747a021e76e63))
+
+  > 权限表 AGENT\_TOOLS（写进 agent frontmatter）与正文那段「工具使用指南」是两份手抄：
+  > 24 个「角色 × 工具」组合里差 6 个——五个角色都漏 invoke\_subagent，learning-coach
+  > 还漏 read\_url\_content（42b9a56 只改了表，正文留到今天）。模型按正文办事，所以那笔
+  > 「给讲解配抓取工具」在 Antigravity 侧等于没生效；两个测试又都 import 同一张表去断言
+  > frontmatter，属于自证，抓不到这类漂移。
+  > 
+  > - 新增 ROLE\_TOOL\_NOTES（角色 × 工具 → 一句用途，原文逐字保留）与 toolGuide() 生成
+  >   那段指南；assertToolNotes() 在模块加载期断言两边集合逐个相等、模板留着占位符
+  > - 测试补「正文指南 == 工具表」（含 image-scout 那种两工具合写一条的形态），原有两条
+  >   独立断言（每个角色必须能派工、learning-coach 必须能读来源）保留
+  > - 顺带：五段角色描述删掉副本，改读技能元数据那一份；插件源清单不再写 version（构建器
+  >   从 package.json 注入，产物侧的断言本来就在）；缺角色规格改为报错退出（原先会静默建出
+  >   没有该 agent 的插件）；宿主约定里点名的角色名单加一条一致性测试
+  > 
+  > 验证：npm test 退出码 0、npm run test:static 退出码 0（536/536 条规则在位）；变异两条——
+  > 指南漏一个工具 → 测试红、删掉一条用途 → 模块加载抛错；真挪走 learning-coach/SKILL.md
+  > 再构建 → 如期报错且文件逐字节还原；新旧 agents 产物逐字节对照只多出新增的 6 行。
+
+- refactor(课件): 大纲与课件路径收成两个模块，五个脚本改问它们 ([a5c95f0](https://github.com/Miaotofu01/Study-Mate/commit/a5c95f03e1e048e9a2427946effaaee673634c10))
+
+  > 「课件编号 = 节点在 curriculum.yaml 的 nodes: 里排第几」这条规则原先由五个脚本各写
+  > 一遍（渲染、校验、重排编号、回填无题理由、主页生成），彼此只在注释里声明「同口径」。
+  > 坏输入的判决还各不相同：节点写坏时渲染与校验硬失败，重排与回填\*\*静默跳过\*\*——位次
+  > 跟着压缩，回填会算出 0002 而渲染器认为它是 0003；主页生成则把重复 id 渲染两遍。
+  > 
+  > - 新增 scripts/curriculum.py：大纲的唯一口径（位次/标题/课型/前后邻居/依赖层级，
+  >   以及什么算坏大纲）。strict（有问题就不可用，问题一次报全）与宽松（坏节点跳过、
+  >   重复 id 只认第一次、逐条收集）由调用方选；怎么报（告警/失败/退出码）仍归各脚本
+  > - 新增 scripts/lessonfile.py：课件文件名（\`&lt;4 位序号&gt;-&lt;节点id&gt;.&lt;md|quiz.json|html&gt;\`）、
+  >   三种页面的共享层前缀、引用清单与外链判据；顺带清掉逐字相同的三份 SCHEME\_RE
+  > - 五个脚本切过去，CLI 与输出格式不变；\`gen\_home\` 的「坏文件不掀翻整次生成」保留，
+  >   只是坏大纲现在会明确告警一次（按 slug 去重），不再静默当没有
+  > - 新增两个套件（39 + 34 条）覆盖此前没有任何用例的坏输入：节点写坏、id 重复、YAML 坏、
+  >   nodes 空、前置成环；已接进 checks.mjs 默认门禁并在测试说明里登记
+  > 
+  > 验证：examples 重新生成（3 个主页 + 6 课）后与仓库产物\*\*逐字节一致\*\*——这条覆盖了任何
+  > 套件都没测的主页位次与依赖层级路径；\`npm test\` 与 \`npm run test:static\` 退出码 0
+  > （536/536 条规则在位）；变异验证「位次偏一位」→ 5 个套件变红，还原逐字节；坏节点实测：
+  > 回填不再给出压缩位次、重排停下不动文件、渲染照旧硬失败、主页明确告警。
+
+- refactor(状态): 状态与课型词表收敛到 schema，宿主指南不再手抄 ([5829120](https://github.com/Miaotofu01/Study-Mate/commit/582912095e4f4f735d24ab257bcb3dc3e3ee9625))
+
+  > 六个节点状态原先在仓库里有七份副本（两份 schema、\`gen\_home\` 三组常量、
+  > \`preview\_templates\` 两组、模板注释、宿主提示词、规格散文）。后果是改一次要动七处；
+  > \`antigravity-interaction.mjs\` 那份手抄的只剩 4/6（少了「初步理解」与「已通过项目验证」），
+  > 模型照它写就会产出 schema 不认的状态；而没有任何测试把两边钉在一起。
+  > 
+  > - 新增 scripts/statuses.py：词表从 schema 读（节点状态读 progress、退路 curriculum；
+  >   科目状态读 subject；课型读 curriculum）。\*\*数组顺序成为载荷\*\*——「完成」= 在
+  >   「能独立应用」处切一刀取后半段，主页卡片排序按科目状态的 enum 顺序；配色映射
+  >   （状态 → 卡片 class）全仓库只剩这一份
+  > - \`gen\_home\` 与 \`preview\_templates\` 改问它；读不到 schema 时降级渲染但\*\*明确告警一次\*\*
+  >   （状态文本写原值、样式退成 todo、完成数按 0），不再静默
+  > - Antigravity 宿主指南那串取值改为导出时从 schema 生成（4/6 → 6/6），课型同理
+  > - 顺带补掉上一笔的漏网：\`gen\_home.py\` 里第三份 SCHEME\_RE 也归到 lessonfile
+  > - 新增 test\_statuses.py（20 条）进默认门禁；test\_antigravity\_skills.mjs 补一条
+  >   「宿主状态清单必须列全 schema 的状态」
+  > 
+  > 验证：examples 重生成后逐字节一致（配色/计数/排序全走这条词表）；npm test 与
+  > test:static 退出码 0（536/536 条规则在位）；三条变异各自变红并逐字节还原——schema 加一个
+  > 状态（配色缺失 + 两份 schema 不等）、配色表删一项、宿主清单只列前 4 个。
+
+- refactor(资源): 共享层清单收成一份，依赖方向正过来，examples 一条命令重建 ([a57a3b4](https://github.com/Miaotofu01/Study-Mate/commit/a57a3b471c119a00029aa96bdfb9d1bbe88cfe87))
+
+  > 共享层清单原先有三处（\`templates/assets/README.md\` 的表格、\`preview\_templates.py\` 的
+  > \`shared\_files\`、\`gen\_home.py\` 的 \`ensure\_shared\_assets\`），\`docs/工程约束.md\` 自己写着
+  > 「清单分散在三处，必须同时改」；逐字节守只盖住四个平铺文件——而 \`examples\` 的
+  > \`katex/fonts/LICENSE\` 一直未跟踪，正是它让整树比对做不了。另外课件渲染器为了复用
+  > \`esc\` / \`replace\_block\` / \`replace\_field\` 反向 \`import gen\_home\`（1300 行的主页生成器被当库用）。
+  > 
+  > - \`scripts/lessonfile.py\` 收下清单（SHARED\_DIRS / SHARED\_FILES / SUBJECT\_FILES / ASSET\_DOC）
+  >   与拷贝助手 \`install\_shared\` / \`install\_subject\`；\`gen\_home\` 与 \`preview\_templates\` 都读它
+  > - 新增 \`scripts/pagetpl.py\`（esc / replace\_block / replace\_field / PLACEHOLDER 逐字搬出），
+  >   \`render\_lesson\` 与 \`gen\_home\` 都依赖它——渲染器不再 import 主页生成器
+  > - 跟踪 \`examples/.learning/assets/katex/fonts/LICENSE\`；\`test\_templates.py\` 的字节守从
+  >   4 个文件扩到\*\*整份清单\*\*（sayo/ 与 katex/ 整树 + 平铺四件 + 每个科目的课件层三件），
+  >   并新增一条「templates/assets 顶层每个文件都登记过」
+  > - 新增 \`scripts/build\_examples.py\` 与 \`npm run build:examples\`（\`studymate build-examples\`）：
+  >   一条命令重建主页与每一课，替代 CONTRIBUTING 里那段「跑两次、每课再来一次」的散文
+  > - 文档对齐：工程约束的脚本一览与那条「三处清单」约束、CONTRIBUTING 的重建段、
+  >   \`templates/assets/README.md\` 只留「清单在 lessonfile」的指针
+  > 
+  > 验证：\`python3 scripts/build\_examples.py\` 与 \`npm run build:examples\` 退出码 0，且 examples
+  > 逐字节一致；npm test 与 test:static 退出码 0（536/536 条规则在位）；三条变异各自变红并逐字节
+  > 还原——删一份 examples 副本、往 templates/assets 塞未登记文件、清单里漏一个文件。
+
+- test(门禁): 套件覆盖断言——新增套件不能再静默地永远不跑 ([f2274f1](https://github.com/Miaotofu01/Study-Mate/commit/f2274f1bb613f893c741cdbb86ee9c89796c8420))
+
+  > \`checks.mjs\` 显式列出各层套件（core / --static / --browser），package.json 另有按需入口
+  > （test:dsh / test:dsh-cli 等 616 行套件），测试说明再抄一份——清单散在多处，而且\*\*新增一个
+  > 套件文件时什么都不会发生\*\*：它静静地谁也不跑。
+  > 
+  > - checks.mjs 加覆盖断言：\`scripts/tests/\` 下每个 .py/.mjs/.js 必须属于某个组、出现在
+  >   package.json 的按需入口里，或在 MANUAL\_ONLY 里明确登记（浏览器手动脚本、排障脚本）；
+  >   漏登记就列出文件名并以退出码 2 停下。三种模式都先跑这条断言
+  > - 支持文件（README.md / run\_tests.sh / fixtures.py / fixtures/）单独放行
+  > - 测试说明补上这条规矩，并写明 checks.mjs 是「默认跑哪些」的唯一出处
+  > 
+  > 验证：塞一个未登记的 test\_probe\_unlisted.py → 门禁退出码 2 并点名该文件；删除后恢复 0；
+  > npm test 与 test:static 退出码 0（当前 core 16 个 Python + 2 个 Node + 1 个 --test）。
+
+- test(CI): 静态契约层并入 npm test，门禁与文档同步 ([bdc6d60](https://github.com/Miaotofu01/Study-Mate/commit/bdc6d60e78451299501d0fd7e8d1ea72c313c17f))
+
+  > \`--static\`（Python 语法、提示词 536 条规则、模板契约、两个宿主的技能转换）此前只在本地
+  > 按需跑；它挡的正是最容易被改坏的那批东西（提示词措辞、模板与规格的静默漂移），而 CI
+  > 只看 \`npm test\`，等于这一层没人守。
+  > 
+  > - \`npm test\` 末尾接上 \`npm run test:static\`（CI 复用同一条命令，不必改 workflow）
+  > - 文档同步：测试说明（「本地按需」只剩真实宿主与真实 Chrome 两层）、CONTRIBUTING 的
+  >   本地验法、工程约束的脚本一览、发布流程那句「手动运行」、Antigravity 文档里过时的
+  >   「514 条」条数；CI 步骤名补上 static contract
+  > - 更正一处旧说法：\`ci.yml\` 的 \`on.push: \[main\]\` 一直都在——\*\*直接推 main 也会跑 CI\*\*，
+  >   之前说「只在 PR 上跑」是错的
+  > 
+  > 验证：\`npm test\` 退出码 0，日志里两层覆盖断言都在（core + --static）、536/536 条规则在位、
+  > 零 FAIL；\`npm run test:static\` 单独跑仍然可用。
+
+- refactor(语法): 围栏判定收成一份（内容文件语法的第一块） ([8bdc7d5](https://github.com/Miaotofu01/Study-Mate/commit/8bdc7d5c63f276f159fbbbf8b7590fb4ce5ecffa))
+
+  > 围栏判定原先在\*\*四个\*\*脚本里各写一遍：渲染器（取语言 + 白名单 + 两处翻转）、回填器
+  > （find\_close / quiz\_blocks，注释里写着「与 render\_lesson.py 同口径」）、主页生成器的
+  > 附件编译器（开块 + 找闭合行）、校验器（题面/答案里的围栏配对，守着它自己的
+  > QUIZ\_FENCE\_RE）。判定分叉的代价不是报错而是\*\*静默\*\*：\`:::\` 被当指令插进代码块、
+  > 或代码块整段不上色——\`python\` 那次 36 个代码块的事故就是白名单两边不一致。
+  > 
+  > - 新增 scripts/lessonfmt.py：marker()（围栏信息串）、is\_fence\_line()（翻转判定）、
+  >   is\_known\_lang()、is\_simple\_fence\_line()（起止各占一整行的形状，校验器口径），以及语言
+  >   标签白名单 COLORED\_LANGS / PLAIN\_LANGS（从渲染器搬来）
+  > - 四个消费者全部改问它；test\_templates.py 那条「白名单 == 前端配色表」的抓取目标从渲染器
+  >   改到语法模块（守仍然有牙：改名会红）
+  > - 新增 scripts/tests/test\_lessonfmt.py（64 条，进默认门禁）：marker 取法与翻转语义、白名单、
+  >   \`:::\` 与围栏的关系，以及\*\*跨消费者一致性\*\*——渲染器对白名单里每个标签都不该报错、未登记
+  >   的必须带行号报错、带语言围栏里的 \`:::\` 不被当指令、回填器的收尾下标要跳过围栏里的 \`:::\`
+  > - 校验器那处与旧正则\*\*逐个等价\*\*（含「\`\`\` python」这种带空格的怪例，已逐例比对过），
+  >   只是换成同一份判定
+  > 
+  > 验证：npm test（含静态层）退出码 0、examples 重建后逐字节一致、536/536 条规则在位；
+  > 四条变异各自变红并逐字节还原——把带语言的围栏判成不是围栏、白名单常量改名、回填器漂回
+  > 私有规则、简单围栏行放宽到允许空格。
+
+- Merge pull request \#30 from Miaotofu01/refactor/architecture-review ([dd3a566](https://github.com/Miaotofu01/Study-Mate/commit/dd3a566782b0aee641eca50afa0e0cba96ed5fa9))
+
+  > Refactor/architecture review
+
+- Merge pull request \#28 from wuxiaodu/fix/antigravity-crlf ([8f9eb3b](https://github.com/Miaotofu01/Study-Mate/commit/8f9eb3b426ba7c5ab302e7c7659fbd3cc172fdc2))
+
+  > fix(插件): 兼容 Windows CRLF 换行符下的 Antigravity 插件构建
+
+- fix(发布): 打包白名单补上 antigravity，Release 不再自己拦自己 ([47127f1](https://github.com/Miaotofu01/Study-Mate/commit/47127f1db61da52e2e5e06d5c9142cfda468c79f))
+
+  > \`package.json\` 的 files 里加了 \`antigravity/studymate/\*\*\`（Antigravity 支持那次），但
+  > \`scripts/release/release.mjs\` 的 \`validatePack\` 白名单没跟上——于是每次发布都在
+  > 「Prepare changelog, version commit and tag」这步失败：
+  > 
+  >     Unexpected or private file in npm tarball: antigravity/studymate/plugin.json
+  > 
+  > 上一次成功的 Release 是 9-24（run \#7），Antigravity 是 9-27 进的，所以这中间每次发布都会中
+  > （今天的 run \#8 就是）。发布套件用的样例包是写死的、不含真实路径，因此没拦住。
+  > 
+  > - 白名单加 \`antigravity/studymate/.+\`；必需清单加 \`antigravity/studymate/plugin.json\`
+  >   （打包时悄悄丢掉插件清单同样要被拦下）
+  > - 新增结构性断言：\`package.json\` 的 files 里\*\*每个模式\*\*取样后都必须能通过白名单——
+  >   两张表从此钉在一起（这次就是它们各改一半）
+  > 
+  > 验证：真实 \`npm pack\`（153 个文件）+ validatePack 修前失败、修后通过；变异（白名单去掉
+  > antigravity）→ 新断言变红且真实包复现失败；本地预演发布第 8 步 buildReleasePlugin 正常
+  > （ZIP 1,007,341 B，头 0x04034b50）；npm test 退出码 0（536/536 条规则在位）。
+
+- Merge pull request \#31 from Miaotofu01/fix/release-antigravity-allowlist ([d89425c](https://github.com/Miaotofu01/Study-Mate/commit/d89425cb366610acf4168ed8d7e7846b66c92c77))
+
+  > fix(发布): 打包白名单补上 antigravity，Release 不再自己拦自己
+
+
+[完整比较](https://github.com/Miaotofu01/Study-Mate/compare/v0.2.0...v0.3.0)
+<!-- /studymate-release:v0.3.0 -->
+
 <!-- studymate-release:v0.2.0 -->
 ## [0.2.0](https://github.com/Miaotofu01/Study-Mate/releases/tag/v0.2.0) - 2026-09-24
 
