@@ -24,7 +24,7 @@ issue 与 spec 都活在 GitHub Issues（`Miaotofu01/Study-Mate`），全部操�
 
 ### Domain docs
 
-**单上下文**布局：领域词表在仓库根 `GLOSSARY.md`，架构决策在 `docs/adr/`。两者都已建立——用到领域词就按词表里的叫法，动到已决策的区域先读对应 ADR。见 [docs/agents/domain.md](docs/agents/domain.md)。
+**单上下文**布局：领域词表在仓库根 `GLOSSARY.md`（**已建立**——用到领域词就按词表里的叫法），架构决策在 `docs/adr/`（**按需创建**——有决策才建；动到已决策的区域先读相关 ADR）。见 [docs/agents/domain.md](docs/agents/domain.md)。
 
 ## 文档在哪
 
@@ -33,7 +33,7 @@ issue 与 spec 都活在 GitHub Issues（`Miaotofu01/Study-Mate`），全部操�
 - **`docs/使用/`** —— 学生与维护者面向：安装、日常使用、宿主说明（Antigravity、Codex 与 ChatGPT）、发布流程
 - **`docs/设计/`** —— 产品与协议视角：设计方案、VitePress 阅读端提案、可选方向探索的指南与验收
 - **`docs/规范/`** —— 唯一约束来源：工程约束、课件内容格式、文件归属
-- **`docs/adr/`** —— 决策类：架构决策记录。**已建立**（改到已决策的区域先读相关的）
+- **`docs/adr/`** —— 决策类：架构决策记录。**按需创建，现在不存在是正常的**
 - **`docs/agents/`** —— agent 约定层：issue tracker、triage 标签、领域文档布局
 - `docs/images/` —— README 用的截图
 
