@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -147,6 +148,28 @@ try:
             (stage / "handoff.json").write_text(json.dumps(manifest), encoding="utf-8")
             result = run(stage)
             check("symlink output fails", result.returncode == 1 and "符号链接" in result.stderr, result.stderr)
+
+    if os.name == "nt":
+        import _winapi
+
+        for location in ("deliver", "declared-tree", "undeclared-tree"):
+            stage, manifest = write_stage("junction-" + location)
+            outside = TMP / ("outside-" + location)
+            outside.mkdir()
+            (outside / "curriculum.yaml").write_text("outside data", encoding="utf-8")
+            if location == "deliver":
+                link = stage / "deliver"
+                (link / "curriculum.yaml").unlink()
+                link.rmdir()
+            else:
+                link = stage / "deliver" / "linked"
+                if location == "declared-tree":
+                    manifest["outputs"].append({"path": "linked", "kind": "tree"})
+                    (stage / "handoff.json").write_text(json.dumps(manifest), encoding="utf-8")
+            _winapi.CreateJunction(str(outside), str(link))
+            result = run(stage)
+            check(f"junction rejected: {location}",
+                  result.returncode == 1 and "目录联接" in result.stderr, result.stderr)
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

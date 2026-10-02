@@ -203,6 +203,10 @@ check('CRLF 围栏正常渲染且保留缩进',
 
 const invalidItems = [
   null, false, 1, '题目', [],
+  { q: { toString: null }, answer: 'a', criteria: 'c' },
+  { q: '坏选项', opts: [{ toString: null }, 'b'], ans: 0, why: 'w' },
+  { q: '空选项', opts: [' ', 'b'], ans: 0, why: 'w' },
+  { q: '非文本选项', opts: [1, 'b'], ans: 0, why: 'w' },
   { q: '越界', opts: ['a', 'b'], ans: 2, why: 'w' },
   { q: '小数', opts: ['a', 'b'], ans: 0.5, why: 'w' },
   { q: '无选项', opts: [], ans: 0, why: 'w' },

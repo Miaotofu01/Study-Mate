@@ -187,6 +187,18 @@ test('installed skill copies get the write-boundary conventions in machine terms
   assert.match(adapted, /先写科目自己的 `<subject_path>\/\.stage\//);
 });
 
+test('installed script commands retain Python flags and use the detected interpreter', () => {
+  const source = 'python3 -B <root>/scripts/check_handoff.py <subject_path> --role learning-coach';
+  for (const platform of ['win32', 'linux']) {
+    const adapted = adaptSkill(source, {
+      platform, pythonExecutable: '/Python with spaces/python',
+      configFile: '/home/me/studymate-config.yaml', tempDirectory: '/tmp',
+    });
+    assert.equal(adapted.split('\n')[0],
+      `${platform === 'win32' ? '& ' : ''}'/Python with spaces/python' -X utf8 -B '<root>/scripts/check_handoff.py' '<subject_path>' --role learning-coach`);
+  }
+});
+
 test('install, reinstall and downgrade preserve workspace and unrelated profile configuration', t => {
   const f = fixture(t);
   fs.mkdirSync(path.dirname(f.patch), { recursive: true });

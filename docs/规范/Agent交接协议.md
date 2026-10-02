@@ -49,7 +49,7 @@
 - 一律用 `/`，相对 `deliver/`；禁止绝对路径、Windows drive path、反斜杠、`.`、`..`。
 - `kind: file` 指一个普通文件；`kind: tree` 指一个非空目录并递归覆盖其下全部普通文件。
 - `deliver/` 中每个普通文件都必须被某个 output 覆盖；多出来的“顺手文件”会阻断合盘。
-- manifest、`deliver/`、子目录和文件都不能是符号链接。
+- manifest、`deliver/`、子目录和文件都不能是符号链接或 Windows 目录联接（junction）。
 
 ## 角色交稿
 
