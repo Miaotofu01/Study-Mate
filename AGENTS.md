@@ -6,11 +6,12 @@
 
 | 你要做什么 | 先读 |
 | --- | --- |
-| 改任何东西之前 | [CONTRIBUTING.md](CONTRIBUTING.md)：改哪块、先读哪份、门禁（`npm test`）、提交信息 |
+| 改任何东西之前 | [CONTRIBUTING.md](CONTRIBUTING.md)：贡献规矩的唯一出处（改哪块先读哪份、门禁、PR 流程、提交信息） |
 | 判断某份文件归谁维护、路径是什么 | [文件归属](docs/规范/文件归属.md)：代称 ↔ 路径 ↔ 维护者，以及角色代称与派工值 |
 | 改模板、渲染器、生成器、占位符 | [工程约束](docs/规范/工程约束.md) §三 占位符契约、§四 脚本一览 |
 | 写或改课件内容文件 | [课件内容格式](docs/规范/课件内容格式.md) |
 | 改角色提示词 `.dsh/skills/**` | 该技能自己的 `SKILL.md`；课件规则归 `lesson-design`，题目归 `layered-practice` |
+| 判断该跑哪些检查、怎么单跑 | [测试说明](scripts/tests/README.md) |
 
 ## Agent skills
 
@@ -28,15 +29,12 @@ issue 与 spec 都活在 GitHub Issues（`Miaotofu01/Study-Mate`），全部操�
 
 ## 文档在哪
 
-`docs/` 按用途分类：
+`docs/` 每个目录放什么、路径与维护者是谁，唯一出处是[工程约束](docs/规范/工程约束.md) §二 与[文件归属](docs/规范/文件归属.md)。这里只记怎么找：
 
-- **`docs/使用/`** —— 学生与维护者面向：安装、日常使用、宿主说明（Antigravity、Codex 与 ChatGPT）、发布流程
-- **`docs/设计/`** —— 产品与协议视角：设计方案、VitePress 阅读端提案、可选方向探索的指南与验收
-- **`docs/规范/`** —— 唯一约束来源：工程约束、课件内容格式、文件归属、Agent 交接协议
-- **`docs/adr/`** —— 决策类：架构决策记录。**按需创建，现在不存在是正常的**
-- **`docs/agents/`** —— agent 约定层：issue tracker、triage 标签、领域文档布局
-- `docs/images/` —— README 用的截图
+- 约束类看 **`docs/规范/`**——它是唯一约束来源
+- 决策类看 **`docs/adr/`**——按需创建，有决策才建；动到已决策的区域先读相关 ADR
+- 面向学生与维护者的用法看 **`docs/使用/`**
 
-待办不在仓库里了：**未完成的事走 GitHub Issues**，别再建 TODO 文件。
+**未完成的事走 GitHub Issues**。
 
 `CHANGELOG.md` 是发布流程生成的历史记录，**不要手改**。

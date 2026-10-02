@@ -39,6 +39,7 @@ def main(argv: list[str]) -> int:
 
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     failed = False
+    schema_skipped = []
 
     for arg in argv[1:]:
         path = Path(arg).resolve()
@@ -60,12 +61,14 @@ def main(argv: list[str]) -> int:
             continue
 
         errors: list[str] = []
-        if jsonschema is not None:
+        schema_checked = jsonschema is not None
+        if schema_checked:
             validator = jsonschema.Draft7Validator(schema)
             for err in sorted(validator.iter_errors(data), key=lambda e: list(e.path)):
                 loc = "/".join(str(p) for p in err.path) or "<root>"
                 errors.append(f"schema  {loc}: {err.message}")
         else:
+            schema_skipped.append(path)
             print("  [WARN] 未安装 jsonschema，跳过 schema 校验")
 
         # 结构检查仍会遍历这些字段；schema 报错后不能继续把错误类型当列表/字符串用。
@@ -192,7 +195,14 @@ def main(argv: list[str]) -> int:
             for msg in errors:
                 print(f"    - {msg}")
         else:
-            print("  [PASS] schema 校验通过，引用完整")
+            if schema_checked:
+                print("  [PASS] schema 校验通过，引用完整")
+            else:
+                print("  [PASS] 结构检查通过，引用完整（schema 未校验，见末尾汇总）")
+
+    if schema_skipped:
+        names = "、".join(p.name for p in schema_skipped)
+        print(f"[WARN] {len(schema_skipped)} 份文件的 schema 未校验，只过了结构检查与引用检查：{names}")
 
     return 1 if failed else 0
 

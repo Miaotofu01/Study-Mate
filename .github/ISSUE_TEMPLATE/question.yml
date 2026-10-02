@@ -1,0 +1,37 @@
+name: 使用提问
+description: 装不上、跑不起来、不知道该怎么用
+title: "[提问] "
+labels: [needs-triage, question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        用法问题也可以直接看[使用说明](https://github.com/Miaotofu01/Study-Mate/blob/main/docs/使用/使用说明.md)与[安装说明](https://github.com/Miaotofu01/Study-Mate/blob/main/docs/使用/安装.md)，
+        常见问题在[这里](https://github.com/Miaotofu01/Study-Mate/blob/main/docs/使用/使用说明.md#八常见问题)。
+
+        如果是「有东西坏了」，请改用 Bug 报告那个模板。
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: 你想做什么
+      description: 一句话说明目标即可，不用铺垫背景。
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 你已经做了什么
+      description: 跑过哪些命令、看到什么结果。有报错贴原文。
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境
+      placeholder: |
+        - 宿主：DSH 桌面端 / DSH CLI / Codex / Antigravity
+        - 系统：Windows 11 / macOS 15 / Ubuntu 24.04
+        - Node / Python：

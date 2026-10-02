@@ -29,7 +29,7 @@
 
 ### DeepSeek Harness
 
-**DSH 依赖**：DSH 0.1.5-rc.2+、Node.js 22 系列或 24+、Python 3.9+、PyYAML。
+**DSH 依赖**：DSH 0.1.5-rc.2+、Node.js（支持范围见 `package.json` 的 `engines`）、Python 3.9+、PyYAML。
 
 ```bash
 npx -y @yunmiao/studymate@latest install
@@ -105,64 +105,18 @@ StudyMate 是一套**数学/计算机学习工作流、SKILL 与 HTML 课件引�
 
 ## 配置与维护
 
-<details>
-<summary><b>脚本：主页生成 + 课件渲染 + 四道领域校验 + Agent 交接校验</b></summary>
+日常要跑的命令只有一条，就是你装完之后自检的那条：
 
 ```bash
-python3 scripts/gen_home.py                    # 生成根主页 + 全部科目主页（默认读配置里的 workspace）
-python3 scripts/preview_templates.py --open    # 用假数据渲染主页模板到 .preview/，只看样式与交互
-python3 scripts/render_lesson.py <subject_path> <节点id>   # 内容文件 + 题库 → 课件 HTML（--check 只校验不写盘）
-python3 scripts/check_curriculum.py examples/.learning/subjects/computer-networks/curriculum.yaml
-python3 scripts/check_lesson.py examples/.learning/subjects/linear-algebra/lessons/0001-vector.space.html --subject examples/.learning/subjects/linear-algebra --node vector.space
-python3 scripts/check_pool.py <你的科目目录>    # 图片池：索引 pool.md 与 assets/img/pool/ 对不对得上
-python3 scripts/check_skill.py .dsh/skills/*    # 技能 frontmatter（改过技能就跑一次）
-python3 scripts/check_handoff.py <stage_dir> --role <角色> [--node <节点id>]  # staged Agent 交接边界
-npm test                                     # 与 Actions 共用的功能回归
-
-# 换成你自己的科目：--subject 给科目目录，--node 给该课件对应的节点 id；大纲校验可一次传多个 curriculum.yaml
+npm test
 ```
 
-`check_lesson.py` 只阻断工程与结构缺项（文件名与编号、课件归属、共享层引用、**本地引用可达**、题目结构与属性写法、题目位置标记残留、主题开关；`kind` 为 `实操/实验` 时还要求 lab 与产物齐全），内容风格类问题只提示；其中「题目位置标记残留」只可能来自手写时代的老课件——渲染产物里不会有标记。`check_pool.py` 校验图片池：索引表头七列、文件名合规、来源 URL 与许可非空、单张 ≤500 KB——还没建过图片池的科目没有 `assets/img/pool.md`，它会报一行「索引不存在」并退出 1，那是图片库还没建，不是命令坏了。退出码：`check_lesson.py` / `check_curriculum.py` / `check_pool.py` 有阻断项即 1，`gen_home.py` 占位符缺失或产物断链即 1。
-
-`npm test` 不需要真实 DSH 或浏览器；测试自己造临时科目，不碰学习工作区。提示词与模板静态约束、真实 DSH 和浏览器检查按需单独运行，见 [测试说明](scripts/tests/README.md)。
-
-</details>
+它不需要真实 DSH、浏览器或模型服务；测试自己造临时科目，不碰你的学习工作区。生成与校验脚本的完整清单见[工程约束 §四 脚本一览](docs/规范/工程约束.md#四脚本一览)，各命令的前置、按需入口（真实浏览器、真实 DSH）与退出码语义见[测试说明](scripts/tests/README.md)——两处各是唯一出处，本文不重抄。
 
 ## 项目结构
 
-```text
-StudyMate/                     ← 本仓库：系统源码（引擎），学习时只读
-├── bin/studymate.mjs          # npx 安装入口 + OpenAI / Antigravity 插件构建入口
-├── bin/antigravity-plugin.mjs # Antigravity 插件构建与安装逻辑
-├── antigravity/studymate/     # Antigravity 插件模板与清单（plugin.json / AGENTS.md）
-├── .dsh/skills/               # 12 个技能：总控 learning-system + 5 个角色 + 6 个协议
-│   ├── learning-system/       #   总控（主教练）：开场、盘问、调度、档案
-│   ├── resource-scout/        #   角色：收集资料（权威教材与官方文档 → 资源清单）
-│   ├── image-scout/           #   角色：采图（抓网页现成的图 → 科目图片库与索引）
-│   ├── curriculum-designer/   #   角色：课程设计（大纲 / 实验课节点）
-│   ├── learning-coach/        #   角色：讲解（写课件内容）
-│   ├── practice-evaluator/    #   角色：出题与评估（题目唯一 owner）
-│   ├── learning-discovery/    #   协议：可选方向探索，由总控按需加载
-│   ├── lesson-design/         #   规范：课件唯一约束来源
-│   ├── layered-practice/      #   规范：四层练习与题型
-│   ├── evidence-check/        #   规范：完成证据核验
-│   ├── local-qa/              #   规范：局部提问怎么答
-│   └── record-keeping/        #   规范：学习状态读写规则
-├── preset/learning/           # 「学习模式」预设源（npx 安装到 ~/.dsh/）
-├── schemas/                   # 6 份数据结构：大纲 / 进度 / 评估 / 会话摘要 / 科目 / Agent 交接
-├── templates/                 # 页面骨架（主页、科目页、课件壳）与前端资源 assets/
-├── scripts/                   # 主页生成 + 课件渲染器 + 四道领域校验 + Agent 交接校验 + tests/ 回归测试
-├── dist/studymate/            # build:plugin 生成的 OpenAI 插件，含适配后的 12 个技能（不入库）
-├── dist/antigravity/          # build-antigravity 生成的 Antigravity 插件目录与 ZIP（不入库）
-├── examples/                  # 示例学习工作区：线性代数 + 计算机网络，页面已生成，clone 即可点开
-├── docs/                      # 文档，按用途分四类（见下）
-│   ├── 使用/                  #   安装、使用说明、Antigravity、Codex 与 ChatGPT、发布流程
-│   ├── 设计/                  #   设计方案、方向探索指南与验收
-│   ├── 规范/                  #   工程约束、课件内容格式、文件归属、Agent 交接协议（唯一约束来源）
-│   └── agents/                #   agent 约定层：issue tracker、triage 标签、领域文档布局
-├── AGENTS.md                  # agent 入口：只放指针，指向上面各份的唯一出处
-└── workspace/                 # 可选的本地学习工作区（已被 .gitignore 忽略）
-```
+目录树、每个目录干什么、哪个文件归谁维护，见[工程约束](docs/规范/工程约束.md) §二 目录与规则归属
+与[文件归属](docs/规范/文件归属.md)——两处各有唯一出处，这里不再抄一份。
 
 DSH 安装到 `~/.dsh/studymate/engine/`，预设与工作区配置也由安装器管理。学习数据默认位于独立的 `~/StudyMate`，无需保留源码仓库；详见 [安装说明](docs/使用/安装.md)。
 
@@ -195,7 +149,7 @@ Python 不自带 PyYAML。请在系统终端复制安装器给出的依赖安装
 
 ### 提改动前先跑这几条
 
-运行 `npm test`，再按修改范围补充 [配置与维护](#配置与维护) 中的校验。其他测试入口见 [测试说明](scripts/tests/README.md)。
+规矩见 [CONTRIBUTING.md](CONTRIBUTING.md)；各命令要跑什么、前置是什么见 [测试说明](scripts/tests/README.md)。
 
 ### License
 
