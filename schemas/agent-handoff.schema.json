@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentHandoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "role", "subject", "node_id", "status", "outputs", "checks", "gaps"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "role": {
+      "enum": ["resource-scout", "curriculum-designer", "practice-evaluator"]
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^/:\\\\\\u0000]+$"
+    },
+    "node_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "status": { "enum": ["succeeded", "blocked"] },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "kind"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "kind": { "enum": ["file", "tree"] },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "status": { "enum": ["passed", "failed", "not_run"] },
+          "detail": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 2000 }
+    }
+  }
+}

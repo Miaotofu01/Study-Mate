@@ -43,6 +43,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_antigravity_plugin.mjs` | Antigravity 插件包含 5 个原生子代理与 12 个技能、无 0 字节文件、占用的输出目录不被清空、构建可重复 |
 | `test_dsh_presets.py` | 预设写入、profile 适配、迁移和重复安装 |
 | `test_workspace_config.py`、`test_interaction_state.py` | 工作区来源优先级、旧配置兼容、交互状态与恢复 |
+| `test_handoff.py` | 子 agent staged 交接：schema、角色/节点绑定、路径边界、symlink、产物覆盖与 SHA-256 |
 | `test_quiz_attr.py`、`test_quiz_code.py` | 题库属性转义、JSON 与代码围栏处理 |
 | `test_lesson_figure.py`、`test_lesson_links.py`、`test_naming_nav.py` | 图片和本地引用可达、课件命名与导航 |
 | `test_pool.py`、`test_lesson_scripts.py` | 图片库校验、课件重排、空题理由写入与失败保护 |

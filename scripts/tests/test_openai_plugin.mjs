@@ -34,12 +34,15 @@ test('exported ZIP contains complete portable skills and renders without DSH or 
   assert.equal(manifest.version, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);
   assert.equal(fs.readdirSync(path.join(plugin, 'skills')).length, 12);
   for (const asset of ['skills/learning-system/SKILL.md', 'skills/learning-system/references/codex-interaction.md',
-    'scripts/interaction_state.py', 'assets/logo.png', 'templates/lesson.html', 'templates/assets/katex/fonts/LICENSE', 'schemas/curriculum.schema.json', 'scripts/render_lesson.py', 'docs/规范/文件归属.md', 'requirements.txt']) {
+    'scripts/interaction_state.py', 'assets/logo.png', 'templates/lesson.html', 'templates/assets/katex/fonts/LICENSE', 'schemas/curriculum.schema.json', 'schemas/agent-handoff.schema.json', 'scripts/check_handoff.py', 'scripts/render_lesson.py', 'docs/规范/文件归属.md', 'requirements.txt']) {
     assert.ok(fs.existsSync(path.join(plugin, asset)), asset);
   }
   for (const unwanted of ['node_modules', '.git', 'workspace', '.dsh', 'preset', 'scripts/tests', 'scripts/install_preset.py']) {
     assert.equal(fs.existsSync(path.join(plugin, unwanted)), false, unwanted);
   }
+  const controllerSkill = fs.readFileSync(path.join(plugin, 'skills/learning-system/SKILL.md'), 'utf8');
+  assert.ok(controllerSkill.includes("<python> -X utf8 -B '<root>/scripts/check_handoff.py' '<stage_dir>' --role '<角色>'"));
+  assert.equal(controllerSkill.includes("python3 -B <root>/scripts/check_handoff.py"), false);
   const home = path.join(directory, 'empty-home');
   const workspace = path.join(directory, '学习数据');
   const env = { ...process.env, HOME: home, USERPROFILE: home, DSH_HOME: path.join(home, '.dsh'), STUDYMATE_WORKSPACE: workspace };

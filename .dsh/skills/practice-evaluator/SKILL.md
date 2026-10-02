@@ -42,6 +42,7 @@ user-invocable: false
 
 1. **先写盘**：每个文件写到暂存目录 `<subject_path>/.stage/practice-evaluator-<节点id>/deliver/<相对路径>`——**相对路径与正式位置一一对应**（`lessons/<序号>-<节点id>.md`、`lessons/<序号>-<节点id>.quiz.json`、`lab/NNNN-主题/main.cpp`、`lab/solutions/NNNN-主题/README.md`…），总控只 `cp` 搬、不读内容
 2. **正文只给清单**：逐文件一行"路径 + 一句话这是什么"，再加右列那些判断性内容
+3. **最后写机器交接**：在同一 stage 根写 `handoff.json`（唯一口径见 `<root>/docs/规范/Agent交接协议.md`）；`outputs` 覆盖本轮 `deliver/` 里的全部文件/目录，`checks` 只记录本轮真实执行过的测试/校验。节点级任务的 `node_id` 写真实节点 id；任何必需检查没过就不要写 `succeeded`
 
 | 时刻 | `deliver/` 里放什么 | 正文里给什么 |
 |---|---|---|

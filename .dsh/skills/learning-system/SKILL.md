@@ -165,6 +165,7 @@ argument-hint: "你想学什么？或继续上次的科目"
 - **角色各守自己的规格**：能不能派子 agent、派哪一类活，写在各角色自己的规格里——**规格没写就不派**（要别的角色就写进报告由你派）；**不调用 `ask_user_question`**（用户通道只有你有）；**不建也不改环境**（`.venv`／`pyproject.toml`／`.python-version` 都是你的活）
 - **角色不写 `<root>`**：引擎项目只由你维护；派发时明说"临时脚本与中间产物写 `<subject_path>/.stage/`，学习产物写 `subject_path`"。事后发现 `<root>` 里有陌生文件 → 查来路，有用就复核后收编并说明，没用就删
 - **长产出走暂存目录**：成套文件（lab、实验说明页）让角色按**最终相对路径**先落到 `<subject_path>/.stage/<角色>-<节点id>/deliver/`、正文只给文件清单（写法在 `practice-evaluator` 的「交付格式」），你 `cp`／`cp -r` 原样搬进正式位置、同一条命令里清掉 `.stage/`——**别读进上下文再写出来**，也别指望回复正文传文件内容（长正文会被压缩掉）；草稿路径一律在 prompt 里写死 `'<subject_path>/.stage/<角色>-<节点id或slug>/'`，**不许给 `.stage/` 根或 `<科目名>` 这类共用固定路径**（后写的会盖掉先写的）
+- **暂存交接先验 manifest**：凡角色通过上面的 `deliver/` 交付，必须在同一 stage 根写 `handoff.json`（唯一口径见 `<root>/docs/规范/Agent交接协议.md`）。你在任何 `cp`／合并之前先跑 `python3 -B <root>/scripts/check_handoff.py '<stage_dir>' --role '<角色>' [--node '<节点id>']`；非零就**不搬、不删 stage**，把原始错误打回同一个角色或处理明确输入缺口。直接写正式位置的既有 owner 不为凑 manifest 改写入路径
 - **交付带可复算的规模**：角色回来除了路径，**必须报**能复算的规模（节点数/边数、图片数/索引行数），你写盘后立刻跑 `check_curriculum.py`／`check_pool.py` 核对再写档案
 - **md5 基准现场算**：多轮迭代要比对文件有没有被改动时，派工与返回都用同一个格式 `md5sum <文件> | cut -c1-12`，基准值**现场算完原样贴**，不许凭记忆写
 

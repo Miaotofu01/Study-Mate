@@ -73,6 +73,8 @@ test('exported Antigravity ZIP contains complete agents, skills, and templates',
   assert.ok(controller.includes('invoke_subagent'), 'Controller should mention invoke_subagent');
   assert.ok(controller.includes('ask_question'), 'Controller should use ask_question');
   assert.ok(controller.includes('Antigravity 宿主约定'), 'Controller should include Antigravity host guide');
+  assert.ok(controller.includes("python3 -B '<root>/scripts/check_handoff.py' '<stage_dir>' --role '<角色>'"));
+  assert.equal(controller.includes("python3 -B <root>/scripts/check_handoff.py"), false);
 
   // 3b. Nothing may ship empty: a referenced-but-empty file is a broken plugin.
   const empty = [];
@@ -98,6 +100,8 @@ test('exported Antigravity ZIP contains complete agents, skills, and templates',
     'templates/assets/katex/katex.min.js',
     'schemas/curriculum.schema.json',
     'schemas/progress.schema.json',
+    'schemas/agent-handoff.schema.json',
+    'scripts/check_handoff.py',
     'scripts/render_lesson.py',
     'scripts/gen_home.py',
     'scripts/check_lesson.py',

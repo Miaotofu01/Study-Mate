@@ -30,11 +30,11 @@ flowchart TD
     LC -->|"课件 Markdown"| LS
     LS -->|"4. 配套四层题库与 Lab"| PE
     PE -->|"quiz.json & lab/"| LS
-    LS -->|"5. 渲染与四道严格校验"| Engine["Python 引擎 (render_lesson.py)"]
+    LS -->|"5. 交接门禁 + 渲染与领域校验"| Engine["Python 引擎 (scripts/)"]
     Engine -->|"HTML 课件与导读 Artifact"| User
 ```
 
-- **主智能体（`learning-system`）**：全局学习规划、用户对话通道、调度子代理、档案管理、课件渲染与四道严格校验。
+- **主智能体（`learning-system`）**：全局学习规划、用户对话通道、调度子代理、档案管理、staged 交接门禁、课件渲染与领域校验。
 - **5 个专属子智能体（`agents/`）**：
   - `resource-scout`：检索权威教材、官方文档与行业标准，产出资源清单与 `## Gaps`。
   - `image-scout`：抓取高质量概念图与流程图，校验尺寸格式，维护 7 列表头索引。
@@ -132,7 +132,7 @@ python3 -m pip install pyyaml jsonschema
 - **安装后技能未加载**：确认插件已正确部署在 `~/.gemini/config/plugins/studymate`，重启 Antigravity IDE 即可重新扫描并注册所有 12 个 Skill 与 5 个 Agent。
 - **提示缺少 yaml 模块**：在系统终端运行 `python3 -m pip install pyyaml jsonschema` 安装依赖。
 - **课件直接打开没有样式**：课件 HTML 会自动加载内置的 Sayo UI 静态样式库与 KaTeX 脚本，直接用 Chrome / Firefox / Edge 等现代浏览器打开即可。
-- **子代理运行报错**：所有子代理交付物在合并前均经过机器校验器（`check_curriculum.py`、`check_pool.py`、`render_lesson.py --check`）强行把关，若未通过校验会打回重试，确保正式课件质量 100% 达标。
+- **子代理运行报错**：走 `.stage/.../deliver/` 的交付会先过 `check_handoff.py`，再继续对应的领域校验（如 `check_curriculum.py`、`check_pool.py`、`render_lesson.py --check`、`check_lesson.py`）；任一阻断项未通过都不合盘并打回重试。
 
 ---
 

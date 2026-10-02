@@ -66,7 +66,7 @@ const groups = {
   core: {
     python: [
       'test_attachment_render.py', 'test_curriculum.py', 'test_dsh_presets.py',
-      'test_interaction_state.py', 'test_lesson_figure.py', 'test_lesson_links.py',
+      'test_interaction_state.py', 'test_handoff.py', 'test_lesson_figure.py', 'test_lesson_links.py',
       'test_lesson_scripts.py', 'test_lessonfile.py', 'test_lessonfmt.py',
       'test_naming_nav.py', 'test_pool.py',
       'test_quiz_attr.py', 'test_quiz_code.py', 'test_render_lesson.py',
