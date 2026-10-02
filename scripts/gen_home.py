@@ -808,25 +808,39 @@ def reference_items(sdir, subject_name=None):
 
 def render_inline_markdown(text):
     code_spans = []
+    attributes = []
+    # 占位符不能与原文碰撞；属性单独封存，避免后续行内语法改写 href/src/alt。
+    token_prefix = '\x00'
+    while token_prefix in text:
+        token_prefix += '\x00'
+    code_token_re = re.compile(re.escape(token_prefix) + r'CODE_(\d+)\x00')
 
     def save_code(m):
         code_spans.append(m.group(1))
-        return f'\x00CODE_{len(code_spans)-1}\x00'
+        return f'{token_prefix}CODE_{len(code_spans)-1}\x00'
+
+    def save_attribute(value):
+        # 原文已经做过文本转义；先还原一次，再按属性上下文转义一次。
+        # URL 与 alt 中的反引号是字面量，不能恢复成 <code> 标签。
+        value = code_token_re.sub(lambda m: '`' + code_spans[int(m.group(1))] + '`',
+                                  html.unescape(value))
+        attributes.append(esc(value, attr=True))
+        return f'{token_prefix}ATTR_{len(attributes)-1}\x00'
 
     text = re.sub(r'`([^`]+)`', save_code, text)
     text = html.escape(text, quote=False)
 
     def make_img(m):
         alt, src = m.group(1), m.group(2)
-        clean_src = esc(src.strip(), attr=True)
-        clean_alt = esc(alt.strip(), attr=True)
+        clean_src = save_attribute(src.strip())
+        clean_alt = save_attribute(alt.strip())
         return f'<img src="{clean_src}" alt="{clean_alt}">'
 
     text = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', make_img, text)
 
     def make_link(m):
         label, url = m.group(1), m.group(2)
-        clean_url = esc(url.strip(), attr=True)
+        clean_url = save_attribute(url.strip())
         extra = ' target="_blank" rel="noopener"' if lessonfile.SCHEME_RE.match(url.strip()) else ''
         return f'<a href="{clean_url}"{extra}>{label}</a>'
 
@@ -840,7 +854,9 @@ def render_inline_markdown(text):
         idx = int(m.group(1))
         return f'<code>{html.escape(code_spans[idx], quote=False)}</code>'
 
-    text = re.sub(r'\x00CODE_(\d+)\x00', restore_code, text)
+    text = code_token_re.sub(restore_code, text)
+    text = re.sub(re.escape(token_prefix) + r'ATTR_(\d+)\x00',
+                  lambda m: attributes[int(m.group(1))], text)
     return text
 
 

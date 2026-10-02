@@ -20,8 +20,8 @@ import fixtures  # noqa: E402
 CODE = 'while (i <= 100) {\n    ++cnt;\n}'
 
 
-def block(q, why='w'):
-    item = {'q': q, 'opts': ['A', 'B'], 'ans': 0, 'why': why}
+def block(q, why='w', opts=None):
+    item = {'q': q, 'opts': ['A', 'B'] if opts is None else opts, 'ans': 0, 'why': why}
     return '<div class="quiz" data-quiz=\'' + json.dumps([item], ensure_ascii=False) + '\'></div>'
 
 
@@ -48,6 +48,11 @@ CASES = [
     # 裸 > 会切断检查的取值正则：页面能渲染，但检查认不出题目块（要写 &gt;）
     ('裸 > 的题目（拦 + 说清原因）', block('x > 0 时怎样？'), True, '值取不出来', None, None),
     ('写成 &gt;（放行）', block('x &gt; 0 时怎样？'), False, None, None, None),
+]
+CASES += [
+    (f'非法选项 {option!r}（拦）', block('请选择', opts=['A', option]),
+     True, '选项必须是非空字符串', None, None)
+    for option in (None, 1, [], {'toString': None}, '', '   ')
 ]
 
 

@@ -9,6 +9,8 @@
 用法：python3 scripts/tests/test_lessonfile.py
 """
 import sys
+import subprocess
+import tempfile
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -85,6 +87,24 @@ def test_scheme():
     check('外链：mailto 也算', bool(lessonfile.SCHEME_RE.match('mailto:a@b.c')))
     check('非外链：相对路径', not lessonfile.SCHEME_RE.match('../assets/style.css'))
     check('非外链：带点的文件名不算 scheme', not lessonfile.SCHEME_RE.match('a.b/c'))
+
+
+def test_build_examples_assets():
+    import fixtures
+
+    with tempfile.TemporaryDirectory(prefix='studymate-example-assets-') as workspace:
+        subject = Path(fixtures.write_subject(workspace, name='测试科目'))
+        (subject / 'assets' / 'quiz.js').unlink()
+        custom = subject / 'assets' / 'custom.js'
+        custom.write_bytes(b'custom component')
+        result = subprocess.run([sys.executable, str(REPO / 'scripts' / 'build_examples.py'), workspace],
+                                capture_output=True, text=True, encoding='utf-8')
+        check('重建示例成功（科目尚无课件）', result.returncode == 0, result.stdout + result.stderr)
+        for name in lessonfile.SUBJECT_FILES:
+            target = subject / 'assets' / name
+            check(f'重建示例更新或补齐科目组件 {name}',
+                  target.is_file() and target.read_bytes() == (Path(lessonfile.TEMPLATE_ASSETS) / name).read_bytes())
+        check('重建示例保留科目自加组件', custom.read_bytes() == b'custom component')
 
 
 def main():

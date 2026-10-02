@@ -21,7 +21,7 @@ const REWRITTEN = ['/tmp', '<WS>', 'python3', '`cp', '`grep', 'ask_user_question
 test('teaching text survives export for every skill', () => {
   assert.equal(skills.length, 12);
   for (const [name, content] of adapted) {
-    const body = sources.get(name).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+    const body = sources.get(name).replaceAll('\r\n', '\n').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
     const tail = body.split('\n').filter(line => line.trim())
       .reverse().find(line => !REWRITTEN.some(token => line.includes(token)));
     assert.ok(tail && content.includes(tail), `${name}: teaching text at the end of the skill was lost`);

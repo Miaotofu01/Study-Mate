@@ -42,8 +42,8 @@ export function adaptSkill(text, { platform, pythonExecutable, configFile, tempD
   // 所以这里不再有 practice-evaluator 的 cp 改写。
   let adapted = text.replaceAll('/tmp', temp);
   adapted = replaceConfig(adapted, portable(configFile));
-  adapted = adapted.replace(/python3 (<root>\/scripts\/[\w-]+\.py)([^`\r\n]*)/g,
-    (_, script, args) => `${python} ${quote(script)}${args.replace(/<(?:subject_path|curriculum\.yaml|页面路径|tsv)>/g, quote)}`);
+  adapted = adapted.replace(/python3 ((?:-[A-Za-z]+\s+)*)(<root>\/scripts\/[\w-]+\.py)([^`\r\n]*)/g,
+    (_, flags, script, args) => `${python} ${flags}${quote(script)}${args.replace(/<(?:subject_path|curriculum\.yaml|页面路径|tsv)>/g, quote)}`);
 
   const digest = windows
     ? "(Get-FileHash -LiteralPath '<文件>' -Algorithm MD5).Hash.Substring(0,12).ToLowerInvariant()"

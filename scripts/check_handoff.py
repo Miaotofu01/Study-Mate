@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import stat
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -123,12 +124,14 @@ def safe_relative(value: str) -> PurePosixPath:
 
 def reject_symlink(path: Path, label: str):
     try:
-        stat = path.lstat()
+        info = path.lstat()
     except FileNotFoundError:
         raise HandoffError(f"{label} 不存在: {path}") from None
-    if path.is_symlink():
-        raise HandoffError(f"{label} 不能是符号链接: {path}")
-    return stat
+    if (stat.S_ISLNK(info.st_mode)
+            or getattr(info, "st_reparse_tag", None)
+            == getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003)):
+        raise HandoffError(f"{label} 不能是符号链接或目录联接: {path}")
+    return info
 
 
 def iter_regular_files(root: Path):
