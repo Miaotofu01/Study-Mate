@@ -7,15 +7,17 @@
 
 功能面：**提供商/模型域已到 schema v3**（对齐开源项目 ZCode 的真实实现：输入模态复选框组 / 最大输出 Token / 上下文窗口 / 推理档位有序 chip 编辑器 / 能力声明；API Key 回填输入框不再掩码吞掉），对话壳层含顶栏瘦身 + 共享右侧边栏（拖拽 + 折叠动画），课程图谱页节点详情也在右侧边栏里；E2E **37 条两轮幂等**。版本号已按维护者要求加后缀：**0.4.0-beta**。
 **方向面**：Web 目标是从"只消费已有产物"改为**复现乃至拓展 dsh 插件全功能**，实施队列排好在《开发与计划》§5.1（阶段 A→I），**全队列一行未动**，等实施代理开工。
-git：`study-mate-web/` 已从"未跟踪"转为**提交在 `feat/study-mate-web` 分支**上（4 个提交：运行时 / E2E / 子项目文档 / 根 README），并已把 `upstream/main`（d4d731c）并入该分支——**无冲突**（上游那 4 个提交只动了根 `AGENTS.md`、新建 `GLOSSARY.md`、`docs/agents/domain.md`，与我们改的根 `README.md` 不相交）。本地 `main` 已 ff 到 `upstream/main`。
-**PR 是占位，尚未创建**：内容已写好待维护者过目（见文末「PR 占位」），**不要当成已完成功能去合并**。
+git：`study-mate-web/` 已从"未跟踪"转为**提交在 `feat/study-mate-web` 分支**上（5 个提交：运行时 / E2E / 子项目文档 / 根 README / 并入上游），已把 `upstream/main`（d4d731c）并入该分支——**无冲突**（上游那 4 个提交只动了根 `AGENTS.md`、新建 `GLOSSARY.md`、`docs/agents/domain.md`，与我们改的根 `README.md` 不相交）；分支已推到 fork（origin）并跟踪。本地 `main` 已 ff 到 `upstream/main`。
+**PR 已创建，是 draft 占位**：<https://github.com/Miaotofu01/Study-Mate/pull/43> ——维护者明确"仍在开发、**不要求被合并**"，**不要当成已完成功能去合**。
 
-## PR 占位（待维护者过目）
+## PR 占位（draft，勿合并）
 
-- 目标：`Miaotofu01/Study-Mate:main` ← 来源 `Sodapopper-pixel:feat/study-mate-web`；按根 `CONTRIBUTING.md`，**PR 只能对着 `main`**。
-- 性质：**开发中占位**，明确声明不要求被合并；正文里要说清"仍在开发测试，功能稳定性不如插件途径"。
-- 门禁：根 `npm test`（CI 在 Ubuntu / Node 24 / Python 3.13 上跑的就是它）。
+- **PR #43** → <https://github.com/Miaotofu01/Study-Mate/pull/43>（`draft`、121 文件 / +19,187 行、0 删除）。
+- 目标 `Miaotofu01/Study-Mate:main` ← 来源 `Sodapopper-pixel:feat/study-mate-web`；按根 `CONTRIBUTING.md`，**PR 只能对着 `main`**。
+- 性质：**开发中占位**，标题与正文都已声明不请求合并；继续往同一分支追加提交即可，PR 自动更新（无需重开）。
+- 门禁：根 `npm test`（本机已验证 `exit 0`；Ubuntu/Node 24/Python 3.13 的 CI 跑的就是它）。
 - 注意：合并 PR **不等于发布**，上游的版本号 / tag / CHANGELOG 由维护者手动触发，别去动；`study-mate-web` 自己那套版本号（当前 `0.4.0-beta`）是本子项目独立的，与上游发布流程无关。
+- 分支里带一个"并入 upstream/main"的 merge 提交：它相对 PR 基线是空操作（diff 里看不到），保留是为了如实记录"已并过上游"。
 
 ## 接下来做什么（实施代理的主线）
 
