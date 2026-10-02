@@ -1,0 +1,14 @@
+# StudyMate Web 运行时产物（勿提交）
+data/
+# 旧布局残留（含嵌套副本）兜底：运行时数据已上提一级
+backend/data/
+backend/.venv/
+frontend/.next/
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
+.playwright-cli/
+# 探索 agent：API Key 与运行产物（见 frontend/tests/explorer/README.md）
+frontend/tests/explorer/.env
+frontend/tests/explorer/runs/
+frontend/tsconfig.tsbuildinfo
