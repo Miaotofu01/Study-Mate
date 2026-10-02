@@ -1,5 +1,574 @@
 # 更新日志
 
+<!-- studymate-release:v1.0.0 -->
+## [1.0.0](https://github.com/Miaotofu01/Study-Mate/releases/tag/v1.0.0) - 2026-10-02
+
+### 已合并的 Pull Request
+
+- feat: 适配了DeepSeek Harness Desktop(Windows)的安装 ([#33](https://github.com/Miaotofu01/Study-Mate/pull/33))
+- docs(前端): 补充 VitePress 课程工作区迁移提案 ([#34](https://github.com/Miaotofu01/Study-Mate/pull/34))
+- refactor(文档): docs/ 按用途归位，接入 agent 约定层 ([#37](https://github.com/Miaotofu01/Study-Mate/pull/37))
+- feat(orchestration): add machine-verifiable subagent handoffs ([#39](https://github.com/Miaotofu01/Study-Mate/pull/39))
+- docs(文档): 领域词表 ([#41](https://github.com/Miaotofu01/Study-Mate/pull/41))
+- docs(文档): 删掉已废弃的桌面端方案 ADR ([#42](https://github.com/Miaotofu01/Study-Mate/pull/42))
+- test(提示词): 交接守卫改成扫源码，删掉一条不会红的断言 ([#45](https://github.com/Miaotofu01/Study-Mate/pull/45))
+- refactor(贡献契约): 契约降为原则与指针，同一事实只留一处 ([#47](https://github.com/Miaotofu01/Study-Mate/pull/47))
+- refactor(提示词): 删掉对 continuable 子 agent 无效的 job\_output 等待规则，压瘦常驻上下文 ([#50](https://github.com/Miaotofu01/Study-Mate/pull/50))
+- refactor(提示词): 暂存与落点单源化，总控只留公式与触发点 ([#52](https://github.com/Miaotofu01/Study-Mate/pull/52))
+- test(提示词): 规则归属外置成声明表 + 技能调用面接进静态门禁 ([#54](https://github.com/Miaotofu01/Study-Mate/pull/54))
+- refactor(提示词): 派工值归角色规格，「输入」节成为唯一出处 ([#56](https://github.com/Miaotofu01/Study-Mate/pull/56))
+- refactor(工程约束): §四 补上参数形态，让「脚本用法的唯一出处」名副其实 ([#58](https://github.com/Miaotofu01/Study-Mate/pull/58))
+- fix(发布): 恢复被 stale 分支合并冲掉的 release 元数据 ([#60](https://github.com/Miaotofu01/Study-Mate/pull/60))
+- test(发布): 补一道「package.json 版本 == 最新 tag」的门禁 ([#62](https://github.com/Miaotofu01/Study-Mate/pull/62))
+
+### 所有提交
+
+- feat: 适配了DeepSeek Harness Desktop的安装 ([53f33d3](https://github.com/Miaotofu01/Study-Mate/commit/53f33d33bb830e91c3ae7c46600bc700b0248254))
+- Merge pull request \#33 from ClauBloom/main ([8f9ef3a](https://github.com/Miaotofu01/Study-Mate/commit/8f9ef3ad659d301da3e5fc8fa26e3020c156e103))
+
+  > feat: 适配了DeepSeek Harness Desktop(Windows)的安装
+
+- docs(前端): 补充 VitePress 课程工作区迁移提案 ([7a2571e](https://github.com/Miaotofu01/Study-Mate/commit/7a2571ee9a3a3ca5a87a65ff75195891e2bb5ca0))
+- Merge pull request \#34 from mia03ther/docs/vitepress-workspace ([8bfa731](https://github.com/Miaotofu01/Study-Mate/commit/8bfa73163a0e1f74086abc5b8188728e64b8a864))
+
+  > docs(前端): 补充 VitePress 课程工作区迁移提案
+
+- refactor(文档): docs/ 按用途归位，接入 agent 约定层 ([4a47b14](https://github.com/Miaotofu01/Study-Mate/commit/4a47b147545690964f556d9041d5b006a89a1bb8))
+
+  > docs/ 原来是 11 份文档平铺在一层，看不出哪份是唯一约束来源、哪份只是使用说明；
+  > agent 也没有统一入口——issue 记在哪、triage 标签叫什么、领域词表与 ADR 该放哪，
+  > 每次都得重新推断。参照 Matt Pocock 工程技能的目录约定重排。
+  > 
+  > - docs/ 分四类：使用/（安装、使用说明、宿主说明、发布）、设计/（设计方案与方向
+  >   探索）、规范/（工程约束、课件内容格式、文件归属）、agents/（agent 约定层）
+  > - 新增 AGENTS.md：只放指针，每条规则的唯一出处仍在原处，不复述
+  > - 新增 docs/agents/{issue-tracker,triage-labels,domain}.md：issue tracker 定为
+  >   GitHub Issues（gh CLI），triage 用五个同名规范标签，领域文档声明为单上下文
+  > - GLOSSARY.md 与 docs/adr/ 按「懒创建」处理：只声明布局，不落空文件
+  > - README 目录树与 docs/ 说明同步；package.json 载荷 glob 改 docs/\*\*/\*.md
+  > 
+  > 顺带修掉一个真 bug：OpenAI 插件、Antigravity 插件、DSH 安装载荷三处都只复制
+  > docs/ 一层的 .md，子目录会静默丢失，技能提示词里的 &lt;root&gt;/docs/&lt;子目录&gt;/&lt;名&gt;.md
+  > 指针随之断掉。抽出 bin/docs-payload.mjs 统一递归枚举，三处共用；images/ 与
+  > superpowers/ 明确排除在发布物之外。
+  > 
+  > 门禁：npm test 全绿（安装器、插件导出、静态契约、发布逻辑）；另拆包核对过插件
+  > ZIP 里 docs 结构与仓库逐路径一致。docs/ 内 89 条相对链接逐条验证可解析，断链
+  > 数与改动前基线相同（9 条均为占位符示例，非本次引入）。
+
+- chore(文档): 删掉 00TODO.md 与 docs/superpowers/，待办改由 issue 维护 ([8048218](https://github.com/Miaotofu01/Study-Mate/commit/804821888fe7fb797acfb5093a9d73559c63e20a))
+
+  > 00TODO.md 是给人工维护用的清单，5 条里 3 条已完成，只在顺手改文档时被打过勾，
+  > 没形成维护节奏。剩下两条（出题 agent 提示词优化、SKILL 索引表）挪到 issue。
+  > 这份清单本身也已被 GitHub Issues 接管，留着就是第二个真相源。
+  > 
+  > docs/superpowers/plans/2026-09-27-课件高亮与依据链.md 是本地工作草稿，从未入库，
+  > 按维护者决定删除；该目录的守卫保留在 bin/docs-payload.mjs，防止它再长回发布物里。
+  > 
+  > AGENTS.md 同步：去掉 00TODO 那条指针，写明未完成的事走 GitHub Issues。
+  > 
+  > 门禁：npm test 全绿。仓库内已无 00TODO / docs/superpowers 的引用；AGENTS.md 的
+  > 7 条链接逐条验证可解析。
+
+- chore(仓库): 忽略 .idea/ 与 .vscode/ ([f766ace](https://github.com/Miaotofu01/Study-Mate/commit/f766ace6cf0a9a8d51c7be0b69a16a0f70fd59ef))
+
+  > 从陈旧分支 chore/drop-todo-list（1597f07）抢救过来的唯一独立改动——那条分支
+  > 其余内容已被本分支的 5e57290 覆盖，但 main 上确实还没忽略这两个 IDE 目录。
+  > 单独成一次提交，便于审阅时忽略。
+
+- fix(文档): 补上评审抓到的三处遗漏与两处坏味道 ([1b6c8ff](https://github.com/Miaotofu01/Study-Mate/commit/1b6c8ff3fc084edc7eb0f5f5c614af325a4fbcca))
+
+  > code-review 的 Standards 轴与 Spec 轴并行评审（固定点 main），逐条处置：
+  > 
+  > \*\*成文标准违规\*\*
+  > 
+  > 1. \`docs/规范/工程约束.md\` 的目录约定树没更新——而这份正是「目录约定」的唯一出处。
+  >    本分支只同步了 README，于是同一棵树在仓库里有两套互相矛盾的说法。
+  > 2. \`docs/设计/设计方案.md\` 两处同样的过期树（正文与附录各一），改成指向工程约束。
+  > 
+  > \*\*规格偏离\*\*
+  > 
+  > 3. \`docs/agents/\` 不该随包分发：它是仓库自己的维护者配置（含本仓库的 gh 流程），
+  >    而唯一入口 \`AGENTS.md\` 不在 npm files 里，发出去只是三份无入口的孤儿文档。
+  >    载荷因此从 14 份收到 11 份，并写了原因，防止以后被当成漏拷补回去。
+  > 4. \`AGENTS.md\` 自称「只放指针，不复述规则」，却复述了 \`npm test\` 门禁——
+  >    把门禁并进 CONTRIBUTING 那一行的括号里。
+  > 5. \`AGENTS.md\` 的文档地图漏了「决策」类（\`docs/adr/\`），与拍板的四类不符。
+  > 
+  > \*\*坏味道（判断项）\*\*
+  > 
+  > 6. 两个插件构建器里的 docs 复制块逐字重复。上一版只抽出了「枚举」这一层缝，
+  >    复制＋改写仍各写一份；补出 \`writeDocsPayload\`，两处都调它。
+  > 7. \`docs-payload.mjs\` 里指向已删目录 \`superpowers/\` 的守卫是死配置，去掉。
+  > 
+  > 门禁：npm test 全绿。
+
+- refactor(文档): VitePress 提案归入 docs/设计/，修好合并处的两处路径 ([38bfa1e](https://github.com/Miaotofu01/Study-Mate/commit/38bfa1ef6ec07c480811654cd2fa8e2ffca949b7))
+
+  > rebase 到 origin/main（8bfa731）后，main 带来的新内容要跟着这轮的目录归位：
+  > 
+  > - main 新增的 \`docs/VitePress工作区.md\` 是阅读端提案，归入 \`docs/设计/\`；
+  >   它指向其它分类的兄弟链接各上一层（工程约束 / 课件内容格式 / 使用说明）
+  > - main 在 \`工程约束.md\` 里加的那条 VitePress 链接随之改成 \`../设计/…\`
+  >   ——这是链接检查器抓到的唯一一条真断链
+  > - 两处目录描述补上这份新文档；工程约束那棵树顺带补上漏掉的
+  >   \`antigravity/studymate/\`：main 刚把它的白名单变成发布阻断项，
+  >   而这棵树号称是目录约定的唯一出处
+  > 
+  > 冲突处置：README 取 main 的新措辞 + 本轮的路径；release.mjs 取 main 的
+  > antigravity 白名单 + 本轮的 docs 递归 glob；release.test.mjs 取 main 抽出的
+  > tarballPack() 写法，并修正它新增的 tarballFiles 常量里两处旧 docs 路径
+  > （naive 地「取 theirs」会把路径留旧）。
+  > 
+  > 门禁：npm test 全绿。仓库内 107 条相对链接逐条验证，断链数与基线相同。
+
+- Merge pull request \#37 from Miaotofu01/refactor/matt-目录约定 ([3343019](https://github.com/Miaotofu01/Study-Mate/commit/3343019bff2d0a51c6b74600879260806571deb9))
+
+  > refactor(文档): docs/ 按用途归位，接入 agent 约定层
+
+- docs(桌面端): 词表与三份架构决策记录 ([b08b92b](https://github.com/Miaotofu01/Study-Mate/commit/b08b92b590682dea3195409ccf7fefbade0304f6))
+
+  > 桌面端的设计会话（spec 见 \#38）定下了一批术语与三个不可逆的决策，落成可引用的唯一出处：
+  > 
+  > - GLOSSARY.md：15 个领域词；顺带消除同词冲突——「桌面端」指本应用，DeepSeek Harness 自己的桌面应用一律写「DSH 桌面端」（README 原来两者同词）。
+  > - docs/adr/0001：外壳自研 + ACP 通道，附实测结论（ACP 不 mount preset、审批请求只带关联 id、ask\_user\_question 与 present 在 ACP 会话里缺失）。
+  > - docs/adr/0002：自带运行时 + 独立 DSH\_HOME + 学习专用；装配机制按实测从「设默认 preset」改为「顶层 patch 行」。
+  > - docs/adr/0003：阅读端走 Vue 组件、HTML 渲染器保留为宿主交付。
+  > 
+  > 三份 ADR 状态均为 proposed：代码未开工，决策仍可改。同时修掉 AGENTS.md 与领域文档里「这两份还不存在」的过期说法。
+
+- Merge pull request \#41 from Miaotofu01/docs/glossary-adr ([b8ce74f](https://github.com/Miaotofu01/Study-Mate/commit/b8ce74ffb9a0f067ca1ca6d327885cbca4762df4))
+
+  > docs(桌面端): 词表与三份架构决策记录
+
+- docs(文档): 删掉已废弃的桌面端方案 ADR ([bd7787f](https://github.com/Miaotofu01/Study-Mate/commit/bd7787ffc63af6e85389e1e8bbb8208633bc3c02))
+
+  > 桌面端方案（spec 见 \#38）已废弃，撤掉 \#41 随词表一起合进来的三份决策记录，
+  > 并把因此变陈旧的指针改回原状：
+  > 
+  > - 删 docs/adr/0001-0003（外壳与 ACP 通道／自带运行时与独立配置目录／阅读端与渲染路径）——方案不做，决策失去意义。
+  > - GLOSSARY.md：删「桌面端」词条——它定义的就是这个已废弃的应用；为区分 DeepSeek Harness 自己的桌面应用而定的「一律写 DSH 桌面端」写法规则一并作废。
+  > - AGENTS.md 与 docs/agents/domain.md：docs/adr/ 从「已建立」改回「按需创建」（目录已空，不存在是正常的），词表仍为已建立。
+  > 
+  > 内容仍可从 b08b92b 与 PR \#41 的历史里取回。
+  > DSH 桌面端（第三方宿主）相关文档与安装器的 desktop 档位不受影响。
+
+- Merge pull request \#42 from Miaotofu01/docs/remove-desktop-adr ([d4d731c](https://github.com/Miaotofu01/Study-Mate/commit/d4d731ce910504d0071f98f05f2eddf57679df11))
+
+  > docs(文档): 删掉已废弃的桌面端方案 ADR
+
+- feat(交接): 子 agent 暂存交接加机器校验门禁 ([e6e475d](https://github.com/Miaotofu01/Study-Mate/commit/e6e475d64ebf03615223ab2b2c4094c2fbce5231))
+
+  > - 角色经 \`.stage/&lt;角色&gt;-&lt;任务&gt;/deliver/\` 交接时，必须在同一 stage 根写 \`handoff.json\`；总控在任何 \`cp\`／合并之前先跑 \`check\_handoff.py\`，非零就\*\*不搬、不删 stage\*\*，把原始错误打回同一角色
+  > - 此前这一步只有自然语言自述：总控是闭眼 \`cp -r\`，且同一条命令里 \`rm -rf .stage/\`——搬错既污染科目目录，也把唯一证据一起销毁
+  > - 校验清单：角色/节点绑定、\`deliver/\` 全覆盖（多写的「顺手文件」阻断合盘）、路径边界（绝对路径／\`..\`／反斜杠／空段）、symlink 拒绝、重复 JSON key、\`succeeded\` 的 \`checks\` 必须真跑过、\`blocked\` 必须写明原因、可选 SHA-256 按盘上真实字节复算
+  > - 只管交接边界，不替代 \`check\_curriculum.py\`／\`check\_lesson.py\`／\`check\_pool.py\`／\`render\_lesson.py --check\` 的领域校验；也不为凑清单改造直写正式位置的既有 owner
+  > - 新增 \`schemas/agent-handoff.schema.json\`、\`scripts/check\_handoff.py\`、\`scripts/tests/test\_handoff.py\`（20 个用例，随 \`npm test\` 跑）、\`docs/规范/Agent交接协议.md\`（唯一口径）；4 份 SKILL.md 同步（3 个角色写清单、总控合盘前先验）
+  > 
+  > Co-authored-by: GodBlessRen &lt;46345883+GodBlessRen@users.noreply.github.com&gt;
+
+- test(提示词): 交接守卫改成扫源码，删掉一条不会红的断言 (\#45) ([174550d](https://github.com/Miaotofu01/Study-Mate/commit/174550d927c301d5cd1985f2fa6019624e866038))
+
+  > \#39 新加的两条防回归断言里，Antigravity 那条永远变不了红：两份适配器的正则都只认不带引号的
+  > 脚本路径，所以「源码带引号」和「源码不带引号」导出的那一行逐字节相同（实测），产物层面根本没有
+  > 可观测差异——那条 assert.equal 实际只保证了文案存在。
+  > 
+  > 改成在源码层守根因：技能里任何 \`python3 ... '&lt;root&gt;/scripts/x.py'\`（脚本路径被引号包住）都会被
+  > 两个宿主适配器静默跳过，现在 test\_skill\_rules.py 直接扫 .dsh/skills/\*\* 拦下，不必等构建，
+  > 而且对两个宿主同时成立。
+  > 
+  > 另加一条反向断言（不带引号的调用必须仍有若干处），防止守卫本身变成空转——这次就是栽在
+  > 「断言永远成立」上。
+  > 
+  > 两个方向都做了负向对照：注入带引号写法 → 红并报出 learning-system:168；清掉调用把计数压到
+  > 阈值以下 → 红。
+  > 
+  > Co-authored-by: Miaotofu01 &lt;196646782+Miaotofu01@users.noreply.github.com&gt;
+
+- fix:异常题目数据导致后续题组无法显示 ([e8be342](https://github.com/Miaotofu01/Study-Mate/commit/e8be34293d3f064f5ee40cd3043a31939c5255df))
+- refactor(贡献契约): 契约降为原则与指针，同一事实只留一处 (\#47) ([41b7aaa](https://github.com/Miaotofu01/Study-Mate/commit/41b7aaae9865ab22e3553eedb51eb9e6376984f5))
+
+  > \* refactor(贡献契约): 契约降为原则与指针，同一事实只留一处
+  > 
+  > CONTRIBUTING.md 此前把流程规则、工程细节与已经枯萎的剧情事实混在一
+  > 起：它说 \`test\` 是遗留分支、PR \#10 至今没合回来，而该分支已删除、那
+  > 两个提交早已进 main；同一事实又被抄在十几处，改一处就会留下别处的
+  > 错。现在：
+  > 
+  > - CONTRIBUTING.md 是唯一出处，只留机器查不了、新人会问的原则，细节
+  >   外链到各自的唯一出处；AGENTS.md 降为只给指针
+  > - 删掉「PR 目标分支只能是 main」：它的理由已消失，main 本就是默认分
+  >   支，而它真实的失败形态是「基分支不是 main 的 PR 静默地没有 CI」。
+  >   ci.yml 改成在所有 PR 上跑，选错基分支不再无声无息
+  > - 门禁仍是唯一一条 npm test，不加强制门、不加断言、不加依赖；命令
+  >   与前置归 scripts/tests/README.md，脚本用法归工程约束 §四
+  > - 修掉 check\_curriculum.py 的假绿：未装 jsonschema 时它会先打印跳过
+  >   校验、紧接着打印「schema 校验通过」。现在只报结构检查通过，并在末
+  >   尾汇总哪些文件的 schema 没校验
+  > - 删掉模板资源清单「分散在三处」的过时说明（实际只有 lessonfile.py
+  >   一份）、README 与工程约束互相矛盾的双份目录树与「docs 分四类」
+  > - Node/Python 版本口径锚到 package.json 与 CI，示例里「Python 3.8」
+  >   改成与安装器一致的 3.9+
+  > - 新增 PR 模板与三份 issue 模板；ADR 0001 记录这次拍板（为何删
+  >   main-only、为何不开强制门、为何不加一致性断言）
+  > 
+  > 验收：npm test 全绿；契约内链逐条可达；提到的 npm script 都真实存在。
+  > 
+  > \* docs(贡献契约): ADR 与词表都已建立，AGENTS.md 的两处指针跟上
+  > 
+  > ---------
+  > 
+  > Co-authored-by: Miaotofu01 &lt;196646782+Miaotofu01@users.noreply.github.com&gt;
+
+- refactor(提示词): 删掉对 continuable 子 agent 无效的 job\_output 等待规则，压瘦常驻上下文 (\#50) ([48f1675](https://github.com/Miaotofu01/Study-Mate/commit/48f16757970eff3336666a6b7bc7a59598355c9b))
+
+  > \`job\_output(wait: true)\` 只对有 \`jobId\` 的后台作业有效；本仓 \`subagent\` 走 continuable 模式返回
+  > \`subagentId\`，照这条规则做必然查无此 job。等待语义本来就归框架（系统提示与工具描述已写明
+  > "do not busy-poll or sleep"），技能里只该留框架管不到的那半：同一科目同时只有一个写入者。
+  > 
+  > 顺带把这条规则的维护成本收掉：
+  > - 常驻提示词压瘦：learning-system 28,377→26,175 B、record-keeping 10,955→10,120 B，
+  >   并删掉跨文件的重复口径（handoff 复述、暂存机制两处、/tmp 细节两处）
+  > - 适配器锚点从整句改成结构锚点，并删掉两处已经静默空转的死锚点
+  >   （\`单会话推进 1-2 个节点\`、\`present 呈上更好\`），修掉一对错位
+  >   （对 learning-system 用了只存在于 record-keeping 的句子，反之亦然）
+  > - 补上"锚点必须还有家"的守卫：适配器声明作用域，锚点在声明范围内必须命中
+  > - 报警器脆性：18 条整句锚点改成句中承重词（源码零改动），删掉 2 条动机解释
+  > - 9 处 \`python3\` 补齐 \`-B\`（此前只对 learning-system 有这条规矩）
+  > 
+  > \`npm test\` 全绿（539/539 条规则在位）。
+  > 
+  > Co-authored-by: Miaotofu01 &lt;196646782+Miaotofu01@users.noreply.github.com&gt;
+
+- refactor(提示词): 暂存与落点单源化，总控只留公式与触发点 (\#52) ([ebf045d](https://github.com/Miaotofu01/Study-Mate/commit/ebf045dbd5486ce44e58e018a3fbeb42c850575f))
+
+  > 同一件事原先有四处正文：总控开场 0.5 段与「暂存模式的收尾」、record-keeping
+  > 「读写规则」第 7 条、工程约束的两处；image-scout 还反向允许把临时文件写进
+  > 系统临时目录。改一条落盘规则要记得改四处，而这段又是全文件最热（12 个提交
+  > 碰过）；31 条断言把两份副本都钉住，提权话术与沙箱模式名却 0 条覆盖。
+  > 
+  > owner 收敛到 record-keeping 的「工作区根与落点交付」（它本来就是写盘规则协议、
+  > 开场即加载）：总控第 0 步只留落点公式与一句指针，会话结束留一行触发点，
+  > 工程约束只留 DSH 侧的机制解释与指针，image-scout 的临时文件改回科目内 .stage/。
+  > 
+  > 顺带修掉导出产物里两个老问题：OpenAI / Antigravity 的宿主约定叫总控用
+  > &lt;STUDYMATE\_SCRATCH&gt;，而「不许用 /tmp」被泛化替换成「不许用 &lt;STUDYMATE\_SCRATCH&gt;」，
+  > 语义正好反了；OpenAI 侧还漏 &lt;SESSION\_DIR&gt;、沙箱模式名与 prefs.md 路径。两个适配器
+  > 现在按宿主口径改写这几行，Codex 的 12 份导出不再出现 DSH 专有暂存措辞。
+  > 
+  > 总控正文 26,175 → 22,845 B（−12.7%，占全部提示词 24.3% → 21.2%），协议侧
+  > 10,120 → 13,608 B；同一事实四处 → 一处。测试只挪键（12 条断言从 learning-system
+  > 移到 record-keeping），断言形式未改——把 528 条改成「规则有家」的归属契约留给下一步。
+  > 
+  > Refs \#51
+  > 
+  > Co-authored-by: Miaotofu01 &lt;196646782+Miaotofu01@users.noreply.github.com&gt;
+
+- test(提示词): 规则归属外置成声明表 + 技能调用面接进静态门禁 (\#54) ([75325b2](https://github.com/Miaotofu01/Study-Mate/commit/75325b25e064f5abe7eec21c3bc6f32b4adc1394))
+
+  > \* refactor(提示词): 暂存与落点单源化，总控只留公式与触发点
+  > 
+  > 同一件事原先有四处正文：总控开场 0.5 段与「暂存模式的收尾」、record-keeping
+  > 「读写规则」第 7 条、工程约束的两处；image-scout 还反向允许把临时文件写进
+  > 系统临时目录。改一条落盘规则要记得改四处，而这段又是全文件最热（12 个提交
+  > 碰过）；31 条断言把两份副本都钉住，提权话术与沙箱模式名却 0 条覆盖。
+  > 
+  > owner 收敛到 record-keeping 的「工作区根与落点交付」（它本来就是写盘规则协议、
+  > 开场即加载）：总控第 0 步只留落点公式与一句指针，会话结束留一行触发点，
+  > 工程约束只留 DSH 侧的机制解释与指针，image-scout 的临时文件改回科目内 .stage/。
+  > 
+  > 顺带修掉导出产物里两个老问题：OpenAI / Antigravity 的宿主约定叫总控用
+  > &lt;STUDYMATE\_SCRATCH&gt;，而「不许用 /tmp」被泛化替换成「不许用 &lt;STUDYMATE\_SCRATCH&gt;」，
+  > 语义正好反了；OpenAI 侧还漏 &lt;SESSION\_DIR&gt;、沙箱模式名与 prefs.md 路径。两个适配器
+  > 现在按宿主口径改写这几行，Codex 的 12 份导出不再出现 DSH 专有暂存措辞。
+  > 
+  > 总控正文 26,175 → 22,845 B（−12.7%，占全部提示词 24.3% → 21.2%），协议侧
+  > 10,120 → 13,608 B；同一事实四处 → 一处。测试只挪键（12 条断言从 learning-system
+  > 移到 record-keeping），断言形式未改——把 528 条改成「规则有家」的归属契约留给下一步。
+  > 
+  > Refs \#51
+  > 
+  > \* test(提示词): 规则归属外置成声明表，check\_skill 接进静态门禁
+  > 
+  > 528 条断言原先只问「这句话在这份文件里」，于是有两件事做不到：把一条规则从总控
+  > 搬进它加载的协议时，必须手工挪断言键（\#52 挪了 13 条）；而工程约束声称
+  > \`scripts/check\_skill.py\` 校验技能调用面，它其实不在任何门禁里跑——\`grep check\_skill\`
+  > 只命中它自己的说明文字，\`user-invocable: false\` 零正向断言，谁把角色改回可调用都不会红。
+  > 
+  > 改动：
+  > 
+  > - 新增 \`scripts/tests/rule-owners.json\`：\`reaches\` 声明谁加载谁（总控 → record-keeping /
+  >   local-qa / learning-discovery；讲解 → lesson-design；出题评估 → layered-practice /
+  >   evidence-check），\`moved\` 声明某条规则的正文住在哪个协议里。断言从此问「这个技能够不够
+  >   得着这条规则」：owner 默认是键所在的技能，声明过就按声明走，且 owner 必须在该技能的可达
+  >   名单里。\*\*以后搬规则 = 提示词改一处 + 表里加一行，断言不用动\*\*（已在真数据上验证）。
+  > - 表自身的守卫：技能名写错、\`moved\` 条目对不上规则说明、owner 够不着，都当场报错；
+  >   另加一组合成自检，证明 \`owner\_of\` / \`reachable\` 是活的，\`moved\` 空表也不是死代码。
+  > - \`check\_skill.py\` 补上第二个面：角色除 \`disable-model-invocation: true\` 外还要
+  >   \`user-invocable: false\`；协议与总控两个面都开。
+  > - 新增 \`scripts/tests/test\_skill\_frontmatter.py\` 并登记进 \`checks.mjs\` 的 \`--static\`：
+  >   5 个角色 / 7 份协议的分类写死在测试里，新增技能必须显式分类，不能被自动划进协议那侧。
+  > - 查重\*\*不做\*\*：实测 ≥24 字的片段里没有一条是整句复述（48 条命中的全是共享标识符——
+  >   命令、路径、schema 文件名、frontmatter 键、故意统一的小节标题、以及 Q6 故意留的落点公式），
+  >   naive 查重只会逼出一张把全部命中都豁免掉的名单，等于空转。真正会复发的失效模式是
+  >   「搬规则时在原处留副本」，那由 \`moved\` 的 owner 归属守住。
+  > 
+  > Refs \#53
+  > 
+  > ---------
+  > 
+  > Co-authored-by: Miaotofu01 &lt;196646782+Miaotofu01@users.noreply.github.com&gt;
+
+- refactor(提示词): 派工值归角色规格，「输入」节成为唯一出处 (\#56) ([bce408d](https://github.com/Miaotofu01/Study-Mate/commit/bce408db2a36bf781a62f99426e27b5e2e67ee78))
+
+  > \* refactor(提示词): 暂存与落点单源化，总控只留公式与触发点
+  > 
+  > 同一件事原先有四处正文：总控开场 0.5 段与「暂存模式的收尾」、record-keeping
+  > 「读写规则」第 7 条、工程约束的两处；image-scout 还反向允许把临时文件写进
+  > 系统临时目录。改一条落盘规则要记得改四处，而这段又是全文件最热（12 个提交
+  > 碰过）；31 条断言把两份副本都钉住，提权话术与沙箱模式名却 0 条覆盖。
+  > 
+  > owner 收敛到 record-keeping 的「工作区根与落点交付」（它本来就是写盘规则协议、
+  > 开场即加载）：总控第 0 步只留落点公式与一句指针，会话结束留一行触发点，
+  > 工程约束只留 DSH 侧的机制解释与指针，image-scout 的临时文件改回科目内 .stage/。
+  > 
+  > 顺带修掉导出产物里两个老问题：OpenAI / Antigravity 的宿主约定叫总控用
+  > &lt;STUDYMATE\_SCRATCH&gt;，而「不许用 /tmp」被泛化替换成「不许用 &lt;STUDYMATE\_SCRATCH&gt;」，
+  > 语义正好反了；OpenAI 侧还漏 &lt;SESSION\_DIR&gt;、沙箱模式名与 prefs.md 路径。两个适配器
+  > 现在按宿主口径改写这几行，Codex 的 12 份导出不再出现 DSH 专有暂存措辞。
+  > 
+  > 总控正文 26,175 → 22,845 B（−12.7%，占全部提示词 24.3% → 21.2%），协议侧
+  > 10,120 → 13,608 B；同一事实四处 → 一处。测试只挪键（12 条断言从 learning-system
+  > 移到 record-keeping），断言形式未改——把 528 条改成「规则有家」的归属契约留给下一步。
+  > 
+  > Refs \#51
+  > 
+  > \* test(提示词): 规则归属外置成声明表，check\_skill 接进静态门禁
+  > 
+  > 528 条断言原先只问「这句话在这份文件里」，于是有两件事做不到：把一条规则从总控
+  > 搬进它加载的协议时，必须手工挪断言键（\#52 挪了 13 条）；而工程约束声称
+  > \`scripts/check\_skill.py\` 校验技能调用面，它其实不在任何门禁里跑——\`grep check\_skill\`
+  > 只命中它自己的说明文字，\`user-invocable: false\` 零正向断言，谁把角色改回可调用都不会红。
+  > 
+  > 改动：
+  > 
+  > - 新增 \`scripts/tests/rule-owners.json\`：\`reaches\` 声明谁加载谁（总控 → record-keeping /
+  >   local-qa / learning-discovery；讲解 → lesson-design；出题评估 → layered-practice /
+  >   evidence-check），\`moved\` 声明某条规则的正文住在哪个协议里。断言从此问「这个技能够不够
+  >   得着这条规则」：owner 默认是键所在的技能，声明过就按声明走，且 owner 必须在该技能的可达
+  >   名单里。\*\*以后搬规则 = 提示词改一处 + 表里加一行，断言不用动\*\*（已在真数据上验证）。
+  > - 表自身的守卫：技能名写错、\`moved\` 条目对不上规则说明、owner 够不着，都当场报错；
+  >   另加一组合成自检，证明 \`owner\_of\` / \`reachable\` 是活的，\`moved\` 空表也不是死代码。
+  > - \`check\_skill.py\` 补上第二个面：角色除 \`disable-model-invocation: true\` 外还要
+  >   \`user-invocable: false\`；协议与总控两个面都开。
+  > - 新增 \`scripts/tests/test\_skill\_frontmatter.py\` 并登记进 \`checks.mjs\` 的 \`--static\`：
+  >   5 个角色 / 7 份协议的分类写死在测试里，新增技能必须显式分类，不能被自动划进协议那侧。
+  > - 查重\*\*不做\*\*：实测 ≥24 字的片段里没有一条是整句复述（48 条命中的全是共享标识符——
+  >   命令、路径、schema 文件名、frontmatter 键、故意统一的小节标题、以及 Q6 故意留的落点公式），
+  >   naive 查重只会逼出一张把全部命中都豁免掉的名单，等于空转。真正会复发的失效模式是
+  >   「搬规则时在原处留副本」，那由 \`moved\` 的 owner 归属守住。
+  > 
+  > Refs \#53
+  > 
+  > \* refactor(提示词): 派工值归角色规格，「输入」节成为唯一出处
+  > 
+  > 派工接口（「总控必须给角色什么」）原先有三份出处：文件归属表那一列、总控正文的
+  > 五处内联值、角色规格的「输入」节——三份已经不一致：总控漏了 \`&lt;root&gt;\`（表与
+  > resource-scout 规格都有）；表里没有「实验课另给被验收节点 id + 项目目标」，
+  > 总控却有；总控要求「必须给节点 kind」，而 practice-evaluator 规格明说 kind 自己
+  > 从课程大纲读、别让总控贴节点全文；learning-coach 规格里那 6 项表里也没有。
+  > 
+  > 值归消费者：角色的「输入」节最清楚自己要什么，它成为唯一出处。总控的派发规范
+  > 改成一条通用规则（派工前读一次该角色的「输入」节），五处内联值删掉——时机标签
+  > （时机一 · 出题 / 实验任务 / 时机二 · 评估）与总控侧纪律（不规定内容怎么写、
+  > 作答原文逐字转发）保留。文件归属表那一列整列删除，它只回答「谁维护哪份文件」。
+  > 
+  > 顺带修掉两处分节口径漂移（同一事实两处说法不同，都无门禁）：
+  > - 「各领域当前水平」不是「共享记忆」的小节，是「我是谁」下面的一个条目
+  >   （templates/MEMORY.md 一直如此），总控说错了层级；
+  > - 建课顺序漏了使命的第四节 \`\#\# Out of scope\`（模板里有，唯一出处是
+  >   learning-discovery:104）。
+  > 
+  > 新增两条契约：使命分节从三节改判四节；总控点名的落点必须在模板里有家
+  > （反向验证过：改掉总控那串字立刻红）。两个宿主适配器按第 4 步那行的锚点从
+  > \`\[^\\n\]+\` 放宽成 \`\[^\\n\]\*\`——那行现在没有尾随文字。
+  > 
+  > Refs \#55
+  > 
+  > ---------
+  > 
+  > Co-authored-by: Miaotofu01 &lt;196646782+Miaotofu01@users.noreply.github.com&gt;
+
+- refactor(工程约束): §四 补上参数形态，让「脚本用法的唯一出处」名副其实 (\#58) ([5da784a](https://github.com/Miaotofu01/Study-Mate/commit/5da784a17ffe54c59596b8668423ccf7eb1e514b))
+
+  > \* refactor(提示词): 暂存与落点单源化，总控只留公式与触发点
+  > 
+  > 同一件事原先有四处正文：总控开场 0.5 段与「暂存模式的收尾」、record-keeping
+  > 「读写规则」第 7 条、工程约束的两处；image-scout 还反向允许把临时文件写进
+  > 系统临时目录。改一条落盘规则要记得改四处，而这段又是全文件最热（12 个提交
+  > 碰过）；31 条断言把两份副本都钉住，提权话术与沙箱模式名却 0 条覆盖。
+  > 
+  > owner 收敛到 record-keeping 的「工作区根与落点交付」（它本来就是写盘规则协议、
+  > 开场即加载）：总控第 0 步只留落点公式与一句指针，会话结束留一行触发点，
+  > 工程约束只留 DSH 侧的机制解释与指针，image-scout 的临时文件改回科目内 .stage/。
+  > 
+  > 顺带修掉导出产物里两个老问题：OpenAI / Antigravity 的宿主约定叫总控用
+  > &lt;STUDYMATE\_SCRATCH&gt;，而「不许用 /tmp」被泛化替换成「不许用 &lt;STUDYMATE\_SCRATCH&gt;」，
+  > 语义正好反了；OpenAI 侧还漏 &lt;SESSION\_DIR&gt;、沙箱模式名与 prefs.md 路径。两个适配器
+  > 现在按宿主口径改写这几行，Codex 的 12 份导出不再出现 DSH 专有暂存措辞。
+  > 
+  > 总控正文 26,175 → 22,845 B（−12.7%，占全部提示词 24.3% → 21.2%），协议侧
+  > 10,120 → 13,608 B；同一事实四处 → 一处。测试只挪键（12 条断言从 learning-system
+  > 移到 record-keeping），断言形式未改——把 528 条改成「规则有家」的归属契约留给下一步。
+  > 
+  > Refs \#51
+  > 
+  > \* test(提示词): 规则归属外置成声明表，check\_skill 接进静态门禁
+  > 
+  > 528 条断言原先只问「这句话在这份文件里」，于是有两件事做不到：把一条规则从总控
+  > 搬进它加载的协议时，必须手工挪断言键（\#52 挪了 13 条）；而工程约束声称
+  > \`scripts/check\_skill.py\` 校验技能调用面，它其实不在任何门禁里跑——\`grep check\_skill\`
+  > 只命中它自己的说明文字，\`user-invocable: false\` 零正向断言，谁把角色改回可调用都不会红。
+  > 
+  > 改动：
+  > 
+  > - 新增 \`scripts/tests/rule-owners.json\`：\`reaches\` 声明谁加载谁（总控 → record-keeping /
+  >   local-qa / learning-discovery；讲解 → lesson-design；出题评估 → layered-practice /
+  >   evidence-check），\`moved\` 声明某条规则的正文住在哪个协议里。断言从此问「这个技能够不够
+  >   得着这条规则」：owner 默认是键所在的技能，声明过就按声明走，且 owner 必须在该技能的可达
+  >   名单里。\*\*以后搬规则 = 提示词改一处 + 表里加一行，断言不用动\*\*（已在真数据上验证）。
+  > - 表自身的守卫：技能名写错、\`moved\` 条目对不上规则说明、owner 够不着，都当场报错；
+  >   另加一组合成自检，证明 \`owner\_of\` / \`reachable\` 是活的，\`moved\` 空表也不是死代码。
+  > - \`check\_skill.py\` 补上第二个面：角色除 \`disable-model-invocation: true\` 外还要
+  >   \`user-invocable: false\`；协议与总控两个面都开。
+  > - 新增 \`scripts/tests/test\_skill\_frontmatter.py\` 并登记进 \`checks.mjs\` 的 \`--static\`：
+  >   5 个角色 / 7 份协议的分类写死在测试里，新增技能必须显式分类，不能被自动划进协议那侧。
+  > - 查重\*\*不做\*\*：实测 ≥24 字的片段里没有一条是整句复述（48 条命中的全是共享标识符——
+  >   命令、路径、schema 文件名、frontmatter 键、故意统一的小节标题、以及 Q6 故意留的落点公式），
+  >   naive 查重只会逼出一张把全部命中都豁免掉的名单，等于空转。真正会复发的失效模式是
+  >   「搬规则时在原处留副本」，那由 \`moved\` 的 owner 归属守住。
+  > 
+  > Refs \#53
+  > 
+  > \* refactor(提示词): 派工值归角色规格，「输入」节成为唯一出处
+  > 
+  > 派工接口（「总控必须给角色什么」）原先有三份出处：文件归属表那一列、总控正文的
+  > 五处内联值、角色规格的「输入」节——三份已经不一致：总控漏了 \`&lt;root&gt;\`（表与
+  > resource-scout 规格都有）；表里没有「实验课另给被验收节点 id + 项目目标」，
+  > 总控却有；总控要求「必须给节点 kind」，而 practice-evaluator 规格明说 kind 自己
+  > 从课程大纲读、别让总控贴节点全文；learning-coach 规格里那 6 项表里也没有。
+  > 
+  > 值归消费者：角色的「输入」节最清楚自己要什么，它成为唯一出处。总控的派发规范
+  > 改成一条通用规则（派工前读一次该角色的「输入」节），五处内联值删掉——时机标签
+  > （时机一 · 出题 / 实验任务 / 时机二 · 评估）与总控侧纪律（不规定内容怎么写、
+  > 作答原文逐字转发）保留。文件归属表那一列整列删除，它只回答「谁维护哪份文件」。
+  > 
+  > 顺带修掉两处分节口径漂移（同一事实两处说法不同，都无门禁）：
+  > - 「各领域当前水平」不是「共享记忆」的小节，是「我是谁」下面的一个条目
+  >   （templates/MEMORY.md 一直如此），总控说错了层级；
+  > - 建课顺序漏了使命的第四节 \`\#\# Out of scope\`（模板里有，唯一出处是
+  >   learning-discovery:104）。
+  > 
+  > 新增两条契约：使命分节从三节改判四节；总控点名的落点必须在模板里有家
+  > （反向验证过：改掉总控那串字立刻红）。两个宿主适配器按第 4 步那行的锚点从
+  > \`\[^\\n\]+\` 放宽成 \`\[^\\n\]\*\`——那行现在没有尾随文字。
+  > 
+  > Refs \#55
+  > 
+  > \* refactor(工程约束): §四 补上参数形态，让「脚本用法的唯一出处」名副其实
+  > 
+  > §四 开头写着「脚本用法的唯一出处就是本节……不重抄参数与行为」，但那节只有一张
+  > 「脚本 → 干什么」的表，参数根本不存在于本节：真正的调用口径活在提示词里
+  > （learning-system 7 处、record-keeping 3 处、3 份角色规格各 1 处），并被 7 条断言
+  > 钉住。维护者想查一个脚本怎么调，得去翻提示词。
+  > 
+  > 改动：
+  > 
+  > - §四 补「参数形态」一列（宿主中立的形状：\`&lt;subject\_path&gt; &lt;节点id&gt;\`、\`--check\`、
+  >   \`--subject/--node\`、\`\[--dry-run\] \[--render\]\`、TSV 三参…），补调用纪律
+  >   （\`-B\` 与它防的那个坑），并把挤在一行的四个 \`check\_\*\` 拆成各自一行。
+  > - 写明「技能正文里的命令是副本，不是出处」：它们是各宿主与本机改写过的形态
+  >   （安装器把 \`python3\` 换成探测到的解释器并补引号，Codex / Antigravity 各自改写，
+  >   而 docs 不做解释器改写），所以\*\*改形状只改本表\*\*。
+  > - 新增契约（\`test\_templates.py\`，规格 ↔ 文档那一层）：提示词里调用到的引擎脚本必须在
+  >   §四 有行；用到的每个 flag 必须在那一行的形状里出现；§四 每个脚本都要有参数形态，
+  >   且写了 \`-B\` 的理由。
+  > 
+  > 提示词与角色规格一个字没改——它们的命令是被三个宿主改写的副本，契约负责两边不漂。
+  > 反向验证过：往提示词里加一个 §四 没有的 flag（\`--strict\`）→ 红并指名脚本与 flag；
+  > 把 §四 里 \`check\_lesson.py\` 的形状清空 → 红两条。
+  > 
+  > Refs \#57
+  > 
+  > ---------
+  > 
+  > Co-authored-by: Miaotofu01 &lt;196646782+Miaotofu01@users.noreply.github.com&gt;
+
+- fix(发布): 恢复被 stale 分支合并冲掉的 release 元数据 (\#60) ([a1ff482](https://github.com/Miaotofu01/Study-Mate/commit/a1ff482824bd237a6919350efb07130b927ed1c6))
+
+  > Release（major）在 \`release.mjs prepare\` 就退：\`package.json (0.2.0) and latest
+  > release (v0.3.0) disagree.\`（run 37058516400）。
+  > 
+  > 根因是 53f33d3（fork PR「适配了 DeepSeek Harness Desktop 的安装」）从 stale
+  > 分支合入时，把两个文件退回了 v0.3.0 之前的状态：package.json 从 0.3.0 改回
+  > 0.2.0、CHANGELOG.md 删掉整个 v0.3.0 段（348 行）。tag 与 GitHub Release 都在，
+  > 坏的是 main 上的元数据——release 脚本的检查没坏，它正是拦这个的。
+  > 
+  > 只恢复这两处：package.json 版本回到 0.3.0（与最新可达 tag 一致），CHANGELOG
+  > 取自 v0.3.0 tag（纯新增 348 行，0 删除）。package.json 里 tag 之后的正当改动
+  > （docs/\*.md → docs/\*\*/\*.md）原样保留。
+  > 
+  > npm test exit 0。
+  > 
+  > Refs \#59
+  > 
+  > Co-authored-by: Miaotofu01 &lt;196646782+Miaotofu01@users.noreply.github.com&gt;
+
+- test(发布): 补一道「package.json 版本 == 最新 tag」的门禁 (\#62) ([c660192](https://github.com/Miaotofu01/Study-Mate/commit/c66019221ac1403d324c4819f6359c9958bf1614))
+
+  > \* fix(发布): 恢复被 stale 分支合并冲掉的 release 元数据
+  > 
+  > Release（major）在 \`release.mjs prepare\` 就退：\`package.json (0.2.0) and latest
+  > release (v0.3.0) disagree.\`（run 37058516400）。
+  > 
+  > 根因是 53f33d3（fork PR「适配了 DeepSeek Harness Desktop 的安装」）从 stale
+  > 分支合入时，把两个文件退回了 v0.3.0 之前的状态：package.json 从 0.3.0 改回
+  > 0.2.0、CHANGELOG.md 删掉整个 v0.3.0 段（348 行）。tag 与 GitHub Release 都在，
+  > 坏的是 main 上的元数据——release 脚本的检查没坏，它正是拦这个的。
+  > 
+  > 只恢复这两处：package.json 版本回到 0.3.0（与最新可达 tag 一致），CHANGELOG
+  > 取自 v0.3.0 tag（纯新增 348 行，0 删除）。package.json 里 tag 之后的正当改动
+  > （docs/\*.md → docs/\*\*/\*.md）原样保留。
+  > 
+  > npm test exit 0。
+  > 
+  > Refs \#59
+  > 
+  > \* test(发布): 补一道「package.json 版本 == 最新 tag」的门禁
+  > 
+  > 53f33d3 从 stale 分支合入时把 package.json 退回 0.2.0、删掉 CHANGELOG 的
+  > v0.3.0 段，这次回退在 main 上躺了两天，直到手动跑 Release 才被 release.mjs
+  > 拦下。原因是没有任何门禁比对「package.json 版本」与「最新 tag」：release.mjs
+  > 的检查只在发布那一刻跑，而 ci.yml 是浅克隆、根本读不到 tag。
+  > 
+  > 新增 scripts/tests/test\_release\_metadata.py：判据与 release.mjs 同源（VERSION /
+  > RELEASE\_TAG 两个正则），取从 HEAD 可达的最新 v\* tag，package.json 的 version
+  > 必须等于它；失败信息里直接给出修法。拿不到 tag 时本地跳过、CI 里红——CI 配了
+  > fetch-depth: 0，那里读不到说明 checkout 配置坏了，守卫失效本身要报出来。
+  > 
+  > ci.yml 的 checkout 加 fetch-depth: 0（这是守卫的前置，理由写在旁边），新测试
+  > 登记进 checks.mjs 的 --static。反向验证过：把版本退回 0.2.0 立刻红。
+  > 
+  > Refs \#61
+  > 
+  > ---------
+  > 
+  > Co-authored-by: Miaotofu01 &lt;196646782+Miaotofu01@users.noreply.github.com&gt;
+
+
+[完整比较](https://github.com/Miaotofu01/Study-Mate/compare/v0.3.0...v1.0.0)
+<!-- /studymate-release:v1.0.0 -->
+
 <!-- studymate-release:v0.3.0 -->
 ## [0.3.0](https://github.com/Miaotofu01/Study-Mate/releases/tag/v0.3.0) - 2026-09-30
 
