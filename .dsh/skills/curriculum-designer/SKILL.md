@@ -67,7 +67,7 @@ user-invocable: false
 
 ## 五、校验（交付前必做）
 
-跑 `python3 <root>/scripts/check_curriculum.py <curriculum.yaml>`（schema + id 重复 + 引用完整性 + 实验课必须有 prerequisites + **环检测** + 孤儿节点提示）；它 PASS 才算交付，退出码非零就按它列的问题改。
+跑 `python3 -B <root>/scripts/check_curriculum.py <curriculum.yaml>`（schema + id 重复 + 引用完整性 + 实验课必须有 prerequisites + **环检测** + 孤儿节点提示）；它 PASS 才算交付，退出码非零就按它列的问题改。
 
 **YAML 一条硬规则**：列表项**以 `&` 或 `*` 开头必须加引号**——`["& 取地址", "* 解引用"]`。裸写会被当成锚点/别名，**flow 与 block 列表都会解析失败**。
 
