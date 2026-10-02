@@ -5,7 +5,7 @@
 
 ## 环境
 
-- Python 3.8 或更高版本，`python3 --version` 能看到版本号就行
+- Python 3.9 或更高版本，`python3 --version` 能看到版本号就行
 - 只用标准库：`unittest` 用来跑测试，`ipaddress` 用来当对照（测试里用，你自己实现的那份不许调它）
 - 不需要装任何第三方包，也不需要联网
 

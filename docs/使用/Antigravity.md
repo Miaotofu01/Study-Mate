@@ -138,15 +138,6 @@ python3 -m pip install pyyaml jsonschema
 
 ## 6. 开发者维护与测试
 
-修改插件或适配逻辑后，运行以下命令验证：
+修改插件或适配逻辑后，先跑 `npm run test:antigravity`（Antigravity 专用回归：ZIP 导出、Agent 准则、12 技能 frontmatter 校验），再跑门禁。
 
-```bash
-# Antigravity 专用回归测试（ZIP导出、Agent准则、12技能Frontmatter校验）
-npm run test:antigravity
-
-# 规范硬规则静态扫描（`npm test` 已含这一层）
-npm run test:static
-
-# 全量功能回归测试
-npm test
-```
+门禁是哪条、静态层与全量回归什么关系，见 [CONTRIBUTING.md §本地验证](../../CONTRIBUTING.md#本地验证)与[测试说明](../../scripts/tests/README.md)。

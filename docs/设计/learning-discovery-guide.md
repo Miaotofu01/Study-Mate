@@ -14,7 +14,7 @@ git clone https://github.com/Miaotofu01/Study-Mate.git
 
 ## 1. 用当前源码装一个独立试用环境
 
-准备 Node.js 22.19+（22 系列）或 24+、DSH 0.1.5-rc.2 或更新版本、Python 3.9+ 和 PyYAML。DSH 还需要可用的模型配置；使用新版 DSH 时，请按它的要求准备 `pnpm`。先在 PowerShell 检查：
+准备 Node.js（支持范围见 `package.json` 的 `engines`）、DSH 0.1.5-rc.2 或更新版本、Python 3.9+ 和 PyYAML。DSH 还需要可用的模型配置；使用新版 DSH 时，请按它的要求准备 `pnpm`。先在 PowerShell 检查：
 
 ```powershell
 node --version

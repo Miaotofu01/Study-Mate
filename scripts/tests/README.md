@@ -6,7 +6,7 @@
 npm test
 ```
 
-需要 Node.js、Python 3.9+ 和 PyYAML。默认检查只跑 npm 安装、插件打包、课件和工作区功能、DOM 与发布逻辑，不安装真实 DSH、pnpm 或浏览器，不调用模型。Actions 只在 Ubuntu / Node 24 / Python 3.13 上运行一次，不再展开系统和运行时矩阵。
+需要 Node.js、Python 3.9+ 和 PyYAML。**各命令的前置以本文件为准**，别处只给指针：Node 的支持范围看 `package.json` 的 `engines`，Actions 实际用的是 Node 24 / Python 3.13，只在 Ubuntu 上跑一次，不展开系统和运行时矩阵。默认检查只跑 npm 安装、插件打包、课件和工作区功能、DOM 与发布逻辑，不安装真实 DSH、pnpm 或浏览器，不调用模型。
 
 测试使用临时目录，不读写学生的 `workspace/`。Python 会按 `python3`、`python`、Windows 的 `py -3` 顺序查找可用解释器。
 

@@ -1,0 +1,36 @@
+name: 功能建议
+description: 想要一个新能力，或觉得现有做法该改
+title: "[建议] "
+labels: [needs-triage, enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提之前先看一眼 [README](https://github.com/Miaotofu01/Study-Mate#readme) 与[使用说明](https://github.com/Miaotofu01/Study-Mate/blob/main/docs/使用/使用说明.md)，
+        避免建议的功能其实已经有了。
+
+        大改动请先在这里谈拢再写代码：写完才发现方向不对，对谁都是浪费。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      description: 先说你遇到的困难，别急着说实现方式——这样别人能给出更省事的方案。
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你设想的做法
+      description: 可选。如果你已经想过怎么改，写在这里。
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你试过的替代办法
+      description: 可选。例如现在怎么绕过去、为什么绕不过去。
+    validations:
+      required: false
