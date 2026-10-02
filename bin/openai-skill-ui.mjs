@@ -51,9 +51,9 @@ const skills = new Map([
     default_prompt: '请用 $learning-discovery 的内部协议帮我从几个候选学习方向里选一个。',
   }],
   ['record-keeping', {
-    description: 'StudyMate 档案维护内部规范：由学习总控读取并执行，规定共享记忆、学习进度、评估记录与会话恢复的文件归属和更新规则。',
+    description: 'StudyMate 档案维护内部规范：由学习总控读取并执行，规定工作区根与落点交付、共享记忆、学习进度、评估记录与会话恢复的文件归属和更新规则。',
     display_name: 'StudyMate · 学习档案',
-    short_description: '供学习总控维护共享记忆、科目进度、评估记录与会话恢复状态',
+    short_description: '供学习总控落盘交付并维护共享记忆、科目进度、评估记录与会话恢复状态',
     default_prompt: '请用 $record-keeping 的内部规范核对并更新当前学习工作区的档案。',
   }],
   ['lesson-design', {
