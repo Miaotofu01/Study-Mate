@@ -118,6 +118,26 @@ test('a runnable dsh is taken from the explicit path, PATH, then the Desktop ins
   found = findDsh({ platform: 'win32', env, home: 'C:\\me', explicit: shim,
     execute: answering([[shim, '0.2.0-rc.2\n']]) });
   assert.deepEqual({ command: found.command, desktop: found.desktop }, { command: path.resolve(shim), desktop: true });
+
+  // Batch wrappers may echo setup commands before @echo off; still honor the
+  // explicit Desktop version instead of falling back to an older CLI on PATH.
+  const echoedCommands = 'C:\\plugins\\0.9.0>REM plugin setup\r\nC:\\plugins\\0.9.0>set NODE_OPTIONS=--require C:\\plugins\\0.9.0\\hook.js\r\n';
+  found = findDsh({ platform: 'win32', env, home: 'C:\\me', explicit: shim,
+    execute: answering([[shim, `${echoedCommands}0.2.0-rc.2\r\n`],
+      ['""dsh" --version"', '0.1.5-rc.3\n'], ['"where dsh"', `${npmShim}\r\n`]]) });
+  assert.deepEqual({ command: found.command, version: found.version, desktop: found.desktop },
+    { command: path.resolve(shim), version: '0.2.0-rc.2', desktop: true });
+
+  // The final complete version line is the launcher's answer, even if its wrapper
+  // printed another version or emits a trailing notice.
+  found = findDsh({ platform: 'win32', env, home: 'C:\\me', explicit: shim,
+    execute: answering([[shim, '0.1.4\r\n  v0.2.0-rc.2+desktop.1  \r\nlauncher finished\r\n']]) });
+  assert.equal(found.version, 'v0.2.0-rc.2+desktop.1');
+
+  // Command echoes containing version-like paths are not a version response.
+  found = findDsh({ platform: 'win32', env, home: 'C:\\me', explicit: shim,
+    execute: answering([[shim, echoedCommands]]) });
+  assert.equal(found.version, undefined);
   found = findDsh({ platform: 'win32', env, home: 'C:\\me', execute: answering([]) });
   assert.equal(found.version, undefined);
   assert.equal(found.checked[0], 'dsh');

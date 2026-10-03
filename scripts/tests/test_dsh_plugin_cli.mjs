@@ -70,12 +70,17 @@ async function fixture(t) {
     npm_config_cache: path.join(directory, 'npm-cache'), npm_config_store_dir: path.join(directory, 'pnpm-store'),
     npm_config_userconfig: path.join(directory, 'empty.npmrc'), npm_config_update_notifier: 'false',
     NODE_COMPILE_CACHE: path.join(directory, 'node-cache'), DSH_TELEMETRY_DISABLED: '1', CI: 'true' });
+  Object.assign(env, { PNPM_CONFIG_STORE_DIR: env.npm_config_store_dir,
+    PNPM_CONFIG_CACHE_DIR: env.npm_config_cache, PNPM_CONFIG_USERCONFIG: env.npm_config_userconfig });
   fs.writeFileSync(env.npm_config_userconfig, '');
   const npmCommand = process.env.npm_execpath || onPath('npm');
   const npmCli = /\.(?:cmd|bat)$/i.test(npmCommand)
     ? path.join(path.dirname(npmCommand), 'node_modules/npm/bin/npm-cli.js') : npmCommand;
+  // pnpm 12 no longer reads npm_config_registry; an explicit flag keeps both
+  // generations of DSH/pnpm on this fixture's local registry.
   const cli = (args, overrides = {}) => run(process.execPath,
-    [path.join(activeRuntime, 'lib/bin.js'), ...args], { ...env, ...overrides }, home);
+    [path.join(activeRuntime, 'lib/bin.js'), ...args,
+      ...(args[0] === 'plugin' ? [`--registry=${registryUrl}`] : [])], { ...env, ...overrides }, home);
   const passed = result => { assert.equal(result.status, 0, redact(result.output)); return result; };
   const packs = path.join(directory, 'packs');
   fs.mkdirSync(packs);
@@ -192,12 +197,14 @@ export function apply(ctx){
     fs.mkdirSync(bin);
     const dshBin = path.join(activeRuntime, 'lib/bin.js');
     if (process.platform === 'win32') {
-      fs.writeFileSync(path.join(bin, 'dsh.cmd'), '@echo off\r\n"' + process.execPath + '" "' + dshBin + '" %*\r\n');
+      // Keep the shim ASCII: cmd.exe must not decode Unicode installation paths.
+      fs.writeFileSync(path.join(bin, 'dsh.cmd'), '@echo off\r\n"%STUDYMATE_TEST_NODE%" "%STUDYMATE_TEST_DSH_BIN%" %*\r\n');
     } else {
       fs.symlinkSync(dshBin, path.join(bin, 'dsh'), 'file');
       fs.symlinkSync(process.execPath, path.join(bin, 'node'), 'file');
     }
-    const installerEnv = { ...env, PATH: bin + path.delimiter + (env.PATH || env.Path || '') };
+    const installerEnv = { ...env, PATH: bin + path.delimiter + (env.PATH || env.Path || ''),
+      STUDYMATE_TEST_NODE: process.execPath, STUDYMATE_TEST_DSH_BIN: dshBin };
     delete installerEnv.Path;
     passed(await run(process.execPath, [path.join(project, 'bin/studymate.mjs'), 'install',
       ...(mode ? ['--mode', mode] : [])], installerEnv, home));
@@ -291,7 +298,8 @@ if (!runtime) {
       f.passed(await f.cli(['plugin', '--profile', 'web', 'add', packageName]));
       const before = f.snapshot();
       const result = await f.web(0, { PATH: f.emptyPath, Path: f.emptyPath });
-      assert.match(result.output, /Python 3\.9\+.*PyYAML/);
+      assert.match(redact(result.output), /没有找到可用的 Python 3\.9\+/);
+      assert.match(redact(result.output), /请安装 Python 3\.9\+/);
       f.unchanged(before);
       assert.equal(f.engineVersion(), undefined);
     });
