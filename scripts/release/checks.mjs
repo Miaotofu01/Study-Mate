@@ -101,6 +101,7 @@ const groups = {
       // 四个附件折叠块的空态。套件在 Node 里伪造 window.__ModuleLoader__ + react 桩把头文件
       // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
       'scripts/tests/test_client_search_index.mjs',
+      'scripts/tests/test_client_fold_empty_state.mjs',
     ],
   },
   '--static': {
