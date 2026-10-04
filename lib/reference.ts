@@ -29,6 +29,9 @@ import { resolvePlainScalar } from './yaml.ts';
 // 台账实例仍是本模块自己的：reference/ 的指纹是「科目+标题+正文」，attempts/ 的是「节点+一次作答」，
 // 共用一个 Map 会让两份台账互相挤掉（上限是共享的），幂等反而在最需要它的时候失效。
 import { IdempotencyLedger, checkOperationId, fingerprintOf, OPERATION_ID_MAX } from './core/fence.ts';
+// 清单排序的判据同理住在纯函数域：`sorted()` 按码位、JS 的 `<` 按 UTF-16 码元，增补平面字符会分叉。
+// `lib/library.ts` 走的也是这一份，同一份清单在两处排出来的顺序必须逐字相同。
+import { cmpCodePoints } from './core/format.ts';
 import type { Stats } from 'node:fs';
 
 /* ── 常量 ──────────────────────────────────────────────────────────────── */
@@ -97,21 +100,6 @@ interface WalkedFile {
 const LEDGER = new IdempotencyLedger<WriteResult>();
 
 /* ── 路径 ──────────────────────────────────────────────────────────────── */
-
-/** Python 的 sorted() 按码位比较；JS 的 < 按 UTF-16 码元比较，遇到增补平面字符会分叉。
-    这里再写一份是因为本模块不能反向 import `lib/library.ts`（那边 import 本模块）。 */
-function cmpCodePoints(a: string, b: string): number {
-  const left = [...a];
-  const right = [...b];
-  const n = Math.min(left.length, right.length);
-  for (let i = 0; i < n; i++) {
-    // `!`：数组元素都是一个码位，codePointAt 不可能给 undefined——类型签名看不出这层
-    const x = left[i].codePointAt(0)!;
-    const y = right[i].codePointAt(0)!;
-    if (x !== y) return x < y ? -1 : 1;
-  }
-  return left.length - right.length;
-}
 
 function isDirectory(target: string): boolean {
   try {
