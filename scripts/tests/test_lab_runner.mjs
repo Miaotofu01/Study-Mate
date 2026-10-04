@@ -425,6 +425,26 @@ test('反证：没有题库 / 题型不对 / 证据为空 / 题号不存在 —�
   assert.match(out.拒.为什么, /锚点与题号/);
 });
 
+test('科目不存在 / 没有工作区：拒（一句能照着改的话，不是穿出来的异常）', async (t) => {
+  writeLabSubject(t);
+  const ctx = labContext();
+  const out = await execute(ctx, 'studymate_lab_run', {
+    subject: '根本没有这个科目', node: 'var', question: '什么是变量#0',
+  });
+  assert.equal(out.状态, '拒了');
+  assert.match(out.拒.为什么, /读不到科目/);
+  assert.match(out.拒.为什么, /不是一个目录/);
+
+  // 没有工作区的组合：同一句拒绝的另一个来源
+  const bare = useHome(t, { withWorkspace: false });
+  void bare;
+  const out2 = await execute(labContext(), 'studymate_lab_run', {
+    subject: 'demo', node: 'var', question: '什么是变量#0',
+  });
+  assert.equal(out2.状态, '拒了');
+  assert.match(out2.拒.为什么, /读不到科目/);
+});
+
 test('没有实验目录的节点：拒（概念课本来就产不出交付物）', async (t) => {
   const { workspace } = useHome(t);
   const { dir } = writeSubject(workspace, 'demo', {

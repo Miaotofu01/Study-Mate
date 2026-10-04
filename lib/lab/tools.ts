@@ -503,10 +503,23 @@ export function labRunTool(service: TaskService): LabToolSpec {
       ensureLabTaskKind();
 
       // ── 1. 命令的来源：题库里那道交付物题的「证据」字段 ──────────────────
-      const read = readDeliverable(
-        poolOf(run.access.read('pool', args.subject, { node: args.node })),
-        args.question,
-      );
+      // 读盘会抛（科目不存在、没工作区、域没声明……）：**转成一句能照着改的拒绝**，
+      // 别让一句栈里的 `Error` 直接穿到调用方那里——那读起来像插件坏了，而其实是「你这个
+      // 参数指向的东西不在」。域 guard 的 DomainViolationError 走同一条路（它带前缀，
+      // 一眼能认出来）。
+      let read;
+      try {
+        read = readDeliverable(
+          poolOf(run.access.read('pool', args.subject, { node: args.node })),
+          args.question,
+        );
+      } catch (error) {
+        return refused(
+          `读不到科目「${args.subject}」节点 ${args.node} 的题库：${error instanceof Error ? error.message : String(error)}`,
+          '先确认这个科目与节点真的在 .learning/subjects/ 下（科目 slug 就是那个目录名），'
+          + '再让出题那一侧把这道交付物题补齐。',
+        );
+      }
       if ('code' in read) return refused(read.message, '换一道交付物题，或者让出题那一侧把这条题补齐。');
       const commandFrom = `题目「${read.id}」的「证据」字段`;
 
