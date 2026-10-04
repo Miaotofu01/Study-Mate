@@ -29,8 +29,8 @@ import { decodeImageSrc, FormatProblems } from '../core/format.ts';
 import { parseLesson, poolJsonError, reportPoolShape } from '../core/lesson.ts';
 import { joinPath, lessonFilesUnder, pathFactsOf, resolveGiven } from './paths.ts';
 import type { StudyToolSpec } from './define.ts';
-import type { DomainAccess } from './access.ts';
-import type { AssetsView, StageView, YamlView } from './vault.ts';
+import type { DomainAccess } from '../host/access.ts';
+import type { AssetsView, StageView, YamlView } from '../host/vault.ts';
 
 /* ── 公用：包内 schema、问题形状、结论 ──────────────────────────────────── */
 

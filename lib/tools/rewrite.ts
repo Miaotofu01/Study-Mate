@@ -20,10 +20,10 @@ import path from 'node:path';
 
 import { isFenceLine } from '../core/format.ts';
 import { joinPath, pathFactsOf, subjectDirOf } from './paths.ts';
-import type { DomainAccess } from './access.ts';
+import type { DomainAccess } from '../host/access.ts';
 import type { StudyProblem } from '../core/validate.ts';
 import type { StudyToolSpec } from './define.ts';
-import type { YamlView } from './vault.ts';
+import type { YamlView } from '../host/vault.ts';
 
 const TEXT = { type: 'string' } as const;
 const INTEGER = { type: 'integer' } as const;

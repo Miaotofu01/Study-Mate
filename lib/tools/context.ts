@@ -15,7 +15,7 @@
 import { probeModel } from './capability.ts';
 import type { ServiceReader } from './capability.ts';
 import type { StudyToolSpec } from './define.ts';
-import type { WorkspaceFacts } from './vault.ts';
+import type { WorkspaceFacts } from '../host/vault.ts';
 
 /** 每个科目最多回几条学习记录：开场要的是「最近学到哪」，不是整本档案。 */
 export const RECENT_RECORD_LIMIT = 5;

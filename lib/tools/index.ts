@@ -22,12 +22,12 @@ import { registerExportKind } from '../export/index.ts';
 
 // 转出去给「往注册点加一行」的子系统与测试用：造工具、域词表、越权错误。
 // （`registerStudyTool` 自己也在下面被用到，所以这里是 import + export 两件事。）
-export { createAccess, DomainViolationError, matchesPattern } from './access.ts';
+export { createAccess, DomainViolationError, matchesPattern } from '../host/access.ts';
 export { defineStudyTool, registerStudyTool, UNAVAILABLE_SCHEMA } from './define.ts';
-export { DOMAINS } from './domains.ts';
+export { DOMAINS } from '../host/domains.ts';
 export { probeModel } from './capability.ts';
-export type { Domain } from './domains.ts';
-export type { DomainAccess, Declaration } from './access.ts';
+export type { Domain } from '../host/domains.ts';
+export type { DomainAccess, Declaration } from '../host/access.ts';
 export type { StudyToolSpec, StudyRun, StudyDeclaration } from './define.ts';
 export type { ModelCapability, Requirement, ServiceReader } from './capability.ts';
 import type { ServiceReader } from './capability.ts';

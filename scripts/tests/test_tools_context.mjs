@@ -14,8 +14,8 @@ import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createAccess } from '../../lib/tools/access.ts';
-import { createWorkspaceVault } from '../../lib/tools/vault.ts';
+import { createAccess } from '../../lib/host/access.ts';
+import { createWorkspaceVault } from '../../lib/host/vault.ts';
 import { assertOutput, execute, fakeContext, loadTools, useHome, writeSubject } from './fixtures/tools.mjs';
 
 const tools = await loadTools();

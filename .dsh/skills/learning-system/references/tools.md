@@ -107,7 +107,7 @@ apply_empty_reasons → { subject, node, file, dryRun, ok,
 
 ## 四、域声明表与「越权即抛」
 
-每个工具在定义里**写死**自己读哪些域、写哪个域的哪些字段（`lib/tools/domains.ts` 是域词表）。**声明之外的读写当场抛 `DomainViolationError`**——不是文档约定，是执行点：写越权时回调一次都不跑。
+每个工具在定义里**写死**自己读哪些域、写哪个域的哪些字段（`lib/host/domains.ts` 是域词表）。**声明之外的读写当场抛 `DomainViolationError`**——不是文档约定，是执行点：写越权时回调一次都不跑。
 
 | 工具 | 读域 | 写字段 |
 |---|---|---|

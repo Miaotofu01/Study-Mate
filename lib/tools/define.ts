@@ -18,13 +18,13 @@
         它们由技能按需加载的参考文档承载（#80 接）。
    ───────────────────────────────────────────────────────────────────────── */
 
-import { createAccess, assertDeclaration } from './access.ts';
-import type { Declaration, DomainAccess } from './access.ts';
+import { createAccess, assertDeclaration } from '../host/access.ts';
+import type { Declaration, DomainAccess } from '../host/access.ts';
 import { unmetRequirement } from './capability.ts';
 import type { Requirement, ServiceReader } from './capability.ts';
-import { createWorkspaceVault } from './vault.ts';
-import type { Vault } from './vault.ts';
-import type { Domain } from './domains.ts';
+import { createWorkspaceVault } from '../host/vault.ts';
+import type { Vault } from '../host/vault.ts';
+import type { Domain } from '../host/domains.ts';
 import { validateAgainstSchema } from '../core/schema.ts';
 
 /** 模型常驻上下文里能容忍的工具说明长度（码点）。超了就是往描述里塞契约了。 */

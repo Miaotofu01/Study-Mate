@@ -68,7 +68,7 @@ export function splitQuestionId(id: unknown): { anchor: string; index: number } 
 }
 
 /**
- * `pool` 域读法回来的东西：`{ value, error, … }`（`lib/tools/vault.ts` 的读法，结构化对齐、
+ * `pool` 域读法回来的东西：`{ value, error, … }`（`lib/host/vault.ts` 的读法，结构化对齐、
  * 不 import）。`readFileView` 给的那几个字段（file / present / text / bytes）在运行期也在，
  * 这里只声明用得到的两个。
  */
@@ -532,7 +532,7 @@ export function labRunTool(service: TaskService): LabToolSpec {
  *
  * `domain` 用 `any` 而不是 `string`：工具域那边是 `Domain` 联合类型，`string` 收窄不了它
  * （反过来也不行），两边用一个共同的宽类型对齐是这里唯一的办法。**运行期一道校验都不少**
- * ——域名的合法性由 `createAccess` 判，写错一个字母当场抛（`lib/tools/access.ts`）。
+ * ——域名的合法性由 `createAccess` 判，写错一个字母当场抛（`lib/host/access.ts`）。
  */
 export interface LabAccess {
   read: (domain: any, target?: string, options?: unknown) => unknown;
