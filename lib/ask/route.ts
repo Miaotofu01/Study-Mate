@@ -33,7 +33,7 @@ import { writeMisconception, ASK_SOURCE } from '../misconceptions.ts';
 /** 与 `bin/dsh-plugin.ts` 里三条路由同一个命名空间（`/api/studymate/…`）。 */
 export const ASK_PATH = '/api/studymate/ask';
 
-/** 一条 user 消息拼出来的文本上限，超过就说明组装出了问题（正常在几千字）。 */
+/** 一次模型调用的超时兜底：适配器必须尊重 `signal`（§9.2），超了就中止，别让面板一直转圈。 */
 const ANSWER_TIMEOUT_MS = 60_000;
 
 /* ── 形状 ──────────────────────────────────────────────────────────────── */
