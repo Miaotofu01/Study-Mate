@@ -5,7 +5,7 @@
    吐出块树、四态对账、错误与提示。它不读任何文件——`file` / `poolFile` 都是调用方
    注入的名字，连图片文件是否存在都走 `checkFigureSrc` 钩子（解析层不碰文件系统）。
 
-   与 Python 的对齐点（`scripts/render_lesson.py` 的 main 那段）：
+   与 Python 的对齐点（迁移前的 Python 渲染器的 main 那段）：
      · front matter 的两个字段 + `title` 与大纲逐字一致（`check_title_match`）；
      · 同名锚点被两个题目位置引用 → 报错（`check_duplicate_anchors`）；
      · 有 `::: quiz` 但题库文件不在 → 报错（`load_quiz`）；
@@ -281,7 +281,7 @@ function reconcile(
     }
     // 没题（含「值不是非空数组」这种形状坏，以及「锚点文本只差空白」的 resolved 残影）
     if (quiz.empty_reason) {
-      // `提示:` 通道（不影响退出码、也不算错）——与 Python `render_lesson.py:1067-1069` 对齐
+      // `提示:` 通道（不影响退出码、也不算错）——与迁移前的 Python 渲染器:1067-1069 对齐
       ctx.problems.note(ctx.file, anchor.line,
         `${ctx.file}:${anchor.line} 锚点「${anchor.text}」没有题：${quiz.empty_reason}`);
       continue;

@@ -1,14 +1,14 @@
 /* ─────────────────────────────────────────────────────────────────────────
    StudyMate · 工具域 —— 四个**校验**工具
 
-   它们替掉技能里那四条 `python3 -B <root>/scripts/check_*.py …`，回报的是**逐条问题**
+   它们替掉技能里那四条 那四条 Python 引擎命令，回报的是**逐条问题**
    （文件 + 行号 + 是否阻断）与一句明确结论，不是 exit code。校验逻辑一行都不在这里重写：
 
      · `studymate_validate_curriculum` → `lib/core/validate.ts` 的 validateCurriculum /
        validateProgress / validateSubject（按文件名分派；也可以直接给科目目录，一次校验三份）
      · `studymate_validate_lesson`     → `lib/core/lesson.ts` 的 parseLesson（内容格式 +
        锚点四态对账 + 图片存在性；DOM 结构检查随静态渲染一起退役）
-     · `studymate_validate_pool`       → `scripts/check_pool.py` 的**行为移植**（图片库索引
+     · `studymate_validate_pool`       →迁移前的 Python 图片库校验器的**行为移植**（图片库索引
        与图片目录逐行对账）。为什么是移植而不是复用：那一层在 Python 里，`lib/core/**` 里
        没有对应的纯函数实现，而 #68 之后技能不再调 Python。
      · `studymate_validate_handoff`    → `lib/core/validate.ts` 的 validateHandoff（盘上快照
@@ -344,7 +344,7 @@ function validateOneLesson(
     poolRaw: poolPresent ? poolView.text : undefined,
     outlineTitle: node?.title,
     nodeId: node?.id,
-    // 图片存在性：`::: figure` 的本地相对路径按**课件同目录**解析（与 render_lesson.py 同口径）
+    // 图片存在性：`::: figure` 的本地相对路径按**课件同目录**解析（与迁移前的 Python 渲染器同口径）
     checkFigureSrc: (src) => {
       const decoded = path.resolve(path.dirname(view.file), decodeImageSrc(src));
       const facts = access.read<{ file: string; present: boolean }>('assets', decoded);
@@ -484,7 +484,7 @@ export function validateLessonTool(): StudyToolSpec {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   三、studymate_validate_pool —— 图片库索引（`scripts/check_pool.py` 的行为移植）
+   三、studymate_validate_pool —— 图片库索引（迁移前的 Python 图片库校验器的行为移植）
    ══════════════════════════════════════════════════════════════════════════ */
 
 const INDEX_REL = 'assets/img/pool.md';

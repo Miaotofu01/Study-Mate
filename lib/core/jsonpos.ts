@@ -2,7 +2,7 @@
    StudyMate · 纯函数域 —— 「带位置的 JSON 读取」
 
    交接 manifest（`handoff.json`）是 JSON。`JSON.parse` 只给值不给位置，于是
-   `check_handoff.py` 今天报的是一句「schema 校验失败：<路径>: …」，没有行号——角色拿着
+  迁移前的 Python 交接校验器 今天报的是一句「schema 校验失败：<路径>: …」，没有行号——角色拿着
    这句话得自己在文件里找。这一层补上位置，顺带补上 Python 侧有、JS 侧会丢的那条检查：
    **重复键**（`json.load(object_pairs_hook=unique_object)` 会拒，`JSON.parse` 只会静默取最后一个）。
 

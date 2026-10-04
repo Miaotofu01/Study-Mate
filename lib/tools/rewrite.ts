@@ -3,8 +3,8 @@
 
    它们替掉技能里的两条 bash：
 
-     · `studymate_renumber_lessons`    ← `scripts/renumber_lessons.py`
-     · `studymate_apply_empty_reasons` ← `scripts/apply_empty_reasons.py`
+     · `studymate_renumber_lessons`    ←迁移前的 Python 位次重排脚本
+     · `studymate_apply_empty_reasons` ←迁移前的 Python 无题理由回填脚本
 
    **行为照搬那两个脚本**（它们是这两个动作唯一的现行口径，#83 才删），只去掉一件事：
    `--render`。页面不再预生成（目标态 §5.1：`lessons/*.html` 退役），所以「改完名再重渲染」
@@ -163,7 +163,7 @@ function planRenames(
 }
 
 /**
- * 按计划改名。**没有**临时名那一步——这是相对 `renumber_lessons.py` 的一处刻意简化：
+ * 按计划改名。**没有**临时名那一步——这是相对迁移前的 Python 位次重排脚本的一处刻意简化：
  *
  * 目标名 `<位次>-<节点id>.<后缀>` 里带着节点 id，所以「谁想改成它」只可能是同一个节点。
  * 于是目标名要么空着（直接改），要么被**同一个节点**的另一份占着（那是 duplicates，前面
