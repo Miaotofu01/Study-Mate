@@ -135,6 +135,13 @@ const groups = {
       // Host 那一半用**注入的假 llm** 证明链路通（真模型调用要花额度，门禁里不跑）。
       'scripts/tests/test_client_ask_panel.mjs',
       'scripts/tests/test_host_ask_route.mjs',
+      // 监听域 lib/watch/**（#74）：变更通知的形状与域映射（纯）、目录集合监听（真 fs）、
+      // 两条推送路（真 HTTP，bridge 与宿主同形）、阅读端「未变即同引用」（VM 里跑 lib/client.js）。
+      // 真 DSH 里的端到端在 scripts/tests/test_dsh_runtime.mjs 的监听探针里。
+      'scripts/tests/test_watch_notice.mjs',
+      'scripts/tests/test_watch_tree.mjs',
+      'scripts/tests/test_watch_push.mjs',
+      'scripts/tests/test_watch_client.mjs',
     ],
   },
   '--static': {
@@ -154,6 +161,9 @@ const groups = {
       'browser/reading_test.mjs',
       'browser/reading_position_test.mjs',
       'browser/attempts_test.mjs',
+      // #74：真浏览器里「改文件 → 监听 → SSE → 页面自己更新（不刷新）」的端到端。
+      // 其余几套测的是阅读端的静态面；这一套要的是**真的 EventSource**接我们那条流式 Response。
+      'browser/watch_push_test.mjs',
     ],
   },
 };
