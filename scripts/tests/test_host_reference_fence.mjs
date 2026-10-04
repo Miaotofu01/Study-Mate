@@ -10,8 +10,8 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { listReference, readReference, referenceVersion, writeReference } from '../../lib/reference.mjs';
-import { readLibrary } from '../../lib/library.mjs';
+import { listReference, readReference, referenceVersion, writeReference } from '../../lib/reference.ts';
+import { readLibrary } from '../../lib/library.ts';
 
 /* ── 临时科目：跑完即弃 ───────────────────────────────────────────────── */
 

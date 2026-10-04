@@ -20,7 +20,15 @@
 
 /** PyYAML 把日期当 date 对象、`=`/`<<` 走特殊标签，这些本子集都不支持，见到就报错。 */
 export class YamlParseError extends Error {
-  constructor(file, line, column, text, message) {
+  // declare：只声明类型，运行期不留字段定义（Node 的类型擦除会把 `declare x: T` 整条抹掉）。
+  // 写成裸的 `file: string;` 会留下一个初值 undefined 的类字段，构造函数再赋值——结果虽然一样，
+  // 但那是实打实的运行期代码，没必要。
+  declare file: string;
+  declare line: number;
+  declare column: number;
+  declare text: string;
+
+  constructor(file: string, line: number, column: number, text: string | null, message: string) {
     super(`${file}:${line}:${column}: ${message}${text == null ? '' : `\n    ${text}`}`);
     this.name = 'YamlParseError';
     this.file = file;
@@ -38,11 +46,23 @@ const PY_WS = '\\t\\n\\v\\f\\r \\x1c-\\x1f\\x85\\xa0\\u1680\\u2000-\\u200a\\u202
 const PY_STRIP_RE = new RegExp(`^[${PY_WS}]+|[${PY_WS}]+$`, 'g');
 
 /** 等价于 Python 的 str.strip()。 */
-export function pyStrip(text) {
+export function pyStrip(text: string): string {
   return String(text).replace(PY_STRIP_RE, '');
 }
 
-function fail(file, line, column, text, message) {
+/** 报错要用的位置：1 起的行号与原文。indexLines 还没建出整行时也够用（它只读这两个字段）。 */
+interface SourcePosition {
+  line: number;
+  raw: string;
+}
+
+/** 源码里的一行：缩进、去掉缩进后的正文，外加报错要用的位置信息。 */
+interface SourceLine extends SourcePosition {
+  indent: number;
+  content: string;
+}
+
+function fail(file: string, line: SourcePosition, column: number, text: string | null, message: string): never {
   throw new YamlParseError(file, line.line, column, text == null ? line.raw : text, message);
 }
 
@@ -61,7 +81,7 @@ const FLOAT_RE = /^(?:[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?|\.[0-9_]
 const TIMESTAMP_RE = /^(?:[0-9][0-9][0-9][0-9]-[0-9][0-9]?-[0-9][0-9]?|[0-9][0-9][0-9][0-9]-[0-9][0-9]?-[0-9][0-9]?(?:[Tt]|[ \t]+)[0-9][0-9]?:[0-9][0-9]:[0-9][0-9](?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?)$/;
 
 /** 把 plain 标量转成 Python 侧等价的 JS 值。 */
-export function resolvePlainScalar(raw) {
+export function resolvePlainScalar(raw: string): string | number | boolean | null {
   if (raw === '' || raw === '~' || raw === 'null' || raw === 'Null' || raw === 'NULL') return null;
   const lower = raw.toLowerCase();
   if (BOOL_TRUE.has(lower)) return true;
@@ -72,7 +92,7 @@ export function resolvePlainScalar(raw) {
   return raw;
 }
 
-function constructInt(raw) {
+function constructInt(raw: string): number {
   let value = raw.replace(/_/g, '');
   let sign = 1;
   if (value[0] === '-') sign = -1;
@@ -93,7 +113,7 @@ function constructInt(raw) {
   return sign * Number(value);
 }
 
-function constructFloat(raw) {
+function constructFloat(raw: string): number {
   let value = raw.replace(/_/g, '').toLowerCase();
   let sign = 1;
   if (value[0] === '-') sign = -1;
@@ -114,18 +134,18 @@ function constructFloat(raw) {
 
 /* ── 行索引 ────────────────────────────────────────────────────────────── */
 
-function isSeqEntry(content) {
+function isSeqEntry(content: string): boolean {
   return content === '-' || content.startsWith('- ') || content.startsWith('-\t');
 }
 
 /** 普通赋值遇到 __proto__ 会去改原型而不是加键；键来自文件，不能给它这种权力。 */
-function setKey(obj, key, value) {
+function setKey(obj: Record<string, unknown>, key: string, value: unknown): void {
   if (key === '__proto__') Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
   else obj[key] = value;
 }
 
 /** 去掉行尾注释。`#` 只有在行首或前面是空白时才是注释（YAML 的规则）。 */
-function stripComment(text) {
+function stripComment(text: string): string {
   let inSingle = false;
   let inDouble = false;
   for (let i = 0; i < text.length; i++) {
@@ -154,7 +174,7 @@ function stripComment(text) {
  * 所以 `url: https://a`（冒号后面是 `/`）和 `title: [a, b]` 都不会认错。
  * 找不到返回 -1，表示这一行不是映射项。
  */
-function findKeyColon(text) {
+function findKeyColon(text: string): number {
   let depth = 0;
   let inSingle = false;
   let inDouble = false;
@@ -182,10 +202,10 @@ function findKeyColon(text) {
   return -1;
 }
 
-function indexLines(text, file) {
+function indexLines(text: string, file: string): SourceLine[] {
   // 实测 21 个真文件全是 \n 结尾；这里顺手归一 CRLF，免得 \r 混进标量尾巴。
   const rawLines = String(text).replace(/\r\n?/g, '\n').split('\n');
-  const lines = [];
+  const lines: SourceLine[] = [];
   for (let i = 0; i < rawLines.length; i++) {
     const raw = rawLines[i];
     let indent = 0;
@@ -209,13 +229,13 @@ function indexLines(text, file) {
 
 /* ── 标量 ──────────────────────────────────────────────────────────────── */
 
-const ESCAPES = {
+const ESCAPES: Record<string, string> = {
   0: '\0', a: '\x07', b: '\b', t: '\t', n: '\n', v: '\v', f: '\f', r: '\r',
   e: '\x1b', ' ': ' ', '"': '"', '/': '/', '\\': '\\',
   N: '\x85', _: '\xa0', L: '\u2028', P: '\u2029',
 };
 
-function readQuoted(text, start, line, file) {
+function readQuoted(text: string, start: number, line: SourceLine, file: string): { value: string; next: number } {
   const quote = text[start];
   let i = start + 1;
   let out = '';
@@ -241,7 +261,8 @@ function readQuoted(text, start, line, file) {
     }
     if (ch === '"') return { value: out, next: i + 1 };
     if (ch === '\\') {
-      const esc = text[i + 1];
+      // 显式写成 string | undefined：越界时 text[i + 1] 就是 undefined，下面的分支靠它兜住
+      const esc: string | undefined = text[i + 1];
       if (esc === undefined) fail(file, line, i + 1, line.raw, '双引号标量以反斜杠结尾');
       if (Object.prototype.hasOwnProperty.call(ESCAPES, esc)) {
         out += ESCAPES[esc];
@@ -271,7 +292,7 @@ function readQuoted(text, start, line, file) {
 }
 
 /** 拒绝所有「看起来像别的东西」的节点开头，附上人话解释。 */
-function assertNodeStart(text, line, column, file) {
+function assertNodeStart(text: string, line: SourceLine, column: number, file: string): void {
   const ch = text[0];
   if (ch === '|' || ch === '>') fail(file, line, column, line.raw, `不支持块标量 "${ch}"：本解析器只支持到行尾的标量`);
   if (ch === '&') fail(file, line, column, line.raw, '不支持锚点 &');
@@ -282,7 +303,7 @@ function assertNodeStart(text, line, column, file) {
   }
 }
 
-function skipFlowSpace(text, i) {
+function skipFlowSpace(text: string, i: number): number {
   while (i < text.length && (text[i] === ' ' || text[i] === '\t')) i++;
   return i;
 }
@@ -292,7 +313,7 @@ function skipFlowSpace(text, i) {
  * 所以 `{k: v}` 的键读成 `k`，而 `[https://a]`、`[1:30]` 里的冒号留在标量里。
  * 是不是映射由调用方看 next 指向的字符决定——同一段代码同时服务 `[...]` 与 `{...}`。
  */
-function parseFlowValue(text, i, line, file) {
+function parseFlowValue(text: string, i: number, line: SourceLine, file: string): { value: unknown; next: number } {
   i = skipFlowSpace(text, i);
   const ch = text[i];
   if (ch === undefined) fail(file, line, i + 1, line.raw, '流式集合没有闭合');
@@ -309,13 +330,13 @@ function parseFlowValue(text, i, line, file) {
   return { value: resolvePlainScalar(raw), next: j };
 }
 
-function parseFlowCollection(text, start, line, file) {
+function parseFlowCollection(text: string, start: number, line: SourceLine, file: string): { value: unknown; next: number } {
   const open = text[start];
   const close = open === '[' ? ']' : '}';
   const isSeq = open === '[';
-  const seq = [];
-  const map = {};
-  const put = (key, value) => {
+  const seq: unknown[] = [];
+  const map: Record<string, unknown> = {};
+  const put = (key: unknown, value: unknown) => {
     setKey(map, typeof key === 'string' ? key : String(key), value);
   };
   let i = skipFlowSpace(text, start + 1);
@@ -333,7 +354,7 @@ function parseFlowCollection(text, start, line, file) {
       // `{k: v}` 的键值对，或 `[k: v]` 这种单项映射（YAML 允许，PyYAML 解析成 [{k: v}]）。
       const val = parseFlowValue(text, skipFlowSpace(text, i + 1), line, file);
       if (isSeq) {
-        const pair = {};
+        const pair: Record<string, unknown> = {};
         setKey(pair, typeof item.value === 'string' ? item.value : String(item.value), val.value);
         seq.push(pair);
       } else {
@@ -360,7 +381,7 @@ function parseFlowCollection(text, start, line, file) {
 }
 
 /** 解析一个值：流式集合、引号标量，或到行尾为止的 plain 标量。 */
-function parseInlineValue(text, line, column, file) {
+function parseInlineValue(text: string, line: SourceLine, column: number, file: string): unknown {
   const ch = text[0];
   if (ch === '[' || ch === '{') {
     const flow = parseFlowCollection(text, 0, line, file);
@@ -383,7 +404,7 @@ function parseInlineValue(text, line, column, file) {
   return resolvePlainScalar(text);
 }
 
-function parseKey(raw, line, column, file) {
+function parseKey(raw: string, line: SourceLine, column: number, file: string): string {
   if (raw === '') fail(file, line, column, line.raw, '键是空的');
   if (raw === '<<' || raw === '=') fail(file, line, column, line.raw, `不支持 YAML 合并键 / 特殊键 "${raw}"`);
   if (raw[0] === '"' || raw[0] === "'") {
@@ -401,8 +422,8 @@ function parseKey(raw, line, column, file) {
 
 /* ── 块结构 ────────────────────────────────────────────────────────────── */
 
-function parseMapping(lines, start, indent, file) {
-  const obj = {};
+function parseMapping(lines: SourceLine[], start: number, indent: number, file: string): [Record<string, unknown>, number] {
+  const obj: Record<string, unknown> = {};
   let i = start;
   while (i < lines.length) {
     const line = lines[i];
@@ -434,8 +455,8 @@ function parseMapping(lines, start, indent, file) {
   return [obj, i];
 }
 
-function parseSequence(lines, start, indent, file) {
-  const arr = [];
+function parseSequence(lines: SourceLine[], start: number, indent: number, file: string): [unknown[], number] {
+  const arr: unknown[] = [];
   let i = start;
   while (i < lines.length) {
     const line = lines[i];
@@ -478,7 +499,7 @@ function parseSequence(lines, start, indent, file) {
 }
 
 /** 一个键的值块：下一行更深就往下走；同级出现列表项也算（YAML 允许列表与键同缩进）。 */
-function parseChild(lines, i, parentIndent, file) {
+function parseChild(lines: SourceLine[], i: number, parentIndent: number, file: string): { value: unknown; next: number } {
   if (i >= lines.length) return { value: null, next: i };
   const line = lines[i];
   if (line.indent > parentIndent) {
@@ -505,7 +526,7 @@ function parseChild(lines, i, parentIndent, file) {
  * @param {{file?: string}} [options] 出错信息里要写的文件名（调用方从盘上读，只有它知道）
  * @returns {unknown} 映射、序列或标量；空文档返回 null
  */
-export function parseYaml(text, options = {}) {
+export function parseYaml(text: string, options: { file?: string } = {}): unknown {
   if (typeof text !== 'string') throw new TypeError('parseYaml 只接受字符串');
   const file = options.file || '<yaml>';
   const lines = indexLines(text, file);

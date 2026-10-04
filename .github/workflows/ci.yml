@@ -32,5 +32,9 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install PyYAML
+      # 类型门禁（npm run test:types）要 tsc，tsc 在 devDependencies 里。npm ci 按
+      # package-lock.json 装：lockfile 与 package.json 对不上时直接失败，门禁不会因为
+      # 「依赖没装上」而少跑一环。Release 的 checks job 复用本文件，所以两处一起覆盖。
+      - run: npm ci
       - name: Installer, plugin, lesson, release and static contract tests
         run: npm test
