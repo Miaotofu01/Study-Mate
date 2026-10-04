@@ -121,6 +121,14 @@ const groups = {
       // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
       'scripts/tests/test_client_search_index.mjs',
       'scripts/tests/test_client_fold_empty_state.mjs',
+      // 导出域 lib/export/**（#82）：产物形状与取消语义、泄漏守卫（含反证：注入 Node 专用依赖
+      // 必须让构建失败）、工具面与任务模型（DSH 侧不主动导出、取消回执说清保留什么）、
+      // 无头侧的 CLI（没有参数也能跑 = 「课完默认导一份」）。
+      // 浏览器那一半（file:// 下真渲染）在 --browser 组。
+      'scripts/tests/test_export_static_page.mjs',
+      'scripts/tests/test_export_leak_guard.mjs',
+      'scripts/tests/test_export_tool_task.mjs',
+      'scripts/tests/test_export_cli.mjs',
     ],
   },
   '--static': {
@@ -134,6 +142,9 @@ const groups = {
       'browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs',
       'browser/reading_test.mjs',
       'browser/reading_position_test.mjs',
+      // #82：**导出的产物本身**在 file:// 下打开（真 Chrome + 真 React）：样式、公式、图片、
+      // 题目全部可用，且控制台/页面/失败请求干净。不搭夹具页——测的就是学生拿到的那份东西。
+      'browser/export_file_test.mjs',
     ],
   },
 };

@@ -65,6 +65,10 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_tools_context.mjs` | `studymate_workspace_context` 的结构化摘要（工作区路径、今天、时区、科目现状含当前节点与三档、最近学习记录、可用能力），以及**逐域投影**：`subjects` 切片里没有题库、没有课件正文（顺着节点也读不到别的域） |
 | `test_tools_validate.mjs` | 四个校验工具：数据层（大纲／进度／科目，逐条带行号）、内容层（格式 + 锚点四态 + 图片存在性 + 题库坏 JSON）、图片库（`check_pool.py` 的行为移植：表头、命名、三列非空、日期、体积）、交接门禁（明确放行／阻断） |
 | `test_tools_rewrite.mjs` | 两个改写工具（`renumber_lessons` 与 `apply_empty_reasons` 的行为照搬）：位次重排（dry-run、换位、目标名被占、重复、认不出的命名）与 `empty_reason` 写入（位置、缩进、CRLF、拦下的六类）；`studymate_export` 的占位形状 |
+| `test_export_static_page.mjs` | 导出（`lib/export/**`）的**产物形状与取消语义**：清单齐全、脚本顺序（数据 → 宿主 → 第三方 → 阅读端本体 → 挂载）、`studymate-client.js` 与仓库里 `lib/client.js` **逐字节相同**（哈希）、页面里没有 ES 模块（`file://` 下加载不了）、机器路径不进产物、守卫对这一份真产物干净、取消说清保留了什么（已落成的保留、入口排在最后写所以半成品一眼可见）、`out` 的判据（不许进 `.learning/`、不许就是工作区根）。夹具 React，真渲染在 `--browser` 组 |
+| `test_export_leak_guard.mjs` | **泄漏守卫**（F11 / 规格 §8）：规则表逐条生效、真产物扫下来干净；**反证**——注入一个 Node 专用依赖之后构建期守卫必须失败（进程内 `exportGuardRun({inject})` 与命令行 `node scripts/release/export_guard.mjs --inject host.js` 各一条，都要非零退出）；第三方包装被改 / 壳里内容被换 / 阅读端本体被改，哈希核对逐个报出来；假阳性防线（`data.js` 载荷里的 require 调用是课件正文，不算泄漏） |
+| `test_export_tool_task.mjs` | 导出的**工具面与任务模型**：DSH 侧**不主动导出**（注册完一个任务都没有、一个产物都没写）、`studymate_export` 起 `durable` 的「导出」任务并**有上限地等**（等到给文件清单，等不到给下一步）、产物登记成绝对路径、阅读端那块板子上看得到且没有 owner、取消（排队中 → 当场已取消没有半成品；已完成 → 「取消来晚了」且已完成产物一律保留）、越权句柄被拒、入参坏形状当场说清 |
+| `test_export_cli.mjs` | 无头宿主的**命令行**（`bin/studymate.mjs export`，真子进程）：`--json` 一行结果、**没有参数也能跑**（工作区从当前目录/`$LEARN_WORKSPACE`/配置认出来 = 「课完默认导一份」）、课完再导一份是幂等的、`--subject` / `--out`、报错都是人话、帮助里有 export |
 | `test_tasks_model.mjs` | 任务模型（`lib/tasks/**`）：六态状态机（排队／运行／取消中／完成／失败／已取消）与转移表、状态查询不阻塞、等待有上限且超时给**下一步提示**、三种结局各一份回执、取消回执写清保留哪些已完成产物、销毁**先回执后删文件**（用「回执到手时文件还在」直接断言顺序）、owner 句柄越权被拒、五个 `studymate_task_*` 工具与 `GET /api/studymate/tasks` 的返回形状；**跨进程**那一节 spawn 夹具 `fixtures/tasks_producer.mjs`（进程 A 起 durable 任务并落盘 → 进程 B 重新加载后查得到、resume 得动） |
 
 ## 提示词规则归属
@@ -101,7 +105,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 
 ## 浏览器套件与手动工具
 
-五套断言套件（`npm run test:browser`）都走同一个骨架 [browser/harness.mjs](browser/harness.mjs)：
+六套断言套件（`npm run test:browser`）都走同一个骨架 [browser/harness.mjs](browser/harness.mjs)：
 探测本机浏览器 → 起 CDP → 收**控制台错误 / 页面错误（未捕获异常）/ 失败请求** → 每个场景出截图与 `summary.json`。
 
 | 文件 | 用途 |
@@ -111,6 +115,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 | `browser/math_test.mjs` | KaTeX 排版、字体、错误公式与动态题目公式（旧静态模板夹具） |
 | `browser/reading_test.mjs` | **阅读端本体**：把真的 `lib/client.js` 挂进夹具页，走「主页 → 科目页（路线图 aria-label + 视觉隐藏表格）→ 课件页（三栏、进度条、窄轨）」、动效四档与 `prefers-reduced-motion`、亮暗两套的**实测对比度**（含 color-mix 是否真解出来） |
 | `browser/reading_position_test.mjs` | 阅读位置三级恢复（section → offset → progress）与锚点四态复核：真 Chrome 里挂**真 `lib/client.js`**（最小模块装载器 + 真 React），用 CDP 点真按钮、滚真滚动区；夹具在 `fixtures/reading_position_fixture.mjs`。纯数学那一半在 `test_client_reading_position.mjs`（默认门禁里跑，不需要浏览器） |
+| `browser/export_file_test.mjs` | **导出的产物本身**在 `file://` 下打开（#82 验收第 1 条）：先用真导出器导一份到临时目录，再用真 Chrome 打开 `file://<导出目录>/index.html`——样式（离线兜底 token）、行内/块级公式、配图（`naturalWidth > 0`）、代码块、题目与判分、参考资料只读都要可用，且控制台/页面/失败请求干净。不搭夹具页：测的就是学生拿到的那份东西。真 React + 真浏览器缺任一就**明确跳过**（退出码 3） |
 | `browser/measure.mjs` | 对比度、计算样式与 hover 测量（手动） |
 | `browser/hovers.mjs` | 批量比较 hover 前后的样式（手动） |
 | `browser/shot.mjs` | 浅色/深色截图与元素边界记录（手动） |
