@@ -140,6 +140,14 @@ function buildFixture(dir, payload) {
       json: function () { return Promise.resolve({ error: '夹具没有这条接口：' + url }); },
     });
   };
+  // 变更推送（#74）：阅读端挂载即订阅 /api/studymate/events。这个夹具页走的是 file://，
+  // 那条请求只会被 CORS 拦掉——生产里它只在 /api 同源下开（见 lib/watch/channel.ts），
+  // 而这一套验的是阅读端的静态面与主题对比度，推送根本不在它的验收面上。
+  // 所以把 EventSource 收掉：lib/client.js 认这个早退（typeof EventSource !== 'function'
+  // 就不订阅），而不是让一条注定失败的请求去污染「控制台/失败请求」那一项判据。
+  // 这条通道本身在 browser/watch_push_test.mjs（真 EventSource ↔ 流式 Response）
+  // 与真 DSH 探针（test_dsh_runtime.mjs）里验，两边各盖一半。
+  window.EventSource = undefined;
 </script>
 </head>
 <body>

@@ -44,18 +44,22 @@ const DOMAIN_RULES = {
   core:   { allow: [], builtin: false, package: false },  // 纯函数域：一个外部依赖都不许
   lib:    { allow: ['core'], builtin: true, package: false },  // Host 数据层
   // tools 是**组合根**：#68 的注册点 `registerStudyMate` 要逐个调用各子系统自己目录里的
-  // registerXxx，所以它必须 import 每个子系统（#73 起：tools → tasks）。方向**只有**这一条——
-  // 子系统一律不许 import tools（任务域就是把 `registerStudyTool` 当参数接过去的，正是为了
-  // 不出现反向边，见 lib/tasks/tools.ts 文件头）。往后每落地一个注册进注册点的子系统
-  // （#74 的 watch、#82 的导出），这里加一个域名，别改成通配。
-  tools:  { allow: ['core', 'lib', 'tasks', 'lab'], builtin: true, package: false },  // 原生工具（#68）+ 任务模型（#73）+ 实验域（#77）
+  // registerXxx，所以它必须 import 每个子系统（tools → tasks、tools → watch、tools → lab）。
+  // 方向**只有**这一条——子系统一律不许 import tools（任务域就是把 `registerStudyTool` 当
+  // 参数接过去的，正是为了不出现反向边，见 lib/tasks/tools.ts 文件头）。往后每落地一个注册进
+  // 注册点的子系统（#82 的导出），这里加一个域名，别改成通配。
+  tools:  { allow: ['core', 'lib', 'tasks', 'watch', 'lab'], builtin: true, package: false },  // 原生工具（#68）+ 任务（#73）+ 监听（#74）+ 实验（#77）
   tasks:  { allow: ['core', 'lib'], builtin: true, package: false },  // 任务模型（#73）
   // 实验域（#77）：判分三轨的第三轨。要 rules（题型与必备字段）、attempts（作答数据的落点）、
   // tasks（长命令走任务模型、可查可取消）。`node:child_process` 是它存在的理由。
   lab:    { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },
-  watch:  { allow: ['core', 'lib'], builtin: true, package: false },  // 预留：#74 文件监听
+  // 问答域（#79）：阅读端问答面板那条 HTTP 路由。只依赖纯函数域与 Host 数据层——
+  // 它**不** import 工具域（能力探测的本体在 `lib/core/model.ts`，见那里的文件头），
+  // 所以这里没有 tools 这条边；反过来说，往这个域里加 `tools` 就是加了一条反向边。
+  ask:    { allow: ['core', 'lib'], builtin: true, package: false },
+  watch:  { allow: ['core', 'lib'], builtin: true, package: false },  // 文件监听（#74）：只读工作区 + 一条 SSE 路由
   export: { allow: ['core', 'lib', 'tools', 'tasks'], builtin: true, package: false },  // 预留
-  bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'lab', 'watch', 'export'], builtin: true, package: false },
+  bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'lab', 'watch', 'export', 'ask'], builtin: true, package: false },
   client: { allow: [], builtin: false, package: false },  // 浏览器侧单文件：只与模块加载器打交道
 };
 
