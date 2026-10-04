@@ -50,8 +50,11 @@ function gate() {
 test('DSH 侧不主动导出：注册完插件，一个任务都没有、一个产物都没写', (t) => {
   const { workspace, ctx } = setup(t);
   assert.ok(ctx.definitions.has('studymate_export'), '导出工具要在注册点上');
-  // 任务类型**加载时就登记**：重开 DSH 之后 resume 要靠它按名字找回跑法
-  assert.deepEqual(tasks.taskService().kinds(), ['导出']);
+  // 任务类型**加载时就登记**：重开 DSH 之后 resume 要靠它按名字找回跑法。
+  // 判据是「导出在里面」而不是「只有导出」：注册点是组合根，别的子系统（#77 的实验代跑、
+  // 往后的资料格式转换）也在那里登记自己的跑法——精确相等会让每加一个子系统都红一次，
+  // 而这条用例要钉的是「注册 ≠ 起任务」。
+  assert.ok(tasks.taskService().kinds().includes('导出'), `已登记：${tasks.taskService().kinds().join('、')}`);
   assert.deepEqual(tasks.taskService().list('本机'), [], '注册不等于起任务');
   assert.ok(!fs.existsSync(path.join(workspace, 'export')), '没人说「导出一份能离线看的」之前，不写任何产物');
 });

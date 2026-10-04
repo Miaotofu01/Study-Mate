@@ -1,49 +1,346 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Attempts",
-  "description": "一个课件的作答数据（目标态规格 §5.3 + ADR-0007）：`<科目>/attempts/<NNNN>-<节点id>.json`，与课件一一对应。作答历史、错因与上次结果只落在这里，**绝不写回 .quiz.json**（题库是模型写的课件内容文件，锚点与正文逐字对应）。状态只服务「当场回顾」，不做汇总视图、不排期。**版本号不在文件里**：它是读写两侧各自按文件内容算出来的（`lib/attempts.ts` 的 `attemptsVersion`），写之前先报自己看到的那个值当 `expectedVersion`，对不上就拒绝并重读。",
+  "description": "一个课件的作答数据（目标态规格 §5.3 + ADR-0007）：`<科目>/attempts/<NNNN>-<节点id>.json`，与课件一一对应。作答历史、错因与上次结果只落在这里，**绝不写回 .quiz.json**（题库是模型写的课件内容文件，锚点与正文逐字对应）。状态只服务「当场回顾」，不做汇总视图、不排期。**版本号不在文件里**：它是读写两侧各自按文件内容算出来的（`lib/attempts.ts` 的 `attemptsVersion`），写之前先报自己看到的那个值当 `expectedVersion`，对不上就拒绝并重读。**判分三轨里没有任何一轨叫 agent**（规格 §7.3）：客观题页内判（`选`/`对`）、主观题取学生自评（`自评`）、实操题是 Host 半代跑的真实事实（`跑`）——三轨都不产生「你会了」的结论。",
   "type": "object",
-  "required": ["节点", "课件", "最后写入", "题"],
+  "required": [
+    "节点",
+    "课件",
+    "最后写入",
+    "题"
+  ],
   "properties": {
-    "节点": { "type": "string", "description": "节点 id（curriculum.yaml 的 nodes[].id），与课件一一对应" },
-    "课件": { "type": "string", "description": "对应的课件文件名（<NNNN>-<节点id>.md），页面上按它回查" },
+    "节点": {
+      "type": "string",
+      "description": "节点 id（curriculum.yaml 的 nodes[].id），与课件一一对应"
+    },
+    "课件": {
+      "type": "string",
+      "description": "对应的课件文件名（<NNNN>-<节点id>.md），页面上按它回查"
+    },
     "幂等键": {
       "type": "string",
       "description": "最近一次写入的 operationId。同一个 id 重放只回放上次回执、不写第二遍；落盘是为了跨进程对账（内存台账重启即失）"
     },
-    "最后写入": { "type": "string", "description": "最近一次写入的时刻（ISO 8601）" },
+    "最后写入": {
+      "type": "string",
+      "description": "最近一次写入的时刻（ISO 8601）"
+    },
     "题": {
       "type": "object",
       "description": "题 id → 这道题的作答记录。题 id 是「<锚点文本>#<题号>」，与题库里那道题一一对应。",
       "additionalProperties": {
         "type": "object",
-        "required": ["id", "作答历史", "上次结果"],
+        "required": [
+          "id",
+          "作答历史",
+          "上次结果"
+        ],
         "properties": {
-          "id": { "type": "string", "description": "题 id（与所属键相同，便于整条记录独立搬运）" },
+          "id": {
+            "type": "string",
+            "description": "题 id（与所属键相同，便于整条记录独立搬运）"
+          },
           "作答历史": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["时", "对"],
+              "required": [
+                "时",
+                "对"
+              ],
               "properties": {
-                "时": { "type": "string", "description": "这次作答的时刻（ISO 8601）" },
-                "选": { "type": ["integer", "null"], "minimum": 0, "description": "客观题选了第几项（从 0 起）；主观题与自评是 null" },
-                "对": { "type": "boolean", "description": "这次算不算对：客观题页内判、主观题取学生自评的第一档" },
-                "自评": { "type": "string", "description": "主观题的自评档（答对了 / 答了一半 / 没答上）" },
-                "错因": { "type": "string", "description": "错因：学生自己写的、或客观题判错时记下的一句——下次回顾看的就是它" }
+                "时": {
+                  "type": "string",
+                  "description": "这次作答的时刻（ISO 8601）"
+                },
+                "选": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "description": "客观题选了第几项（从 0 起）；主观题与自评是 null"
+                },
+                "对": {
+                  "type": "boolean",
+                  "description": "这次算不算对：客观题页内判、主观题取学生自评的第一档。**代跑记的永远是 false**——通过与否不由这一层判（规格 §7.3）"
+                },
+                "自评": {
+                  "type": "string",
+                  "description": "主观题的自评档（答对了 / 答了一半 / 没答上）"
+                },
+                "错因": {
+                  "type": "string",
+                  "description": "错因：学生自己写的、或客观题判错时记下的一句——下次回顾看的就是它"
+                },
+                "预测": {
+                  "type": "string",
+                  "description": "预测+验证题：学生先写下的预测，与「跑」里的实测一起落盘，供当场对照（规格 §7.2）"
+                },
+                "跑": {
+                  "type": "object",
+                  "description": "实操题（`交付物` 题型）由 Host 半代跑出来的**事实**（issue #77、规格 §7.3 的第三轨）。命令只能来自那道题的「证据」字段，cwd 与可写范围限在该节点的 `lab/` 实验目录里；这里记的是原始输出，**含失败与报错原文**。**没有「通过」这个字段**，也不许加：`退出码` 是数字、`结局` 只说这次是怎么结束的（跑完 / 超时 / 取消 / 起不来）——通过与否由学生看输出后自评。",
+                  "required": [
+                    "命令",
+                    "argv",
+                    "cwd",
+                    "退出码",
+                    "结局",
+                    "毫秒",
+                    "stdout",
+                    "stderr"
+                  ],
+                  "properties": {
+                    "命令": {
+                      "type": "string",
+                      "description": "题目里声明的那条命令原文（逐字）"
+                    },
+                    "argv": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "切好的 argv：空白切词、不开 shell（引号 / 管道 / 重定向 / 变量一律拒）"
+                    },
+                    "程序": {
+                      "type": "string",
+                      "description": "argv[0] 解析到的绝对路径；空串表示没在 PATH 上找到"
+                    },
+                    "cwd": {
+                      "type": "string",
+                      "description": "子进程的落脚点（绝对路径，在该节点的 lab 实验目录之内）"
+                    },
+                    "可写": {
+                      "type": "array",
+                      "description": "这次声明会写的路径（相对实验目录的原文 + 规范化后的绝对路径）。没声明的写在边界之外",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "声明",
+                          "路径"
+                        ],
+                        "properties": {
+                          "声明": {
+                            "type": "string"
+                          },
+                          "路径": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "退出码": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "真实退出码。被信号杀掉时是 null（没有退出码就没有）。非零**如实记**，它不是失败判决"
+                    },
+                    "信号": {
+                      "type": "string",
+                      "description": "结尾信号（SIGTERM 这类）；正常退出是空串"
+                    },
+                    "结局": {
+                      "type": "string",
+                      "enum": [
+                        "跑完",
+                        "超时",
+                        "取消",
+                        "起不来"
+                      ],
+                      "description": "这次是怎么结束的——一个事实，不是评价"
+                    },
+                    "毫秒": {
+                      "type": "integer",
+                      "description": "从 spawn 到结束的毫秒数"
+                    },
+                    "stdout": {
+                      "type": "string",
+                      "description": "标准输出原文（超上限时头尾都留、中间截掉并注明）"
+                    },
+                    "stderr": {
+                      "type": "string",
+                      "description": "标准错误原文（同上）"
+                    },
+                    "字节": {
+                      "type": "object",
+                      "description": "两条流的**原始**字节数（截断前）",
+                      "properties": {
+                        "stdout": {
+                          "type": "integer"
+                        },
+                        "stderr": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "截断": {
+                      "type": "object",
+                      "description": "两条流有没有被截断（单条上限 64 KiB，免得一次运行把作答数据灌成几十兆）",
+                      "properties": {
+                        "stdout": {
+                          "type": "boolean"
+                        },
+                        "stderr": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "起不来": {
+                      "type": "string",
+                      "description": "命令没起来时的那句原因（ENOENT 这类）；起来了就是空串"
+                    }
+                  }
+                }
               }
             }
           },
           "上次结果": {
             "type": "object",
-            "required": ["时", "对"],
+            "required": [
+              "时",
+              "对"
+            ],
             "description": "最近一次作答，与「作答历史」的最后一项同源。单独留一份是为了课件页里就地显示「上次你选了 B」时不必解整条历史。",
             "properties": {
-              "时": { "type": "string" },
-              "选": { "type": ["integer", "null"], "minimum": 0 },
-              "对": { "type": "boolean" },
-              "自评": { "type": "string" },
-              "错因": { "type": "string" }
+              "时": {
+                "type": "string"
+              },
+              "选": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "对": {
+                "type": "boolean"
+              },
+              "自评": {
+                "type": "string"
+              },
+              "错因": {
+                "type": "string"
+              },
+              "预测": {
+                "type": "string"
+              },
+              "跑": {
+                "type": "object",
+                "description": "实操题（`交付物` 题型）由 Host 半代跑出来的**事实**（issue #77、规格 §7.3 的第三轨）。命令只能来自那道题的「证据」字段，cwd 与可写范围限在该节点的 `lab/` 实验目录里；这里记的是原始输出，**含失败与报错原文**。**没有「通过」这个字段**，也不许加：`退出码` 是数字、`结局` 只说这次是怎么结束的（跑完 / 超时 / 取消 / 起不来）——通过与否由学生看输出后自评。",
+                "required": [
+                  "命令",
+                  "argv",
+                  "cwd",
+                  "退出码",
+                  "结局",
+                  "毫秒",
+                  "stdout",
+                  "stderr"
+                ],
+                "properties": {
+                  "命令": {
+                    "type": "string",
+                    "description": "题目里声明的那条命令原文（逐字）"
+                  },
+                  "argv": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "切好的 argv：空白切词、不开 shell（引号 / 管道 / 重定向 / 变量一律拒）"
+                  },
+                  "程序": {
+                    "type": "string",
+                    "description": "argv[0] 解析到的绝对路径；空串表示没在 PATH 上找到"
+                  },
+                  "cwd": {
+                    "type": "string",
+                    "description": "子进程的落脚点（绝对路径，在该节点的 lab 实验目录之内）"
+                  },
+                  "可写": {
+                    "type": "array",
+                    "description": "这次声明会写的路径（相对实验目录的原文 + 规范化后的绝对路径）。没声明的写在边界之外",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "声明",
+                        "路径"
+                      ],
+                      "properties": {
+                        "声明": {
+                          "type": "string"
+                        },
+                        "路径": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "退出码": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "真实退出码。被信号杀掉时是 null（没有退出码就没有）。非零**如实记**，它不是失败判决"
+                  },
+                  "信号": {
+                    "type": "string",
+                    "description": "结尾信号（SIGTERM 这类）；正常退出是空串"
+                  },
+                  "结局": {
+                    "type": "string",
+                    "enum": [
+                      "跑完",
+                      "超时",
+                      "取消",
+                      "起不来"
+                    ],
+                    "description": "这次是怎么结束的——一个事实，不是评价"
+                  },
+                  "毫秒": {
+                    "type": "integer",
+                    "description": "从 spawn 到结束的毫秒数"
+                  },
+                  "stdout": {
+                    "type": "string",
+                    "description": "标准输出原文（超上限时头尾都留、中间截掉并注明）"
+                  },
+                  "stderr": {
+                    "type": "string",
+                    "description": "标准错误原文（同上）"
+                  },
+                  "字节": {
+                    "type": "object",
+                    "description": "两条流的**原始**字节数（截断前）",
+                    "properties": {
+                      "stdout": {
+                        "type": "integer"
+                      },
+                      "stderr": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "截断": {
+                    "type": "object",
+                    "description": "两条流有没有被截断（单条上限 64 KiB，免得一次运行把作答数据灌成几十兆）",
+                    "properties": {
+                      "stdout": {
+                        "type": "boolean"
+                      },
+                      "stderr": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "起不来": {
+                    "type": "string",
+                    "description": "命令没起来时的那句原因（ENOENT 这类）；起来了就是空串"
+                  }
+                }
+              }
             }
           }
         }

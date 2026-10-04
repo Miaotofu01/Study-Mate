@@ -103,6 +103,10 @@ const groups = {
       'scripts/tests/test_client_pure.mjs',
       // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
       'scripts/tests/test_client_reading_position.mjs',
+      // #77 交付物题的界面：代跑事实块只显示事实（命令 / 退出码 / 两条流 / 截断），
+      // 界面文案里一个判决词都没有，入口只有一颗「跑一次」按钮且不点不跑。
+      // 渲染函数在工厂闭包里，靠 fixtures/client_harness.mjs 的 React 桩调起来。
+      'scripts/tests/test_client_lab_run.mjs',
       // #69：架构边界与依赖无环断言（扫真实 import 图，域规则表默认拒绝）
       'scripts/tests/test_architecture_boundaries.mjs',
       // 工具域 lib/tools/**（#68）：域声明与越权即抛、工作区摘要、四个校验器、两个改写工具。
@@ -115,6 +119,11 @@ const groups = {
       // 五个 studymate_task_* 工具、阅读端的 GET /api/studymate/tasks。
       // 跨进程那一半的「进程 A」是夹具 scripts/tests/fixtures/tasks_producer.mjs。
       'scripts/tests/test_tasks_model.mjs',
+      // 实验域 lib/lab/**（#77）：判分三轨的第三轨。真跑一条会失败的命令、真实输出原样进
+      // 作答数据（attempts/*.json 的 `跑` 字段）、长命令的进度与取消回执、以及四组越界反证
+      // （cwd / 可写范围 / 参数里的路径 / 软链）。命令从哪来也是断言的一部分：只有题库里那道
+      // 交付物题的「证据」字段能提供命令，模型与学生都没有第二个入口。
+      'scripts/tests/test_lab_runner.mjs',
       // 阅读端（lib/client.js 是零构建的浏览器插件，没有 export）：跨科目搜索的索引覆盖与
       // 四个附件折叠块的空态。套件在 Node 里伪造 window.__ModuleLoader__ + react 桩把头文件
       // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
@@ -175,6 +184,10 @@ const groups = {
       // #74：真浏览器里「改文件 → 监听 → SSE → 页面自己更新（不刷新）」的端到端。
       // 其余几套测的是阅读端的静态面；这一套要的是**真的 EventSource**接我们那条流式 Response。
       'browser/watch_push_test.mjs',
+      // #77：交付物题的「跑一次」——点一下 → 真命令跑起来 → 真实输出回到界面并落进
+      // attempts/。夹具与 attempts_test.mjs 同一套（真 lib/client.js + 真 HTTP 迷你宿主），
+      // 走的是 lib/lab/route.ts 注册出来的真路由。
+      'browser/lab_run_test.mjs',
       // #82：**导出的产物本身**在 file:// 下打开（真 Chrome + 真 React）：样式、公式、图片、
       // 题目全部可用，且控制台/页面/失败请求干净。不搭夹具页——测的就是学生拿到的那份东西。
       'browser/export_file_test.mjs',

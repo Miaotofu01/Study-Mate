@@ -87,7 +87,10 @@ test('payload 的 node.attempts 与写回执都落成同一形状的本地作答
   const fromPayload = I.attemptsFromPayload(node);
   assert.deepEqual([...fromPayload.keys()], [KEY0]);
   assert.deepEqual(fromPayload.get(KEY0), {
-    at: '2026-09-24T13:05:00.000Z', chosen: 2, correct: false, self: undefined, reason: '记错了', seq: 0, pending: 0,
+    // `lab` 是 #77 加的那一格：这一次作答若是一次**代跑**，事实（命令 / 退出码 / 两条流）
+    // 就挂在这儿。这条作答不是代跑，所以它是 undefined——键在、值是空的，形状仍然只有一种。
+    at: '2026-09-24T13:05:00.000Z', chosen: 2, correct: false, self: undefined, reason: '记错了',
+    lab: undefined, seq: 0, pending: 0,
   });
   const fromReceipt = I.attemptsFromReceipt(NODE, { 题: { '每层各管一段#1': { 上次结果: last(null, true, { 自评: '答了一半' }) } } });
   assert.equal(fromReceipt.get(KEY1).self, '答了一半');

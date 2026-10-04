@@ -38,6 +38,7 @@ import {
 import { applyEmptyReasonsTool, renumberLessonsTool } from './rewrite.ts';
 import { exportTool } from './export.ts';
 import { registerWatch } from '../watch/index.ts';
+import { registerLabTools } from '../lab/index.ts';
 
 /** `ctx.inject(['tools'], …)` 给的那层上下文：只用得到这几个成员。 */
 export interface StudyPluginContext extends ServiceReader {
@@ -115,5 +116,8 @@ export function registerStudyMate(ctx: StudyPluginContext): void {
   // #74 文件监听：学习工作区一变就往通知总线上发一条（推给打开的页面由 bin/dsh-plugin.ts
   // 那一行挂的 SSE 路由负责；没有页面在听时，监听本身也不做别的事）。
   registerWatch(ctx);
+  // #77 判分三轨的第三轨：studymate_lab_run 把交付物题里声明的命令在 lab 目录里代跑一遍，
+  // 真实输出原样进作答数据（长命令走上面那套任务模型）。同一个姿势：注册点注入造工具能力。
+  registerLabTools(ctx, { registerStudyTool });
   // ↑↑↑ 加完为止：不要动 bin/dsh-plugin.ts，也不要在这里写具体工具 ↑↑↑
 }
