@@ -37,18 +37,13 @@ export function adaptSkill(text, { platform, pythonExecutable, configFile, tempD
 
   // Replace source references before inserting real paths, which may themselves
   // be below /tmp (for example in tests or a custom Python installation).
-  // `/tmp` 在源技能里只剩 record-keeping 的「工作区根与落点交付」一处（跨工具接力那条，
-  // 说明为什么不能拿它当中转）；角色产出的暂存目录是科目内的 `.stage/`（它在写边界里，
-  // bwrap 下也不会被清），所以这里不再有 practice-evaluator 的 cp 改写。
+  // 暂存模式已删（ADR-0008），源技能里不再有工作区暂存根与落点偏好；这里保留的 `/tmp` 改写
+  // 服务的是角色侧还写着的临时目录说明。产物交接的暂存目录是科目内的 `.stage/`，
+  // 所以这里也没有 practice-evaluator 的 cp 改写。
   let adapted = text.replaceAll('/tmp', temp);
   adapted = replaceConfig(adapted, portable(configFile));
   adapted = adapted.replace(/python3 ((?:-[A-Za-z]+\s+)*)(<root>\/scripts\/[\w-]+\.py)([^`\r\n]*)/g,
     (_, flags, script, args) => `${python} ${flags}${quote(script)}${args.replace(/<(?:subject_path|curriculum\.yaml|页面路径|tsv)>/g, quote)}`);
-
-  const digest = windows
-    ? "(Get-FileHash -LiteralPath '<文件>' -Algorithm MD5).Hash.Substring(0,12).ToLowerInvariant()"
-    : `${python} -c ${quote('import hashlib,pathlib,sys; print(hashlib.md5(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest()[:12])')} '<文件>'`;
-  adapted = adapted.replaceAll('md5sum <文件> | cut -c1-12', digest);
 
   const open = windows ? "Start-Process -FilePath '<页面绝对路径>'"
     : `${platform === 'darwin' ? 'open' : 'xdg-open'} '<页面绝对路径>'`;
@@ -66,5 +61,5 @@ export function adaptSkill(text, { platform, pythonExecutable, configFile, tempD
     : `使用本机 shell；单文件原样搬运用 \`cp '<源文件>' '<目标文件>'\`，目录内容原样搬运用 \`cp -r '<源目录>/.' '<目标目录>/'\`。`;
   return `${adapted.trimEnd()}\n\n## 本机命令约定（安装器生成）\n\n` +
     `只调整命令与路径写法；流程、文件归属和原样搬运要求不变。每次调用 shell 工具执行 Python 时，必须在同一条命令中先设置环境再执行脚本：\`${environment}\`；这次设置不保留到下一次工具调用。Python 使用 \`${python}\`，子进程也继承 UTF-8 编码。\n\n` +
-    `${platformNote} 临时与暂存文件先写科目自己的 \`<subject_path>/.stage/\`（它在会话写边界内）；确实需要系统临时目录时用 \`${temp}\`。路径占位符换成实值后必须保持 shell 引用；${windows ? "PowerShell 单引号路径中的单引号写两次" : "POSIX 单引号路径中的单引号用 '\"'\"' 转义"}，不要把路径当作未引用的命令片段。打开页面用 \`${open}\`，无桌面环境时保留可点的页面链接即可。\n`;
+    `${platformNote} 临时与暂存文件先写科目自己的 \`<subject_path>/.stage/\`（产物交接的暂存区）；确实需要系统临时目录时用 \`${temp}\`。路径占位符换成实值后必须保持 shell 引用；${windows ? "PowerShell 单引号路径中的单引号写两次" : "POSIX 单引号路径中的单引号用 '\"'\"' 转义"}，不要把路径当作未引用的命令片段。打开页面用 \`${open}\`，无桌面环境时保留可点的页面链接即可。\n`;
 }

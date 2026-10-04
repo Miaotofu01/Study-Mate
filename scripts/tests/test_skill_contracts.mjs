@@ -60,32 +60,47 @@ test('调用面守卫自身不空转：至少四份技能点名了原生工具',
   assert.ok(allReferenced.length >= 3, `点名的工具种类只有 ${allReferenced.length} 种：${allReferenced}`);
 });
 
-test('两个无头宿主适配层都为点名的工具留了等价命令', () => {
+test('两个无头宿主适配层都为点名的工具留了等价落点', () => {
   for (const [host, fallback] of [['OpenAI/Codex', OPENAI_FALLBACK], ['Antigravity', AGY_FALLBACK]]) {
     for (const tool of allReferenced) {
-      const command = fallback[tool];
-      assert.ok(command, `${host} 适配层没有 ${tool} 的落点（源技能点名了它）`);
-      // 落点必须是「脚本路径不带引号」的 `python3 -B <root>/scripts/x.py`：两个宿主适配器
-      // 的通用规整只认这种写法，带引号就静默跳过、导出件里留下跑不动的命令。
-      assert.match(command, /^python3 -B <root>\/scripts\/[\w-]+\.py/,
-        `${host} 的 ${tool} 落点不是适配器认得的写法：${command}`);
+      const landing = fallback[tool];
+      assert.ok(landing, `${host} 适配层没有 ${tool} 的落点（源技能点名了它）`);
+      // 有 1:1 脚本的落点必须是「脚本路径不带引号」的 `python3 -B <root>/scripts/x.py`：
+      // 两个适配器的通用规整只认这种写法，带引号就静默跳过、导出件里留下跑不动的命令。
+      // 没有 1:1 脚本的工具（如 workspace_context 这种「读几份文件」的）如实写成本宿主
+      // 的做法——不假装有一条命令，但也不能是空话、更不能把工具名抄一遍。
+      if (landing.startsWith('python3 ')) {
+        assert.match(landing, /^python3 -B <root>\/scripts\/[\w-]+\.py/,
+          `${host} 的 ${tool} 落点不是适配器认得的写法：${landing}`);
+      } else {
+        assert.ok(landing.length >= 8 && !/studymate_/.test(landing),
+          `${host} 的 ${tool} 落点既不是命令、也不是一句可照做的做法：${landing}`);
+      }
     }
   }
 });
 
 test('导出件里不留原生工具名，落点是宿主跑得动的命令', () => {
-  const script = tool => tool.replace(/^studymate_validate_/, '').replace(/^studymate_/, '');
   for (const [name, text] of sources) {
     const tools = referencedTools(text);
     if (tools.length === 0) continue;
-    for (const [host, adapt] of [['OpenAI/Codex', adaptOpenAiSkill], ['Antigravity', adaptAntigravitySkill]]) {
+    for (const [host, adapt, fallback] of [
+      ['OpenAI/Codex', adaptOpenAiSkill, OPENAI_FALLBACK],
+      ['Antigravity', adaptAntigravitySkill, AGY_FALLBACK],
+    ]) {
       const exported = adapt(text, name);
       assert.doesNotMatch(exported, /studymate_[a-z_]+/,
         `${host} 导出件里还留着原生工具名（${name}）`);
       for (const tool of tools) {
-        const scriptName = `${script(tool)}.py`;
-        assert.ok(exported.includes(scriptName),
-          `${host} 导出件里找不到 ${tool} 的等价脚本 ${scriptName}（${name}）`);
+        // 判据取自**落点自己**，不从工具名猜脚本名：落点是命令时，它点到的每个脚本都要在
+        // 导出件里出现。落点不是命令的（`workspace_context` 这种「读几份文件」的）由上面那条
+        // 形状断言管——它的正文位置可能整段被宿主开场替换掉（那正是最彻底的降级），
+        // 所以这里只要求导出件里不留工具名，不再要求那段做法原文出现。
+        const scripts = [...fallback[tool].matchAll(/scripts\/([\w-]+\.py)/g)].map(m => m[1]);
+        for (const scriptName of scripts) {
+          assert.ok(exported.includes(scriptName),
+            `${host} 导出件里找不到 ${tool} 的等价脚本 ${scriptName}（${name}）`);
+        }
       }
     }
   }

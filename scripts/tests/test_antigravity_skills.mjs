@@ -109,7 +109,7 @@ test('adaptation fails loudly when a skill anchor drifts', () => {
     /Antigravity skill adaptation error/
   );
   assert.throws(
-    () => adaptAntigravitySkill(sources.get('record-keeping').replace('路径以**工作区根 `<WS>`** 为前缀', '路径以工作区根为前缀'), 'record-keeping'),
+    () => adaptAntigravitySkill(sources.get('record-keeping').replace('学习状态由你（主教练）亲自读写', '学习状态由执行者读写'), 'record-keeping'),
     /Antigravity skill adaptation error/
   );
   assert.throws(() => adaptAntigravitySkill('没有 frontmatter 的正文', 'learning-system'), /Antigravity skill adaptation error/);
