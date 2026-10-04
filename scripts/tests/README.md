@@ -20,7 +20,7 @@ npm test
 | `npm run test:antigravity` | Antigravity 插件 ZIP、原生 agents、导出保护与重复构建 |
 | `npm run test:release` | 版本、changelog、重试和发布保护 |
 | `npm run test:static` | Python 语法、技能调用面与提示词规则归属、提示词与模板文案契约、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
-| `npm run test:browser` | 三套真实 Chrome 渲染测试，需要 `google-chrome` |
+| `npm run test:browser` | 四套真实浏览器渲染测试（含阅读端），浏览器二进制自动探测 |
 | `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录 |
 | `npm run test:dsh-cli` | 真实 DSH CLI 安装、更新、卸载，还需要 `pnpm` |
 
@@ -91,14 +91,28 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 
 ## 浏览器套件与手动工具
 
+四套断言套件（`npm run test:browser`）都走同一个骨架 [browser/harness.mjs](browser/harness.mjs)：
+探测本机浏览器 → 起 CDP → 收**控制台错误 / 页面错误（未捕获异常）/ 失败请求** → 每个场景出截图与 `summary.json`。
+
 | 文件 | 用途 |
 | --- | --- |
-| `browser/hl_test.mjs` | 真实 Chrome 代码块高亮、语言识别与已有高亮保留 |
-| `browser/quiz_code_test.mjs` | 题目代码块的缩进、等宽字体与高亮 |
-| `browser/math_test.mjs` | KaTeX 排版、字体、错误公式与动态题目公式 |
-| `browser/measure.mjs` | 对比度、计算样式与 hover 测量 |
-| `browser/hovers.mjs` | 批量比较 hover 前后的样式 |
-| `browser/shot.mjs` | 浅色/深色截图与元素边界记录 |
+| `browser/hl_test.mjs` | 代码块高亮、语言识别与已有高亮保留（旧静态模板夹具） |
+| `browser/quiz_code_test.mjs` | 题目代码块的缩进、等宽字体与高亮（旧静态模板夹具） |
+| `browser/math_test.mjs` | KaTeX 排版、字体、错误公式与动态题目公式（旧静态模板夹具） |
+| `browser/reading_test.mjs` | **阅读端本体**：把真的 `lib/client.js` 挂进夹具页，走「主页 → 科目页（路线图 aria-label + 视觉隐藏表格）→ 课件页（三栏、进度条、窄轨）」、动效四档与 `prefers-reduced-motion`、亮暗两套的**实测对比度**（含 color-mix 是否真解出来） |
+| `browser/measure.mjs` | 对比度、计算样式与 hover 测量（手动） |
+| `browser/hovers.mjs` | 批量比较 hover 前后的样式（手动） |
+| `browser/shot.mjs` | 浅色/深色截图与元素边界记录（手动） |
+
+浏览器二进制**探测**，不钉死 `google-chrome`：先看 `STUDYMATE_CHROME` / `CHROME_BIN` / `CHROMIUM_BIN` /
+`PUPPETEER_EXECUTABLE_PATH`，再看 PATH 上的 `google-chrome` / `chromium` / `chrome` 等，最后看 macOS 的 `.app` 路径。
+
+**找不到浏览器时套件明确跳过**：打一段说明（试过哪些、怎么指）并以退出码 **3** 退出——跳过不算通过，
+所以不会出现「没跑过却报绿」。`npm test`（默认门禁）不含 `--browser`，CI 不受影响。
+
+产物落在仓库根的 `.shots/<套件>/`（已 gitignore）：每个场景一张 `<场景>.png` 加一份 `summary.json`，
+里面是每个场景的 metrics、problems（控制台错误 / 页面错误 / 失败请求）与 warnings。
+有 problems 的场景按失败算。
 
 后三项是手动工具，不是断言套件；浏览器工具需要提供页面 URL：
 
@@ -106,6 +120,11 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 node scripts/tests/browser/measure.mjs <file-url> [--hover ".sel"]
 node scripts/tests/browser/shot.mjs <file-url> <out-prefix> <css-selector>
 ```
+
+阅读端那条套件用的夹具在 [fixtures/](fixtures/)：`mini-react.js` 是只够跑阅读端的最小渲染器
+（宿主那份 React 打包在 bundle 里，拿不到），`host-theme-tokens.json` 是宿主主题 token 的快照，
+`client-css.mjs` 负责从 `lib/client.js` 里解析 CSS 与 token 块。夹具页的 CSS 与 JS **都从源码现取**，
+不手抄一份标记。
 
 ## 写新测试
 
