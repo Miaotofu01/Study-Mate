@@ -29,6 +29,9 @@ const tools = await import(pathToFileURL(path.join(ROOT, 'lib/tools/index.ts')).
 const PRODUCER = path.join(ROOT, 'scripts/tests/fixtures/tasks_producer.mjs');
 const TASKS_MODULE = path.join(ROOT, 'lib/tasks/index.ts');
 
+/** 「等待有上限」那条用例的预算：受控时钟下，它既是 tick 的步长，也是 waitedMs 的期望值。 */
+const WAIT_BUDGET_MS = 40;
+
 /* ── 夹具 ─────────────────────────────────────────────────────────────── */
 
 /** 一个只属于本用例的台账目录（现造现弃）。 */
@@ -260,6 +263,14 @@ test('三种结局各有一份明确回执：完成 / 失败 / 已取消', async
 });
 
 test('等待有上限：超时返回下一步提示，任务本身照旧在跑', async (t) => {
+  /* 判据要确定，不能靠「机器刚好跑得快」。
+     `waitedMs` 是 `Date.now()` 的差值，而唤醒来自 `setTimeout`——两个时钟各自按毫秒取整，
+     天然有 ±1ms 抖动。原来断言 `waitedMs >= 40` 因此偶发实测 39ms（假红，约一半概率），
+     把 40 调成 38 只是把假红概率变小、并没有消除抖动。
+     这里把 `setTimeout` 与 `Date` 一起换成受控的：预算走多少由 `tick` 的步长构造出来，
+     `waitedMs` 与预算**恰好相等**——既不早醒（早醒＝根本没等），也不多等（多等＝吊死）。 */
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.parse('2026-01-01T00:00:00Z') });
+
   const dir = ledger(t);
   const hold = gate();
   const service = serviceWith(dir, async (job) => {
@@ -268,10 +279,13 @@ test('等待有上限：超时返回下一步提示，任务本身照旧在跑',
   });
   const handle = service.start('session-A', { kind: '导出', label: '导出全部科目' });
 
-  const timedOut = await service.wait('session-A', handle, { timeoutMs: 40 });
+  const waiting = service.wait('session-A', handle, { timeoutMs: WAIT_BUDGET_MS });
+  t.mock.timers.tick(WAIT_BUDGET_MS);
+  const timedOut = await waiting;
   assert.equal(timedOut.settled, false);
   assert.equal(timedOut.timedOut, true);
-  assert.ok(timedOut.waitedMs >= 40, `至少等满 40ms，实际 ${timedOut.waitedMs}`);
+  assert.equal(timedOut.waitedMs, WAIT_BUDGET_MS,
+    `受控时钟下应当恰好等满预算 ${WAIT_BUDGET_MS}ms，实际 ${timedOut.waitedMs}`);
   assert.equal(timedOut.task.status, '运行', '超时不等于取消：任务照旧在跑');
   // 下一步提示要能照着做：接着说清了三条路（继续等 / 不阻塞地看 / 取消）
   assert.match(timedOut.next, /还在跑（进度：3\/7 科目 demo）/);
@@ -283,6 +297,8 @@ test('等待有上限：超时返回下一步提示，任务本身照旧在跑',
   await assert.rejects(() => service.wait('session-A', handle, { timeoutMs: tasks.MAX_WAIT_MS + 1 }),
     /\[TASK_BAD_INPUT\] timeoutMs/);
 
+  // 后半段回到真时钟：这里的「不会吊死」要在真实时间上验，超时由 2000ms 兜底（真吊死会直接失败）
+  t.mock.timers.reset();
   hold.open();
   const settled = await service.wait('session-A', handle, { timeoutMs: 2000 });
   assert.equal(settled.settled, true);

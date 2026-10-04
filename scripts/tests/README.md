@@ -101,7 +101,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 
 ## 浏览器套件与手动工具
 
-四套断言套件（`npm run test:browser`）都走同一个骨架 [browser/harness.mjs](browser/harness.mjs)：
+五套断言套件（`npm run test:browser`）都走同一个骨架 [browser/harness.mjs](browser/harness.mjs)：
 探测本机浏览器 → 起 CDP → 收**控制台错误 / 页面错误（未捕获异常）/ 失败请求** → 每个场景出截图与 `summary.json`。
 
 | 文件 | 用途 |
@@ -110,6 +110,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 | `browser/quiz_code_test.mjs` | 题目代码块的缩进、等宽字体与高亮（旧静态模板夹具） |
 | `browser/math_test.mjs` | KaTeX 排版、字体、错误公式与动态题目公式（旧静态模板夹具） |
 | `browser/reading_test.mjs` | **阅读端本体**：把真的 `lib/client.js` 挂进夹具页，走「主页 → 科目页（路线图 aria-label + 视觉隐藏表格）→ 课件页（三栏、进度条、窄轨）」、动效四档与 `prefers-reduced-motion`、亮暗两套的**实测对比度**（含 color-mix 是否真解出来） |
+| `browser/reading_position_test.mjs` | 阅读位置三级恢复（section → offset → progress）与锚点四态复核：真 Chrome 里挂**真 `lib/client.js`**（最小模块装载器 + 真 React），用 CDP 点真按钮、滚真滚动区；夹具在 `fixtures/reading_position_fixture.mjs`。纯数学那一半在 `test_client_reading_position.mjs`（默认门禁里跑，不需要浏览器） |
 | `browser/measure.mjs` | 对比度、计算样式与 hover 测量（手动） |
 | `browser/hovers.mjs` | 批量比较 hover 前后的样式（手动） |
 | `browser/shot.mjs` | 浅色/深色截图与元素边界记录（手动） |

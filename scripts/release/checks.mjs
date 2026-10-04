@@ -106,6 +106,8 @@ const groups = {
       // 动效四档与 prefers-reduced-motion、首次引导定位几何（纯函数，node:vm 里跑）
       'scripts/tests/test_client_tokens.mjs',
       'scripts/tests/test_client_pure.mjs',
+      // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
+      'scripts/tests/test_client_reading_position.mjs',
       // #69：架构边界与依赖无环断言（扫真实 import 图，域规则表默认拒绝）
       'scripts/tests/test_architecture_boundaries.mjs',
       // 工具域 lib/tools/**（#68）：域声明与越权即抛、工作区摘要、四个校验器、两个改写工具。
@@ -134,11 +136,15 @@ const groups = {
     tests: ['scripts/tests/test_openai_skills.mjs', 'scripts/tests/test_openai_skill_ui.mjs', 'scripts/tests/test_antigravity_skills.mjs'],
   },
   '--browser': {
-    // 前三个测旧静态模板（file:// 夹具）；reading_test.mjs 测阅读端本体（真 lib/client.js）；
-    // attempts_test.mjs 把阅读端打进一个说 HTTP 的迷你宿主，真的落盘到工作区文件（#72 的作答路径）。
+    // 前三个测旧静态模板（file:// 夹具），reading_test.mjs 测阅读端本体（真 lib/client.js）。
+    // 后面两条各测阅读端的一块，夹具同一套（harness.mjs + mini-react）：
+    //   · #76 阅读位置三级恢复 + 锚点四态复核；
+    //   · #72 作答落盘（把阅读端打进一个说 HTTP 的迷你宿主，真的落盘到工作区文件）。
     node: [
       'browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs',
-      'browser/reading_test.mjs', 'browser/attempts_test.mjs',
+      'browser/reading_test.mjs',
+      'browser/reading_position_test.mjs',
+      'browser/attempts_test.mjs',
     ],
   },
 };
