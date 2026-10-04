@@ -43,8 +43,13 @@ const ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const DOMAIN_RULES = {
   core:   { allow: [], builtin: false, package: false },  // 纯函数域：一个外部依赖都不许
   lib:    { allow: ['core'], builtin: true, package: false },  // Host 数据层
-  tools:  { allow: ['core', 'lib'], builtin: true, package: false },  // 原生工具（#68）
-  tasks:  { allow: ['core', 'lib'], builtin: true, package: false },  // 预留：#73 后台任务
+  // tools 是**组合根**：#68 的注册点 `registerStudyMate` 要逐个调用各子系统自己目录里的
+  // registerXxx，所以它必须 import 每个子系统（#73 起：tools → tasks）。方向**只有**这一条——
+  // 子系统一律不许 import tools（任务域就是把 `registerStudyTool` 当参数接过去的，正是为了
+  // 不出现反向边，见 lib/tasks/tools.ts 文件头）。往后每落地一个注册进注册点的子系统
+  // （#74 的 watch、#82 的导出），这里加一个域名，别改成通配。
+  tools:  { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },  // 原生工具（#68）+ 任务模型（#73）
+  tasks:  { allow: ['core', 'lib'], builtin: true, package: false },  // 任务模型（#73）
   watch:  { allow: ['core', 'lib'], builtin: true, package: false },  // 预留：#74 文件监听
   export: { allow: ['core', 'lib', 'tools', 'tasks'], builtin: true, package: false },  // 预留
   bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'watch', 'export'], builtin: true, package: false },

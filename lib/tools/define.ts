@@ -63,9 +63,15 @@ export interface ToolDefinitionLike {
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
-/** 宿主交给 body 的执行上下文：这里只用 `signal`（协作响应取消）。 */
+/** 宿主交给 body 的执行上下文：这里只用 `signal`（协作响应取消）与 `agent`（调用方身份）。 */
 export interface ToolRunLike {
   signal?: AbortSignal;
+  /**
+   * 发起这次调用的 agent（宿主 `ToolExecutionInput.agent`）。**只读它的 `id`**：任务域拿它当
+   * owner 标签（`studymate_task_*` 要判「这个任务是不是你的」）。没有会话身份的调用方
+   * （无头探针、直接 execute 的单测）这里是 undefined，任务域按「无主任务」处理。
+   */
+  agent?: { id?: string };
 }
 
 /** body 拿到的东西：**唯一的**数据入口（`access`）与工作区读法。 */
@@ -73,6 +79,8 @@ export interface StudyRun {
   access: DomainAccess;
   vault: Vault;
   signal: AbortSignal | undefined;
+  /** 调用方的会话标签（`exec.agent.id`）；没有会话身份时是 undefined（见 ToolRunLike.agent）。 */
+  agent?: string;
 }
 
 export interface StudyToolSpec {
@@ -162,7 +170,12 @@ export function defineStudyTool(ctx: ServiceReader, spec: StudyToolSpec): ToolDe
     // 每次执行现造：工作区可能在两次调用之间被换掉（与 bin/dsh-plugin.ts 的路由同一口径）
     const vault = createWorkspaceVault();
     const access = createAccess({ tool: spec.name, declaration }, vault.load);
-    return spec.execute(args, { access, vault, signal: exec?.signal });
+    // 调用方身份原样透给 body（任务域靠它做 owner 标签）；没有就是 undefined，不编一个默认值
+    const agent = typeof exec?.agent?.id === 'string' && exec.agent.id.trim() !== '' ? exec.agent.id : undefined;
+    return spec.execute(args, {
+      access, vault, signal: exec?.signal,
+      ...agent === undefined ? {} : { agent },
+    });
   };
 
   return {

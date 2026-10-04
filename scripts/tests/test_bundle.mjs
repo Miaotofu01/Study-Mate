@@ -11,6 +11,9 @@ import { findPython } from '../../bin/studymate.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const python = findPython();
 const plugin = pathToFileURL(path.join(root, 'bin/dsh-plugin.ts')).href;
+// 原生加载下引擎就是**已安装的包自身**——package.json 与 package.json 里 files 带的
+// scripts/、templates/、schemas/、docs/、.dsh/skills 都在这个目录里。
+const packageSkills = path.join(root, '.dsh', 'skills').split(path.sep).join('/');
 
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-bundle-'));
@@ -21,7 +24,6 @@ function fixture(t) {
   const env = { ...process.env, HOME: home, USERPROFILE: home, DSH_HOME: dshHome, LEARN_WORKSPACE: workspace };
   const patch = path.join(dshHome, 'profiles', 'web', 'cordis.patch.yml');
   const config = path.join(dshHome, 'studymate-config.yaml');
-  const engine = path.join(dshHome, 'studymate', 'engine');
   const run = (code, overrides = {}) => spawnSync(process.execPath, ['--input-type=module', '-e', code], {
     env: { ...env, ...overrides }, encoding: 'utf8', timeout: 30000,
   });
@@ -50,7 +52,8 @@ function fixture(t) {
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout);
   }
-  return { dir, env, dshHome, workspace, patch, config, engine, run, boot, yaml };
+  // 原生加载下引擎 = 已安装的包自身，所以这份夹具里没有 <dshHome>/studymate/engine
+  return { dir, env, dshHome, workspace, patch, config, run, boot, yaml };
 }
 
 function snapshot(dir) {
@@ -75,22 +78,29 @@ test('native loading initializes portable skills and owns the preset lifetime wi
   assert.deepEqual(state.config.plugins.find(row => row.id === 'tool-bash').disabled,
     { __jsExpr: "process.platform === 'win32'" });
   assert.deepEqual(state.config.plugins.find(row => row.id === 'skill-filesystem').config.customSkillDirs,
-    [path.join(f.engine, '.dsh', 'skills').split(path.sep).join('/')]);
-  const skills = fs.readFileSync(path.join(f.engine, '.dsh/skills/learning-system/SKILL.md'), 'utf8');
-  assert.ok(skills.includes(process.platform === 'win32' ? 'PowerShell' : 'python'));
+    [packageSkills]);
+  // 原生加载的引擎 = 已安装的包自身：<root> 是包目录，技能随包发布，摆在包里的 .dsh/skills
+  assert.ok(fs.statSync(path.join(root, '.dsh/skills/learning-system/SKILL.md')).isFile());
   assert.equal(fs.existsSync(f.patch), false);
   assert.equal(fs.existsSync(path.join(f.dshHome, '.agent-presets')), false);
+  // ~/.dsh/studymate/ 里不再有源码树副本——连空壳目录都不留
+  assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate')), false);
+  assert.equal(f.yaml(f.config).root, root);
   assert.equal(f.yaml(f.config).workspace, fs.realpathSync(f.workspace));
   const data = path.join(f.workspace, '.learning', 'subjects', 'keep.txt');
   fs.writeFileSync(data, 'my learning data');
   const config = { ...f.yaml(f.config), custom: 'keep' };
   fs.writeFileSync(f.config, JSON.stringify(config));
-  fs.writeFileSync(path.join(f.engine, 'obsolete.txt'), 'old package');
+  const skillSentinel = path.join(root, '.dsh', 'skills', 'obsolete.txt');
+  fs.writeFileSync(skillSentinel, 'old package');
   const again = f.boot({ LEARN_WORKSPACE: '' });
   assert.equal(again.status, 0, again.stderr + again.stdout);
   assert.equal(f.yaml(f.config).custom, 'keep');
   assert.equal(fs.readFileSync(data, 'utf8'), 'my learning data');
-  assert.equal(fs.existsSync(path.join(f.engine, 'obsolete.txt')), false);
+  // 启动不许往包目录里写：装好的包是随包发的只读材料（link: 安装下更是学生自己的检出）
+  assert.equal(fs.readFileSync(skillSentinel, 'utf8'), 'old package');
+  assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate')), false);
+  fs.rmSync(skillSentinel);
 });
 
 test('native startup leaves installer-managed registration and payload unchanged', t => {

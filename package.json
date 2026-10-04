@@ -2,6 +2,7 @@
   "name": "@yunmiao/studymate",
   "version": "1.0.0",
   "description": "StudyMate learning skills and lesson engine for DeepSeek Harness, Google Antigravity, Codex and ChatGPT Work.",
+  "type": "module",
   "bin": {
     "studymate": "bin/studymate.mjs"
   },

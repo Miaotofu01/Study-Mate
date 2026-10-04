@@ -72,7 +72,7 @@ const groups = {
       'test_quiz_attr.py', 'test_quiz_code.py', 'test_render_lesson.py',
       'test_statuses.py', 'test_templates.py', 'test_workspace_config.py',
     ],
-    node: ['quiz_dom_test.js', 'toc_dom_test.js'],
+    node: ['quiz_dom_test.cjs', 'toc_dom_test.cjs'],
     tests: [
       'scripts/release/release.test.mjs',
       // Host 半数据层的特征化测试（lib/{workspace,library,assets,yaml,reference,attempts}.mjs）
@@ -109,6 +109,10 @@ const groups = {
       'scripts/tests/test_tools_context.mjs',
       'scripts/tests/test_tools_validate.mjs',
       'scripts/tests/test_tools_rewrite.mjs',
+      // 任务域 lib/tasks/**（#73）：六态状态机、owner 句柄与越权、durable 落盘的**跨进程**接上、
+      // 五个 studymate_task_* 工具、阅读端的 GET /api/studymate/tasks。
+      // 跨进程那一半的「进程 A」是夹具 scripts/tests/fixtures/tasks_producer.mjs。
+      'scripts/tests/test_tasks_model.mjs',
       // 阅读端（lib/client.js 是零构建的浏览器插件，没有 export）：跨科目搜索的索引覆盖与
       // 四个附件折叠块的空态。套件在 Node 里伪造 window.__ModuleLoader__ + react 桩把头文件
       // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
