@@ -136,22 +136,89 @@ test('进度：不在任何一版词表里的状态要说清后果（会被保�
   assert.equal(report.blocking, true);
 });
 
-test('进度：schema 违规逐条带行号（format / enum / maximum / 缺字段）', () => {
+test('进度：schema 违规逐条带行号（format / enum / 缺字段）', () => {
   const text = [
     'updated_at: "2026-09-24"',   // 1  ← 不是 date-time
     'nodes:',                     // 2
     '  a:',                       // 3
-    '    status: 学习中',          // 4
-    '    mastery: 1.5',           // 5  ← 超过 maximum
-    'misconceptions: []',         // 6
-    '',                           // 7  ← 少了 project
+    '    status: 学会了',          // 4  ← 不在任何一版词表里
+    'project:',                   // 5
+    '  current: ""',              // 6
+    'edges: []',                  // 7  ← 进度里没有这个键（额外键不拦，只说明它没用）
   ].join('\n');
   const report = validateProgress({ file: 'progress.yaml', text, value: fixture(text), schema: PROGRESS_SCHEMA });
   assert.equal(find(report, 'date-time').line, 1);
-  assert.equal(find(report, '不能大于 1，实际 1.5').line, 5);
-  assert.equal(find(report, '缺少必填字段 project').line, 1, '缺字段回退到根那一行');
+  assert.equal(find(report, '不在允许值').line, 4);
   assert.equal(report.blocking, true);
   assert.match(report.summary, /^progress\.yaml：阻断——/);
+});
+
+test('进度：缺 project 是阻断，行号回退到根那一行', () => {
+  const text = [
+    'updated_at: "2026-09-24T21:05:00+08:00"',   // 1
+    'nodes:',                                    // 2
+    '  a:',                                      // 3
+    '    status: 学习中',                         // 4
+    '',
+  ].join('\n');
+  const report = validateProgress({ file: 'progress.yaml', text, value: fixture(text), schema: PROGRESS_SCHEMA });
+  assert.equal(find(report, '缺少必填字段 project').line, 1, '缺字段回退到根那一行');
+  assert.equal(report.blocking, true);
+});
+
+/* ── 一之二、三档词表与旧字段的迁移提示（#71）────────────────────────── */
+
+test('进度：旧六档读得进（schema 的 enum 就地展开），野词照样被 schema 拦下', () => {
+  // 六个旧词逐条：schema 一份都不报「不在允许值」，只有域层那条「写回时映射为」的提示
+  const report = validateProgress({
+    file: 'progress.yaml',
+    text: LEGACY_PROGRESS,
+    value: fixture(LEGACY_PROGRESS),
+    schema: PROGRESS_SCHEMA,
+  });
+  assert.equal(report.problems.some((problem) => problem.message.includes('不在允许值')), false,
+    JSON.stringify(messages(report)));
+  assert.equal(report.blocking, false, JSON.stringify(messages(report)));
+
+  // 野词（连旧词表都不是）：schema 报「不在允许值」且阻断，域层补一句「会被当成未开始」
+  const wild = [
+    'updated_at: "2026-09-24T21:05:00+08:00"',
+    'nodes:',
+    '  a:',
+    '    status: 学会了',
+    'project:',
+    '  current: ""',
+  ].join('\n');
+  const wildReport = validateProgress({ file: 'progress.yaml', text: wild, value: fixture(wild), schema: PROGRESS_SCHEMA });
+  assert.equal(find(wildReport, '不在允许值').blocking, true);
+  assert.equal(find(wildReport, '不在任何一版词表里').blocking, false);
+});
+
+test('进度：mastery 与 misconceptions 读得进，但各给一条迁移提示（不阻断）', () => {
+  const text = [
+    'updated_at: "2026-09-24T21:05:00+08:00"',   // 1
+    'nodes:',                                    // 2
+    '  a:',                                      // 3
+    '    status: 能独立应用',                     // 4  ← 旧六档，映射成「已学完」
+    '    mastery: 0.8',                          // 5  ← 掌握度字段已取消
+    'misconceptions:',                           // 6  ← 双落点的旧副本
+    '  - topic: 旧副本',                          // 7
+    'project:',                                  // 8
+    '  current: ""',                             // 9
+  ].join('\n');
+  const report = validateProgress({ file: 'progress.yaml', text, value: fixture(text), schema: PROGRESS_SCHEMA });
+
+  const mastery = find(report, '掌握度字段已取消');
+  assert.equal(mastery.line, 5);
+  assert.equal(mastery.blocking, false);
+  const legacyMis = find(report, '旧的双落点');
+  assert.equal(legacyMis.line, 6);
+  assert.equal(legacyMis.blocking, false);
+  // 三档里没有「能独立应用」：schema 不报错，但域层要说清写回时会变成什么
+  assert.equal(find(report, '属旧六档词表').line, 4);
+  assert.equal(report.blocking, false, JSON.stringify(messages(report)));
+  // 旧字段留着不写回去，所以这份文件整体仍是放行
+  assert.match(report.summary, /放行/);
 });
 
 test('进度：空 nodes 是提示，不阻断', () => {

@@ -75,11 +75,14 @@ const groups = {
     node: ['quiz_dom_test.js', 'toc_dom_test.js'],
     tests: [
       'scripts/release/release.test.mjs',
-      // Host 半数据层的特征化测试（lib/{workspace,library,assets,yaml,reference}.mjs）
+      // Host 半数据层的特征化测试（lib/{workspace,library,assets,yaml,reference,attempts}.mjs）
       'scripts/tests/test_host_library_payload.mjs',
       'scripts/tests/test_host_reference_fence.mjs',
       'scripts/tests/test_host_path_boundary.mjs',
       'scripts/tests/test_host_yaml_workspace.mjs',
+      // #71 的验收面：作答数据的幂等/版本栅栏，以及「拿一份 v0.2 真实工作区跑一遍」
+      'scripts/tests/test_host_attempts_fence.mjs',
+      'scripts/tests/test_host_v02_workspace.mjs',
       // 纯函数域 lib/core/**：内容格式的解析与锚点题库对账（格式只有一个真相）
       'scripts/tests/test_core_format.mjs',
       'scripts/tests/test_core_anchors.mjs',
@@ -91,6 +94,8 @@ const groups = {
       'scripts/tests/test_validators_progress_subject.mjs',
       'scripts/tests/test_validators_handoff.mjs',
       'scripts/tests/test_rules_pure.mjs',
+      // 纯函数域的判据：写入栅栏（幂等台账 + 版本比较）、题库题型与字段、误解字段定型
+      'scripts/tests/test_core_fence_questions.mjs',
       'scripts/tests/test_core_coverage_floor.mjs',
     ],
   },

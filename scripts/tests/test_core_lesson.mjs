@@ -217,6 +217,72 @@ test('题库形状坏（值不是非空数组）→ 报形状错，同时锚点�
   assert.ok(codes(emptyArray).includes('anchor-missing'));
 });
 
+/* ── 四种题型：能写进题库并过锚点对账；未知题型带文件与行号 ─────────────── */
+
+test('四种题型都能写进题库：过锚点对账，零错误', () => {
+  const poolRaw = [
+    '{',
+    '  "有的锚点": [',
+    '    { "kind": "客观题", "q": "题", "opts": ["a", "b"], "ans": 0, "why": "w" },',
+    '    { "kind": "预测验证", "q": "题", "预测": "p", "比对": "b" },',
+    '    { "kind": "开放题", "q": "题", "answer": "a", "criteria": "c" },',
+    '    { "kind": "交付物", "q": "题", "交付物": "d", "证据": "e" }',
+    '  ]',
+    '}',
+    '',
+  ].join('\n');
+  const result = run([...QUIZ_BLOCK], {
+    pool: JSON.parse(poolRaw), poolFile: 'a.quiz.json', poolPresent: true, poolRaw,
+  });
+  assert.deepEqual(result.errors, [], JSON.stringify(result.errors));
+  assert.equal(result.reconciliation.anchors[0].resolution, 'resolved');
+  assert.deepEqual(result.reconciliation.orphans, []);
+});
+
+test('未知题型：带**题库文件**与那道题的真实行号', () => {
+  const poolRaw = [
+    '{',
+    '  "有的锚点": [',
+    '    { "kind": "客观题", "q": "题", "opts": ["a", "b"], "ans": 0, "why": "w" },',
+    '    { "kind": "选择题", "q": "题" }',
+    '  ]',
+    '}',
+    '',
+  ].join('\n');
+  const result = run([...QUIZ_BLOCK], {
+    pool: JSON.parse(poolRaw), poolFile: 'a.quiz.json', poolPresent: true, poolRaw,
+  });
+  const unknown = result.errors.find((item) => item.code === 'pool-unknown-kind');
+  assert.ok(unknown, JSON.stringify(codes(result)));
+  assert.equal(unknown.file, 'a.quiz.json', '报的是题库文件，不是内容文件');
+  assert.equal(unknown.line, 4, '行号指向那道题的对象');
+  assert.match(unknown.message, /题型「选择题」不在词表里/);
+  assert.match(unknown.message, /客观题、预测验证、开放题、交付物/);
+  assert.match(formatErrorLine(unknown), /^a\.quiz\.json:4 /);
+  // 锚点照样对上：题型问题不连坐锚点四态
+  assert.equal(result.reconciliation.anchors[0].resolution, 'resolved');
+});
+
+test('显式 kind 但字段不全：报 missing-field，也带题库文件与行号', () => {
+  const poolRaw = '{\n  "有的锚点": [\n    { "kind": "交付物", "q": "题", "交付物": "d" }\n  ]\n}\n';
+  const result = run([...QUIZ_BLOCK], {
+    pool: JSON.parse(poolRaw), poolFile: 'a.quiz.json', poolPresent: true, poolRaw,
+  });
+  const missing = result.errors.find((item) => item.code === 'pool-missing-field');
+  assert.ok(missing, JSON.stringify(codes(result)));
+  assert.equal(missing.file, 'a.quiz.json');
+  assert.equal(missing.line, 3);
+  assert.match(missing.message, /「交付物」缺 可运行证据/);
+});
+
+test('旧题库（不写 kind）照旧读得进：零错误', () => {
+  const poolRaw = '{\n  "有的锚点": [\n    { "q": "题", "answer": "a", "criteria": "c" }\n  ]\n}\n';
+  const result = run([...QUIZ_BLOCK], {
+    pool: JSON.parse(poolRaw), poolFile: 'a.quiz.json', poolPresent: true, poolRaw,
+  });
+  assert.deepEqual(result.errors, []);
+});
+
 test('题库 JSON 语法错转成一条普通错误（**不抛异常**）', () => {
   const problems = new FormatProblems();
   const raw = '{\n  "有的锚点": [\n    {oops\n  ]\n}\n';
