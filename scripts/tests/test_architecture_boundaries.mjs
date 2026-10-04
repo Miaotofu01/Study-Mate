@@ -44,12 +44,17 @@ const DOMAIN_RULES = {
   core:   { allow: [], builtin: false, package: false },  // 纯函数域：一个外部依赖都不许
   lib:    { allow: ['core'], builtin: true, package: false },  // Host 数据层
   // tools 是**组合根**：#68 的注册点 `registerStudyMate` 要逐个调用各子系统自己目录里的
-  // registerXxx，所以它必须 import 每个子系统（tools → tasks、tools → watch、tools → export）。
-  // 方向**只有**这一条——子系统一律不许 import tools（任务域就是把 `registerStudyTool` 当参数
-  // 接过去的，正是为了不出现反向边，见 lib/tasks/tools.ts 文件头）。往后每落地一个注册进注册点
-  // 的子系统，这里加一个域名，别改成通配。
-  tools:  { allow: ['core', 'lib', 'tasks', 'watch', 'export'], builtin: true, package: false },  // 原生工具（#68）+ 任务模型（#73）+ 文件监听（#74）+ 导出（#82）
+  // registerXxx，所以它必须 import 每个子系统（tools → tasks、tools → watch、tools → lab、
+  // tools → export）。方向**只有**这一条——子系统一律不许 import tools（任务域就是把
+  // `registerStudyTool` 当参数接过去的，正是为了不出现反向边，见 lib/tasks/tools.ts 文件头）。
+  // 往后每落地一个注册进注册点的子系统，这里加一个域名，别改成通配。
+  tools:  { allow: ['core', 'lib', 'tasks', 'watch', 'lab', 'export'], builtin: true, package: false },  // 原生工具（#68）+ 任务（#73）+ 监听（#74）+ 实验（#77）+ 导出（#82）
   tasks:  { allow: ['core', 'lib'], builtin: true, package: false },  // 任务模型（#73）
+  // 实验域（#77）：判分三轨的第三轨。要 core（题型与必备字段）、lib（作答数据的落点、
+  // 域 guard 与 vault）、tasks（长命令走任务模型、可查可取消）。`node:child_process`
+  // 是它存在的理由，而它**不** import tools：guard 与 vault 在 `lib` 域里（#77 搬过去的），
+  // 所以 Web 路由那条入口不需要借道工具域。
+  lab:    { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },
   // 问答域（#79）：阅读端问答面板那条 HTTP 路由。只依赖纯函数域与 Host 数据层——
   // 它**不** import 工具域（能力探测的本体在 `lib/core/model.ts`，见那里的文件头），
   // 所以这里没有 tools 这条边；反过来说，往这个域里加 `tools` 就是加了一条反向边。
@@ -59,7 +64,7 @@ const DOMAIN_RULES = {
   // **不许 import tools**（预登记的初值里有它）：工具域 import 导出域去注册 `studymate_export`，
   // 反向再来一条就是域图成环——这条环由下面的环检测拦下，所以这里直接不写。
   export: { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },
-  bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'watch', 'export', 'ask'], builtin: true, package: false },
+  bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'lab', 'watch', 'export', 'ask'], builtin: true, package: false },
   client: { allow: [], builtin: false, package: false },  // 浏览器侧单文件：只与模块加载器打交道
 };
 

@@ -34,6 +34,17 @@ export interface AttemptEntry {
   自评?: string;
   /** 错因：学生自己写的，或客观题判错时记下的一句 */
   错因?: string;
+  /** 学生先写下的预测（预测+验证题；#77 起与实测一起落盘，供当场回顾对照） */
+  预测?: string;
+  /**
+   * 一次**代跑**的事实（#77 的第三轨：Host 半在学生本机上代跑测试命令）。
+   *
+   * 这里刻意是 `unknown` 而不是某个具体类型：作答数据是**派生记录**（ADR-0007），不该为了
+   * 记一次运行就去 import 实验域的模块（那是 Host 数据层反向依赖一个子系统）。形状的口径在
+   * `schemas/attempts.schema.json`，产出方在 `lib/lab/tools.ts`。
+   * **通过与否不在里面**：只有退出码、时长、stdout/stderr 原文这些事实。
+   */
+  跑?: unknown;
 }
 
 /** 一道题的作答记录。 */
@@ -232,6 +243,10 @@ function normalizeEntry(value: Record<string, unknown>): AttemptEntry {
   };
   if (typeof value['自评'] === 'string') entry.自评 = value['自评'];
   if (typeof value['错因'] === 'string') entry.错因 = value['错因'];
+  if (typeof value['预测'] === 'string') entry.预测 = value['预测'];
+  // 代跑的事实原样带出去（界面要照它显示真实输出）；不是对象就当没有这一条
+  const ran = value['跑'];
+  if (typeof ran === 'object' && ran !== null && !Array.isArray(ran)) entry.跑 = ran;
   return entry;
 }
 
@@ -297,6 +312,13 @@ export interface AttemptInput {
   对?: unknown;
   自评?: unknown;
   错因?: unknown;
+  /** 预测+验证题：学生先写下的预测（纯文本）。 */
+  预测?: unknown;
+  /**
+   * 代跑的事实（#77）。**原样收**：这一层的职责是把学生那边与 Host 那边交上来的东西落进
+   * 作答数据，不是重新判一遍它——`lib/lab/tools.ts` 已经把形状钉在自己的输出契约里了。
+   */
+  跑?: unknown;
 }
 
 /** 入参 → 一条历史记录。认不出的值按「没选、不对」收——**不猜**（猜成「对了」最坏）。 */
@@ -309,6 +331,9 @@ function toEntry(raw: AttemptInput, at: string): AttemptEntry {
   };
   if (typeof raw.自评 === 'string' && raw.自评.trim() !== '') entry.自评 = raw.自评.trim();
   if (typeof raw.错因 === 'string' && raw.错因.trim() !== '') entry.错因 = raw.错因.trim();
+  if (typeof raw.预测 === 'string' && raw.预测.trim() !== '') entry.预测 = raw.预测.trim();
+  // `跑` 原样收（对象才收）：它是**事实**，这一层不改写它——改写就等于二次加工真实输出
+  if (typeof raw.跑 === 'object' && raw.跑 !== null && !Array.isArray(raw.跑)) entry.跑 = raw.跑;
   return entry;
 }
 
@@ -380,9 +405,13 @@ export function writeAttempts({ workspace, subject, node, questions, expectedVer
   const normalized = items
     .map(([id, item]) => [id.trim(), toEntry(item, at)] as const)
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  // 指纹带上 `预测` 与 `跑`：同一道题的两次代跑（第二次的输出不一样）必须被认成**两次不同的
+  // 作答**，否则同一个 operationId 重放会把第二条真实输出当成「重复提交」丢掉。
+  // `跑` 用 JSON 原文进指纹（键序由产出方固定），够稳。
   const fingerprint = fingerprintOf([
     String(subject), node, lessonName,
-    ...normalized.map(([id, entry]) => `${id}\u0001${entry.选 ?? ''}\u0001${entry.对}\u0001${entry.自评 ?? ''}\u0001${entry.错因 ?? ''}`),
+    ...normalized.map(([id, entry]) => `${id}\u0001${entry.选 ?? ''}\u0001${entry.对}\u0001${entry.自评 ?? ''}`
+      + `\u0001${entry.错因 ?? ''}\u0001${entry.预测 ?? ''}\u0001${entry.跑 === undefined ? '' : JSON.stringify(entry.跑)}`),
   ]);
 
   // 幂等回放放在版本校验**之前**：第一次写成功之后版本号已经变了，重试带回来的
