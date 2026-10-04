@@ -18,6 +18,11 @@
                         界面如实说、两条历史都在、谁的数据都没丢
 
    数据现造现弃（临时工作区 + 临时 HOME），跑完即删；仓库里不存样例数据。
+
+   唯一一处不是「真」的：`/api/studymate/events`（#74 的变更推送）。阅读端挂载即订阅它，
+   而推送不在这一套的验收面上，所以迷你宿主只回一条不推数据的 text/event-stream——
+   让那条请求有个正当落点，不至于在「控制台/失败请求」那一项上把这一套判红。
+   推送本身在 watch_push_test.mjs 与真 DSH 探针里验。
 */
 import fs from 'node:fs';
 import http from 'node:http';
@@ -153,6 +158,23 @@ async function startHost(workspace) {
       if (url.pathname === '/mini-react.js') return send(200, fs.readFileSync(path.join(HERE, '..', 'fixtures', 'mini-react.js')), 'text/javascript; charset=utf-8');
       if (url.pathname === '/api/studymate/library') {
         return send(200, JSON.stringify(readLibrary({ workspace })), 'application/json; charset=utf-8');
+      }
+      if (url.pathname === '/api/studymate/events') {
+        // 变更推送（#74）：阅读端挂载即订阅这条通道。这一套验的是作答落盘，推送不在它的
+        // 验收面上——但夹具是「真 HTTP 迷你宿主」，客户端发的每条请求都得有正当落点
+        // （favicon 那条补 204 也是这个理由），不接这一下浏览器就记一条 404，
+        // 会被 QA 骨架算成失败请求。
+        //
+        // 这里给一条**最朴素的** text/event-stream：先握个手，之后一个 data 都不发。
+        // 为什么不挂 lib/watch 的真通道：openChannel 会顺带 ensureWatching，把文件监听
+        // 拉起来——那会给这一套引入它不需要的后台活动（本套自己往盘上写作答，会反过来
+        // 触发通知与重取），而这一套要的只是「请求有个正当落点」。没有 data 就不会触发
+        // 重取，不会干扰「只发了一笔 POST」与作答计数那几条断言。
+        // 真通道的形状与两条推送路在 watch_push_test.mjs 与真 DSH 探针里验。
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
+        res.write(': studymate 夹具：变更推送不在这一套的验收面上\n\n');
+        res.on('close', () => { if (!res.writableEnded) res.end(); });
+        return;
       }
       if (url.pathname === '/api/studymate/attempts') {
         const chunks = [];
