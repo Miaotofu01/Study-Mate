@@ -2,8 +2,7 @@
 // 用法: node measure.mjs <file-url> [--hover "<selector>"]
 import { spawn } from 'node:child_process';
 import { rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { requireBrowser, tempProfile } from './harness.mjs';
 
 async function killChrome() {
   // 等 chrome 真的退出再删 profile：kill() 只是发信号，进程还在写盘时删会被它重建
@@ -20,9 +19,10 @@ const url = process.argv[2];
 const hoverIdx = process.argv.indexOf('--hover');
 const hoverSel = hoverIdx > 0 ? process.argv[hoverIdx + 1] : null;
 const PORT = 9100 + Math.floor(Math.random() * 400);
-const PROFILE = join(tmpdir(), `smtest-theme-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+const PROFILE = tempProfile('theme');
 
-const chrome = spawn('google-chrome', [
+// 浏览器二进制探测（环境变量 / PATH / macOS .app），不写死 google-chrome
+const chrome = spawn(requireBrowser('measure').path, [
   '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
   `--user-data-dir=${PROFILE}`,
   `--remote-debugging-port=${PORT}`, '--window-size=1280,900', 'about:blank',

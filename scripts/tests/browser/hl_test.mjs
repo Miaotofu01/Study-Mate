@@ -1,62 +1,14 @@
-// 在真实 Chrome 里跑代码块高亮的断言：node scripts/tests/browser/hl_test.mjs
-import { spawn } from 'node:child_process';
-import { rmSync } from 'node:fs';
+// 在真实浏览器里跑代码块高亮的断言：node scripts/tests/browser/hl_test.mjs
+//
+// 起浏览器、收控制台/页面错误/失败请求、出截图与 summary.json 都走 ./harness.mjs
+// （浏览器二进制在那里探测，不写死 google-chrome）。
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
-
-async function killChrome() {
-  // 等 chrome 真的退出再删 profile：kill() 只是发信号，进程还在写盘时删会被它重建
-  await new Promise((resolve) => {
-    const done = () => resolve();
-    chrome.once('exit', done);
-    setTimeout(done, 3000);
-    chrome.kill();
-  });
-  try { rmSync(PROFILE, { recursive: true, force: true }); } catch {}
-}
+import { openSession, finishSuite } from './harness.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 const FIXTURE = 'file://' + join(HERE, 'highlight-fixture.html');
-const PROFILE = join(tmpdir(), 'smtest-hl-' + Date.now());
-const PORT = 9800 + Math.floor(Math.random() * 300);
-
-const chrome = spawn('google-chrome', [
-  '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
-  `--user-data-dir=${PROFILE}`,
-  `--remote-debugging-port=${PORT}`, '--window-size=1000,900', 'about:blank',
-], { stdio: 'ignore' });
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function pageTarget() {
-  for (let i = 0; i < 60; i++) {
-    try {
-      const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-      const p = list.find((t) => t.type === 'page');
-      if (p) return p;
-    } catch {}
-    await sleep(200);
-  }
-  throw new Error('chrome 没起来');
-}
-
-const page = await pageTarget();
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-await new Promise((r) => (ws.onopen = r));
-let id = 0;
-const pending = new Map();
-ws.onmessage = (e) => {
-  const m = JSON.parse(e.data);
-  if (m.id && pending.has(m.id)) { pending.get(m.id)(m.result); pending.delete(m.id); }
-};
-const send = (method, params = {}) =>
-  new Promise((res) => { const i = ++id; pending.set(i, res); ws.send(JSON.stringify({ id: i, method, params })); });
-
-await send('Page.enable');
-await send('Page.navigate', { url: FIXTURE });
-await sleep(1500);
 
 const probe = `(() => {
   const syn = (sel) => Array.from(document.querySelectorAll(sel + ' .syn-keyword, ' + sel + ' .syn-string, ' + sel + ' .syn-type, ' + sel + ' .syn-func, ' + sel + ' .syn-comment, ' + sel + ' .syn-number, ' + sel + ' .syn-macro, ' + sel + ' .syn-operator'));
@@ -105,10 +57,21 @@ const probe = `(() => {
   };
 })()`;
 
-const { result } = await send('Runtime.evaluate', { expression: probe, returnByValue: true });
-const r = result.value;
+const session = await openSession({ suite: 'hl', width: 1000, height: 900 });
+let r = null;
+try {
+  const record = await session.scene('hl', async (ctx) => {
+    await ctx.navigate(FIXTURE, { settle: 1500 });
+    return ctx.evaluate(probe);
+  });
+  r = record.metrics;
+} catch (error) {
+  // 页面没开起来时 r 是 null：断言表整个不建，直接算一条失败，原因也记进 summary.json
+  console.log('FAIL  浏览器套件跑完（浏览器起来、页面能打开）  — ' + String(error));
+  await session.scene('hl-error', async (ctx) => { ctx.note('harness', String(error)); });
+}
 
-const checks = [
+const checks = r ? [
   ['cpp：关键字/类型着色（int 出现≥5 次）', r.b1.filter((t) => ['int', 'double', 'for', 'return'].includes(t)).length >= 5],
   ['cpp：数字着色', r.b1num >= 4],
   ['cpp：注释着色', r.b1comment >= 1],
@@ -146,9 +109,9 @@ const checks = [
   ['python：数字着色', r.b19num >= 3],
   ['python：前缀三引号整块算字符串（块内 # 不是注释）', r.b20comment === 0 && r.b20string.some((s) => s.includes('digits'))],
   ['python：多行 f-string 的字符串体也上色', r.b20string.some((s) => s.includes('bye {name}'))],
-];
+] : [];
 
-let bad = 0;
+let bad = r ? 0 : 1;
 for (const [name, ok] of checks) {
   if (!ok) bad++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
@@ -156,6 +119,4 @@ for (const [name, ok] of checks) {
 console.log(`\n${checks.length - bad}/${checks.length} 通过`);
 if (bad) console.log('detail:', JSON.stringify(r));
 
-ws.close();
-await killChrome();
-process.exit(bad ? 1 : 0);
+await finishSuite(session, { suite: 'hl', failed: bad });
