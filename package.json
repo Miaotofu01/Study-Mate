@@ -6,7 +6,7 @@
     "studymate": "bin/studymate.mjs"
   },
   "exports": {
-    ".": "./bin/dsh-plugin.mjs",
+    ".": "./bin/dsh-plugin.ts",
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
@@ -27,6 +27,7 @@
     "cordis.patch.yml",
     "lib/**",
     "bin/*.mjs",
+    "bin/*.ts",
     "openai/studymate/.codex-plugin/plugin.json",
     "openai/studymate/requirements.txt",
     "openai/studymate/scripts/*.py",
