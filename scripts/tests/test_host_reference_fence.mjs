@@ -154,7 +154,15 @@ test('同一个 operationId 重放只回原回执，不落第二条记录', () =
   const replay = writeReference(request);
   assert.deepEqual(replay, first, '重放要原样回放上次的回执');
   assert.equal(countFiles(referenceDir), filesAfterFirst, '重放不许再写一个文件');
-  assert.equal(referenceDir.includes('-2'), false);
+  // 断言的是 reference/ 里的落盘文件名，不是临时目录名：撞名换用 -2/-3 后缀
+  // （见 lib/reference.ts 的 continue），所以逐项看 basename 有没有多出带 -2 的副本。
+  // 原写法用 referenceDir.includes('-2') 顺手检查了整条路径，而 mkdtemp 的随机后缀
+  // 以 '2' 开头时那条路径自己就带 '-2'，于是这条断言按临时目录名碰运气地假红。
+  assert.deepEqual(
+    fs.readdirSync(referenceDir).map((name) => path.basename(name)).filter((name) => name.includes('-2')),
+    [],
+    '重放不许落一个带 -2 后缀的副本文件',
+  );
   assert.equal(fs.existsSync(path.join(referenceDir, '讲义-2.md')), false);
 
   // 去掉首尾空白后是同一个 id：双击时多一个空格也算同一次提交
