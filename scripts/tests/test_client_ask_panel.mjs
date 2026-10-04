@@ -89,17 +89,19 @@ test('#79 面板：点「问一句」真的发 POST，请求体只有那几样',
   assert.equal(calls[0].url, '/api/studymate/ask');
   assert.equal(calls[0].options.method, 'POST');
   const body = JSON.parse(calls[0].options.body);
-  assert.deepEqual(Object.keys(body).sort(), ['expectedVersion', 'node', 'operationId', 'question', 'selection', 'subject']);
+  assert.deepEqual(Object.keys(body).sort(), ['node', 'operationId', 'question', 'selection', 'subject']);
   assert.equal(body.subject, 'computer-networks');
   assert.equal(body.node, 'net.mask');
   assert.equal(body.selection, SELECTION);
   assert.equal(body.question, QUESTION);
-  assert.equal(body.expectedVersion, 'v1');
   assert.match(body.operationId, /^ask-/);
   // 面板**不背会话**：请求体里没有 messages / history / sessionId 这类东西
   for (const forbidden of ['messages', 'history', 'sessionId', 'conversation']) {
     assert.equal(Object.hasOwn(body, forbidden), false, `请求体里出现了 ${forbidden}`);
   }
+  // 也不带 expectedVersion：这份文件是「只追加」的，而快照里的版本号随时会过期——
+  // 带上它只会在总控刚写过之后把面板这一笔挡掉（理由见 client.js 那处注释）
+  assert.equal(Object.hasOwn(body, 'expectedVersion'), false);
 });
 
 test('#79 面板：回答与那条误解记录按回执渲染，承诺不再是空头支票', () => {
