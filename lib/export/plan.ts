@@ -232,7 +232,7 @@ export function planExport(options: PlanExportOptions): ExportPlan {
   products.push({ path: HOST_FILE, role: 'page', text: host, bytes: Buffer.byteLength(host) });
 
   const title = pageTitle(subjects.map((subject) => subject.name));
-  const boot = bootScript({ title });
+  const boot = bootScript();
   products.push({ path: BOOT_FILE, role: 'page', text: boot, bytes: Buffer.byteLength(boot) });
 
   // 入口**最后**写（run.ts 按这个顺序落盘）：中途失败/取消的导出目录里没有 index.html，

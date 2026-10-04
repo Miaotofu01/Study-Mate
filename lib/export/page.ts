@@ -45,8 +45,6 @@ export const REFERENCE_ENDPOINT = '/api/studymate/reference';
 export const ASSET_ENDPOINT = '/api/studymate/asset';
 /** 作答数据的写入口（#72）：离线页面明确回 403，不假装落盘。 */
 export const ATTEMPTS_ENDPOINT = '/api/studymate/attempts';
-/** 变更推送（#74）：离线页面用静默替身，不连这条流。 */
-export const EVENTS_ENDPOINT = '/api/studymate/events';
 
 /** 冻结模块表里的键名：与宿主给阅读端的名字逐字相同（client.js 只 require 'react'）。 */
 export const VENDOR_MODULES = {
@@ -219,7 +217,7 @@ export function hostScript(): string {
     }
     return Promise.resolve(json({
       error: 'not-found',
-      message: '离线页面只应答 library 与 reference 两条接口，收到的是：' + target,
+      message: '离线页面只应答 library 与 reference 的读请求（写请求一律 403），收到的是：' + target,
     }, 404));
   };
 
@@ -269,7 +267,7 @@ export function hostScript(): string {
 }
 
 /** `boot.js`：把阅读端本体挂到画布上（与 `scripts/tests/fixtures/reading_position_fixture.mjs` 同一套座位表）。 */
-export function bootScript(options: { title: string }): string {
+export function bootScript(): string {
   return `/* StudyMate 导出的离线页面 —— 挂载。座位表照宿主：阅读端只往 main 与 sidebar.panellist 登记。 */
 (function () {
   'use strict';
