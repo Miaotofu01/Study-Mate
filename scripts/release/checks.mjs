@@ -103,6 +103,11 @@ const groups = {
       'scripts/tests/test_tools_context.mjs',
       'scripts/tests/test_tools_validate.mjs',
       'scripts/tests/test_tools_rewrite.mjs',
+      // 阅读端（lib/client.js 是零构建的浏览器插件，没有 export）：跨科目搜索的索引覆盖与
+      // 四个附件折叠块的空态。套件在 Node 里伪造 window.__ModuleLoader__ + react 桩把头文件
+      // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
+      'scripts/tests/test_client_search_index.mjs',
+      'scripts/tests/test_client_fold_empty_state.mjs',
     ],
   },
   '--static': {
