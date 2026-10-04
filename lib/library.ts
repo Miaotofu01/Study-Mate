@@ -22,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseYaml, pyStrip } from './yaml.ts';
-// reference/ 的清单与版本号放在 lib/reference.mjs：写入端要用同一套规则算版本号（并发栅栏），
+// reference/ 的清单与版本号放在 lib/reference.ts：写入端要用同一套规则算版本号（并发栅栏），
 // 两边各写一份就会出现「明明没人动过却报冲突」。这里只把结果挂进 payload。
 import { listReference } from './reference.ts';
 import type { ReferenceEntry } from './reference.ts';
@@ -557,7 +557,7 @@ function buildSubject(subjectDir: string, dirName: string, workspace: string): S
   nodes.forEach((node, index) => { order[node.id] = index; });
 
   // 参考资料：与资料收集角色同放 reference/ 的本地教材、速查页与学生自加的讲义（ADR-0010）。
-  // 清单与版本号必须同源，所以一起从 lib/reference.mjs 取；目录不存在时给空清单 + 空清单的
+  // 清单与版本号必须同源，所以一起从 lib/reference.ts 取；目录不存在时给空清单 + 空清单的
   // 版本号（**不能给空串**：空串会让「第一次往空目录里写」没法带期望版本）。
   const { entries: reference, version: reference_version } = listReference({ subjectDir });
 

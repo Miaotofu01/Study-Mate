@@ -1,4 +1,4 @@
-/* 特征化测试：Host 半数据层 · lib/reference.mjs 的写入栅栏
+/* 特征化测试：Host 半数据层 · lib/reference.ts 的写入栅栏
    ────────────────────────────────────────────────────────────────────────
    钉住三件事：operationId 幂等重放只回放原回执、expectedVersion 对不上就拒绝、
    校验顺序与拒绝码。断言只看 writeReference 的返回值与 reference/ 里的文件数，

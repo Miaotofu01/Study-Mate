@@ -189,7 +189,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
             return Response.json(found);
           }
 
-          // POST：写盘的所有判断都在 lib/reference.mjs 里（版本号、幂等、路径越界、来源标记），
+          // POST：写盘的所有判断都在 lib/reference.ts 里（版本号、幂等、路径越界、来源标记），
           // 这里只负责把请求体解出来 + 把结果映射成 HTTP 状态
           const body = await request.json().catch(() => null);
           if (!body || typeof body !== 'object') {

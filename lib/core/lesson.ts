@@ -15,7 +15,8 @@
      · 锚点没题又没 `empty_reason:` → 报错；有 `empty_reason:` → 一行提示、不算错。
 
    「题库 JSON 语法错」也**不抛异常**：调用方把 `JSON.parse` 的报错交给
-   `poolJsonError()` 转成一条普通错误（今天 `lib/library.mjs:415` 的 `throw` 是反例）。
+   `poolJsonError()` 转成一条普通错误（`lib/library.ts` 的 `readLibrary` 里读题库那段
+   仍是直接 `throw`——那是反例，别照它写）。
    ───────────────────────────────────────────────────────────────────────── */
 
 import {

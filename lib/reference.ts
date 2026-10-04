@@ -12,7 +12,7 @@
 
    清单、版本号、读取、写入四件事必须共用同一套「什么算一条资料」的规则——版本号是写入
    时的栅栏，清单与它不同源就会出现「明明没人动过却报冲突」。所以规则都收在本模块里，
-   `lib/library.mjs` 只负责把清单与版本号挂进 payload（它 import 本模块；反过来会成环）。
+   `lib/library.ts` 只负责把清单与版本号挂进 payload（它 import 本模块；反过来会成环）。
    ───────────────────────────────────────────────────────────────────────── */
 
 import { createHash } from 'node:crypto';
@@ -97,7 +97,7 @@ const LEDGER = new IdempotencyLedger<WriteResult>();
 /* ── 路径 ──────────────────────────────────────────────────────────────── */
 
 /** Python 的 sorted() 按码位比较；JS 的 < 按 UTF-16 码元比较，遇到增补平面字符会分叉。
-    这里再写一份是因为本模块不能反向 import lib/library.mjs（那边 import 本模块）。 */
+    这里再写一份是因为本模块不能反向 import `lib/library.ts`（那边 import 本模块）。 */
 function cmpCodePoints(a: string, b: string): number {
   const left = [...a];
   const right = [...b];
@@ -124,14 +124,14 @@ function isSkippedName(name: string): boolean {
   return name.startsWith('.') || SKIP_DIRS.has(name);
 }
 
-/** 科目目录的绝对路径。subject 里出现分隔符或 `..` 直接判不合法（与 lib/assets.mjs 一致）。 */
+/** 科目目录的绝对路径。subject 里出现分隔符或 `..` 直接判不合法（与 `lib/assets.ts` 一致）。 */
 function subjectDirOf(workspace: unknown, subject: unknown): string | null {
   if (typeof workspace !== 'string' || !workspace) return null;
   if (typeof subject !== 'string' || !subject || subject.includes('/') || subject.includes('\\') || subject.includes('..')) return null;
   return path.resolve(workspace, '.learning', 'subjects', subject);
 }
 
-/** 越界判据与 lib/assets.mjs 同一写法：前后都补分隔符再比，避免 /a/bc 被当成在 /a/b 里面。 */
+/** 越界判据与 `lib/assets.ts` 同一写法：前后都补分隔符再比，避免 /a/bc 被当成在 /a/b 里面。 */
 function inside(root: string, full: string): boolean {
   return full === root || full.startsWith(root + path.sep);
 }
@@ -322,7 +322,7 @@ function walkReference(root: string, realBoundary: string | null, prefix = '', o
     const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
     let stat;
     try {
-      stat = fs.statSync(full); // 跟随符号链接，与 lib/library.mjs 的 collectFileNames 一致
+      stat = fs.statSync(full); // 跟随符号链接，与 `lib/library.ts` 的 collectFileNames 一致
     } catch {
       continue;
     }
