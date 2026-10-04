@@ -7,15 +7,25 @@
   },
   "exports": {
     ".": "./bin/dsh-plugin.mjs",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
     }
   },
   "files": [
     "cordis.patch.yml",
+    "lib/**",
     "bin/*.mjs",
     "openai/studymate/.codex-plugin/plugin.json",
     "openai/studymate/requirements.txt",
@@ -45,7 +55,9 @@
     "test:browser": "node scripts/release/checks.mjs --browser",
     "test:release": "node --test scripts/release/release.test.mjs",
     "test:dsh": "node --test scripts/tests/test_dsh_runtime.mjs",
-    "test:dsh-cli": "node --test scripts/tests/test_dsh_plugin_cli.mjs"
+    "test:dsh-cli": "node --test scripts/tests/test_dsh_plugin_cli.mjs",
+    "prototype": "node prototype/reading-client/tools/serve.mjs",
+    "prototype:data": "python3 prototype/reading-client/tools/build-data.py"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

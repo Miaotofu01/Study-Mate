@@ -172,7 +172,9 @@ function requireWorkflow() {
 export function validatePack(pack) {
   if (pack.name !== PACKAGE || !VERSION.test(pack.version)) throw new Error('Unexpected npm package identity.');
   const files = pack.files.map(file => file.path);
-  const allowed = /^(?:package\.json|cordis\.patch\.yml|README\.md|LICENSE|CHANGELOG\.md|bin\/[^/]+\.mjs|openai\/studymate\/(?:\.codex-plugin\/plugin\.json|requirements\.txt|scripts\/[^/]+\.py|skills\/learning-system\/references\/[^/]+\.md)|\.dsh\/skills\/.+|antigravity\/studymate\/.+|preset\/learning\/.+|scripts\/[^/]+\.py|schemas\/[^/]+\.json|templates\/.+|docs\/(?:[^/]+\/)*[^/]+\.md|docs\/images\/.+)$/;
+  // lib/ 是 Client 半（阅读端）与 Host 半的共享模块：package.json 的 exports["./client"]
+  // 指向 lib/client.js，宿主按这个字段取 bundle，所以它必须随包发出去。
+  const allowed = /^(?:package\.json|cordis\.patch\.yml|README\.md|LICENSE|CHANGELOG\.md|bin\/[^/]+\.mjs|lib\/.+|openai\/studymate\/(?:\.codex-plugin\/plugin\.json|requirements\.txt|scripts\/[^/]+\.py|skills\/learning-system\/references\/[^/]+\.md)|\.dsh\/skills\/.+|antigravity\/studymate\/.+|preset\/learning\/.+|scripts\/[^/]+\.py|schemas\/[^/]+\.json|templates\/.+|docs\/(?:[^/]+\/)*[^/]+\.md|docs\/images\/.+)$/;
   for (const file of files) {
     if (!allowed.test(file) || /(^|\/)(?:\.env(?:\..*)?|\.npmrc|\.git|node_modules|__pycache__|\.DS_Store|[^/]+\.pyc)(\/|$)/.test(file)) {
       throw new Error(`Unexpected or private file in npm tarball: ${file}`);
