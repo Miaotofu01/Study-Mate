@@ -31,17 +31,7 @@ const KIND_LIST = schemaEnum('curriculum.schema.json',
 export const AGY_HOST_GUIDE = `## Antigravity 宿主约定（导出时生成）
 
 - **引擎定位与只读资产**：本文件位于 \`<root>/skills/<技能名>/SKILL.md\`；从实际文件路径定位包含 \`skills/\`、\`agents/\`、\`scripts/\`、\`templates/\`、\`schemas/\`、\`rules/\`、\`docs/\` 的插件根目录，记为 \`<root>\`。引擎与插件安装目录属于只读静态资产，严禁在 \`<root>\` 下写入临时脚本、数据、测试文件或编译缓存（\`__pycache__\`）。所有相对的脚本、模板、schema、文档路径均相对 \`<root>\` 解析。
-- **原生工具（DSH 专属）在本宿主不存在**：技能正文里出现的 \`studymate_*\` 是 DSH 侧的原生工具（契约见 \`<root>/skills/learning-system/references/tools.md\`），**本宿主一个都调不到**。按下面这张降级表用文件读写与 \`<root>/scripts/\` 下的脚本完成同一件事；缺的能力如实说明，**不要假装调用过工具**。
-  | 正文里的工具 | 本宿主怎么做 |
-  |---|---|
-  | \`studymate_workspace_context\` | 读配置里的工作区、\`.learning/MEMORY.md\`、当前科目的 \`progress.yaml\` 与最近的学习记录 |
-  | \`studymate_validate_curriculum\` | \`python3 -B '<root>/scripts/check_curriculum.py' '<数据文件>'\`（给科目目录就逐份校验） |
-  | \`studymate_validate_lesson\` | \`python3 -B '<root>/scripts/check_lesson.py' '<内容文件>' --subject '<subject_path>' --node '<节点id>'\` |
-  | \`studymate_validate_pool\` | \`python3 -B '<root>/scripts/check_pool.py' '<subject_path>'\` |
-  | \`studymate_validate_handoff\` | \`python3 -B '<root>/scripts/check_handoff.py' '<stage_dir>' --role '<角色>' [--node '<节点id>']\` |
-  | \`studymate_renumber_lessons\` | \`python3 -B '<root>/scripts/renumber_lessons.py' '<subject_path>' [--dry-run] [--render]\` |
-  | \`studymate_apply_empty_reasons\` | \`python3 -B '<root>/scripts/apply_empty_reasons.py' '<subject_path>' '<节点id>' '<tsv>'\` |
-  | \`studymate_export\` | \`python3 -B '<root>/scripts/render_lesson.py' '<subject_path>' '<节点id>'\` 出课件页，\`python3 -B '<root>/scripts/gen_home.py' '<LEARN_WORKSPACE>'\` 出主页 |
+- **原生工具（DSH 专属）在本宿主不存在**：DSH 侧的 \`studymate_\` 系列工具（契约见 \`<root>/skills/learning-system/references/tools.md\`）在这里**一个都调不到**——正文里点名它们的地方，导出时已经换成等价的引擎命令（\`python3 -B '<root>/scripts/…'\`，映射表在两个适配器的 \`NATIVE_TOOL_FALLBACK\` 与上面那份契约文档 §8）。缺的能力如实说明，**不要假装调用过工具**。
 - **原生多智能体协同（invoke_subagent）**：总控调度专业角色时，必须使用宿主原生 \`invoke_subagent\` 工具委派对应角色（TypeName 为 \`resource-scout\`、\`image-scout\`、\`curriculum-designer\`、\`learning-coach\`、\`practice-evaluator\`，角色规格在 \`<root>/agents/<角色名>.md\` 中声明）。角色在独立的后台子会话中执行，完成后宿主通过事件驱动通知自动唤醒总控，**严禁使用 sleep 循环或 manage_task 频繁轮询状态**。
   - **调度协同节奏**：资源收集（\`resource-scout\`）先行；资源就绪后，建图片池（\`image-scout\`）与拟大纲（\`curriculum-designer\`）通过 \`invoke_subagent\` 单次数组**并发派发**；课件阶段保持**严格串行**（讲解角色 \`learning-coach\` 交付正文与锚点后，再派 \`practice-evaluator\` 配套出题与设计 Lab）。
   - **边界与通道隔离**：子代理无面向用户的会话通道，不向用户提问，不调用 \`ask_question\`。若缺少上下文或遇到异常，在完成报告中说明并交回总控。

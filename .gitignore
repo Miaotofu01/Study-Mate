@@ -7,3 +7,5 @@ dist/
 .vscode/
 .preview/
 /workspace/
+# 浏览器 QA 的产物（截图集 + summary.json）：本地产物，不进库
+.shots/

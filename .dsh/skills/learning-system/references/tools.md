@@ -135,13 +135,13 @@ apply_empty_reasons → { subject, node, file, dryRun, ok,
 
 ## 八、旧命令对照表（无头宿主按它降级）
 
-DSH 侧**不再调这些脚本**；Antigravity / Codex 侧没有原生工具，按这张表降级（脚本与它们的参数形态的唯一出处是 `docs/规范/工程约束.md` §四）。
+DSH 侧**不再调这些脚本**；Antigravity / Codex 侧没有原生工具，按这张表降级（脚本与它们的参数形态的唯一出处是 `docs/规范/工程约束.md` §四）。**可执行的那份映射表是两个宿主适配器里的 `NATIVE_TOOL_FALLBACK`**（`bin/openai-skill-compat.mjs`、`bin/antigravity-skill-compat.mjs`）：导出时逐名替换，无头侧的技能正文因此不会留下调不到的工具名。本表是同一件事的人类可读版本；两边不一致时以适配器为准，并回来改这一份。
 
 | 旧命令 | 今天的工具（DSH） | 无头侧怎么做 |
 |---|---|---|
-| 总控开场自己读一堆文件 | `studymate_workspace_context` | 读配置里的工作区、`.learning/MEMORY.md`、当前科目的 `progress.yaml` 与最近学习记录 |
-| `check_curriculum.py <curriculum.yaml>` | `studymate_validate_curriculum` | 原命令 |
-| `check_lesson.py <页面路径> --subject … --node …` | `studymate_validate_lesson`（**只查内容层**；DOM 结构检查随静态渲染退役） | 原命令 |
+| 总控开场自己读一堆文件 | `studymate_workspace_context` | 读工作区配置、`.learning/MEMORY.md`、当前科目的 `progress.yaml` 与最近学习记录 |
+| `check_curriculum.py <curriculum.yaml>` | `studymate_validate_curriculum` | 原命令（进度与科目档案没有对应脚本，按 `schemas/*.json` 自查） |
+| `check_lesson.py <页面路径> --subject … --node …` | `studymate_validate_lesson`（**只查内容层**；DOM 结构检查随静态渲染退役） | 先 `render_lesson.py … --check` 查内容与题库；页面出来后再用 `check_lesson.py` 查页面 |
 | `check_pool.py <subject_path>` | `studymate_validate_pool` | 原命令 |
 | `check_handoff.py '<stage_dir>' --role '<角色>'` | `studymate_validate_handoff` | 原命令 |
 | `renumber_lessons.py <subject_path> [--dry-run] [--render]` | `studymate_renumber_lessons` | 原命令（`--render` 那半在无头侧仍要出页面） |

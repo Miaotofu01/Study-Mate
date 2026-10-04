@@ -47,26 +47,26 @@ test('bootstrap initializes a separate workspace without requiring legacy config
   assert.doesNotMatch(adapted.get('record-keeping'), /开场从.*config\.yaml/);
 });
 
-test('无头降级表里的引擎命令都带引号、走探测到的解释器，gen_home 始终显式传工作区', () => {
+test('无头侧的引擎命令都走探测到的解释器、路径带引号，gen_home 始终显式传工作区', () => {
   for (const [name, content] of adapted) {
-    // DSH 侧正文已经不调引擎脚本（原生工具接管）；脚本只活在导出时注入的降级表里，
-    // 那张表是本宿主唯一的执行面，所以命令形状由它守：解释器要经探测（`<python>`），
-    // 路径与占位符一律带引号。
+    // 源技能正文已经不调引擎脚本（DSH 走原生工具）；脚本只活在导出时按
+    // `NATIVE_TOOL_FALLBACK` 换进来的等价做法里，所以命令形状由这一层守：
+    // 解释器要经探测（`<python>`）、路径与占位符一律带引号。
+    // （每个工具都有落点这件事由 test_skill_contracts.mjs 逐条对账。）
+    assert.doesNotMatch(content, /python3 -B/, `${name}: Codex 侧不许留裸 python3（要走探测到的解释器）`);
     for (const match of content.matchAll(/`(<python> -X utf8(?: -[A-Za-z]+)* '[^`]+)`/g)) {
       // `<python>` 是宿主约定的解释器占位，先摘掉再看剩下的占位符有没有裸着进命令。
       const command = match[1].replace('<python>', 'PY');
       assert.doesNotMatch(command, /(?<!')<[^>]+>/,
-        `${name}: 降级表里的占位符没加引号 —— ${match[1]}`);
-    }
-    assert.doesNotMatch(content, /python3 -B/, `${name}: Codex 侧不许留裸 python3（要走探测到的解释器）`);
-    // 八个原生工具都要有降级做法：少一行就等于导出一句本宿主做不到的话。
-    for (const tool of ['studymate_workspace_context', 'studymate_validate_curriculum',
-      'studymate_validate_lesson', 'studymate_validate_pool', 'studymate_validate_handoff',
-      'studymate_renumber_lessons', 'studymate_apply_empty_reasons', 'studymate_export']) {
-      assert.ok(content.includes(tool), `${name}: 无头降级表缺 ${tool}`);
+        `${name}: 降级落点里的占位符没加引号 —— ${match[1]}`);
     }
   }
-  assert.match(adapted.get('learning-system'),
+  assert.match(adapted.get('learning-system'), /调用主页生成器始终传/,
+    '主页生成器必须显式传工作区这条规矩要写在宿主约定里');
+  // 合成正文反证：技能里真的出现裸的 gen_home 调用时，导出必须补上显式工作区
+  // （源技能里已经一处都没有了，所以只能拿合成样本来证明这条改写还活着）。
+  const sample = '---\nname: lesson-design\ndescription: 合成样本\n---\n\n刷新主页：python3 -B <root>/scripts/gen_home.py\n';
+  assert.match(adaptOpenAiSkill(sample, 'lesson-design'),
     /<python> -X utf8 -B '<root>\/scripts\/gen_home\.py' '<LEARN_WORKSPACE>'/, 'gen_home 必须显式传工作区');
 });
 

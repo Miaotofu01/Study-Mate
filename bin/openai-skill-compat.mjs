@@ -7,17 +7,7 @@ const HOST_GUIDE = `## OpenAI 宿主约定（导出时生成）
 
 - **引擎定位**：本文件位于 \`<root>/skills/<技能名>/SKILL.md\`；从实际文件路径定位包含 \`skills/\`、\`scripts/\`、\`templates/\`、\`schemas/\`、\`docs/\` 的插件根目录，记为 \`<root>\`。引擎与插件缓存只读，学习数据写入另一个可写工作区。所有相对的脚本、模板、schema、文档路径均相对 \`<root>\`；参考文档中的旧宿主安装说明不参与本插件启动。
 - **加载协议**：正文说“加载某技能”时，用宿主文件读取工具读 \`<root>/skills/<技能名>/SKILL.md\`；不需要专门的技能调用工具。缺少文件读取能力时说明具体缺项，不声称已加载。所有角色的教学职责与文件归属保持不变。
-- **原生工具（DSH 专属）在本宿主不存在**：正文里出现的 \`studymate_*\` 是 DSH 侧的原生工具（契约见 \`<root>/skills/learning-system/references/tools.md\`），**本宿主一个都调不到**。按下面这张降级表用文件读写与 \`<root>/scripts/\` 下的脚本完成同一件事；缺的能力如实说明，**不要假装调用过工具**。
-  | 正文里的工具 | 本宿主怎么做 |
-  |---|---|
-  | \`studymate_workspace_context\` | 读配置里的工作区、\`.learning/MEMORY.md\`、当前科目的 \`progress.yaml\` 与最近的学习记录 |
-  | \`studymate_validate_curriculum\` | \`<python> -X utf8 -B '<root>/scripts/check_curriculum.py' '<数据文件>'\`（给科目目录就逐份校验） |
-  | \`studymate_validate_lesson\` | \`<python> -X utf8 -B '<root>/scripts/check_lesson.py' '<内容文件>' --subject '<subject_path>' --node '<节点id>'\` |
-  | \`studymate_validate_pool\` | \`<python> -X utf8 -B '<root>/scripts/check_pool.py' '<subject_path>'\` |
-  | \`studymate_validate_handoff\` | \`<python> -X utf8 -B '<root>/scripts/check_handoff.py' '<stage_dir>' --role '<角色>' [--node '<节点id>']\` |
-  | \`studymate_renumber_lessons\` | \`<python> -X utf8 -B '<root>/scripts/renumber_lessons.py' '<subject_path>' [--dry-run] [--render]\` |
-  | \`studymate_apply_empty_reasons\` | \`<python> -X utf8 -B '<root>/scripts/apply_empty_reasons.py' '<subject_path>' '<节点id>' '<tsv>'\` |
-  | \`studymate_export\` | \`<python> -X utf8 -B '<root>/scripts/render_lesson.py' '<subject_path>' '<节点id>'\` 出课件页，\`<python> -X utf8 -B '<root>/scripts/gen_home.py' '<LEARN_WORKSPACE>'\` 出主页 |
+- **原生工具（DSH 专属）在本宿主不存在**：DSH 侧的 \`studymate_\` 系列工具（契约见 \`<root>/skills/learning-system/references/tools.md\`）在这里**一个都调不到**——正文里点名它们的地方，导出时已经换成下面的等价做法（用文件读写与 \`<root>/scripts/\` 下的脚本完成同一件事）。缺的能力如实说明，**不要假装调用过工具**。
 - **工作区**：总控传入的 \`<LEARN_WORKSPACE>\` 与 \`subject_path\` 必须是实际绝对路径；新会话按总控的“会话开场”恢复。不要把插件目录、缓存或未知的当前目录当作学习数据目录。角色不另选工作区。
 - **工具能力**：只使用宿主实际提供的提问、浏览、文件读写、图片查看、命令执行、委派与预览工具。提问工具不可用时总控用普通对话提问；角色把待问事项交给总控。检索不可用时记录未核验来源与 Gaps，不编造核验结果；图片不可取得时允许空图片库。文件或执行工具不可用时可以继续讨论，但具体生成、持久化与校验必须如实标为未完成。
 - **角色执行**：总控阶段的调度动作由总控执行（角色自己能派什么由各自规格决定，规格没写就不派）。有委派工具时按总控规范分工；没有委派工具时由总控按角色规格串行执行，每段读取对应规格，以“准备讲解/核对练习”等工作内容报告进度，完成产物与检查后才切回总控。不得假称启动了子 agent；串行执行仍保留正文→出题→原样搬运→渲染的顺序、题目唯一 owner 与档案归属，不能用总控身份随手改角色产物。
@@ -36,6 +26,27 @@ function replaceRequired(text, pattern, replacement, name) {
   if (!pattern.test(text)) throw new Error(`OpenAI skill adaptation needs updating: ${name}`);
   return text.replace(pattern, replacement);
 }
+
+// 源技能里的 `studymate_*` 是本插件在 DSH 里的原生工具（#68），这个宿主没有它们：
+// 导出时逐名翻译成等价的引擎命令，调用面不留悬空引用。命令故意写成
+// `python3 -B <root>/scripts/x.py`（脚本路径不带引号），下面那段通用的 python 规整
+// 才认得出来、会把它变成 `<python> -X utf8 -B '<root>/scripts/x.py' …`。
+// 新增原生工具时这里加一行——scripts/tests/test_skill_contracts.mjs 会检查覆盖率。
+/* 无头宿主（Codex / ChatGPT Work）没有原生工具：技能正文里的 `studymate_*` 在这里换成
+   本宿主跑得动的等价做法。**有 1:1 脚本的落点必须写成「脚本路径不带引号」的
+   `python3 -B <root>/scripts/x.py`**——下面的通用规整只认这种写法（带引号就静默跳过，
+   导出件里会留下跑不动的命令），补解释器、`-X utf8` 与路径引号都归它。
+   两个没有 1:1 脚本的工具如实写成本宿主的做法，不假装有一条命令。
+   契约与人类可读的对照表在 `.dsh/skills/learning-system/references/tools.md` §8。 */
+export const NATIVE_TOOL_FALLBACK = {
+  studymate_workspace_context: '读工作区配置、.learning/MEMORY.md、当前科目的 progress.yaml 与最近的学习记录',
+  studymate_validate_curriculum: "python3 -B <root>/scripts/check_curriculum.py '<curriculum.yaml>'",
+  studymate_validate_lesson: "python3 -B <root>/scripts/render_lesson.py '<subject_path>' '<节点id>' --check",
+  studymate_validate_pool: "python3 -B <root>/scripts/check_pool.py '<subject_path>'",
+  studymate_validate_handoff: "python3 -B <root>/scripts/check_handoff.py '<stage_dir>' --role '<角色>'",
+  studymate_renumber_lessons: "python3 -B <root>/scripts/renumber_lessons.py '<subject_path>'",
+  studymate_apply_empty_reasons: "python3 -B <root>/scripts/apply_empty_reasons.py '<subject_path>' '<节点id>' '<tsv>'",
+};
 
 function adaptController(body) {
   let result = replaceRequired(body, /^0\. \*\*定位工作区与引擎\*\*：[^\n]+/m,
@@ -141,6 +152,11 @@ export function adaptOpenAiSkill(content, name) {
     // 本插件不读 DSH 的 studymate-config.yaml，工作区根一律记作 `<LEARN_WORKSPACE>`。
     body = body.replaceAll('~/.dsh/studymate-config.yaml', '宿主的全局工作区配置');
     body = body.replaceAll('<WS>', '<LEARN_WORKSPACE>');
+  }
+  // 原生工具名先落到本宿主的等价命令，再走下面那段通用的 python 规整（顺序不能反：
+  // 规整只认脚本路径不带引号的写法）。
+  for (const [tool, fallback] of Object.entries(NATIVE_TOOL_FALLBACK)) {
+    body = body.replaceAll(tool, fallback);
   }
   body = body.replaceAll('.dsh/skills/', 'skills/')
     .replaceAll('/tmp', '<STUDYMATE_SCRATCH>')
