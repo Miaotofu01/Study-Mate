@@ -1,4 +1,4 @@
-/* 技能调用面 ↔ 工具注册表对账（issue #81 的验收面）
+/* 技能正文 ↔ 代码对账（issue #81 的验收面）：调用面与词表
    ────────────────────────────────────────────────────────────────────────
    洗技能调用面时最容易犯的错不是写错句子，而是写了一个**不存在的工具**：技能照样能读、
    模型照样会照做，直到真实会话里那一步才失败——而门禁全绿。这条套件把两头钉在一起：
@@ -26,6 +26,10 @@ import { adaptAntigravitySkill, NATIVE_TOOL_FALLBACK as AGY_FALLBACK }
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SKILLS_DIR = path.join(ROOT, '.dsh', 'skills');
 const { STUDY_TOOL_NAMES } = await import(pathToFileURL(path.join(ROOT, 'lib/tools/index.ts')).href);
+const {
+  LAYERS, LAYER_RULES, QUESTION_KINDS, QUESTION_KIND_SHAPES, QUESTION_RULES,
+  EVIDENCE_BY_TRUST, NON_INDEPENDENT_EVIDENCE,
+} = await import(pathToFileURL(path.join(ROOT, 'lib/core/rules.ts')).href);
 
 const sources = new Map(fs.readdirSync(SKILLS_DIR, { withFileTypes: true })
   .filter(entry => entry.isDirectory())
@@ -112,4 +116,41 @@ test('#81 管的七份技能不再出现旧档位与旧层级词', () => {
     }
   }
   assert.deepEqual(offenders, [], `旧词表残留在技能里：${offenders.join('、')}`);
+});
+
+test('layered-practice 的四层与四种题型与代码词表逐字对齐', () => {
+  // 词表的唯一出处是 `lib/core/rules.ts`（数据契约是 `schemas/question.schema.json` 的 `kind.enum`）。
+  // 技能里漂一格，模型就会写出 schema 不认的层级、或判分那一轨跑不起来的题型——
+  // 所以这里不比对「说法像不像」，而是逐字比。
+  const text = sources.get('layered-practice');
+  assert.ok(text, '技能目录里没有 layered-practice');
+  for (const layer of LAYERS) {
+    assert.ok(text.includes(`**${layer}**`), `layered-practice 少了四层里的「${layer}」`);
+    assert.ok(text.includes(LAYER_RULES[layer].display),
+      `layered-practice 的「${layer}」通过标准与 LAYER_RULES 不一致：${LAYER_RULES[layer].display}`);
+  }
+  for (const kind of QUESTION_KINDS) {
+    assert.ok(text.includes(`**${kind}**`), `layered-practice 少了四种题型里的「${kind}」`);
+    for (const field of QUESTION_KIND_SHAPES[kind].required) {
+      assert.ok(text.includes(field), `「${kind}」的必备字段 ${field} 没写进 layered-practice`);
+    }
+    // 「服务哪一层」也要逐层对上：题型的层级匹配由 QUESTION_RULES 定，技能不能各说各的。
+    for (const layer of QUESTION_RULES[kind].layers) {
+      assert.ok(new RegExp(`\\*\\*${kind}\\*\\*[^\\n]*${layer}`).test(text),
+        `layered-practice 里「${kind}」没有标出它服务「${layer}」`);
+    }
+  }
+  const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'schemas', 'question.schema.json'), 'utf8'));
+  assert.deepEqual(schema.properties.kind.enum, [...QUESTION_KINDS],
+    'schema 的 kind.enum 与 rules.ts 的 QUESTION_KINDS 分叉了');
+});
+
+test('evidence-check 的证据资格清单与代码常量逐条对齐', () => {
+  const text = sources.get('evidence-check');
+  for (const kind of EVIDENCE_BY_TRUST) {
+    assert.ok(text.includes(kind), `evidence-check 少了可信度排序里的「${kind}」`);
+  }
+  for (const kind of NON_INDEPENDENT_EVIDENCE) {
+    assert.ok(text.includes(kind), `evidence-check 少了排除清单里的「${kind}」`);
+  }
 });
