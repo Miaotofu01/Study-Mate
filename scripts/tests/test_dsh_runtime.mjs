@@ -72,21 +72,30 @@ async function probe() {
     const bootExports = await import(pathToFileURL(bootFile).href);
     const runProfile = bootExports.runProfile || Object.values(bootExports).find(value => typeof value === 'function' && value.name === 'runProfile');
     assert.equal(typeof runProfile, 'function', 'The installed DSH must expose runProfile');
-    const [{ loadLayeredEnv }, registry] = await Promise.all([
+    const [{ loadLayeredEnv, loadProfileDirectory }, registry] = await Promise.all([
       fromRuntime('dsh-app-boot'), fromRuntime(isModern ? 'dsh-agent-preset-registry' : 'dsh-agent-presets'),
     ]);
+    const profileName = process.env.STUDYMATE_RUNTIME_PROFILE || 'web';
     app = await runProfile({
-      environment: loadLayeredEnv('studymate-runtime-regression', home), profile: 'web', patchFiles: [],
+      environment: loadLayeredEnv('studymate-runtime-regression', home), profile: profileName, patchFiles: [],
+      // Desktop owns this profile and supplies it directly to runProfile.
+      ...(profileName === 'desktop' ? { resolvedProfile: {
+        profile: loadProfileDirectory('dsh', path.join(dshHome, 'profiles', profileName), path.join(runtime, 'package.json')),
+        installAnchor: path.join(runtime, 'package.json'),
+      } } : {}),
       args: ['--host', '127.0.0.1', '--port', '0', '--no-open'],
     });
     assert.ok(app.ctx.get('webServer')?.port > 0, 'Web must listen on an ephemeral port');
+    const fresh = process.env.STUDYMATE_RUNTIME_SCENARIO === 'fresh';
     const nativeEntries = [...app.ctx.loader.entries()].filter(entry => entry.options.name === '@yunmiao/studymate');
-    assert.equal(nativeEntries.length, 1, 'There must be exactly one native entry');
+    assert.equal(nativeEntries.length, fresh ? 0 : 1, 'Only native installations should have a native entry');
     const downgraded = process.env.STUDYMATE_RUNTIME_SCENARIO === 'downgraded';
     const migrated = downgraded || process.env.STUDYMATE_RUNTIME_SCENARIO === 'migrated';
-    assert.equal(Boolean(nativeEntries[0].disabled), migrated, 'Only the migrated native entry should be disabled');
-    if (!migrated) assert.equal(nativeEntries[0].fiber?.state, 2, 'Native entry must remain Active');
-    const expectLearning = migrated || isModern;
+    if (!fresh) {
+      assert.equal(Boolean(nativeEntries[0].disabled), migrated, 'Only the migrated native entry should be disabled');
+      if (!migrated) assert.equal(nativeEntries[0].fiber?.state, 2, 'Native entry must remain Active');
+    }
+    const expectLearning = fresh || migrated || isModern;
     const roster = await app.ctx.agentPresets.list();
     const standard = await app.ctx.agentPresets[isModern ? 'resolve' : 'resolveMountable']('standard');
     assert.equal(standard.broken, undefined, 'Standard mode must remain usable');
@@ -132,12 +141,12 @@ async function probe() {
   stdout(`${marker}${JSON.stringify(result)}\n`);
 }
 
-function fixture(t, scenario) {
+function fixture(t, scenario, profileName = 'web') {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-runtime-'));
   t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
   const home = path.join(temporary, "家 O'Brien");
   const dshHome = path.join(home, '.dsh');
-  const profile = path.join(dshHome, 'profiles/web');
+  const profile = path.join(dshHome, 'profiles', profileName);
   const workspace = path.join(home, '学习资料');
   fs.mkdirSync(profile, { recursive: true });
   fs.mkdirSync(workspace, { recursive: true });
@@ -148,11 +157,12 @@ function fixture(t, scenario) {
   }
   Object.assign(env, { HOME: home, USERPROFILE: home, DSH_HOME: dshHome, LEARN_WORKSPACE: workspace,
     XDG_CONFIG_HOME: path.join(home, '.config'), XDG_CACHE_HOME: path.join(home, '.cache'),
-    DSH_TELEMETRY_DISABLED: '1', STUDYMATE_DSH_PACKAGE: path.resolve(runtime), STUDYMATE_RUNTIME_SCENARIO: scenario });
+    DSH_TELEMETRY_DISABLED: '1', STUDYMATE_DSH_PACKAGE: path.resolve(runtime), STUDYMATE_RUNTIME_SCENARIO: scenario,
+    STUDYMATE_RUNTIME_PROFILE: profileName });
   const installed = path.join(profile, 'node_modules/@yunmiao/studymate');
-  fs.mkdirSync(path.dirname(installed), { recursive: true });
+  if (scenario !== 'fresh') fs.mkdirSync(path.dirname(installed), { recursive: true });
   if (scenario === 'native') fs.symlinkSync(project, installed, process.platform === 'win32' ? 'junction' : 'dir');
-  else {
+  else if (scenario !== 'fresh') {
     fs.mkdirSync(path.join(installed, 'bin'), { recursive: true });
     fs.writeFileSync(path.join(installed, 'package.json'), JSON.stringify({ name: '@yunmiao/studymate', version: '0.1.3',
       exports: { '.': './bin/dsh-plugin.mjs' }, dsh: { bundle: { patch: './cordis.patch.yml' } } }));
@@ -162,24 +172,27 @@ function fixture(t, scenario) {
       'export const inject = ["agentPresets"]; export function apply() { throw new Error("StudyMate 0.1.3 incompatible native entry was executed"); }');
   }
   const manifest = path.join(profile, 'package.json');
-  fs.writeFileSync(manifest, JSON.stringify({ name: 'studymate-test-profile', private: true,
-    dependencies: { '@yunmiao/studymate': scenario === 'native'
+  if (scenario !== 'fresh' || profileName === 'desktop') fs.writeFileSync(manifest, JSON.stringify({ name: 'studymate-test-profile', private: true,
+    dependencies: scenario === 'fresh' ? {} : { '@yunmiao/studymate': scenario === 'native'
       ? JSON.parse(fs.readFileSync(path.join(project, 'package.json'), 'utf8')).version : '0.1.3' },
-    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@yunmiao/studymate'] } } }, null, 2));
+    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app',
+      ...(scenario === 'fresh' ? [] : ['@yunmiao/studymate'])] } } }, null, 2));
   const patch = path.join(profile, 'cordis.patch.yml');
   const unrelatedPatch = '# Existing unrelated plugin\n- insert:\n  - id: unrelated-disabled\n    name: "@local/not-installed"\n    disabled: true\n';
   fs.writeFileSync(patch, unrelatedPatch);
-  const preserved = [manifest, path.join(profile, 'pnpm-lock.yaml'), path.join(dshHome, 'cordis.patch.yml'),
+  const preserved = [path.join(dshHome, 'cordis.patch.yml'),
     path.join(dshHome, 'profiles/other/package.json'), path.join(dshHome, 'profiles/other/cordis.patch.yml')];
-  for (const file of preserved.slice(1)) {
+  if (scenario !== 'fresh') preserved.unshift(path.join(profile, 'pnpm-lock.yaml'));
+  for (const file of preserved) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, file.endsWith('package.json') ? '{"private":true,"custom":"keep"}\n'
       : file.endsWith('pnpm-lock.yaml') ? "lockfileVersion: '9.0'\nsettings: {}\n" : '# Keep this profile untouched\n[]\n');
   }
+  if (fs.existsSync(manifest)) preserved.unshift(manifest);
   const before = preserved.map(file => fs.readFileSync(file));
   function unchanged() {
     preserved.forEach((file, index) => assert.deepEqual(fs.readFileSync(file), before[index], `${file} must remain unchanged`));
-    assert.ok(fs.readFileSync(patch, 'utf8').startsWith(unrelatedPatch), 'Unrelated Web patch bytes must remain unchanged');
+    assert.ok(fs.readFileSync(patch, 'utf8').startsWith(unrelatedPatch), 'Unrelated profile patch bytes must remain unchanged');
   }
   function runProbe(selectedRuntime = runtime, selectedScenario = scenario) {
     const result = spawnSync(process.execPath, [self, '--probe'], {
@@ -199,15 +212,18 @@ function fixture(t, scenario) {
     fs.mkdirSync(bin);
     const dshBin = path.join(selectedRuntime, 'lib/bin.js');
     if (process.platform === 'win32') {
-      fs.writeFileSync(path.join(bin, 'dsh.cmd'), '@echo off\r\n"' + process.execPath + '" "' + dshBin + '" %*\r\n');
+      // Keep the shim ASCII: cmd.exe must not decode Unicode installation paths.
+      fs.writeFileSync(path.join(bin, 'dsh.cmd'), '@echo off\r\n"%STUDYMATE_TEST_NODE%" "%STUDYMATE_TEST_DSH_BIN%" %*\r\n');
     } else {
       // Match a real npm command while using only the supplied DSH installation.
       fs.symlinkSync(dshBin, path.join(bin, 'dsh'), 'file');
       fs.symlinkSync(process.execPath, path.join(bin, 'node'), 'file');
     }
-    const installerEnv = { ...env, PATH: bin + path.delimiter + (env.PATH || env.Path || '') };
+    const installerEnv = { ...env, PATH: bin + path.delimiter + (env.PATH || env.Path || ''),
+      STUDYMATE_TEST_NODE: process.execPath, STUDYMATE_TEST_DSH_BIN: dshBin };
     delete installerEnv.Path;
-    const result = spawnSync(process.execPath, [path.join(project, 'bin/studymate.mjs'), 'install'], {
+    const result = spawnSync(process.execPath, [path.join(project, 'bin/studymate.mjs'), 'install',
+      ...(profileName === 'web' ? [] : ['--profile', profileName])], {
       env: installerEnv, cwd: home, encoding: 'utf8', timeout: 60000, windowsHide: true,
     });
     assert.equal(result.status, 0, redact(result.error?.message || result.stderr || result.stdout));
@@ -224,6 +240,21 @@ if (process.argv.includes('--probe')) {
   const metadata = JSON.parse(fs.readFileSync(path.join(runtime, 'package.json'), 'utf8'));
   assert.equal(metadata.name, '@deepseek-ai/dsh');
   if (process.env.STUDYMATE_DSH_EXPECTED_VERSION) assert.equal(metadata.version, process.env.STUDYMATE_DSH_EXPECTED_VERSION);
+  test(`DSH ${metadata.version}: fresh standalone install and reinstall expose one usable learning mode`, { timeout: 120000 }, t => {
+    const f = fixture(t, 'fresh');
+    const learningData = path.join(f.workspace, 'keep.txt');
+    fs.writeFileSync(learningData, 'existing learning data');
+    assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate-config.yaml')), false);
+    assert.equal(fs.existsSync(path.join(f.dshHome, 'profiles/web/package.json')), false);
+    for (let installation = 0; installation < 2; installation++) {
+      f.install();
+      const outcome = f.runProbe();
+      assert.equal(outcome.learningPresets, 1);
+      assert.equal(outcome.learningReady, true);
+      assert.equal(fs.readFileSync(learningData, 'utf8'), 'existing learning data');
+      f.unchanged();
+    }
+  });
   test(`DSH ${metadata.version}: native entry keeps Web usable`, { timeout: 70000 }, t => {
     const f = fixture(t, 'native');
     const outcome = f.runProbe();
@@ -234,6 +265,22 @@ if (process.argv.includes('--probe')) {
     }
     f.unchanged();
   });
+  if (atLeastRelease(metadata.version, 2, 0)) {
+    for (const scenario of ['native', 'fresh']) {
+      test(`DSH ${metadata.version}: Desktop ${scenario} installation exposes one usable learning mode`, { timeout: 70000 }, t => {
+        const f = fixture(t, scenario, 'desktop');
+        assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate-config.yaml')), false);
+        const learningData = path.join(f.workspace, 'keep.txt');
+        fs.writeFileSync(learningData, 'existing learning data');
+        if (scenario === 'fresh') f.install();
+        const outcome = f.runProbe();
+        assert.equal(outcome.learningPresets, 1);
+        assert.equal(outcome.learningReady, true);
+        assert.equal(fs.readFileSync(learningData, 'utf8'), 'existing learning data');
+        f.unchanged();
+      });
+    }
+  }
   test(`DSH ${metadata.version}: installer recovers the old native package without changing other profiles`, { timeout: 70000 }, t => {
     const f = fixture(t, 'migrated');
     const learningData = path.join(f.workspace, 'learning-data.txt');

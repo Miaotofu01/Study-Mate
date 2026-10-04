@@ -47,8 +47,44 @@ def main():
     check('规格仍要求术语表两节（docs/规范/文件归属.md）', ok, f'缺 {missing}')
 
     ok, missing = has_all(read('.dsh/skills/learning-system/SKILL.md'),
-                          ['## Why', '## Success looks like', '## Constraints'])
-    check('规格仍要求使命三节（learning-system 建课顺序）', ok, f'缺 {missing}')
+                          ['## Why', '## Success looks like', '## Constraints', '## Out of scope'])
+    check('规格仍要求使命四节（learning-system 建课顺序）', ok, f'缺 {missing}')
+
+    # 总控点名的落点必须在模板里有家：说「共享记忆」的某个条目，模板里就得真有那串字，
+    # 否则学生按指示去找、找不到（「各领域当前水平」是「我是谁」下面的一个条目，不是小节）。
+    system = read('.dsh/skills/learning-system/SKILL.md')
+    memory_tpl = read('templates/MEMORY.md')
+    for term in ['各领域当前水平']:
+        check(f'总控点名的「{term}」在 templates/MEMORY.md 里有家',
+              term in system and term in memory_tpl,
+              f'总控{"有" if term in system else "没有"}、模板{"有" if term in memory_tpl else "没有"}')
+
+    # ── 脚本调用形状：唯一出处是工程约束 §四，技能正文里是各宿主改写过的副本 ──────
+    # 副本必须与出处对得上：提示词里调用到的脚本要在 §四 有行，用到的每个 flag 要在
+    # 那一行的形状里出现。改形状只改 §四；往提示词里加 §四 没有的 flag 会红。
+    engine = read('docs/规范/工程约束.md').split('## 四、脚本一览', 1)[-1].split('\n## ', 1)[0]
+    shapes = {}
+    for line in engine.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
+        if len(cells) == 3 and re.fullmatch(r'`[\w-]+\.py`', cells[0]):
+            shapes[cells[0].strip('`')] = cells[2]
+    check('§四 每个脚本都写了参数形态',
+          bool(shapes) and all(shape for shape in shapes.values()),
+          f'缺 {[name for name, shape in shapes.items() if not shape]}')
+    check('§四 写了调用纪律（-B 与原因）', '-B' in engine and '__pycache__' in engine)
+
+    called = {}
+    for skill_path in sorted((REPO / '.dsh/skills').glob('*/SKILL.md')):
+        for name, args in re.findall(r'python3 (?:-[A-Za-z]+ )*<root>/scripts/([\w-]+\.py)([^\n`]*)',
+                                     skill_path.read_text(encoding='utf-8')):
+            called.setdefault(name, set()).update(re.findall(r'--[\w-]+', args))
+    check('提示词调用到的引擎脚本都在 §四 有行',
+          all(name in shapes for name in called),
+          f'缺 {sorted(name for name in called if name not in shapes)}')
+    drifted = {name: sorted(flags - set(re.findall(r'--[\w-]+', shapes[name])))
+               for name, flags in called.items()
+               if name in shapes and flags - set(re.findall(r'--[\w-]+', shapes[name]))}
+    check('提示词用到的每个 flag 都在 §四 的形状里', not drifted, str(drifted))
 
     ok, missing = has_all(read('docs/使用/使用说明.md'),
                           ['我是谁 / 教学偏好 / 学习习惯 / 跨科目观察'])

@@ -19,7 +19,7 @@
 
    题型一 · 选择题（页内自动判）
      q     题干（字符串，必填，两种题型都要）
-     opts  选项数组（必填，≥2 项）
+     opts  选项数组（必填，≥2 项，每项都是非空字符串）
      ans   正确选项下标，从 0 开始（必填，必须落在 opts 范围内）
      why   答完显示的一句解释（必填：检查会拦，见 scripts/check_lesson.py）
 
@@ -80,7 +80,8 @@
   }
 
   function questionBlock(item, index, total) {
-    return richBlock('quiz__q', item && item.q || '', total > 1 ? (index + 1) + '. ' : '');
+    return richBlock('quiz__q', item && typeof item.q === 'string' ? item.q : '',
+                     total > 1 ? (index + 1) + '. ' : '');
   }
 
   /* ── 题面/答案里的代码：```lang 围栏渲染成真代码块 ────────────────
@@ -311,6 +312,7 @@
   function isChoiceItem(item) {
     return !!item && typeof item === 'object' && !Array.isArray(item) &&
            nonEmptyText(item.q) && Array.isArray(item.opts) && item.opts.length >= 2 &&
+           item.opts.every(nonEmptyText) &&
            typeof item.ans === 'number' && item.ans % 1 === 0 &&
            item.ans >= 0 && item.ans < item.opts.length && nonEmptyText(item.why) &&
            !('answer' in item) && !('criteria' in item);

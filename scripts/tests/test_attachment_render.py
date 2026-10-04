@@ -17,6 +17,7 @@ import os
 import shutil
 import sys
 import tempfile
+from html.parser import HTMLParser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
@@ -41,6 +42,43 @@ def test_markdown_inline():
     check('斜体渲染', '<em>斜体</em>' in html_out)
     check('外链包含 target blank', '<a href="https://example.com" target="_blank" rel="noopener">链接</a>' in html_out)
     check('相对链接无 target blank', '<a href="other.html">相对链接</a>' in html_out)
+
+    class Attributes(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.tags = []
+
+        def handle_starttag(self, tag, attrs):
+            self.tags.append((tag, dict(attrs)))
+
+    def parse_inline(raw):
+        parser = Attributes()
+        parser.feed(gen_home.render_inline_markdown(raw))
+        return parser.tags
+
+    url = 'https://example.com/?a=1&b=2&q=**literal**&x=~~value~~'
+    tags = parse_inline(f'[查询]({url})')
+    check('链接查询串只转义一次且不解析行内样式', tags == [
+        ('a', {'href': url, 'target': '_blank', 'rel': 'noopener'})], repr(tags))
+    alt = 'a & b **原文** `code`'
+    tags = parse_inline(f'![{alt}](image.png?a=1&b=2)')
+    check('图片 URL 与 alt 原样保留', tags == [
+        ('img', {'src': 'image.png?a=1&b=2', 'alt': alt})], repr(tags))
+
+    injected = '`" onmouseover="alert(1)//`'
+    tags = parse_inline(f'[链接](https://example.com/{injected})')
+    check('URL 中的代码不能突破属性边界', tags == [
+        ('a', {'href': f'https://example.com/{injected}',
+               'target': '_blank', 'rel': 'noopener'})], repr(tags))
+    tags = parse_inline(f'![{injected}](image.png)')
+    check('alt 中的代码不能突破属性边界', tags == [
+        ('img', {'src': 'image.png', 'alt': injected})], repr(tags))
+    check('链接文字中的代码与粗体仍渲染',
+          '<strong>粗</strong> <code>code</code></a>' in
+          gen_home.render_inline_markdown('[**粗** `code`](page.html)'))
+    check('原文不能冒充内部占位符',
+          gen_home.render_inline_markdown('\x00CODE_0\x00 `safe`') ==
+          '\x00CODE_0\x00 <code>safe</code>')
 
 
 def test_markdown_blocks():

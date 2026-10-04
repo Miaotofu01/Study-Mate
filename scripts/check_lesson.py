@@ -23,7 +23,7 @@ r"""课件质量检查：只阻断工程/结构缺项；内容风格类问题只
     4 题目（结构，题型不同要求不同；字段契约见 templates/assets/quiz.js 顶部注释）：
        每个 .quiz[data-quiz] 块是合法 JSON 非空数组；每题：
          · 都有非空 `q`（题面）；
-         · 选择题（写了 opts/ans）：`opts` 是 ≥2 项的数组、`ans` 是范围内的整数、`why` 非空；
+         · 选择题（写了 opts/ans）：`opts` 是 ≥2 项的非空字符串数组、`ans` 是范围内的整数、`why` 非空；
          · 开放题（写了 answer/criteria）：`answer`（参考答案）与 `criteria`（判分要点）都非空；
          · 两组字段不能同时出现在一题里；都没有则题型不明。
          · `q`/`answer`/`criteria`/`why` 里的 ``` 围栏必须成对（不成对后半段会被渲染成代码块）。
@@ -801,6 +801,9 @@ def check_quiz(text, required=True):
                 opts = item.get('opts')
                 if not isinstance(opts, list) or len(opts) < 2:
                     problems.append(f'{label}选择题选项结构错误（缺 opts 或选项数 < 2）')
+                    continue
+                if any(not isinstance(opt, str) or not opt.strip() for opt in opts):
+                    problems.append(f'{label}选择题的每个选项必须是非空字符串')
                     continue
                 ans = item.get('ans')
                 if isinstance(ans, bool) or not isinstance(ans, int) or not 0 <= ans < len(opts):

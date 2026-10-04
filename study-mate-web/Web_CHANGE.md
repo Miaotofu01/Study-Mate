@@ -858,3 +858,18 @@ pytest **117 + 1 skip**、E2E **60 + 3 skip**、组件 **20 全绿**、`tsc --no
 - **真机核验（同一构建）**：`/api/home` 服务主页与其相对资源、越界被拒；「我的课程」内嵌主页且无右栏、
   带 `?subject=` 仍是原课程页；聊天右栏三个页签可切、标签 77px 不截断；已落盘会话里「确认建课」/「落点确认」
   两个按钮均为禁用；建课链真机 685s 跑通、产课/评估工具旅程由 E2E 覆盖。
+
+### 第九轮补充：并入 upstream/main（v1.0.0）解掉 PR 冲突
+
+- **为什么**：PR #43 被 GitHub 标为 `CONFLICTING`。经核，冲突面只有根 `README.md`——上游把那份内联目录树
+  换成了指向《工程约束 §二 目录与规则归属》与《文件归属》的指针（"同一事实只留一处"），本分支此前在那份树里
+  加过 `study-mate-web` 两行。解决：取上游的指针写法，另补一句说明子项目自包含、结构与归属看它自己的 README。
+- **合并带入的上游改动**：v1.0.0 发布链与 release 元数据恢复、7 个角色 `SKILL.md`、`schemas/`、
+  `scripts/`（`gen_home.py` / `check_curriculum.py` / `check_lesson.py` / `check_skill.py` 等）与 `.github/` 模板，
+  共 35 个被复用的引擎文件。子项目对引擎只读复用，故合并后**重跑全套门禁**：后端 pytest 152+1skip、
+  E2E 62+3skip（0 失败）、组件 20、tsc/build 通过，**根 `npm test` 77 条全绿**。
+- **一个长期误报消失了**：根门禁里那条"Windows CRLF 假红"（curriculum-designer 导出断言）随上游那份
+  `SKILL.md` 一并更新而消失；HANDOFF 的「已知坑」已改为"已消失 + 别把 only-fetch-branch 导致的
+  release 元数据比对照当成真红"。
+- **给上游维护者的建议**：`docs/规范/文件归属.md` 目前没有 `study-mate-web/` 这一行，而 README 的目录说明
+  已经改成指向它——建议合并本 PR 时在该表补一行，让"唯一出处"真正覆盖子项目。

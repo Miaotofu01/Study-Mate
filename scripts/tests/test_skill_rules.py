@@ -3,6 +3,11 @@
 
 每条 = (技能, 说明, 必须出现的片段)。片段取自旧版原文里**承载规则**的词
 （阈值、字段名、文件名、命令、时机、禁止项），不是文风词。
+
+**片段住在哪由 `rule-owners.json` 声明**，不由它挂在哪个技能下决定：`reaches` 说谁加载谁，
+`moved` 说某条规则的正文其实住在哪个协议里。断言问的是「这个技能够不够得着这条规则」，
+所以把一条规则从总控搬进它加载的协议时，改提示词 + 在表里加一行就够，断言不用动。
+表自身的形状（名字写错、条目失效、owner 够不着）也在这里守。
 """
 import json
 import os
@@ -10,7 +15,32 @@ import re
 import sys
 from pathlib import Path
 
-SK = str(Path(__file__).resolve().parents[2] / '.dsh' / 'skills')
+SKILLS_DIR = Path(__file__).resolve().parents[2] / '.dsh' / 'skills'
+SK = str(SKILLS_DIR)
+
+# 规则归属声明表（说明见 scripts/tests/README.md「提示词规则归属」）
+_owners = json.loads((Path(__file__).parent / 'rule-owners.json').read_text(encoding='utf-8'))
+REACHES = _owners['reaches']
+MOVED = _owners['moved']
+SKILL_TEXT = {p.parent.name: p.read_text(encoding='utf-8') for p in SKILLS_DIR.glob('*/SKILL.md')}
+
+
+def owner_of(skill, desc, moved=None):
+    """这条规则的正文住在哪个技能里；没声明过就是它自己。"""
+    return (MOVED if moved is None else moved).get(skill, {}).get(desc, skill)
+
+
+def reachable(skill):
+    """这个技能够得着的技能：它自己 + 它加载的协议。"""
+    return [skill, *REACHES.get(skill, [])]
+
+
+def contract(label, condition):
+    global bad, total
+    total += 1
+    bad += not condition
+    print(f"{'PASS' if condition else 'FAIL'}  {label}")
+
 
 RULES = {
 'learning-system': [
@@ -37,7 +67,7 @@ RULES = {
  ('必问项之四：项目给 3 个以上候选', '3 个以上候选'),
  ('必问项之五：实验载体先随派工交给 practice-evaluator', '先随派工 prompt 交给 `practice-evaluator`'),
  ('必问项之三：前置基础按科目问具体项', '**按科目问具体项**'),
- ('前置基础落 Constraints 与共享记忆', '「科目使命」的 `## Constraints`，随盘问结果一起交给 `curriculum-designer`'),
+ ('前置基础落 Constraints 与共享记忆', '「科目使命」的 `## Constraints`'),
  ('事实不问学生，但自评必须问', '**前置基础是学生自评、不是事实**'),
  ('事实不问学生', '事实不问学生'),
  ('结束标准 frontier 空', 'frontier 空'),
@@ -45,12 +75,12 @@ RULES = {
  ('不重复问同一个问题', '不重复问同一个问题'),
  ('学生说今天到这别再推', '今天到这'),
  ('节点状态置学习中', '学习中'),
- ('派工的值见文件归属表', '按 `<root>/docs/规范/文件归属.md` 角色表「派工时给的值」一列给**值**'),
+ ('派工的值按角色规格的「输入」节给（值归消费者）', '**按该角色规格的「输入」节给值**（派工前读一次那一节，它写明哪些要你给、哪些它自己从文件里读）'),
  ('出题串行交接：内容文件写盘后才派出题人', '锚点是讲解的产物，内容文件没写盘就先别派出题人'),
  ('写盘时题面与答案一个字都不改', '题面与答案一个字都不改'),
  ('empty_reason 由总控用脚本打进内容文件', 'scripts/apply_empty_reasons.py <subject_path> <节点id> <tsv>'),
  ('你写盘 lab 并自查交付态（载体无关）', '参考解全绿、任务/留白态非零退出'),
- ('总控跑渲染器出页面', 'python3 <root>/scripts/render_lesson.py <subject_path> <节点id>'),
+ ('总控跑渲染器出页面', 'python3 -B <root>/scripts/render_lesson.py <subject_path> <节点id>'),
  ('渲染失败按 <文件>:<行> 打回对应角色', '按 `<文件>:<行>` 打回'),
  ('实验课说明页：cp 到位后走渲染器（内容格式）', '`cp` 说明页到 `lessons/<序号>-<节点id>.md`'),
  ('实验课与概念课同一条路（渲染 → 检查）', '跟概念课同一条路'),
@@ -77,43 +107,28 @@ RULES = {
  ('只派五类活（收集资料 + 采图 + 大纲/课件/出题）', '只派五类活'),
  ('派工边界按角色规格（默认不派、规格写明要派的按规格派）', '**默认不派子 agent；规格里写明要派的，按规格派**'),
  ('派角色只用全新上下文的 subagent', '不要用 `subagent_fork`'),
- ('fork 注入总控已完成的回合，角色误当总控', '角色会误以为自己是总控'),
- ('角色身份靠全新上下文，不靠压低层数', '不靠压低层数'),
  ('角色边界：不调 ask_user_question、不建也不改环境（派工边界按各自规格）', '**不调用 `ask_user_question`**'),
  ('角色派工边界写在各角色规格里', '规格没写就不派'),
  ('角色不建也不改环境', '**不建也不改环境**'),
  ('同一科目同时只有一个写入者', '同一科目同时只有一个写入者'),
  ('暂存目录按角色分开，不许共用固定路径', '这类共用固定路径'),
  ('交付报能复算的规模，写盘后核对', '**必须报**能复算的规模'),
+ ('staged 交接先跑 handoff 校验再合盘', 'scripts/check_handoff.py'),
  ('搬运用 shell，不转抄（产物只经作者的手）', '**搬运用 shell，不转抄**'),
  ('位↔题交给检查，不手工核', '**「位 ↔ 题」交给检查，你别手工核**'),
  ('评估作答原文（不许摘要）', '**作答原文（逐字转发，不许摘要'),
  ('上游产出给路径，不转述', '**上游产出给路径，不转述**'),
  ('角色规格按路径交，read 读得到', '明说"先读它、照它执行"'),
  ('别把产物读进上下文再写出来', '**别读进上下文再写出来**'),
- ('等子 agent 不许 sleep 轮询（通知会唤醒主线程）', '它那一轮结束会**自动给你送回通知**并把你唤醒'),
- ('要原地等就用有等待语义的调用', '`job_output(wait: true)`'),
+ ('上一支没回来别派下一支（等通知，不轮询）', '上一支没回来别派下一支'),
  ('草稿路径模板带 slug 变体', "'<subject_path>/.stage/<角色>-<节点id或slug>/'"),
- ('开场默认先写暂存区，不探测工作区', '**默认先写暂存工作区，别去写配置里的 `workspace`、也别做任何探测写入**'),
+ ('开场默认先写暂存区，不探测工作区', '默认先写暂存工作区'),
  ('唯一不暂存的情况：会话目录就是工作区', '**只有一种情况不暂存**'),
  ('暂存根落会话目录，不用 /tmp', '`<WS>` = `<SESSION_DIR>/.studymate-stage/<slug>`'),
- ('明令禁止拿 /tmp 当中转', '别拿 `/tmp` 当中转站'),
- ('暂存模式的两条硬约束', '**暂存模式的两条硬约束**'),
  ('跑引擎脚本加 -B（别往只读引擎目录写 __pycache__）', '跑引擎的 Python 脚本一律加 `-B`'),
- ('暂存模式开场告知学生', '课程先建在会话目录下的临时工作区'),
- ('跨工具接力只在暂存根之下成立', '**每次落盘的下一步要能看见它**'),
- ('暂存模式收尾：问落点并搬走', '问一次成品放哪'),
- ('落点候选：学习工作区／桌面／文档／家目录', '**学习工作区**（配置里的 `workspace`，平时都在那，放进去就能续学）／**桌面**／**文档文件夹**／**用户根目录**'),
- ('有默认落点就排第一并标 Recommended', '**有默认落点就把它放第一项并标"(Recommended)"**'),
- ('落点写进会话侧偏好文件（零提权）', '`<SESSION_DIR>/.studymate-stage/prefs.md`'),
- ('偏好只改一行、不整文件覆盖', '就**只改这一行**，别整文件覆盖'),
- ('开场恢复落点偏好、存在就不重复问', '记成**默认落点**，收尾时它排在第一项、**不再重复问**'),
- ('改全局定位要先问学生', '要改就先问学生一句"以后默认就用这个位置吗"'),
- ('默认不动全局 workspace 键', '`workspace` 是**机器全局**的、在会话写边界外，**不要默默去改**'),
  ('会话结束也要确认落点已持久化', '**落点持久化**：这次收尾搬过东西的话'),
- ('落到工作区时刷新根主页', "gen_home.py '<WS>'"),
  ('cp 搬入后清掉 .stage/', 'rm -rf` 掉 `.stage/'),
- ('新科目并行：RESOURCES.md 落位后同时派两支', '**建池与拟大纲并行**——「资源清单」落位后，同时派下面两个（别串着等）'),
+ ('新科目并行：RESOURCES.md 落位后同时派两支', '**建池与拟大纲并行**'),
  ('并行两支各自的输入与汇合点一条链', '├─ 「采图」爬「图片库」\n        └─ 「课设」设计大纲\n     两边都回来 → 你写「课程大纲」、核对「图片库索引」→ 开始第一课'),
  ('图片库为空不阻塞', '图片库为空不阻塞'),
  ('并行段终点仍要问开始吗', '→ 开始第一课（仍按「对话节奏」问"开始吗"）'),
@@ -121,10 +136,9 @@ RULES = {
  ('资源清单收集归资料收集，总控只做小增量', '收集归「资料收集」'),
  ('判断标准：外部检索/大量生成/独立验证', '独立验证'),
  ('跳过节点记原因', '跳过原因'),
- ('单会话 1-2 个节点', '1-2 个节点'),
  ('跨科目只在 MEMORY 共享', '跨科目'),
  ('刷新主页命令', 'gen_home.py'),
- ('大纲插/删节点后跑 renumber 脚本重排重渲', 'python3 <root>/scripts/renumber_lessons.py <subject_path> [--dry-run] [--render]'),
+ ('大纲插/删节点后跑 renumber 脚本重排重渲', 'python3 -B <root>/scripts/renumber_lessons.py <subject_path> [--dry-run] [--render]'),
  ('renumber 的时机：报告受影响节点之后、刷新主页之前', '报告受影响节点之后、**刷新主页之前**'),
  ('探索入口先于首次记忆写入', '可选方向入口（首次写记忆之前）'),
  ('明确科目与恢复学习直达原流程', '已有明确科目直接走原流程，恢复已有科目不拦截'),
@@ -139,7 +153,7 @@ RULES = {
  ('探索只保留会话状态', '只维护会话状态，不写盘'),
  ('复用已有信息与允许读取的记忆', '只读允许读取的 `MEMORY.md` 相关分节，复用本轮表达'),
  ('保留来源与确认状态，不认证自述', '自述不是实测掌握证据'),
- ('确认建课之前不建科目、不写记忆或进度', '用户确认建课之前不创建科目，不写 `MEMORY.md`，不修改掌握度与学习进度，不建立持久化探索档案'),
+ ('确认建课之前不建科目、不写记忆或进度', '用户确认建课之前不创建科目，不写 `MEMORY.md`'),
  ('科目前不生成摘要与主页', '不为探索生成会话摘要、学习记录或刷新主页'),
  ('建课前不做知识小测', '建课前不做有标准答案的知识小测，不生成题库、自动评分或能力认证'),
  ('评估 owner 与输入仍真实', '题目的唯一 owner 仍为 `practice-evaluator`；禁止为调用它伪造 `subject_path`、节点或 assessment'),
@@ -149,12 +163,12 @@ RULES = {
  ('跳过探索回选择而不自动建课', '否则回到科目选择，不替学生选方向或自动建课'),
  ('跳过本题仍计数', '当前项记为未知，已问的问题仍计数，再继续必要问题'),
  ('不确定不猜测、不反复逼答', '记为未知，不猜测答案，不换说法反复逼答'),
- ('发问前递增，补问设备问题也计数', '每发一问先令 `asked_count += 1`；补问、追问、冲突确认、设备问题均计数'),
+ ('发问前递增，补问设备问题也计数', '`asked_count += 1`'),
  ('复用不计数，改答案不重置预算', '不能通过换话题、修改答案或重新命名阶段重置预算'),
- ('五问或关键项已覆盖即给阶段建议', '五个关键项已覆盖（包括明确未知），或 `asked_count == 5` 时，先给简短阶段建议'),
+ ('五问或关键项已覆盖即给阶段建议', '`asked_count == 5`'),
  ('信息已够不机械补五问', '足够时可以少于五问，不机械补问五遍'),
  ('五问后仅必要区分才补问', '五问后仅在有必要区分候选时补问'),
- ('八问或要求建议就停止追问', '`asked_count >= 8` 或用户要求先给建议时，哪怕信息不足也必须停问'),
+ ('八问或要求建议就停止追问', '`asked_count >= 8`'),
  ('未知时间、设备、基础不编造', '不得假定未知的时间、设备或基础'),
  ('选择菜单不暗藏新信息问题', '建议后的选择菜单不夹带新的信息问题'),
  ('兴趣与自评选项不作推荐', '兴趣、基础、自评、时间和偏好选项不标“推荐”或 `(Recommended)`'),
@@ -202,7 +216,7 @@ RULES = {
  ('lab 不预建', '不预建'),
  ('列出科目的四项', '上次学习日期'),
  ('共享组件更新要同步副本', '共享组件更新后同步'),
- ('图片库与索引归科目自己（不从 templates 同步）', '**「图片库」是科目自己的**：图片与「图片库索引」**不从 `<root>/templates/` 同步**'),
+ ('图片库与索引归科目自己（不从 templates 同步）', '**「图片库」是科目自己的**'),
  ('已引用的图不能删', '**已引用的图不能删**'),
  ('图片库随科目打包（区别于 .venv）', '学习产物，随科目整体拷贝或迁移时跟着走'),
  ('图片命名与索引规则指向采图规格', '命名与索引格式见采图规格'),
@@ -229,7 +243,7 @@ RULES = {
  ('归属边界', 'practice-evaluator'),
  ('三件文件的关系与 owner', '「课件内容文件」+「练习题库」+「课件页面」'),
  ('档案只留结构化摘要', '原始过程留在会话里'),
- ('评估记录 cp 搬入', '`deliver/assessments/NNNN-<节点id>.md`，**你 `cp` 搬入**'),
+ ('评估记录 cp 搬入', '`deliver/assessments/NNNN-<节点id>.md`'),
  ('科目隔离', '科目之间隔离'),
  ('只写工作区', '绝不写会话目录'),
  ('工作区根默认是会话目录下的暂存区', '路径以**工作区根 `<WS>`** 为前缀'),
@@ -237,6 +251,19 @@ RULES = {
  ('暂存模式禁止拿 /tmp 当中转（两个命名空间）', '别拿 `/tmp` 当中转'),
  ('角色产出走科目内的 .stage/', '角色产出走科目内的 `<subject_path>/.stage/`'),
  ('交付前 .stage 必须为空', '**交付前 `.stage/` 必须为空**'),
+ ('明令禁止拿 /tmp 当中转', '别拿 `/tmp` 当中转站'),
+ ('暂存模式的两条硬约束', '**暂存模式的两条硬约束**'),
+ ('暂存模式开场告知学生', '课程先建在会话目录下的临时工作区'),
+ ('跨工具接力只在暂存根之下成立', '**每次落盘的下一步要能看见它**'),
+ ('暂存模式收尾：问落点并搬走', '问一次成品放哪'),
+ ('落点候选：学习工作区／桌面／文档／家目录', '**学习工作区**（配置里的 `workspace`'),
+ ('有默认落点就排第一并标 Recommended', '**有默认落点就把它放第一项并标"(Recommended)"**'),
+ ('落点写进会话侧偏好文件（零提权）', '`<SESSION_DIR>/.studymate-stage/prefs.md`'),
+ ('偏好只改一行、不整文件覆盖', '就**只改这一行**，别整文件覆盖'),
+ ('开场恢复落点偏好、存在就不重复问', '记成**默认落点**，收尾时它排在第一项、**不再重复问**'),
+ ('改全局定位要先问学生', '要改就先问学生一句"以后默认就用这个位置吗"'),
+ ('默认不动全局 workspace 键', '`workspace` 是**机器全局**的'),
+ ('落到工作区时刷新根主页', "gen_home.py '<WS>'"),
 ],
 'local-qa': [
  ('你亲自答不派 agent', '亲自回答'),
@@ -330,6 +357,7 @@ RULES = {
  ('实验说明页也交内容格式正文（语法见格式文档）', '说明页也是内容格式正文'),
 ],
 'practice-evaluator': [
+ ('staged 题目/lab/评估写 handoff manifest', 'handoff.json'),
  ('输入节标题统一', '## 输入（总控在 prompt 里给）'),
  ('你是唯一 owner', '全系统的题都由你出'),
  ('你不写科目目录（产出落 deliver/）', '你不写**科目目录**'),
@@ -373,6 +401,7 @@ RULES = {
  ('不改课程与档案', '不改课程与档案文件'),
 ],
 'resource-scout': [
+ ('staged 资源清单写 handoff manifest', 'handoff.json'),
  ('输入节标题统一', '## 输入（总控在 prompt 里给）'),
  ('只读权威教材与官方文档', '权威教材（公认教材、经典书、同行评审材料）与官方文档'),
  ('清单分两类：延伸阅读 + 易变内容的官方核对来源', '**易变内容的官方核对来源**：每条'),
@@ -398,7 +427,7 @@ RULES = {
 'image-scout': [
  ('输入节标题统一', '## 输入（总控在 prompt 里给）'),
  ('命名规则串：格式 + 字符集 + 无空格 + ≤60', '`<主题>-<子主题>-<要点>-<来源缩写>-<NN>.<ext>`，只用 `[0-9A-Za-z\\u4e00-\\u9fa5-]`、无空格、总长 ≤60'),
- ('索引是图片库索引，表头七列逐字固定', '写在「图片库索引」，表头逐字固定：`| 文件 | 主题标签 | 一句话说明 | 来源 URL | 许可 | 尺寸 | 抓取日期 |`'),
+ ('索引是图片库索引，表头七列逐字固定', '| 文件 | 主题标签 | 一句话说明 | 来源 URL | 许可 | 尺寸 | 抓取日期 |'),
  ('索引末尾 ## Gaps', '## Gaps'),
  ('只抓网页：不抓 PDF、不抓动态加载、不漫游搜索', '不抓 PDF、不抓动态加载、不漫游搜索'),
  ('站点边界：点名的 + 总控另给的额外站点', '**站点边界** = 清单点名的站点 + 总控另给的"额外允许站点"'),
@@ -408,13 +437,14 @@ RULES = {
  ('来源与许可：页面没标注就填「未标注」', '页面没写就填「未标注」'),
  ('许可是记录不是门槛（不为它放弃图/做核查）', '**许可是记录、不是门槛**（个人学习用途）'),
  ('交付：写盘即交付（不写别处）', '写盘即交付'),
- ('交付：正文只报五项（图片库路径/张数/索引路径/Gaps/最值得用的 3~5 张，此规则归本角色规格）', '正文只报五项：「图片库」路径、张数、「图片库索引」路径、`Gaps` 条数、**最值得用的 3~5 张**'),
+ ('交付：正文只报五项（图片库路径/张数/索引路径/Gaps/最值得用的 3~5 张，此规则归本角色规格）', '正文只报五项：'),
  ('边界：你只搬现成图（自己产图走另一条路）', '自己产图走另一条路（归「讲解」'),
  ('边界：不写课件、不做课程（归属指向 record-keeping）', '课件三份产物的归属见 `record-keeping` 的「课件三份产物的归属」'),
  ('收图体积上限 500 KB（与课件硬约束同一个数）', '**单张 >500 KB 的也不要**'),
  ('采图按条目点名，URL 自己读', '**URL 你自己从文件里读，别让总控抄一遍**'),
 ],
 'curriculum-designer': [
+ ('staged 大纲写 handoff manifest', 'handoff.json'),
  ('输入节标题统一', '## 输入（总控在 prompt 里给）'),
  ('输入六项', '盘问结果'),
  ('按依赖建 DAG', 'DAG'),
@@ -428,7 +458,7 @@ RULES = {
  ('侧重默认跟着 kind 走（方向不是配额）', '**侧重不许与 `kind` 打架**'),
  ('深度对齐目标层级', '目标层级'),
  ('resources 易变要官方文档', '官方文档'),
- ('资源每条带 title/type/url（本地教材没有 url）', '**本地教材没有 `url`，写 `reference/…` 指针即可**'),
+ ('资源每条带 title/type/url（本地教材没有 url）', '**本地教材没有 `url`'),
  ('title ≤16 字', '≤16 字'),
  ('objective ≤34 字', '≤34 字'),
  ('按需写不为整齐填满', '逐个填满'),
@@ -518,7 +548,7 @@ RULES = {
  ('生成图可裁可缩，成品 ≤500 KB', '**可以裁、缩、换配色**'),
  ('matplotlib 默认字体不出汉字、需指定 CJK', 'matplotlib **默认字体不出汉字**'),
  ('每张图必须有 alt:', '每张必须有 `alt:`'),
- ('渲染器章节：公式排版归渲染器（TeX 是它的输入）', '**公式排版**：注入离线 KaTeX，你只管写 TeX：行内 `$…$`、块级 `$$…$$`'),
+ ('渲染器章节：公式排版归渲染器（TeX 是它的输入）', '注入离线 KaTeX'),
  ('caption 只写一句话', '`caption:` 只写一句话'),
  ('课件别依赖外链，图要能离线打开', '别依赖外链**（页面里的图要能离线打开）'),
  ('课件页面内单张 ≤500 KB', '≤500 KB'),
@@ -543,7 +573,7 @@ RULES = {
  ('命名规则', '<序号>-<节点id>.md'),
  ('配图用 ::: figure 指令', '::: figure <相对路径>'),
  ('内联示意图可用 ::: svg（不是唯一画法）', '内联示意图另有 `::: svg`'),
- ('该配图处不用文字带过（配几张与画法不限）', '"前后对比、参数影响、结构/流程关系、数据分布"这类内容，用图比用文字省力'),
+ ('该配图处不用文字带过（配几张与画法不限）', '"前后对比、参数影响、结构/流程关系、数据分布"'),
  ('指针由渲染器算', '渲染器按「课程大纲」的 `nodes:` 顺序算'),
  ('第一课/最后一课由渲染器算', '第一课没有上一个、最后一课没有下一个'),
  ('内容文件里不写 HTML 标签', '出现块级 HTML 标签会被渲染器拦下'),
@@ -569,24 +599,52 @@ RULES = {
 
 bad = 0
 total = 0
+
+# 归属表自身的守卫：技能名写错、条目失效、owner 够不着，都要当场报出来——
+# 否则一条声明写歪了只会让断言悄悄放过，比没有声明更糟。
+for skill, targets in REACHES.items():
+    contract(f'归属表：{skill} 是真实技能', skill in SKILL_TEXT)
+    for target in targets:
+        contract(f'归属表：{skill} 加载的 {target} 是真实技能', target in SKILL_TEXT)
+for skill, overrides in MOVED.items():
+    contract(f'归属表：moved 的键 {skill} 是真实技能', skill in SKILL_TEXT)
+    known = {desc for desc, _ in RULES.get(skill, [])}
+    for desc, owner in overrides.items():
+        contract(f'归属表：moved 的条目 {desc!r} 在 {skill} 的规则表里', desc in known)
+        contract(f'归属表：{desc!r} 的 owner {owner} 是真实技能', owner in SKILL_TEXT)
+        contract(f'归属表：{owner} 在 {skill} 的可达名单里', owner in reachable(skill))
+
+# 机制自检（合成数据）：`moved` 现在是空表，但解析与可达判定得先证明是活的——
+# 否则它只是一段没人跑过的声明，下一次搬规则时才发现写歪了。
+_SYNTHETIC = {'learning-system': {'合成规则': 'record-keeping'}}
+contract('机制自检：moved 把 owner 解析到协议',
+         owner_of('learning-system', '合成规则', _SYNTHETIC) == 'record-keeping')
+contract('机制自检：没声明的规则 owner 是它自己',
+         owner_of('learning-system', '没声明过', _SYNTHETIC) == 'learning-system')
+contract('机制自检：record-keeping 在总控的可达名单里',
+         'record-keeping' in reachable('learning-system'))
+contract('机制自检：未加载的协议不在可达名单里',
+         'lesson-design' not in reachable('learning-system'))
+
 for skill, rules in RULES.items():
-    text = open(os.path.join(SK, skill, 'SKILL.md'), encoding='utf-8').read()
-    missing = [(desc, frag) for desc, frag in rules if frag not in text]
+    missing = []
+    for desc, frag in rules:
+        owner = owner_of(skill, desc)
+        if owner not in reachable(skill):
+            missing.append((desc, frag, f'{owner} 不在 {skill} 的可达名单里'))
+        elif frag not in SKILL_TEXT.get(owner, ''):
+            where = owner if owner == skill else f'{owner}（{skill} 加载的协议）'
+            missing.append((desc, frag, f'不在 {where}'))
     total += len(rules)
     if missing:
         bad += len(missing)
         print(f'FAIL {skill}: {len(missing)}/{len(rules)} 条规则在新版里找不到')
-        for desc, frag in missing:
-            print(f'       · {desc}  （找的是 {frag!r}）')
+        for desc, frag, why in missing:
+            print(f'       · {desc}  （找的是 {frag!r}；{why}）')
     else:
         print(f'PASS {skill}: {len(rules)} 条规则全部在位')
 
 # 这是静态协议检查，不执行模型，也不能证明真实对话会遵守问数与写入边界。
-def contract(label, condition):
-    global bad, total
-    total += 1
-    bad += not condition
-    print(f"{'PASS' if condition else 'FAIL'}  {label}")
 
 
 discovery_dir = Path(SK) / 'learning-discovery'
@@ -629,6 +687,49 @@ contract('对话场景有用户输入、后续回复、停止条件和独立判�
     and case.get('stop_when') and case.get('checks')
     and isinstance(case.get('max_user_turns'), int) and case['max_user_turns'] > 0
     for case in cases))
+
+# 引擎脚本调用要经两个宿主适配器改写（bin/openai-skill-compat.mjs、bin/antigravity-skill-compat.mjs），
+# 而两份正则都只认 `python3 [-B] <root>/scripts/x.py` 这种**不带引号**的脚本路径：路径一旦被引号
+# 包住，转换会静默跳过那一行，产物里就留下宿主跑不动的调用（#39 的 learning-system 正是这么漏的，
+# 且只在 OpenAI 一侧看得出来）。在源码层拦，两个宿主一起管，也不用等构建。
+quoted_calls = []
+unquoted_calls = 0
+for skill_path in sorted(Path(SK).glob('*/SKILL.md')):
+    for number, line in enumerate(skill_path.read_text(encoding='utf-8').splitlines(), 1):
+        for match in re.finditer(r"""python3\s+(?:-[A-Za-z]+\s+)*(['"]?)(<root>/scripts/[\w-]+\.py)""", line):
+            if match.group(1):
+                quoted_calls.append(f'{skill_path.parent.name}:{number}')
+            else:
+                unquoted_calls += 1
+contract(f'引擎脚本调用不带引号（适配器只认这种写法）{quoted_calls or ""}', not quoted_calls)
+contract(f'引擎脚本调用仍存在（守卫自身不空转）：{unquoted_calls} 处', unquoted_calls >= 5)
+
+# 宿主适配器把 DSH 措辞改写成宿主措辞时，锚点是「这句话」本身：正文一改，`String.replace` 就
+# 静默空转（产物里留下 DSH 措辞），`replaceRequired` 则整份导出报错。两类都不该等到构建才发现。
+# 每个适配器都声明了自己作用于哪几份 skill（`if (name === 'x')` / 适配器头部注释），所以判据是
+# **规格驱动**的：锚点必须在它自己声明的那几份源码里命中，而不是在随便哪一份里命中。
+ADAPTER_SCOPE = {
+    'bin/openai-skill-compat.mjs': ['learning-system', 'record-keeping'],
+    'bin/antigravity-skill-compat.mjs': ['learning-system', 'record-keeping'],
+}
+ROOT = Path(__file__).resolve().parents[2]
+DRIFT = []
+for adapter, scope in ADAPTER_SCOPE.items():
+    text = (ROOT / adapter).read_text(encoding='utf-8')
+    sources = {name: (Path(SK) / name / 'SKILL.md').read_text(encoding='utf-8') for name in scope}
+    anchors = [(f'/{body}/', re.compile(body, re.M if 'm' in flags else 0))
+               for body, flags in re.findall(
+                   r"replaceRequired\((?:result|body|\s*\n\s*result|\s*\n\s*body)?\s*,\s*\n?\s*/((?:[^/\\\n]|\\.)+)/([gimsuy]*)\s*,", text)]
+    anchors += [(repr(literal)[:48], literal)
+                for literal in re.findall(r"\.replace\(\s*\n?\s*'((?:[^'\\]|\\.){10,})'", text)]
+    for label, anchor in anchors:
+        if isinstance(anchor, str) and re.fullmatch(r'\{\{\w+\}\}', anchor):
+            continue  # 角色提示模板占位符，不是 skill 正文锚点
+        hit = any((anchor.search(body) if hasattr(anchor, 'search') else anchor in body)
+                  for body in sources.values())
+        if not hit:
+            DRIFT.append(f'{adapter} → {label}')
+contract(f'适配器锚点在它声明的 skill 里有家（{len(DRIFT)} 处失配）{DRIFT[:2]}', not DRIFT)
 
 print(f'\n合计 {total - bad}/{total} 条规则在位')
 sys.exit(1 if bad else 0)

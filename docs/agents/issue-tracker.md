@@ -55,4 +55,4 @@ GitHub 的 issue 与 PR **共用一套编号**，所以裸写的 `#42` 可能是
 
 ## 本仓库额外的规矩
 
-提交信息用 Conventional Commits、描述写中文，PR 目标分支只能是 `main`。这两条写在 [CONTRIBUTING.md](../../CONTRIBUTING.md)，以那份为准。
+贡献流程、门禁、PR 与提交信息的规矩写在 [CONTRIBUTING.md](../../CONTRIBUTING.md)，以那份为准，这里只给指针。

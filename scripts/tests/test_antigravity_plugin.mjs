@@ -73,6 +73,11 @@ test('exported Antigravity ZIP contains complete agents, skills, and templates',
   assert.ok(controller.includes('invoke_subagent'), 'Controller should mention invoke_subagent');
   assert.ok(controller.includes('ask_question'), 'Controller should use ask_question');
   assert.ok(controller.includes('Antigravity 宿主约定'), 'Controller should include Antigravity host guide');
+  assert.ok(controller.includes("python3 -B '<root>/scripts/check_handoff.py' '<stage_dir>' --role '<角色>'"));
+  // 这里刻意不再断言「不带引号的写法不存在」。Antigravity 适配器的正则同样只认不带引号的脚本
+  // 路径，所以源码带不带引号导出的这一行逐字节相同（实测），产物层面没有可观测差异——那条断言
+  // 永远成立，只会给人虚假的安全感。带引号的写法改由 test_skill_rules.py 在源码层拦下，
+  // 那一条对两个宿主同时成立。
 
   // 3b. Nothing may ship empty: a referenced-but-empty file is a broken plugin.
   const empty = [];
@@ -98,6 +103,8 @@ test('exported Antigravity ZIP contains complete agents, skills, and templates',
     'templates/assets/katex/katex.min.js',
     'schemas/curriculum.schema.json',
     'schemas/progress.schema.json',
+    'schemas/agent-handoff.schema.json',
+    'scripts/check_handoff.py',
     'scripts/render_lesson.py',
     'scripts/gen_home.py',
     'scripts/check_lesson.py',

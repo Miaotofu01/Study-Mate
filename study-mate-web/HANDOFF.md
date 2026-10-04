@@ -23,7 +23,10 @@
 
 **组件测试层有 9 条陈旧红**（`tests/component/` 13 条中：`ChatView.test.tsx` 3 条断言已移除的"工作区引导块"、`ProvidersView.test.tsx` 6 条断言已移除的「保存」「测试连接」按钮）——自前两轮 UI 改动起即红、**不进根门禁**，本轮未动，已记 backlog #20。
 
-第三～九轮的累计改动（前端三轮 UI + 生产侧 + K 系列工具化 + 编排可见性/墙钟 + 建课链正确性 + agent 工具化产课/评估 + 断开兜底 + 存储并发安全 + 右栏选项卡）已按维护者指示**一次性提交**并推送到 fork 分支 `feat/study-mate-web`；PR #43 已由占位 draft 转为**正式待上游 review**（目标 `main`）。版本号 0.5.0-beta → **0.6.0-beta**。K4（总控全 agent 化）远期观望。
+第三～九轮的累计改动（前端三轮 UI + 生产侧 + K 系列工具化 + 编排可见性/墙钟 + 建课链正确性 + agent 工具化产课/评估 + 断开兜底 + 存储并发安全 + 右栏选项卡）已按维护者指示**一次性提交**并推送到 fork 分支 `feat/study-mate-web`；PR #43 已由占位 draft 转为**正式待上游 review**（目标 `main`）。版本号 0.5.0-beta → **0.6.0-beta**。随后按维护者指示**并入 upstream/main（v1.0.0）**解决 PR 的 CONFLICTING：
+冲突只在根 `README.md`（上游把内联目录树换成指向《工程约束 §二》《文件归属》的指针），取上游写法并补一句
+指向子项目自己的 README；合并后重跑全套门禁仍全绿，且**根 `npm test` 由"1 条 CRLF 假红"变为全绿**。
+K4（总控全 agent 化）远期观望。
 
 ## 上一版遗留项的处置
 
@@ -139,14 +142,17 @@
 - **Windows 注册表系统代理会经手本机网关**：`llm.py` 已按 host 精确挂直连 mounts；换机器复现"长流必挂"先查这条。
 - **长派工时间口径**：`REQUEST_TIMEOUT` 900s（`STUDYMATE_LLM_TIMEOUT` 可调）；mimo-medium 单次课件派工 694s。
 - **TestClient 不增量吐 SSE**：整条响应结束才一次性交付；判断在途状态看磁盘产物 + `Get-NetTCPConnection -OwningProcess <pid>`。
-- **根 `npm test` 的 CRLF 假红**：`test_antigravity_skills.mjs` 的 curriculum-designer 导出断言在 Windows 上必红（`.dsh/skills` CRLF 检出），Linux CI 不受影响；不要试图"修"它。
+- **~~根 `npm test` 的 CRLF 假红~~（第九轮并入 upstream/main 后已消失）**：原先 `test_antigravity_skills.mjs` 的
+  curriculum-designer 导出断言在 Windows 上必红（本地那份 `.dsh/skills` 与上游不同步）。并入上游 v1.0.0 后
+  该技能文件随上游更新，根门禁 77 条全绿。**注意**：release 元数据那道门禁比的是"本地可达的最新 `v*` tag"，
+  浅克隆/只 fetch 分支会误报 —— 先 `git fetch upstream --tags`。
 - 端口：后端 8101 / 前端 dev 3800 / 生产 3801 / E2E 8290 + 3810。venv 在 `backend/.venv`（Windows 为 `.venv/Scripts/python.exe`）。
 - **启动/停止**：双击 `start-web.bat`（自动判定构建新鲜度、端口预检、就绪后自动关窗）；`stop-web.bat` 一键全停；端口可用 `SM_WEB_BACKEND_PORT` / `SM_WEB_FRONTEND_PORT` 覆盖；助手是 `tools/studymate-web.ps1`（纯 ASCII）。`.bat` 一律 GBK + CRLF（转换流程见 `windows-bat-encoding` 技能）。
 - 嵌套残留 `study-mate-web/study-mate-web/`：本机已不存在。
 
 ## 环境事实
 
-- Python 依赖在 `backend/.venv`；门禁 = `python -m pytest tests`（**152 条 + 1 skip**：1 条为 `SMOKE_REAL_LLM` 门控冒烟）+ `compileall` + `tsc --noEmit` + `npm run build` + E2E（frontend/，**62 条通过 + 3 条 skip（悬空占位）**；单轮全量 0 失败）。根 `npm test` 另跑根仓库测试（installer / openai / antigravity / release / static 五个子集，除 1 条既有 Windows CRLF 假红外全绿）。
+- Python 依赖在 `backend/.venv`；门禁 = `python -m pytest tests`（**152 条 + 1 skip**：1 条为 `SMOKE_REAL_LLM` 门控冒烟）+ `compileall` + `tsc --noEmit` + `npm run build` + E2E（frontend/，**62 条通过 + 3 条 skip（悬空占位）**；单轮全量 0 失败）。根 `npm test` 另跑根仓库测试（installer / openai / antigravity / release / static 五个子集全绿：77 通过 / 0 失败）。
 - **组件测试层**（`npm run test:component`，vitest + Testing Library，**20 条**）**不进根门禁**，第四轮按现行 UI 重写、第五轮补 `cleanAssistantText`、第六轮补建课进度卡，**全绿**。
 - **本机有真实 LLM 渠道**：`my-api` = 本机 new-api 中转 `http://localhost:4000/v1`，六模型（mimo-v2.6-flash 质量主力 / space-bunny-alpha 速度 / Deepseek-v4-flash 活跃默认 / agnes / muse-spark / u2-flash），均带思考档位（默认 medium）。冒烟口径：**串行不并发**、脚本自己钉死模型；**工具调用默认全模型开启**；门控冒烟命令：`SMOKE_REAL_LLM=1 SMOKE_MODEL=space-bunny-alpha .venv/Scripts/python.exe -m pytest tests/test_smoke_real_llm.py -s -q`（backend/ 下）。**注意 `Deepseek-v4-flash` 的档位名当前与网关不匹配（会 400，见 backlog #21）。**
 - `docs/` 上游文档已按用途归位（使用/规范/设计/agents）；引用上游文档用新路径。

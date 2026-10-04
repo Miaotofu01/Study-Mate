@@ -6,7 +6,7 @@
 npm test
 ```
 
-需要 Node.js、Python 3.9+ 和 PyYAML。默认检查只跑 npm 安装、插件打包、课件和工作区功能、DOM 与发布逻辑，不安装真实 DSH、pnpm 或浏览器，不调用模型。Actions 只在 Ubuntu / Node 24 / Python 3.13 上运行一次，不再展开系统和运行时矩阵。
+需要 Node.js、Python 3.9+ 和 PyYAML。**各命令的前置以本文件为准**，别处只给指针：Node 的支持范围看 `package.json` 的 `engines`，Actions 实际用的是 Node 24 / Python 3.13，只在 Ubuntu 上跑一次，不展开系统和运行时矩阵。默认检查只跑 npm 安装、插件打包、课件和工作区功能、DOM 与发布逻辑，不安装真实 DSH、pnpm 或浏览器，不调用模型。
 
 测试使用临时目录，不读写学生的 `workspace/`。Python 会按 `python3`、`python`、Windows 的 `py -3` 顺序查找可用解释器。
 
@@ -19,7 +19,7 @@ npm test
 | `npm run test:openai` | OpenAI 插件 ZIP、完整性、独立运行与导出保护 |
 | `npm run test:antigravity` | Antigravity 插件 ZIP、原生 agents、导出保护与重复构建 |
 | `npm run test:release` | 版本、changelog、重试和发布保护 |
-| `npm run test:static` | Python 语法、提示词与模板文案契约、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
+| `npm run test:static` | Python 语法、技能调用面与提示词规则归属、提示词与模板文案契约、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
 | `npm run test:browser` | 三套真实 Chrome 渲染测试，需要 `google-chrome` |
 | `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录 |
 | `npm run test:dsh-cli` | 真实 DSH CLI 安装、更新、卸载，还需要 `pnpm` |
@@ -43,6 +43,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_antigravity_plugin.mjs` | Antigravity 插件包含 5 个原生子代理与 12 个技能、无 0 字节文件、占用的输出目录不被清空、构建可重复 |
 | `test_dsh_presets.py` | 预设写入、profile 适配、迁移和重复安装 |
 | `test_workspace_config.py`、`test_interaction_state.py` | 工作区来源优先级、旧配置兼容、交互状态与恢复 |
+| `test_handoff.py` | 子 agent staged 交接：schema、角色/节点绑定、路径边界、symlink、产物覆盖与 SHA-256 |
 | `test_quiz_attr.py`、`test_quiz_code.py` | 题库属性转义、JSON 与代码围栏处理 |
 | `test_lesson_figure.py`、`test_lesson_links.py`、`test_naming_nav.py` | 图片和本地引用可达、课件命名与导航 |
 | `test_pool.py`、`test_lesson_scripts.py` | 图片库校验、课件重排、空题理由写入与失败保护 |
@@ -52,6 +53,17 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_render_lesson.py`、`test_attachment_render.py` | 课件和附件渲染、题库锚点、转义、数学式、输出与检查器对接 |
 | `quiz_dom_test.js`、`toc_dom_test.js` | 题目判分、展开、代码和公式展示，侧栏目录与移动端行为 |
 | `scripts/release/release.test.mjs` | 版本计算、更新记录、历史 tag、PR 去重、制品校验与重试保护 |
+
+## 提示词规则归属
+
+`test_skill_rules.py` 逐条断言「旧版里的可执行规则还在」。片段**住在哪**由 `rule-owners.json` 声明，不由它挂在哪个技能下决定：
+
+| 键 | 是什么 | 怎么写 |
+| --- | --- | --- |
+| `reaches` | 谁加载谁（`learning-system` → 它开场加载的三份协议；角色 → 它自己加载的规范） | 只在真有加载关系时写；名字写错、指向不存在的技能会当场报错 |
+| `moved` | 某条规则的正文其实住在哪个协议里：`{技能: {规则说明: owner}}` | 把一条规则从总控搬进它加载的协议时，提示词改一处 + 这里加一行，**断言不用动** |
+
+断言问的是「这个技能够不够得着这条规则」：owner 默认是键所在的技能，声明过 `moved` 就按声明走，且 owner 必须在该技能的 `reaches` 名单里。表里的死条目（说明写错、owner 够不着）也会报错，不让声明悄悄空转。
 
 ## DSH 实际安装与启动
 

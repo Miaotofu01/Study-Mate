@@ -1,0 +1,58 @@
+name: Bug 报告
+description: 有东西坏了、报错了、结果不对
+title: "[bug] "
+labels: [needs-triage, bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先谢谢你来报告。为了能复现，下面的几项尽量都填上；不确定的写「不确定」也比留空好。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 你期望的结果，与实际发生的结果。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 怎么复现
+      description: 从哪一步开始、说了什么话、点了什么按钮。能贴原话就贴原话。
+      placeholder: |
+        1. 新建会话，选「学习模式」
+        2. 说「我想学 ……」
+        3. ……
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境
+      description: 宿主与版本、操作系统、Node 与 Python 版本；更新类问题写上装的是哪个版本。
+      placeholder: |
+        - 宿主：DSH 桌面端 / DSH CLI / Codex / Antigravity
+        - 版本：例如 studymate 0.3.0
+        - 系统：Windows 11 / macOS 15 / Ubuntu 24.04
+        - Node / Python：
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 报错原文或截图
+      description: 有报错就贴完整输出（不要只贴最后一行）；界面问题贴截图更省事。
+      render: text
+
+  - type: checkboxes
+    id: tried
+    attributes:
+      label: 你已经试过
+      options:
+        - label: 重新运行过安装命令（`npx -y @yunmiao/studymate@latest install`）
+        - label: 完全退出宿主后重新打开（桌面端必须完全退出）
+        - label: 在装它的宿主的 Python 环境里确认过 PyYAML 可用

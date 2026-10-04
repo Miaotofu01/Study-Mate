@@ -115,12 +115,7 @@ cp package/dist/fonts/*.woff2 templates/assets/katex/fonts/
 
 ## 新增共享文件时（容易漏）
 
-共享层的清单分散在三处，新增/改名时必须同时改，否则页面会静默少加载一个文件：
-
-1. `templates/assets/README.md`（本文件的表格与目录树）
-2. `scripts/preview_templates.py` 里的 `shared_files` / `shared_dirs`
-3. `scripts/gen_home.py` 的 `ensure_shared_assets`（真的往工作区拷的那一处）
-4. `docs/规范/工程约束.md` 的「前端技术选型」与「目录与规则归属」（共享层那份清单）
+共享层与课件层的清单**只有一份**：`scripts/lessonfile.py` 的 `SHARED_DIRS` / `SHARED_FILES` / `SUBJECT_FILES`（`gen_home.py`、`preview_templates.py` 都读它）。新增或改名时改那一处，再同步本文件的表格；忘了登记 `test_templates.py` 会报出来，但**漏登记不会让页面报错，只会静默地少加载一个文件**。
 
 ## 谁在哪里落地
 

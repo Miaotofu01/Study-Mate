@@ -7,8 +7,9 @@
   python3 scripts/check_skill.py .dsh/skills/learning-system --expect-model-invocable
   python3 scripts/check_skill.py .dsh/skills/lesson-design --expect-model-invocable
 
-角色 skill 设 `disable-model-invocation: true`（不可被模型加载，由总控在派发 prompt 里内联）；
-协议与 learning-system 不设（可被 `skill` 工具按名字加载）。
+角色 skill **两个面都关**：`disable-model-invocation: true`（模型不能用 `skill` 工具按名字加载，
+由总控在派发 prompt 里给绝对路径让它自己 read）＋ `user-invocable: false`（用户也不能直接选它）；
+协议与 learning-system 两个面都开。
 """
 import os
 import re
@@ -54,11 +55,18 @@ def main(argv):
         disabled = meta.get('disable-model-invocation', False)
         if not isinstance(disabled, bool):
             problems.append('disable-model-invocation 必须是布尔值 true / false')
+        user_invocable = meta.get('user-invocable', True)
+        if not isinstance(user_invocable, bool):
+            problems.append('user-invocable 必须是布尔值 true / false')
         model_invocable = disabled is not True
         if '--expect-model-invocable' in flags and not model_invocable:
             problems.append('本 skill 应允许模型直接调用，但设了 disable-model-invocation')
         if '--expect-role' in flags and model_invocable:
-            problems.append('角色/协议 skill 需设 disable-model-invocation: true')
+            problems.append('角色 skill 需设 disable-model-invocation: true')
+        if '--expect-role' in flags and user_invocable:
+            problems.append('角色 skill 需设 user-invocable: false（它只作为磁盘上的规格文件）')
+        if '--expect-model-invocable' in flags and not user_invocable:
+            problems.append('本 skill 应允许用户直接调用，但设了 user-invocable: false')
         if problems:
             failed = True
             print(f'FAIL {skill_dir}: ' + '；'.join(problems))

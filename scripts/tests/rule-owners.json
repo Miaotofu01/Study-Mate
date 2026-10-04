@@ -1,0 +1,8 @@
+{
+  "reaches": {
+    "learning-system": ["record-keeping", "local-qa", "learning-discovery"],
+    "learning-coach": ["lesson-design"],
+    "practice-evaluator": ["layered-practice", "evidence-check"]
+  },
+  "moved": {}
+}

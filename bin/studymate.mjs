@@ -99,8 +99,10 @@ function dshVersion(command, { platform, env, execute = runDesktop }) {
     ? execute(env.ComSpec || process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', quoted], { windowsVerbatimArguments: true })
     : execute(command, ['--version']);
   if (result.error || result.status !== 0) return undefined;
-  const version = result.stdout?.trim();
-  return version || undefined;
+  // A wrapper can echo commands before invoking dsh. Match a whole version line
+  // so version-like directory names in those commands cannot select a preset.
+  return result.stdout?.split(/\r?\n/).map(line => line.trim())
+    .findLast(line => /^v?\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(line));
 }
 
 /** Where a bare command resolves to, so a Desktop shim on PATH is recognized as one. */
