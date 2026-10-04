@@ -183,24 +183,117 @@ test('版本号：科目名不合法给空串，目录不存在给空清单的�
     /^[0-9a-f]{16}$/);
 });
 
-/* ── 符号链接：今天的行为，未修 ───────────────────────────────────────── */
+/* ── 符号链接：边界按真实路径算 ───────────────────────────────────────── */
 
-test('符号链接：指向目录的链接不进清单，指向文件的链接今天照旧跟随（未修的口子）', () => {
+test('符号链接解出来的真实路径跑出科目目录：清单不收、读取拒绝', () => {
   const { workspace, demo, outside } = makeWorkspace();
   fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(demo, 'reference', 'link.txt'));
   fs.symlinkSync(outside, path.join(demo, 'reference', 'linkdir'));
   fs.symlinkSync(path.join(outside, '不存在.txt'), path.join(demo, 'reference', 'broken.txt'));
 
   const paths = listReference({ subjectDir: demo }).entries.map((entry) => entry.path);
-  // 指向目录的符号链接**不进**：跟着走会成环，也可能指到 reference/ 外面去
+  // 指向目录的符号链接不进（跟着走会成环），指向树外文件的链接同样不收
   assert.equal(paths.includes('linkdir/secret.txt'), false);
+  assert.equal(paths.includes('link.txt'), false, '解出来在科目外面的链接不许进清单');
   // 断链跳过，不让整个清单崩掉
   assert.equal(paths.includes('broken.txt'), false);
-  assert.deepEqual(paths, ['data.bin.md', 'link.txt', 'notes.txt', 'pdf.pdf', 'sub/nested.md', '讲义.md']);
+  assert.deepEqual(paths, ['data.bin.md', 'notes.txt', 'pdf.pdf', 'sub/nested.md', '讲义.md']);
 
-  // 下面两条钉的是**今天的行为**，不是期望行为：树外的文件经符号链接仍读得到。
-  // 验收标准写的是「路径越界（..、绝对路径、symlink）→ 拒绝」，今天只做到了前两条；
-  // 修它的时候请连同这两条断言一起改（交付说明里已列为未修的问题）。
-  assert.equal(readReference({ workspace, subject: 'demo', relPath: 'link.txt' }).text, '树外的秘密\n');
-  assert.equal(readReference({ workspace, subject: 'demo', relPath: 'linkdir/secret.txt' }).text, '树外的秘密\n');
+  // 读取一样拒绝：返回 null 就是「读不到」，不让 realpath 的异常冒成 500
+  assert.equal(readReference({ workspace, subject: 'demo', relPath: 'link.txt' }), null);
+  assert.equal(readReference({ workspace, subject: 'demo', relPath: 'linkdir/secret.txt' }), null);
+  // 版本号也只按留下来的条目算，被拒的链接不进栅栏
+  assert.equal(referenceVersion({ workspace, subject: 'demo' }),
+    listReference({ subjectDir: demo }).version);
+});
+
+test('取址同样拒绝经符号链接跑到科目外面的目标', () => {
+  const { workspace, demo, outside } = makeWorkspace();
+  fs.symlinkSync(outside, path.join(demo, 'assets', 'linkdir'));
+  fs.symlinkSync(path.join(outside, 'secret.png'), path.join(demo, 'assets', 'link.png'));
+
+  assert.equal(assetFile({ workspace, subject: 'demo', rel: 'assets/linkdir/secret.png' }), null);
+  assert.equal(assetFile({ workspace, subject: 'demo', rel: 'assets/link.png' }), null);
+  // 科目自己那份图照旧取得到
+  assert.equal(assetFile({ workspace, subject: 'demo', rel: 'assets/img/图.PNG' }),
+    path.join(demo, 'assets', 'img', '图.PNG'));
+});
+
+test('越界的是「跑出科目目录」：科目目录自己挂成符号链接不算越界', () => {
+  const { workspace, subjects, root } = makeWorkspace();
+  const target = path.join(root, '别的盘', 'linked');
+  write(path.join(target, 'subject.yaml'), 'slug: linked\nname: 挂过来的科目\n');
+  write(path.join(target, 'curriculum.yaml'), 'nodes:\n  - id: 变量\n    title: 变量\n');
+  write(path.join(target, 'reference', '带过来的.md'), '带过来的正文\n');
+  write(path.join(target, 'assets', '带过来的.png'), 'PNG');
+  fs.symlinkSync(target, path.join(subjects, 'linked'));
+
+  const linked = path.join(subjects, 'linked');
+  assert.equal(assetFile({ workspace, subject: 'linked', rel: 'assets/带过来的.png' }),
+    path.join(linked, 'assets', '带过来的.png'));
+  assert.equal(readReference({ workspace, subject: 'linked', relPath: '带过来的.md' }).text, '带过来的正文\n');
+  assert.deepEqual(listReference({ subjectDir: linked }).entries.map((entry) => entry.path), ['带过来的.md']);
+
+  // 写入也照常落在链接指向的那个目录里（学生自己的布置，不是越界）
+  const result = writeReference({
+    workspace, subject: 'linked', title: '写进来的', markdown: '正文\n',
+    expectedVersion: referenceVersion({ workspace, subject: 'linked' }),
+    operationId: `linked-subject-${process.pid}`, now: 0,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(fs.readFileSync(path.join(target, 'reference', '写进来的.md'), 'utf8').endsWith('正文\n'), true);
+});
+
+test('reference/ 里的链接指向本科目内的资料：解出来还在科目里，照旧可列可读', () => {
+  const { workspace, demo } = makeWorkspace();
+  fs.symlinkSync(path.join(demo, 'reference', '讲义.md'), path.join(demo, 'reference', '别名.md'));
+
+  const paths = listReference({ subjectDir: demo }).entries.map((entry) => entry.path);
+  assert.equal(paths.includes('别名.md'), true);
+  assert.equal(readReference({ workspace, subject: 'demo', relPath: '别名.md' }).text, '讲义正文\n');
+});
+
+test('断链与成环的符号链接：读不到就是读不到，不把请求打成 500', () => {
+  const { workspace, demo } = makeWorkspace();
+  const ref = path.join(demo, 'reference');
+  fs.symlinkSync(path.join(ref, 'b.txt'), path.join(ref, 'a.txt'));
+  fs.symlinkSync(path.join(ref, 'a.txt'), path.join(ref, 'b.txt')); // a ↔ b 成环
+  fs.symlinkSync(path.join(ref, '不存在.txt'), path.join(ref, 'broken.txt'));
+  fs.symlinkSync(path.join(demo, 'assets', 'self.png'), path.join(demo, 'assets', 'self.png')); // 自指
+
+  // 解不出真实路径的，一律按「读不到」处理，不让 realpath 的异常冒出去
+  assert.equal(readReference({ workspace, subject: 'demo', relPath: 'a.txt' }), null);
+  assert.equal(readReference({ workspace, subject: 'demo', relPath: 'broken.txt' }), null);
+  assert.equal(assetFile({ workspace, subject: 'demo', rel: 'assets/self.png' }), null);
+  assert.deepEqual(listReference({ subjectDir: demo }).entries.map((entry) => entry.path),
+    ['data.bin.md', 'notes.txt', 'pdf.pdf', 'sub/nested.md', '讲义.md']);
+
+  // 这些坏链接也不该挡住正常的写入
+  const result = writeReference({
+    workspace, subject: 'demo', title: '照常写', markdown: '正文\n',
+    expectedVersion: referenceVersion({ workspace, subject: 'demo' }),
+    operationId: `loop-${process.pid}`, now: 0,
+  });
+  assert.equal(result.ok, true);
+});
+
+test('reference/ 自己指向科目外面的符号链接：写入被拒，外面一个文件都不许多', () => {
+  const { workspace, demo, outside } = makeWorkspace();
+  fs.rmSync(path.join(demo, 'reference'), { recursive: true, force: true });
+  fs.symlinkSync(outside, path.join(demo, 'reference'));
+  const before = fs.readdirSync(outside).sort();
+
+  const result = writeReference({
+    workspace, subject: 'demo', title: '越界写入', markdown: '正文\n',
+    expectedVersion: referenceVersion({ workspace, subject: 'demo' }),
+    operationId: `escape-write-${process.pid}`, now: 0,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 400);
+  assert.equal(result.error, 'path-invalid');
+  assert.deepEqual(fs.readdirSync(outside).sort(), before, '科目外面的目录一个文件都不许多');
+
+  // 同一处口子的另外两面：清单不列外面那些，读也读不到
+  assert.deepEqual(listReference({ subjectDir: demo }).entries, []);
+  assert.equal(readReference({ workspace, subject: 'demo', relPath: 'secret.txt' }), null);
 });
