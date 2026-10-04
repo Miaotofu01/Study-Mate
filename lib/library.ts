@@ -20,10 +20,125 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseYaml, pyStrip } from './yaml.mjs';
+import { parseYaml, pyStrip } from './yaml.ts';
 // reference/ 的清单与版本号放在 lib/reference.mjs：写入端要用同一套规则算版本号（并发栅栏），
 // 两边各写一份就会出现「明明没人动过却报冲突」。这里只把结果挂进 payload。
-import { listReference } from './reference.mjs';
+import { listReference } from './reference.ts';
+import type { ReferenceEntry } from './reference.ts';
+
+/* ── 形状 ──────────────────────────────────────────────────────────────────
+   这一份 JSON 是与阅读端（lib/client.js）之间的契约：字段名、层级、空值口径都按它走。
+   值域来自学习文件的地方标 unknown/any —— 那些地方本来就有运行期检查兜着，把检查
+   改成类型收窄会连带改掉表达式，而这次迁移要求运行期逐字不变。 */
+
+/** 锚点 ↔ 题库键的一条对账结果，四态见 resolveAnchors。 */
+interface AnchorEntry {
+  text: string;
+  level: string;
+  resolution: 'resolved' | 'stale' | 'ambiguous' | 'missing';
+  keys: string[];
+}
+
+/** 术语表里的一条词。 */
+interface GlossaryTerm {
+  term: string;
+  def: string;
+  avoid: string;
+}
+
+/** 术语表的一个 `## 分组`。 */
+interface GlossaryGroup {
+  title: string;
+  terms: GlossaryTerm[];
+}
+
+/** MISSION.md 解析出来的小节：`title` 是一级标题，`sections` 是「小节名 → 行数组」。 */
+interface Mission {
+  title: string;
+  sections: Record<string, string[]>;
+}
+
+/** 一条学习记录。 */
+interface LearningRecord {
+  file: string;
+  title: string;
+  date: string;
+  markdown: string;
+}
+
+/** 一个 lab 任务。 */
+interface Lab {
+  dir: string;
+  files: string[];
+  readme: string;
+}
+
+/** 大纲里的一个节点，加上从文件里算出来的东西。 */
+interface SubjectNode {
+  id: string;
+  title: string;
+  kind: string;
+  objective: string;
+  problem: string;
+  concepts: unknown[];
+  pitfalls: unknown[];
+  realworld: string;
+  practice: string;
+  resources: unknown[];
+  prerequisites: unknown[];
+  level: number;
+  tier: string;
+  raw_status: string;
+  notes: string;
+  number: string;
+  lesson_md: string;
+  lesson: string;
+  pool: Record<string, any>;
+  anchors: AnchorEntry[];
+  orphan_keys: string[];
+  lab: Lab | null;
+}
+
+/** 大纲里的一条边。 */
+interface SubjectEdge {
+  from: unknown;
+  to: unknown;
+  reason: unknown;
+}
+
+/** 一份科目的 payload。 */
+interface SubjectPayload {
+  slug: string;
+  name: string;
+  goal: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  project: string;
+  mission: Mission;
+  glossary: GlossaryGroup[];
+  resources_md: string;
+  reference: ReferenceEntry[];
+  reference_version: string;
+  misconceptions: unknown[];
+  misconception_library: unknown[];
+  records: LearningRecord[];
+  nodes: SubjectNode[];
+  edges: SubjectEdge[];
+  levels: number;
+  stats: Record<string, number>;
+  continue_node: string;
+  order: Record<string, number>;
+}
+
+/** 阅读端拿到的整份快照。 */
+interface LibraryPayload {
+  workspace: string;
+  generated_at: string;
+  today: string;
+  memory_md: string;
+  subjects: SubjectPayload[];
+}
 
 /* ── 三档词表（目标态规格 §5.2）─────────────────────────────────────────────
    旧词表读到就映射，写回一律用新词表。用 Map 不用普通对象：状态值来自文件，
@@ -39,7 +154,7 @@ const TIER_MAP = new Map([
 const TIERS = ['未开始', '学习中', '已学完'];
 
 /** 旧词表 → 三档。读到不认识的词退回「未开始」，绝不静默当成学会了。 */
-function tint(raw) {
+function tint(raw: string): string {
   return TIER_MAP.get(raw || '') || '未开始';
 }
 
@@ -54,12 +169,12 @@ const PY_RSTRIP_RE = new RegExp(`[${PY_WS}]+$`);
 const PY_NORM_RE = new RegExp(`[${PY_WS}]+`, 'g');
 const PY_LINE_BREAK_RE = /\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]/;
 
-function pyRstrip(text) {
+function pyRstrip(text: string): string {
   return String(text).replace(PY_RSTRIP_RE, '');
 }
 
 /** 等价于 Python 的 str.splitlines()（含它认的那一串少见换行符，且不留结尾空串）。 */
-function pySplitLines(text) {
+function pySplitLines(text: string): string[] {
   if (text === '') return [];
   const parts = String(text).split(PY_LINE_BREAK_RE);
   if (parts[parts.length - 1] === '') parts.pop();
@@ -67,7 +182,7 @@ function pySplitLines(text) {
 }
 
 /** 等价于 Python 的 str()：日志与时间戳字段在参考实现里都过了 str()。 */
-function pyStr(value) {
+function pyStr(value: unknown): string {
   if (value === null || value === undefined) return 'None';
   if (value === true) return 'True';
   if (value === false) return 'False';
@@ -75,18 +190,19 @@ function pyStr(value) {
 }
 
 /** Python 的 dict.get(k, default)：键存在但值是 null 时不套用默认值。 */
-function pick(object, key, fallback) {
+function pick(object: Record<string, any> | null | undefined, key: string, fallback: unknown): any {
   return object && Object.hasOwn(object, key) ? object[key] : fallback;
 }
 
 /** Python 的 sorted() 按码位比较；JS 的 < 按 UTF-16 码元比较，遇到增补平面字符会分叉。 */
-function cmpCodePoints(a, b) {
+function cmpCodePoints(a: string, b: string): number {
   const left = [...a];
   const right = [...b];
   const n = Math.min(left.length, right.length);
   for (let i = 0; i < n; i++) {
-    const x = left[i].codePointAt(0);
-    const y = right[i].codePointAt(0);
+    // `!`：数组元素都是一个码位，codePointAt 不可能给 undefined——类型签名看不出这层
+    const x = left[i].codePointAt(0)!;
+    const y = right[i].codePointAt(0)!;
     if (x !== y) return x < y ? -1 : 1;
   }
   return left.length - right.length;
@@ -94,7 +210,7 @@ function cmpCodePoints(a, b) {
 
 /* ── 读盘 ──────────────────────────────────────────────────────────────── */
 
-function isDirectory(target) {
+function isDirectory(target: string): boolean {
   try {
     return fs.statSync(target).isDirectory();
   } catch {
@@ -102,7 +218,7 @@ function isDirectory(target) {
   }
 }
 
-function isFile(target) {
+function isFile(target: string): boolean {
   try {
     return fs.statSync(target).isFile();
   } catch {
@@ -111,7 +227,7 @@ function isFile(target) {
 }
 
 /** 读文本；不存在或读不动都返回 null，交给调用方给默认值。缺文件不该让整份 payload 崩掉。 */
-function readTextIfPresent(file) {
+function readTextIfPresent(file: string): string | null {
   try {
     return fs.readFileSync(file, 'utf8');
   } catch {
@@ -120,7 +236,7 @@ function readTextIfPresent(file) {
 }
 
 /** 目录下一层的名字，排序用码位比较（与 Python 的 sorted() 一致）。 */
-function listNames(dir, { filesOnly = true, suffix = '' } = {}) {
+function listNames(dir: string, { filesOnly = true, suffix = '' }: { filesOnly?: boolean; suffix?: string } = {}): string[] {
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -133,19 +249,21 @@ function listNames(dir, { filesOnly = true, suffix = '' } = {}) {
     .sort(cmpCodePoints);
 }
 
-function readYaml(file) {
+function readYaml(file: string): Record<string, any> {
   const text = readTextIfPresent(file);
   if (text === null) return {}; // 与参考实现一致：文件不存在 → {}，不崩
-  return parseYaml(text, { file }) || {};
+  // 解析器给的是 unknown：文件里的形状本来就没有静态契约，逐字段的检查活在各调用点
+  return (parseYaml(text, { file }) || {}) as Record<string, any>;
 }
 
-function readYamlList(file) {
+function readYamlList(file: string): any[] {
   if (!isFile(file)) return [];
-  return parseYaml(readTextIfPresent(file), { file }) || [];
+  // isFile 已经证明读得到；解析器只接受字符串，这里按它的契约收窄
+  return (parseYaml(readTextIfPresent(file) as string, { file }) || []) as any[];
 }
 
 /** 收集一棵目录下所有文件的名字（只要 basename，与参考实现的 rglob + p.name 一致）。 */
-function collectFileNames(root, depth = 0) {
+function collectFileNames(root: string, depth = 0): string[] {
   if (depth > 32) return []; // 符号链接成环时 Python 的 rglob 会一直绕；这里主动截断
   let entries;
   try {
@@ -153,7 +271,7 @@ function collectFileNames(root, depth = 0) {
   } catch {
     return [];
   }
-  const names = [];
+  const names: string[] = [];
   for (const entry of entries) {
     const full = path.join(root, entry.name);
     let stat;
@@ -174,14 +292,14 @@ function collectFileNames(root, depth = 0) {
  * 课件文件名是 <序号>-<节点id>.md，节点 id 里带点，按后缀匹配最稳。
  * 同前缀有多个时取排序后第一个，与参考实现一致。
  */
-function findLesson(lessonsDir, nodeId) {
+function findLesson(lessonsDir: string, nodeId: string): string | null {
   for (const name of listNames(lessonsDir, { suffix: '.md' })) {
     if (name.slice(0, -3).endsWith('-' + nodeId)) return name;
   }
   return null;
 }
 
-function lessonNumber(fileName) {
+function lessonNumber(fileName: string | null): string {
   if (!fileName) return '';
   const match = /^(\d+)/.exec(fileName.slice(0, -3));
   return match ? match[1] : '';
@@ -193,13 +311,13 @@ const ANCHOR_RE = new RegExp(
   'gm',
 );
 
-function lessonAnchors(markdown) {
+function lessonAnchors(markdown: string): Array<{ level: string; text: string }> {
   ANCHOR_RE.lastIndex = 0; // 带 g 的正则是有状态的，上一次的 lastIndex 会漏掉开头的锚点
   return [...markdown.matchAll(ANCHOR_RE)].map((match) => ({ level: match[1], text: match[2] }));
 }
 
 /** 归一化只抹掉空白与全角空格——用来区分「逐字一致」与「只差空白」。 */
-function normalizeAnchor(text) {
+function normalizeAnchor(text: unknown): string {
   return String(text).replace(PY_NORM_RE, '');
 }
 
@@ -207,26 +325,26 @@ function normalizeAnchor(text) {
  * 锚点 ↔ 题库键对账，四态：resolved / stale / ambiguous / missing（目标态规格 §4.4）。
  * 多匹配绝不静默取第一个：ambiguous 原样报出来，让界面去问人。
  */
-function resolveAnchors(declared, pool) {
+function resolveAnchors(declared: Array<{ level: string; text: string }>, pool: Record<string, any>): { anchors: AnchorEntry[]; orphanKeys: string[] } {
   const poolKeys = Object.keys(pool);
-  const exact = new Map();
+  const exact = new Map<string, string>();
   for (const key of poolKeys) exact.set(pyStrip(key), key); // 后写的覆盖先写的，同 Python 的字典推导
 
-  const byNormalized = new Map();
+  const byNormalized = new Map<string, string[]>();
   for (const key of poolKeys) {
     const normalized = normalizeAnchor(key);
     if (!byNormalized.has(normalized)) byNormalized.set(normalized, []);
-    byNormalized.get(normalized).push(key);
+    byNormalized.get(normalized)!.push(key);
   }
 
-  const anchors = [];
-  const used = new Set();
+  const anchors: AnchorEntry[] = [];
+  const used = new Set<string>();
   for (const item of declared) {
     const text = pyStrip(item.text);
-    const entry = { text, level: item.level, resolution: 'missing', keys: [] };
+    const entry: AnchorEntry = { text, level: item.level, resolution: 'missing', keys: [] };
     if (exact.has(text)) {
       entry.resolution = 'resolved';
-      entry.keys = [exact.get(text)];
+      entry.keys = [exact.get(text)!];
     } else {
       const candidates = byNormalized.get(normalizeAnchor(text)) || [];
       if (candidates.length > 1) {
@@ -249,10 +367,10 @@ function resolveAnchors(declared, pool) {
 /* ── 附件类文件的解析 ──────────────────────────────────────────────────── */
 
 /** GLOSSARY.md 按 `## 分组` + `**词**: 释义` + `_Avoid_: ...` 三段式。 */
-function parseGlossary(markdown) {
-  const groups = [];
-  let current = null;
-  let term = null;
+function parseGlossary(markdown: string): GlossaryGroup[] {
+  const groups: GlossaryGroup[] = [];
+  let current: GlossaryGroup | null = null;
+  let term: GlossaryTerm | null = null;
   for (const raw of pySplitLines(markdown)) {
     const line = pyRstrip(raw);
     if (line.startsWith('## ')) {
@@ -279,12 +397,12 @@ function parseGlossary(markdown) {
 }
 
 /** MISSION.md 是 `## 小节` + 列表；Why 那节是散文，成功标准那节是列表，两种都收。 */
-function parseMission(markdown) {
-  const sections = new Map();
-  let title = null;
-  const push = (key, value) => {
+function parseMission(markdown: string): Mission {
+  const sections = new Map<string, string[]>();
+  let title: string | null = null;
+  const push = (key: string, value: string) => {
     if (!sections.has(key)) sections.set(key, []);
-    sections.get(key).push(value);
+    sections.get(key)!.push(value);
   };
   for (const raw of pySplitLines(markdown)) {
     const line = pyRstrip(raw);
@@ -305,8 +423,8 @@ function parseMission(markdown) {
   };
 }
 
-function readRecords(recordsDir) {
-  const out = [];
+function readRecords(recordsDir: string): LearningRecord[] {
+  const out: LearningRecord[] = [];
   for (const name of listNames(recordsDir, { suffix: '.md' })) {
     const markdown = readTextIfPresent(path.join(recordsDir, name)) ?? '';
     const lines = pySplitLines(markdown);
@@ -324,7 +442,7 @@ function readRecords(recordsDir) {
  * lab 目录按 <序号>-<短名> 命名，序号与课件位次对齐（lab/0003-ip-subnet → 第 3 课）。
  * README 取的是 lab/ 自己那份（不是每次实验目录里的），与参考实现一致。
  */
-function readLab(labDir, number) {
+function readLab(labDir: string, number: string): Lab | null {
   if (!number || !isDirectory(labDir)) return null;
   let entries;
   try {
@@ -332,7 +450,8 @@ function readLab(labDir, number) {
   } catch {
     return null;
   }
-  const match = entries
+  // 显式写成 string | undefined：空数组时下标 0 取不到东西，下面的分支靠它兜住
+  const match: string | undefined = entries
     .filter((entry) => entry.isDirectory() && entry.name.startsWith(number + '-') && entry.name !== 'solutions')
     .map((entry) => entry.name)
     .sort(cmpCodePoints)[0];
@@ -350,50 +469,50 @@ function readLab(labDir, number) {
  * 按前置依赖分层：层号 = 到根的最长路径，路线图按它排。
  * 大纲里意外成环时按 0 切断（visited 里出现过就不再往下），不能无限递归。
  */
-function levelsOf(nodes) {
-  const byId = new Map();
+function levelsOf(nodes: any[]): Record<string, number> {
+  const byId = new Map<string, any>();
   for (const node of nodes) byId.set(node.id, node); // 同 id 后者覆盖，同 Python 的字典推导
-  const memo = new Map();
+  const memo = new Map<string, number>();
 
-  const depth = (nodeId, seen) => {
-    if (memo.has(nodeId)) return memo.get(nodeId);
+  const depth = (nodeId: string, seen: Set<string>): number => {
+    if (memo.has(nodeId)) return memo.get(nodeId)!;
     if (seen.has(nodeId)) return 0;
     const node = byId.get(nodeId);
     if (!node) return 0;
-    const prerequisites = (node.prerequisites || []).filter((id) => byId.has(id));
+    const prerequisites = (node.prerequisites || []).filter((id: string) => byId.has(id));
     let value = 0;
     if (prerequisites.length > 0) {
       const next = new Set(seen);
       next.add(nodeId);
-      value = 1 + Math.max(...prerequisites.map((id) => depth(id, next)));
+      value = 1 + Math.max(...prerequisites.map((id: string) => depth(id, next)));
     }
     memo.set(nodeId, value);
     return value;
   };
 
-  const levels = {};
+  const levels: Record<string, number> = {};
   for (const node of nodes) levels[node.id] = depth(node.id, new Set());
   return levels;
 }
 
 /* ── 科目 ──────────────────────────────────────────────────────────────── */
 
-function buildSubject(subjectDir, dirName) {
+function buildSubject(subjectDir: string, dirName: string): SubjectPayload {
   const subject = readYaml(path.join(subjectDir, 'subject.yaml'));
   const curriculum = readYaml(path.join(subjectDir, 'curriculum.yaml'));
   const progress = readYaml(path.join(subjectDir, 'progress.yaml'));
   const slug = subject.slug || dirName;
 
-  const nodesIn = curriculum.nodes || [];
+  const nodesIn: any[] = curriculum.nodes || [];
   if (!Array.isArray(nodesIn)) {
     throw new Error(`curriculum.yaml 的 nodes 不是列表：${path.join(subjectDir, 'curriculum.yaml')}`);
   }
-  const edgesIn = curriculum.edges || [];
+  const edgesIn: any[] = curriculum.edges || [];
   const progressNodes = pick(progress, 'nodes', null) || {};
   const levels = levelsOf(nodesIn);
   const lessonsDir = path.join(subjectDir, 'lessons');
 
-  const nodes = [];
+  const nodes: SubjectNode[] = [];
   for (const node of nodesIn) {
     const nodeId = node.id;
     const lessonFile = findLesson(lessonsDir, String(nodeId));
@@ -410,9 +529,10 @@ function buildSubject(subjectDir, dirName) {
     if (poolFile !== null && isFile(poolFile)) {
       const raw = readTextIfPresent(poolFile);
       try {
-        pool = JSON.parse(raw) || {};
+        // isFile 已经证明读得到，只是类型系统看不见（与 readYamlList 同一个口径）
+        pool = JSON.parse(raw as string) || {};
       } catch (error) {
-        throw new Error(`题库不是合法 JSON：${poolFile}\n    ${error.message}`);
+        throw new Error(`题库不是合法 JSON：${poolFile}\n    ${(error as Error).message}`);
       }
     }
     const { anchors, orphanKeys } = resolveAnchors(lessonAnchors(lessonMarkdown), pool);
@@ -449,15 +569,15 @@ function buildSubject(subjectDir, dirName) {
     });
   }
 
-  const stats = {};
+  const stats: Record<string, number> = {};
   for (const tier of TIERS) stats[tier] = nodes.filter((node) => node.tier === tier).length;
 
   // 「继续学」的候选：先找学习中的，没有就找第一个未开始的，全学完则回到最后一个节点
-  const current = nodes.find((node) => node.tier === '学习中')
+  const current: SubjectNode | null = nodes.find((node) => node.tier === '学习中')
     || nodes.find((node) => node.tier === '未开始')
     || (nodes.length > 0 ? nodes[nodes.length - 1] : null);
 
-  const order = {};
+  const order: Record<string, number> = {};
   nodes.forEach((node, index) => { order[node.id] = index; });
 
   // 参考资料：与资料收集角色同放 reference/ 的本地教材、速查页与学生自加的讲义（ADR-0010）。
@@ -506,7 +626,7 @@ function buildSubject(subjectDir, dirName) {
  *   root：项目根，只用来解析相对路径。
  * @returns {object} 可直接 JSON.stringify 的 payload
  */
-export function buildLibrary(options = {}) {
+export function buildLibrary(options: { workspace?: string; root?: string } = {}): LibraryPayload {
   const { workspace: workspaceOption } = options;
   if (typeof workspaceOption !== 'string' || workspaceOption === '') {
     throw new Error('buildLibrary 需要 workspace：学习工作区目录的路径（其中应含 .learning/subjects/）');
@@ -526,7 +646,7 @@ export function buildLibrary(options = {}) {
     .sort(cmpCodePoints);
 
   // 建课时会先建目录再填内容，所以零节点的科目直接跳过，不出现在阅读端
-  const subjects = [];
+  const subjects: SubjectPayload[] = [];
   for (const name of subjectDirs) {
     const subject = buildSubject(path.join(subjectsDir, name), name);
     if (subject.nodes.length > 0) subjects.push(subject);
@@ -549,7 +669,7 @@ export function buildLibrary(options = {}) {
 }
 
 /** 读盘并构建。与 buildLibrary 同一实现，只是名字更贴合调用点的读法。 */
-export function readLibrary(options = {}) {
+export function readLibrary(options: { workspace?: string; root?: string } = {}): LibraryPayload {
   return buildLibrary(options);
 }
 

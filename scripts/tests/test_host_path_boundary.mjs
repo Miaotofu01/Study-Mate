@@ -9,8 +9,8 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { assetFile, contentTypeOf } from '../../lib/assets.mjs';
-import { listReference, readReference, referenceVersion, writeReference } from '../../lib/reference.mjs';
+import { assetFile, contentTypeOf } from '../../lib/assets.ts';
+import { listReference, readReference, referenceVersion, writeReference } from '../../lib/reference.ts';
 
 /* ── 临时工作区：跑完即弃 ─────────────────────────────────────────────── */
 

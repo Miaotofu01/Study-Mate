@@ -53,7 +53,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_render_lesson.py`、`test_attachment_render.py` | 课件和附件渲染、题库锚点、转义、数学式、输出与检查器对接 |
 | `quiz_dom_test.js`、`toc_dom_test.js` | 题目判分、展开、代码和公式展示，侧栏目录与移动端行为 |
 | `scripts/release/release.test.mjs` | 版本计算、更新记录、历史 tag、PR 去重、制品校验与重试保护 |
-| `test_host_library_payload.mjs`、`test_host_reference_fence.mjs`、`test_host_path_boundary.mjs`、`test_host_yaml_workspace.mjs` | Host 半数据层（`lib/{workspace,library,assets,yaml,reference}.mjs`）的特征化测试：payload 顶层与科目/节点形状、旧六档→三档、锚点四态、`operationId` 幂等重放、`expectedVersion` 冲突拒绝、路径越界、YAML 子集与工作区配置读取。数据在临时目录现造现弃，不碰真实工作区 |
+| `test_host_library_payload.mjs`、`test_host_reference_fence.mjs`、`test_host_path_boundary.mjs`、`test_host_yaml_workspace.mjs` | Host 半数据层（`lib/{workspace,library,assets,yaml,reference}.ts`）的特征化测试：payload 顶层与科目/节点形状、旧六档→三档、锚点四态、`operationId` 幂等重放、`expectedVersion` 冲突拒绝、路径越界、YAML 子集与工作区配置读取。数据在临时目录现造现弃，不碰真实工作区 |
 | `test_core_schema_subset.mjs` | JSON Schema 子集校验器（`lib/core/schema.ts`）：关键字枚举表与六份真 schema 对齐（新增关键字会红）、不支持的关键字不静默放行、逐个断言的 `type`/`required`/`additionalProperties`/`enum`/`const`/`pattern`/`minLength`/`minimum`/`minItems`/`format` |
 | `test_validators_curriculum.mjs` | 大纲校验（`validateCurriculum`）与带位置的 YAML 读取：DAG 无环、位次不倒挂、实验课前置非空、字段齐全、重复 id、悬空引用；行号是解析位置（夹具里放了逐字相同的**诱饵注释**，文本搜索会指错行）；并与 `lib/yaml.{ts,mjs}` 的值树逐路径对齐 |
 | `test_validators_progress_subject.mjs` | 进度与科目的 schema 与取值：旧六档读到就报映射、进度与大纲的引用完整性、空串 `name`/`goal`、`created_at` 是否真实存在、`slug` 与目录名不一致 |
