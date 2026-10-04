@@ -1,0 +1,45 @@
+{
+  // Host 半（bin/dsh-plugin.ts 与 lib/*.ts）的类型门禁。
+  //
+  // 只做检查、不产出：运行期走 Node 原生类型擦除（Node ≥22.18 / 24 默认开），
+  // 源码就是发货产物，没有构建目录、没有打包步骤。所以 noEmit + allowImportingTsExtensions
+  // 是这套布局的前提——import 说明符里写的是真实的 .ts 文件名，Node 才解析得到。
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+
+    // 说明符写真实的 .ts 文件名（Node 的 ESM 解析不做扩展名补全，`.ts` 就得写 `.ts`）。
+    // 这条要求 noEmit —— 我们本来也不产出。
+    "allowImportingTsExtensions": true,
+
+    // 擦除式语法：enum / namespace / 构造器参数属性 / import x = require() 在
+    // Node 的类型擦除下没有实现可跑，所以让 tsc 直接拦住（decisions.md §1）。
+    "erasableSyntaxOnly": true,
+
+    // verbatimModuleSyntax 在这里**必须是 false**：本包没有 `"type": "module"`，
+    // 而 scripts/tests/{quiz_dom_test,toc_dom_test}.js 是 CommonJS（require/__dirname），
+    // 加上 `"type": "module"` 会把那两个套件打掉。于是 tsc 按 nodenext 把 .ts 当 CJS 看，
+    // 开着 verbatimModuleSyntax 就会以 TS1287/TS1295 拒绝文件里的 ESM 语法。
+    // 代价是“类型专用 import 必须手写 import type”不再由编译器强制 —— 但 Node 擦除
+    // 之后会原样保留写漏的那条 import，运行期立刻炸，而 npm test 会加载全部这些模块。
+    "verbatimModuleSyntax": false,
+
+    // 与「逐文件擦除」同一个前提：跨文件只能靠 import 传值，类型不能靠 re-export 隐式传递。
+    "isolatedModules": true,
+
+    // bin/studymate.mjs 本次**不在迁移范围**（ticket 没点名它，改它要动 6 个测试的命名导出）。
+    // 它被 bin/dsh-plugin.ts 静态 import，所以要能被解析——只解析，不检查。
+    "allowJs": true,
+    "checkJs": false,
+
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["lib/**/*.ts", "bin/*.ts"],
+  // Client 半（阅读端）是手写 JS、零构建原样发货，不进类型检查（ticket #65 明文）。
+  "exclude": ["lib/client.js"]
+}

@@ -47,7 +47,8 @@
     "build:plugin": "node bin/studymate.mjs build-plugin",
     "build:antigravity": "node bin/studymate.mjs build-antigravity",
     "build:examples": "node bin/studymate.mjs build-examples",
-    "test": "npm run test:installer && npm run test:openai && npm run test:antigravity && node scripts/release/checks.mjs && npm run test:static",
+    "test": "npm run test:types && npm run test:installer && npm run test:openai && npm run test:antigravity && node scripts/release/checks.mjs && npm run test:static",
+    "test:types": "node scripts/release/typecheck.mjs",
     "test:openai": "node --test scripts/tests/test_openai_plugin.mjs",
     "test:antigravity": "node --test scripts/tests/test_antigravity_plugin.mjs",
     "test:installer": "node --test scripts/tests/test_installer.mjs scripts/tests/test_bundle.mjs",
@@ -85,5 +86,9 @@
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "typescript": "^7.0.2"
   }
 }
