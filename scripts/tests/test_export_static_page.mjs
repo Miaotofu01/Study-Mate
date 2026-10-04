@@ -25,7 +25,7 @@ import { runExport, resolveOutDir, writeUnder, ExportCancelledError } from '../.
 import { planExport, clientSourceFile } from '../../lib/export/plan.ts';
 import { resolveReact, ReactMissingError, reactCandidates } from '../../lib/export/react.ts';
 import { readExportDir, checkExport } from '../../lib/export/guard.ts';
-import { assetProductPath } from '../../lib/export/page.ts';
+import { assetProductPath, indexHtml } from '../../lib/export/page.ts';
 import { tempDir } from './fixtures/tools.mjs';
 import { writeExportWorkspace, addSecondSubject, fakeReactRoot } from './fixtures/export_workspace.mjs';
 
@@ -85,6 +85,25 @@ test('index.html 的脚本顺序是依赖顺序，且没有 ES 模块（file:// 
     'studymate-client.js', 'boot.js',
   ]);
   assert.match(html, /<noscript>/, '无脚本时要说明白为什么看不到内容');
+});
+
+test('index.html 的属性位置按属性口径转义：双引号与单引号都转，标题走文本口径', () => {
+  /* 这一条来自一次真实的错：壳里原来有一个私有 `escapeHtml`（只转 `& < > "`，少转 `'`），
+     却被用在 `<script src="…">` 与 `title="…">` 两个属性位置上。属性值里的科目名是**学生
+     数据**，多一个引号就截断属性。判据是 `lib/core/format.ts` 的 `escAttr` / `escText`。 */
+  const html = indexHtml({
+    title: `一门"引号'科目`,
+    note: `说明"里的'引号`,
+    scripts: [`a'b".js`],
+  });
+  // 属性位置：单引号也必须转（`&#x27;`），否则属性被截断
+  assert.match(html, /<script src="a&#x27;b&quot;\.js"><\/script>/);
+  assert.match(html, /<div id="studymate-export" title="说明&quot;里的&#x27;引号"><\/div>/);
+  // 文本位置（`<title>` 是 RCDATA）：只转 `& < >`，引号原样留着才是文本口径
+  assert.match(html, /<title>一门"引号'科目<\/title>/);
+  // 反证：属性值里不许出现裸引号
+  const attribute = /<div id="studymate-export" title="([^"]*)"><\/div>/.exec(html);
+  assert.equal(attribute[1], '说明&quot;里的&#x27;引号');
 });
 
 test('data.js 装的是整份快照：科目、正文、题库、参考资料都在，且抹掉了机器路径', async (t) => {
