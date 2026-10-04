@@ -8,7 +8,7 @@
 
 1. **一个 PR 只做一件事。** 顺带重构请另开一个 PR。
 2. **改行为之前先开 issue 对齐。** 「大」不用数字界定，用这个测试：不用跑代码就要能说清它改了什么。说不清，说明还没对齐。
-3. **门禁只有一条**，就是下面[本地验证](#本地验证)里那条命令。CI 在 Ubuntu / Node 24 / Python 3.13 上跑的就是它，本地跑通即可，不用模拟其他平台。
+3. **门禁只有一条**，就是下面[本地验证](#本地验证)里那条命令。CI 在 Ubuntu / Node 24 上跑的就是它，本地跑通即可，不用模拟其他平台。
 4. **提交信息用 Conventional Commits，描述与 scope 都写中文。**
 5. **提交 PR 前保持分支与 `main` 同步**：把 `main` merge 进你的分支即可；落后时 GitHub 会提示 out of date，点 Update branch 一样管用。
 
@@ -21,10 +21,10 @@
 | 你要改 | 先读 |
 |---|---|
 | `.dsh/skills/**` 提示词与角色规格 | 该技能自己的 `SKILL.md`；课件规则归 `lesson-design`，题目归 `layered-practice` |
-| `lib/**` 引擎：纯函数域、工具域、任务域、监听域、导出域 | 该目录自己的文件头注释；[目标态规格](docs/设计/目标态规格.md) §3–§5 |
+| `lib/**` 引擎：纯函数域、数据域（`host/`）、工具域、任务域、监听域、问答域、实验域、导出域 | 该目录自己的文件头注释；[目标态规格](docs/设计/目标态规格.md) §3–§5 |
 | `templates/**` 工作区数据骨架 | [工程约束](docs/规范/工程约束.md) §二；[骨架说明](templates/README.md) |
 | `schemas/*.json` | 该 schema 本身；[文件归属](docs/规范/文件归属.md) |
-| `bin/*.mjs` 安装器与插件构建 | [安装说明](docs/使用/安装.md)；[Codex 与 ChatGPT](docs/使用/Codex与ChatGPT.md) |
+| `bin/*.mjs`、`bin/dsh-plugin.ts` 安装器、插件构建与 DSH 插件入口 | [安装说明](docs/使用/安装.md)；[Codex 与 ChatGPT](docs/使用/Codex与ChatGPT.md) |
 | `openai/studymate/**` 插件源 | [Codex 与 ChatGPT](docs/使用/Codex与ChatGPT.md) |
 | 课件内容文件 | [课件内容格式](docs/规范/课件内容格式.md) |
 | `docs/**`、`README.md` | 该文件已有的口径；新规则遵循「一处定义，别处只给指针」 |
@@ -39,7 +39,7 @@ npm test    # 与 CI 同一条
 
 单跑某一层、要真实浏览器或真实 DSH 的入口、各命令的前置，都写在[测试说明](scripts/tests/README.md)。
 
-Node 与 Python 的版本要求看 `package.json` 的 `engines` 与 CI 实际使用的版本，这里不重抄数字。
+Node 的版本要求看 `package.json` 的 `engines` 与 CI 实际使用的版本，这里不重抄数字。**没有 Python 了**：引擎随包发 TypeScript，`node` 直接跑 `.ts`（`scripts/tests/README.md` 是各命令前置的唯一出处）。
 ## 提交 PR
 
 1. 先开 issue（硬规矩 2），PR 正文里引用它。

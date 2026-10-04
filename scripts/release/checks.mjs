@@ -69,10 +69,20 @@ const groups = {
       // 两条都是「原 Python 套件的验收面」，不是新功能——见脚本自己的文件头。
       'scripts/tests/test_preset_install.mjs',
       'scripts/tests/test_interaction_state.mjs',
-      // Host 半数据层的特征化测试（lib/{workspace,library,assets,yaml,reference,attempts}.mjs）
+      // Host 半数据层的特征化测试（lib/{workspace,library,assets,yaml,reference,attempts}.ts）
       'scripts/tests/test_host_library_payload.mjs',
       'scripts/tests/test_host_reference_fence.mjs',
       'scripts/tests/test_host_path_boundary.mjs',
+      // 路径包含判据本身（lib/paths.ts）：reference / assets / export / lab 四处共用的那一份，
+      // 边界值（同前缀兄弟目录、root 带尾分隔符、软链指出去、断链）逐条钉住。特征化测试测的
+      // 是「取址/落盘的结果」，判据换一种写法照样可能绿——所以判据自己也要有一条。
+      'scripts/tests/test_host_paths.mjs',
+      // 阅读端五条 /api/studymate/* 路由的**错误信封**：形状（`{ok:false, error:{code,message}}`）、
+      // 机读码词表（源码里用了表外的码就红）、以及两端一致（lib/client.js 是手写 JS，不进 tsc）。
+      'scripts/tests/test_host_route_envelope.mjs',
+      // 性能预算（目标态规格 §10.3）：**相对规模的比例**，不写绝对秒数。数 readLibrary()
+      // 真的碰了几次文件系统，断言 4 倍规模 ≈ 4 倍工作量（线性 ≈ 4、平方 ≈ 16）。
+      'scripts/tests/test_host_perf_budget.mjs',
       'scripts/tests/test_host_yaml_workspace.mjs',
       // #71 的验收面：作答数据的幂等/版本栅栏，以及「拿一份 v0.2 真实工作区跑一遍」
       'scripts/tests/test_host_attempts_fence.mjs',

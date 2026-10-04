@@ -27,6 +27,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
+import { maskSource, insideLiteral } from './fixtures/source_mask.mjs';
+
 const ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 
 /* ── 域规则表：**唯一**的越权判据，默认拒绝 ──────────────────────────────────
@@ -43,18 +45,23 @@ const ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const DOMAIN_RULES = {
   core:   { allow: [], builtin: false, package: false },  // 纯函数域：一个外部依赖都不许
   lib:    { allow: ['core'], builtin: true, package: false },  // Host 数据层
+  // host 是「工具能碰哪些学习数据」那一层的落点（域词表、越权 guard、域数据读法）：它读 lib
+  // 的数据层与 core 的纯函数，自己**不**认识工具域与实验域——反过来 tools → host、lab → host
+  // 才是那两条边。放在 lib/ 下的二级目录而不是直接摊在 lib/ 里，是因为它要能被两个域同时
+  // import 而不制造反向边；目录名 `host` 指的是「Host 数据层的守卫」，不是宿主适配层。
+  host:   { allow: ['core', 'lib'], builtin: true, package: false },
   // tools 是**组合根**：#68 的注册点 `registerStudyMate` 要逐个调用各子系统自己目录里的
   // registerXxx，所以它必须 import 每个子系统（tools → tasks、tools → watch、tools → lab、
   // tools → export）。方向**只有**这一条——子系统一律不许 import tools（任务域就是把
   // `registerStudyTool` 当参数接过去的，正是为了不出现反向边，见 lib/tasks/tools.ts 文件头）。
   // 往后每落地一个注册进注册点的子系统，这里加一个域名，别改成通配。
-  tools:  { allow: ['core', 'lib', 'tasks', 'watch', 'lab', 'export'], builtin: true, package: false },  // 原生工具（#68）+ 任务（#73）+ 监听（#74）+ 实验（#77）+ 导出（#82）
+  tools:  { allow: ['core', 'lib', 'host', 'tasks', 'watch', 'lab', 'export'], builtin: true, package: false },  // 原生工具（#68）+ 任务（#73）+ 监听（#74）+ 实验（#77）+ 导出（#82）
   tasks:  { allow: ['core', 'lib'], builtin: true, package: false },  // 任务模型（#73）
-  // 实验域（#77）：判分三轨的第三轨。要 core（题型与必备字段）、lib（作答数据的落点、
-  // 域 guard 与 vault）、tasks（长命令走任务模型、可查可取消）。`node:child_process`
-  // 是它存在的理由，而它**不** import tools：guard 与 vault 在 `lib` 域里（#77 搬过去的），
-  // 所以 Web 路由那条入口不需要借道工具域。
-  lab:    { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },
+  // 实验域（#77）：判分三轨的第三轨。要 core（题型与必备字段）、lib（作答数据的落点）、
+  // tasks（长命令走任务模型、可查可取消）。`node:child_process` 是它存在的理由，而它
+  // **不** import tools：guard 与 vault 在 `host` 域里（#77 搬过去的），所以 Web 路由那条
+  // 入口不需要借道工具域。
+  lab:    { allow: ['core', 'lib', 'host', 'tasks'], builtin: true, package: false },
   // 问答域（#79）：阅读端问答面板那条 HTTP 路由。只依赖纯函数域与 Host 数据层——
   // 它**不** import 工具域（能力探测的本体在 `lib/core/model.ts`，见那里的文件头），
   // 所以这里没有 tools 这条边；反过来说，往这个域里加 `tools` 就是加了一条反向边。
@@ -112,110 +119,9 @@ const containsScanRoot = (directory) => SCAN_ROOTS.some(root => {
   return relative === '' || !relative.startsWith('..');
 });
 
-/* ── 源码扫描：注释与正则抹掉、字符串原样留（说明符在里面），并记下字符串区间 ──
-   为什么要区间：注释、字符串、模板里都可能出现 `import … from 'x'` 字样（本仓库的文档与提示语
-   里就不少）。抹掉注释与正则、把落在字符串内容里的匹配丢掉，才不会把「文档里的示例」当依赖。
-
-   三个真踩过的坑（不是理论洁癖，都是这个仓库里真实存在的写法）：
-     · 模板里套模板：``value => `'${value}'` `` 嵌在另一个模板的 `${}` 里（`bin/openai-skill-compat.mjs`）。
-       所以模板要按 `${}` 进出、记深度，不能见反引号就收尾。
-     · 带引号的正则：`.replace(/"/g, '&quot;')`（`lib/core/format.ts`）。把正则当普通代码扫的话，
-       里面的引号会把状态机带偏。所以按前导字符判正则，判到就整段抹成空格。
-     · 引号在字符串内容里：靠「区间」而不是「引号计数」来判，才不会把内容里的引号当边界。 */
-const REGEX_KEYWORDS = new Set(['return', 'typeof', 'case', 'in', 'of', 'new', 'delete', 'void',
-  'instanceof', 'do', 'else', 'yield', 'await']);
-// 正则前面允许出现的「非值」字符：`= /re/`、`( /re/`、`, /re/`…；标识符、`)`、`]` 后面是除法。
-const REGEX_LEADERS = '([{,;=:!&|?+-*%^~<>';
-
-function maskSource(source) {
-  let out = '';
-  const literals = [];
-  const stack = [{ kind: 'code' }];
-  const top = () => stack[stack.length - 1];
-  /** `/` 是正则还是除号：看已产出代码里最后一个有意义的字符/词。 */
-  const regexAllowed = () => {
-    const head = out.replace(/\s+$/, '');
-    if (!head) return true;
-    if (REGEX_LEADERS.includes(head[head.length - 1])) return true;
-    const word = /[A-Za-z_$][\w$]*$/.exec(head);
-    return word !== null && REGEX_KEYWORDS.has(word[0]);
-  };
-  let i = 0;
-  while (i < source.length) {
-    const frame = top();
-    const char = source[i];
-    const next = source[i + 1];
-    if (frame.kind === 'code') {
-      if (char === '/' && next === '/') { stack.push({ kind: 'line' }); out += '  '; i += 2; continue; }
-      if (char === '/' && next === '*') { stack.push({ kind: 'block' }); out += '  '; i += 2; continue; }
-      if (char === '/' && regexAllowed()) {
-        // 正则字面量：转义与 `[…]` 字符组里的 `/` 不算收尾；撞到换行说明判错了，退回普通字符
-        let j = i + 1;
-        let inClass = false;
-        let closed = false;
-        while (j < source.length) {
-          const inner = source[j];
-          if (inner === '\\') { j += 2; continue; }
-          if (inner === '\n') break;
-          if (inner === '[') inClass = true;
-          else if (inner === ']') inClass = false;
-          else if (inner === '/' && !inClass) { closed = true; break; }
-          j += 1;
-        }
-        if (closed) {
-          let end = j + 1;
-          while (end < source.length && /[a-z]/.test(source[end])) end += 1;
-          out += ' '.repeat(end - i);
-          i = end;
-          continue;
-        }
-      }
-      if (char === '`') { stack.push({ kind: 'template', start: i }); out += char; i += 1; continue; }
-      if (char === '"' || char === "'") { stack.push({ kind: 'quote', quote: char, start: i }); out += char; i += 1; continue; }
-      if (frame.hole) {
-        if (char === '{') frame.depth += 1;
-        else if (char === '}') {
-          if (frame.depth === 0) {
-            stack.pop();
-            top().start = i + 1;  // 洞之后那段模板文本从 `}` 的下一格开始
-            out += char; i += 1; continue;
-          }
-          frame.depth -= 1;
-        }
-      }
-      out += char; i += 1; continue;
-    }
-    if (frame.kind === 'line') {
-      out += char === '\n' ? '\n' : ' ';
-      i += 1;
-      if (char === '\n') stack.pop();
-      continue;
-    }
-    if (frame.kind === 'block') {
-      if (char === '*' && next === '/') { stack.pop(); out += '  '; i += 2; continue; }
-      out += char === '\n' ? '\n' : ' ';
-      i += 1;
-      continue;
-    }
-    if (frame.kind === 'quote') {
-      if (char === '\\') { out += char + (next ?? ''); i += 2; continue; }
-      out += char; i += 1;
-      if (char === frame.quote) { literals.push([frame.start, i]); stack.pop(); }
-      continue;
-    }
-    // 模板：`${` 之前的文本是一段字面量内容，洞里的代码照常扫（所以区间不含洞）
-    if (char === '\\') { out += char + (next ?? ''); i += 2; continue; }
-    if (char === '`') { out += char; i += 1; literals.push([frame.start, i]); stack.pop(); continue; }
-    if (char === '$' && next === '{') {
-      // 洞紧跟洞时（`…${a}${b}…`）这里会是一段空内容，别记空区间
-      if (frame.start < i) literals.push([frame.start, i]);
-      stack.push({ kind: 'code', hole: true, depth: 0 });
-      out += '${'; i += 2; continue;
-    }
-    out += char; i += 1;
-  }
-  return { code: out, literals };
-}
+/* ── 源码扫描（注释与正则抹掉、字符串原样留、并记下区间）住在 ──
+   `scripts/tests/fixtures/source_mask.mjs`：`test_docs_references.mjs` 也要用同一个判据
+   反查注释里的路径引用，两份扫描器会在真实写法上分叉。文件头写了为什么。 */
 
 const STATIC_IMPORT = /\bimport\s+(?:[^'";]*?\bfrom\s*)?['"]([^'"]+)['"]/g;
 const RE_EXPORT = /\bexport\s+[^'";]*?\bfrom\s+['"]([^'"]+)['"]/g;
@@ -223,7 +129,6 @@ const DYNAMIC_IMPORT = /\bimport\s*\(\s*([^)]*)\)/g;
 const CONST_LITERAL = /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(`[^`]*`|'[^']*'|"[^"]*")\s*[;,]/g;
 const REQUIRE_CALL = /\brequire\s*\(/;
 
-const insideLiteral = (literals, index) => literals.some(([from, to]) => index >= from && index < to);
 
 /** 模板字面量里能定死的部分：洞落在最后一段（`../../schemas/${name}`）时目录是定死的。
  *  返回 `{ directory: 'schemas/', resolved: false }`；洞落在目录上就返回 null（定不死）。 */
@@ -486,11 +391,11 @@ test('架构边界：真实 import 图无违规', () => {
 
 test('扫描不是空转：已知的域与跨域边都在图里', () => {
   const domains = new Set(GRAPH.modules.map(domainOf));
-  for (const domain of ['core', 'lib', 'tools', 'bin', 'client']) {
+  for (const domain of ['core', 'lib', 'host', 'tools', 'bin', 'client']) {
     assert.ok(domains.has(domain), `域 ${domain} 一个模块都没扫到：扫描器瞎了，还是它真的不见了？`);
   }
   const pairs = new Set(GRAPH.edges.map(edge => `${domainOf(edge.from)} → ${domainOf(edge.to)}`));
-  for (const pair of ['core → core', 'lib → core', 'tools → core', 'tools → lib', 'bin → lib', 'bin → tools']) {
+  for (const pair of ['core → core', 'lib → core', 'host → lib', 'tools → core', 'tools → host', 'bin → lib', 'bin → tools']) {
     assert.ok(pairs.has(pair), `跨域边 ${pair} 没扫到：要么真的没了，要么扫描器漏了说明符`);
   }
   // 低水位线：只用来证明文件遍历没瞎，不是精确清单（精确清单就是扫描结果本身）

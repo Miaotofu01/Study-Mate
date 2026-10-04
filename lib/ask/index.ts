@@ -2,9 +2,10 @@
    StudyMate · 问答域 —— 目录出口（#79）
 
    阅读端问答面板的那一条路由：`POST /api/studymate/ask`（目标态规格 §7.4）。
-   注册点在 `bin/dsh-plugin.ts` 的 `ctx.inject(['connection'], …)` 里加**一行**：
+   注册点在 `bin/dsh-plugin.ts` 里加**一行**（与另外三条路由同一份约定：收外层 ctx、
+   自己 `inject(['connection'])`）：
 
-     registerAskRoute(connectionCtx as Parameters<typeof registerAskRoute>[0]);
+     registerAskRoute(ctx);
 
    为什么不像别的子系统那样由 `lib/tools/index.ts` 的 `registerStudyMate` 代注册：问答面板
    走的是 **HTTP 路由**（浏览器侧直接调），不是总控的工具面——`registerStudyMate` 只在

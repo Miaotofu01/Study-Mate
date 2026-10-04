@@ -27,6 +27,8 @@
    中间那段是上游文件的逐字节拷贝，哈希进 `export.json`，泄漏守卫按哈希核对（见 guard.ts）。
    ───────────────────────────────────────────────────────────────────────── */
 
+import { escAttr, escText } from '../core/format.ts';
+
 /** 导出目录的名字（工作区里的默认落点）：`<工作区>/export/`。 */
 export const OUT_DIR_NAME = 'export';
 
@@ -312,9 +314,12 @@ export function bootScript(): string {
 
 /* ── 壳 ─────────────────────────────────────────────────────────────────── */
 
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+/* 转义用 `lib/core/format.ts` 那对（`escText` / `escAttr`），**不在这里再写一份**：
+   原来这里有一个私有的 `escapeHtml`，形状与 `escAttr` 几乎一样、只少转一个 `'`，却被用在
+   `<script src="…">` 与 `title="…"` 两个属性位置上——属性值用双引号包裹时少转单引号还能
+   侥幸，但它与 `format.ts:97` 明说的「属性值：再多转 `"` 与 `'`」是两份会漂的判据。
+   标题与说明里的科目名是**学生数据**（`pageTitle` 直接用 `subjects[].name`），
+   所以这里不是理论洁癖。 */
 
 export interface IndexOptions {
   title: string;
@@ -333,13 +338,13 @@ export interface IndexOptions {
  *   · 无脚本时说明白为什么看不到内容，而不是留一片空白。
  */
 export function indexHtml(options: IndexOptions): string {
-  const scripts = options.scripts.map((src) => `<script src="${escapeHtml(src)}"></script>`).join('\n');
+  const scripts = options.scripts.map((src) => `<script src="${escAttr(src)}"></script>`).join('\n');
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(options.title)}</title>
+<title>${escText(options.title)}</title>
 <meta name="generator" content="StudyMate 导出（阅读端本体，离线）">
 <style>
   /* 阅读端本体把自己的样式整份注入 <style>；这里只管画布与「起不来」时的兜底外观。 */
@@ -352,7 +357,7 @@ export function indexHtml(options: IndexOptions): string {
 </style>
 </head>
 <body>
-<div id="studymate-export" title="${escapeHtml(options.note)}"></div>
+<div id="studymate-export" title="${escAttr(options.note)}"></div>
 <noscript>
   <div class="smb-export-error">这个页面和 DSH 里的阅读端是同一份渲染代码，所以它需要脚本才能画出来。
   在浏览器里允许这个页面运行脚本即可（它不联网：数据、样式、图都在这个目录里）。</div>

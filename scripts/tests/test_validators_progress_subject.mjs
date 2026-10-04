@@ -11,21 +11,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { validateProgress, validateSubject } from '../../lib/core/validate.ts';
+import { parseYaml } from '../../lib/yaml.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-
-async function loadYamlParser() {
-  for (const name of ['yaml.ts', 'yaml.mjs']) {
-    const file = path.join(ROOT, 'lib', name);
-    if (fs.existsSync(file)) return import(pathToFileURL(file).href);
-  }
-  throw new Error('lib/yaml.ts 与 lib/yaml.mjs 都不在：夹具没有解析器可用');
-}
-
-const { parseYaml } = await loadYamlParser();
 const PROGRESS_SCHEMA = JSON.parse(fs.readFileSync(path.join(ROOT, 'schemas', 'progress.schema.json'), 'utf8'));
 const SUBJECT_SCHEMA = JSON.parse(fs.readFileSync(path.join(ROOT, 'schemas', 'subject.schema.json'), 'utf8'));
 

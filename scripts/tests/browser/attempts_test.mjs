@@ -137,9 +137,12 @@ ${hostTokenCss()}</style>
 /** 迷你宿主：library 现读，attempts 交给真路由；POST 与回执都记下来给断言用。 */
 async function startHost(workspace) {
   const routes = [];
+  // 注册约定：收外层 ctx、自己 inject(['connection'])（与 registerAskRoute 同一姿势）
   registerAttemptRoutes({
-    connection: { fetch: { register: (route) => { routes.push(route); return () => {}; } } },
-    effect: (fn) => fn(),
+    inject: (names, handler) => handler({
+      connection: { fetch: { register: (route) => { routes.push(route); return () => {}; } } },
+      effect: (fn) => fn(),
+    }),
   });
   const route = routes[0];
   const posts = [];
@@ -312,8 +315,8 @@ try {
     await ctx.sleep(900);
     const seen = await ctx.evaluate(PROBE);
     const fresh = host.posts.slice(postsBefore);
-    check('第一笔被 409 拒（拒绝写入，不静默）', fresh[0] && fresh[0].status === 409 && fresh[0].body.error === 'version-conflict',
-      JSON.stringify(fresh.map((p) => [p.status, p.body.error])));
+    check('第一笔被 409 拒（拒绝写入，不静默）', fresh[0] && fresh[0].status === 409 && fresh[0].body.error.code === 'version-conflict',
+      JSON.stringify(fresh.map((p) => [p.status, p.body.error && p.body.error.code])));
     check('客户端拿回执里的版本号重来了一次（重读 + 重试同一个 operationId）',
       fresh[1] && fresh[1].status === 200
       && fresh[1].body.attempts['题'][QUESTION]['作答历史'].length === 2,

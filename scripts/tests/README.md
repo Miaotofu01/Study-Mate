@@ -49,8 +49,11 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_antigravity_plugin.mjs` | Antigravity 插件包含 5 个原生子代理与 12 个技能、无 0 字节文件、占用的输出目录不被清空、构建可重复 |
 | `scripts/release/release.test.mjs` | 版本计算、更新记录、历史 tag、PR 去重、制品校验与重试保护 |
 | `test_host_library_payload.mjs`、`test_host_reference_fence.mjs`、`test_host_path_boundary.mjs`、`test_host_yaml_workspace.mjs` | Host 半数据层（`lib/{workspace,library,assets,yaml,reference}.ts`）的特征化测试：payload 顶层与科目/节点形状、旧六档→三档、锚点四态、`operationId` 幂等重放、`expectedVersion` 冲突拒绝、路径越界、YAML 子集与工作区配置读取。数据在临时目录现造现弃，不碰真实工作区 |
+| `test_host_perf_budget.mjs` | **性能预算**（目标态规格 §10.3）：写成「相对工作区规模的比例」而不是绝对秒数——现造 16 课与 64 课两份工作区，数 `readLibrary()` 真的碰了几次文件系统（`readFileSync` / `readdirSync` / `statSync`…），断言 4 倍规模的工作量落在 `[3, 6]`（线性 ≈ 4、平方 ≈ 16、常数 ≈ 1）。数字是确定性的，不取挂钟——时间抖动在共享 CI 上只会变成假红 |
+| `test_host_route_envelope.mjs` | 阅读端 HTTP 路由的**错误信封**（`lib/route-envelope.ts`）：形状恒为 `{ ok:false, error:{ code, message } }`（`extra` 覆盖不掉这两个键）、`ROUTE_ERROR_CODES` 是唯一一份机读码词表（扫 `lib/**`、`bin/**` 的调用点，用了表外的码就红）、客户端只从 `error.code` / `error.message` 取值（`lib/client.js` 是手写 JS，不进 tsc）。契约的人读版在[工程约束](../规范/工程约束.md) §三 |
+| `test_host_paths.mjs` | 路径包含判据**本身**（`lib/paths.ts`）：reference 的读写、assets 的取址、导出的落点、实验命令的 cwd／可写范围／参数路径四处共用这一份，所以边界值直接钉住——同前缀的兄弟目录（`/a/bc` 不在 `/a/b` 里）、父目录与 `..`、`root` 带尾分隔符、软链指到边界之外、断链；并断言四个调用点都走这一份、谁也没再长出私有副本 |
 | `test_core_schema_subset.mjs` | JSON Schema 子集校验器（`lib/core/schema.ts`）：关键字枚举表与六份真 schema 对齐（新增关键字会红）、不支持的关键字不静默放行、逐个断言的 `type`/`required`/`additionalProperties`/`enum`/`const`/`pattern`/`minLength`/`minimum`/`minItems`/`format` |
-| `test_validators_curriculum.mjs` | 大纲校验（`validateCurriculum`）与带位置的 YAML 读取：DAG 无环、位次不倒挂、实验课前置非空、字段齐全、重复 id、悬空引用；行号是解析位置（夹具里放了逐字相同的**诱饵注释**，文本搜索会指错行）；并与 `lib/yaml.{ts,mjs}` 的值树逐路径对齐 |
+| `test_validators_curriculum.mjs` | 大纲校验（`validateCurriculum`）与带位置的 YAML 读取：DAG 无环、位次不倒挂、实验课前置非空、字段齐全、重复 id、悬空引用；行号是解析位置（夹具里放了逐字相同的**诱饵注释**，文本搜索会指错行）；并与 `lib/yaml.ts` 的值树逐路径对齐 |
 | `test_validators_progress_subject.mjs` | 进度与科目的 schema 与取值：旧六档读到就报映射、进度与大纲的引用完整性、空串 `name`/`goal`、`created_at` 是否真实存在、`slug` 与目录名不一致 |
 | `test_validators_handoff.mjs` | 交接门禁（`validateHandoff`）：明确放行/阻断、manifest ↔ `deliver/` 覆盖、角色/节点绑定、路径边界、symlink、可选 SHA-256、重复 JSON key 与 JSON 语法错误的真实行列 |
 | `test_rules_pure.mjs` | 纯函数规则层（`lib/core/rules.ts`）：四层判定逐条通过标准、题型与深度的匹配、旧六档 → 三档六条映射逐条断言、证据资格与分母口径；并断言 `lib/core/**` 不 import `node:*` |

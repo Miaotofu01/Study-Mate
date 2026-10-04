@@ -11,8 +11,8 @@
 
 import path from 'node:path';
 
-import type { DomainAccess } from './access.ts';
-import type { PathFacts, WorkspaceFacts } from './vault.ts';
+import type { DomainAccess } from '../host/access.ts';
+import type { PathFacts, WorkspaceFacts } from '../host/vault.ts';
 
 export type { PathFacts };
 

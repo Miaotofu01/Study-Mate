@@ -203,7 +203,7 @@ test('#79 幂等：同一个 operationId 换了内容 → 拒绝，不写盘', a
   // 回答照给（模型那边确实调了），但写盘被拒
   assert.equal(second.ok, true);
   assert.equal(second.write.ok, false);
-  assert.equal(second.write.error, 'operation-id-conflict');
+  assert.equal(second.write.error.code, 'operation-id-conflict');
   assert.equal(fs.readFileSync(path.join(subjectDir, 'misconceptions.yaml'), 'utf8'), bytes);
 });
 
@@ -220,7 +220,7 @@ test('#79 版本栅栏：expectedVersion 对不上就拒绝写入，回答不受
 
   assert.equal(view.ok, true, '版本冲突不该把回答一起吞掉');
   assert.equal(view.write.ok, false);
-  assert.equal(view.write.error, 'version-conflict');
+  assert.equal(view.write.error.code, 'version-conflict');
   assert.equal(view.write.version, misconceptionsVersion({ workspace, subject: SUBJECT }));
   assert.equal(fs.readFileSync(file, 'utf8'), bytes, '版本对不上却写了盘');
 });

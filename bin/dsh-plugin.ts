@@ -102,6 +102,12 @@ export async function apply(ctx: PluginContext): Promise<void> {
     console.warn(`StudyMate：原生工具模块加载不了，总控只能退回旧路径。${error instanceof Error ? error.message : String(error)}`);
   }
 
+  /* 错误信封的唯一构造点（`lib/route-envelope.ts`）。**动态取**：这个文件会被
+     `test_bundle.mjs` 单独拷进一个没有 `lib/` 的目录里跑（那里模拟的是安装器边界失败），
+     顶层静态 import 会让那条用例在解析期就崩——与下面几条路由的 lib/ 依赖同一姿势。 */
+  const envelope = async (status: number, code: string, message: string): Promise<Response> =>
+    (await import('../lib/route-envelope.ts')).routeError(status, code, message);
+
   // ── 阅读端的数据通路 ───────────────────────────────────────────────────
   // 每次请求现读工作区：学习文件是纯文本、体量小（目标态 §12「按需扫描足够」），
   // 不落盘索引、不加缓存，也就没有「文件变了页面还是旧的」这类要同步的状态。
@@ -122,12 +128,12 @@ export async function apply(ctx: PluginContext): Promise<void> {
           ]);
           const workspace = resolveWorkspace();
           if (!workspace) {
-            return Response.json({ error: '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。' }, { status: 500 });
+            return envelope(500, 'no-workspace', '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。');
           }
           return Response.json(readLibrary({ workspace }));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          return Response.json({ error: message }, { status: 500 });
+          return envelope(500, 'internal', message);
         }
       },
     }), 'studymate: 阅读端数据路由');
@@ -172,7 +178,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
           const { resolveWorkspace } = await import('../lib/workspace.ts');
           const workspace = resolveWorkspace();
           if (!workspace) {
-            return Response.json({ error: '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。' }, { status: 500 });
+            return envelope(500, 'no-workspace', '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。');
           }
           const { readReference, writeReference } = await import('../lib/reference.ts');
 
@@ -184,16 +190,16 @@ export async function apply(ctx: PluginContext): Promise<void> {
               relPath: url.searchParams.get('path') || '',
             });
             if (!found) {
-              return Response.json({ error: 'not-found', message: '读不到这份资料：不存在、越界，或者它不是文本（二进制只能在界面上按文件看）' }, { status: 404 });
+              return envelope(404, 'not-found', '读不到这份资料：不存在、越界，或者它不是文本（二进制只能在界面上按文件看）');
             }
             return Response.json(found);
           }
 
-          // POST：写盘的所有判断都在 lib/reference.mjs 里（版本号、幂等、路径越界、来源标记），
+          // POST：写盘的所有判断都在 lib/reference.ts 里（版本号、幂等、路径越界、来源标记），
           // 这里只负责把请求体解出来 + 把结果映射成 HTTP 状态
           const body = await request.json().catch(() => null);
           if (!body || typeof body !== 'object') {
-            return Response.json({ error: 'body-invalid', message: '请求体要是 JSON 对象：{ subject, title, markdown, operationId, expectedVersion }' }, { status: 400 });
+            return envelope(400, 'body-invalid', '请求体要是 JSON 对象：{ subject, title, markdown, operationId, expectedVersion }');
           }
           const result = writeReference({
             workspace,
@@ -206,25 +212,33 @@ export async function apply(ctx: PluginContext): Promise<void> {
           return Response.json(result, { status: result.ok ? 200 : result.status });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          return Response.json({ error: message }, { status: 500 });
+          return envelope(500, 'internal', message);
         }
       },
     }), 'studymate: 参考资料路由');
-
-    // 作答数据（#72）：路径、方法、请求体、状态码映射都在 lib/attempts-route.ts 里，这里只挂一行
-    import('../lib/attempts-route.ts').then((module) => module.registerAttemptRoutes(connectionCtx), (error) => { console.warn(`StudyMate：作答数据路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
-
-    // 实验代跑（#77）：学生按「跑一次」→ POST /api/studymate/lab-run。计划与执行与原生工具
-    // studymate_lab_run 共用一份实现，这里也只挂一行。
-    import('../lib/lab/route.ts').then((module) => module.registerLabRoute(connectionCtx), (error) => { console.warn(`StudyMate：实验代跑路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
-
-    // 问答面板（#79）：POST /api/studymate/ask —— 阅读端就地调模型，不经过总控。
-    // 具体实现在 lib/ask/**，这个文件不认识它的形状（与上面三条同一种姿势）。
-    void import('../lib/ask/index.ts').then(({ registerAskRoute }) => registerAskRoute(connectionCtx as Parameters<typeof registerAskRoute>[0])).catch((error) => { console.warn(`StudyMate：问答路由挂不上。${error instanceof Error ? error.message : String(error)}`); });
 
     // 文件监听与变更推送（#74）：监听在学习工作区那一侧（lib/watch，由 lib/tools 的
     // registerStudyMate 起），这里只挂推送路由——它要的 connection 只有这个注入点拿得到。
     // 动态 import 与上面同一姿势（这个文件会被 test_bundle 拷到没有 lib/ 的临时目录里跑）。
     void import('../lib/watch/index.ts').then((watch) => watch.registerWatchChannel(connectionCtx), (error) => console.warn(`StudyMate：变更推送通道没挂上。${error instanceof Error ? error.message : String(error)}`));
   });
+
+  /* ── 另外三条路由：各子系统自己 inject(['connection']) ─────────────────────
+     注册约定只有一种——**收外层 ctx、自己注入**（与 `registerTaskRoute` 逐字相同）。
+     所以它们挂在这里、不挂进上面那个 `ctx.inject` 回调里：那个回调是「已经拿到
+     connection」的地方，而这几个模块要自己决定「connection 就绪才注册」。
+
+     这个文件会被 test_bundle.mjs 拷到没有 lib/ 的临时目录里跑，所以一律动态 import；
+     模块加载失败只警告，插件其余部分照常。 */
+
+  // 作答数据（#72）：路径、方法、请求体、状态码映射都在 lib/attempts-route.ts 里，这里只挂一行
+  import('../lib/attempts-route.ts').then((module) => module.registerAttemptRoutes(ctx), (error) => { console.warn(`StudyMate：作答数据路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
+
+  // 实验代跑（#77）：学生按「跑一次」→ POST /api/studymate/lab-run。计划与执行与原生工具
+  // studymate_lab_run 共用一份实现，这里也只挂一行。
+  import('../lib/lab/route.ts').then((module) => module.registerLabRoute(ctx), (error) => { console.warn(`StudyMate：实验代跑路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
+
+  // 问答面板（#79）：POST /api/studymate/ask —— 阅读端就地调模型，不经过总控。
+  // 具体实现在 lib/ask/**，这个文件不认识它的形状（与上面两条同一种姿势）。
+  void import('../lib/ask/index.ts').then(({ registerAskRoute }) => registerAskRoute(ctx)).catch((error) => { console.warn(`StudyMate：问答路由挂不上。${error instanceof Error ? error.message : String(error)}`); });
 }

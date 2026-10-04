@@ -25,11 +25,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** 路径包含：`target` 在 `root` 之内（含相等）。两侧都必须是**规范化过的绝对路径**。 */
-export function isWithin(root: string, target: string): boolean {
-  if (target === root) return true;
-  return target.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
-}
+/* 路径包含判据只有一份，在 `lib/paths.ts`（全仓四处调用点共用）。这里转出去是为了不改
+   `lib/lab/index.ts` 的对外导出面——`isWithin` 本来就是从这个文件导出的。 */
+import { isWithin } from '../paths.ts';
+export { isWithin };
 
 export interface PathVerdict {
   ok: boolean;

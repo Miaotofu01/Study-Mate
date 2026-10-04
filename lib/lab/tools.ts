@@ -68,7 +68,7 @@ export function splitQuestionId(id: unknown): { anchor: string; index: number } 
 }
 
 /**
- * `pool` 域读法回来的东西：`{ value, error, … }`（`lib/tools/vault.ts` 的读法，结构化对齐、
+ * `pool` 域读法回来的东西：`{ value, error, … }`（`lib/host/vault.ts` 的读法，结构化对齐、
  * 不 import）。`readFileView` 给的那几个字段（file / present / text / bytes）在运行期也在，
  * 这里只声明用得到的两个。
  */
@@ -250,7 +250,7 @@ export async function runLabJob(job: TaskJob, input: unknown): Promise<TaskOutco
   entry.written = written.ok;
   entry.writeNote = written.ok
     ? ''
-    : `没能写进作答数据（${written.error}）：${written.message}`;
+    : `没能写进作答数据（${written.error.code}）：${written.error.message}`;
   ledger.put(entry);
 
   job.progress(`跑完了：退出码 ${facts.退出码 === null ? '（无，被信号杀掉）' : facts.退出码}｜${facts.毫秒} 毫秒`
@@ -465,7 +465,11 @@ export function renderLabRun(value: LabRunOutcome): { type: 'text'; text: string
 
 /* ── 工具定义 ──────────────────────────────────────────────────────────── */
 
-/** 工具域 `define.ts` 的 `StudyToolSpec` 里我们用到的部分（结构化对齐，不 import：域图不成环）。 */
+/** 工具域 `define.ts` 的 `StudyToolSpec` 里我们用到的部分（结构化对齐，不 import：域图不成环）。
+ *
+ *  **它是手抄的，所以有一条测试钉着**（`test_lab_runner.mjs` 的「结构对齐」）：两份接口的
+ *  顶层键与可选性逐条对账，`labRunTool()` 真造出来的对象也拿来数键。别只改一边——
+ *  `registerLabTools` 里那句 `as unknown as` 会把类型不符一起咽下去，靠 tsc 拦不住。 */
 export interface LabToolSpec {
   name: string;
   description: string;
@@ -528,7 +532,7 @@ export function labRunTool(service: TaskService): LabToolSpec {
  *
  * `domain` 用 `any` 而不是 `string`：工具域那边是 `Domain` 联合类型，`string` 收窄不了它
  * （反过来也不行），两边用一个共同的宽类型对齐是这里唯一的办法。**运行期一道校验都不少**
- * ——域名的合法性由 `createAccess` 判，写错一个字母当场抛（`lib/tools/access.ts`）。
+ * ——域名的合法性由 `createAccess` 判，写错一个字母当场抛（`lib/host/access.ts`）。
  */
 export interface LabAccess {
   read: (domain: any, target?: string, options?: unknown) => unknown;

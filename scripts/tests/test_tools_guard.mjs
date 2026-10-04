@@ -15,7 +15,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createAccess, DomainViolationError, matchesPattern } from '../../lib/tools/access.ts';
+import { createAccess, DomainViolationError, matchesPattern } from '../../lib/host/access.ts';
 import { assertOutput, execute, fakeContext, loadTools, useHome } from './fixtures/tools.mjs';
 
 const tools = await loadTools();
@@ -64,7 +64,7 @@ const DECLARATIONS = {
       'assets', 'records', 'reference', 'misconceptions'],
     writes: { export: ['index.html', 'data.js', 'host.js', 'boot.js', 'studymate-client.js', 'export.json', 'vendor/**', 'assets/**'] },
   },
-  // #73 任务域：任务状态不是学习数据域（`lib/tools/domains.ts` 里没有它），
+  // #73 任务域：任务状态不是学习数据域（`lib/host/domains.ts` 里没有它），
   // 所以五个工具一个域都不读、一个字段都不写——它们碰的是插件自己的台账。
   studymate_task_status: { reads: [], writes: {} },
   studymate_task_wait: { reads: [], writes: {} },

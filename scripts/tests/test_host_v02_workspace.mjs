@@ -316,7 +316,7 @@ test('v0.2 工作区上：重放同一 operationId 字节不变；版本对不�
   const stale = writeAttempts({ ...submission, operationId: 'v02-stale', expectedVersion: '0000000000000000' });
   assert.equal(stale.ok, false);
   assert.equal(stale.status, 409);
-  assert.equal(stale.error, 'version-conflict');
+  assert.equal(stale.error.code, 'version-conflict');
   assert.deepEqual(stale.attempts, first.attempts, '拒绝时把当前那份带回去，数据不丢');
   assert.deepEqual(fs.readFileSync(file), bytes, '被拒绝的那次不写盘');
 });

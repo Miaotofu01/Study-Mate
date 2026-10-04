@@ -25,7 +25,7 @@ import {
   EXPORT_KIND, OUT_DIR_NAME, checkExport, readExportDir,
 } from '../export/index.ts';
 import type { ExportTaskResult } from '../export/index.ts';
-import type { WorkspaceFacts } from './vault.ts';
+import type { WorkspaceFacts } from '../host/vault.ts';
 import type { StudyRun, StudyToolSpec } from './define.ts';
 
 const TEXT = { type: 'string' } as const;

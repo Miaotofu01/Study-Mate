@@ -65,17 +65,23 @@ function makeHome() {
   return { root, home, workspace, subjectDir, attemptsDir: path.join(subjectDir, 'attempts') };
 }
 
-/* ── 挂路由：模拟 `ctx.inject(['connection'], …)` 给的那层 ctx ─────────── */
+/* ── 挂路由：模拟宿主的**两层** ctx（外层 `inject` → 注入后的 connection ctx）──
+   注册约定与 `registerAskRoute` / `registerTaskRoute` 逐字相同：收外层 ctx、自己
+   `inject(['connection'])`。所以假 ctx 也要两层，`inject` 立刻回调（与宿主同一时机）。 */
 
 function connect() {
   const routes = [];
   const labels = [];
-  const ctx = {
+  const child = {
     connection: { fetch: { register: (route) => { routes.push(route); return () => {}; } } },
     effect: (fn, label) => { labels.push(label); return fn(); },
   };
-  const registered = registerAttemptRoutes(ctx);
-  return { ctx, routes, labels, registered, route: routes[0] };
+  const injections = [];
+  const ctx = {
+    inject: (names, handler) => { injections.push(names); handler(child); },
+  };
+  registerAttemptRoutes(ctx);
+  return { ctx, child, injections, routes, labels, route: routes[0] };
 }
 
 /** 一次 POST：路由注册出来的那个 handler 原样吃一个 Request（与宿主同一条路径）。 */
@@ -115,8 +121,7 @@ function submission(workspace, overrides = {}) {
 /* ── 注册 ─────────────────────────────────────────────────────────────── */
 
 test('路由挂得上：路径、方法、请求体，以及缺 connection 时不炸', () => {
-  const { routes, labels, registered } = connect();
-  assert.equal(registered, true);
+  const { routes, labels, injections } = connect();
   assert.equal(routes.length, 1);
   const [route] = routes;
   assert.equal(route.path, ATTEMPTS_PATH);
@@ -126,12 +131,24 @@ test('路由挂得上：路径、方法、请求体，以及缺 connection 时�
   assert.equal(typeof route.fetch, 'function');
   assert.deepEqual(labels, ['studymate: 作答数据路由'], '注册是有主的副作用（走 effect）');
 
-  // headless / 更老的宿主：没有 connection 或 effect 时给 false，不抛
-  assert.equal(registerAttemptRoutes(undefined), false);
-  assert.equal(registerAttemptRoutes(null), false);
-  assert.equal(registerAttemptRoutes({}), false);
-  assert.equal(registerAttemptRoutes({ connection: {} }), false);
-  assert.equal(registerAttemptRoutes({ connection: { fetch: { register: () => {} } } }), false);
+  // 外层 ctx 只 inject 一次，而且只要 connection（与另外三条路由同一份清单）
+  assert.deepEqual(injections, [['connection']]);
+
+  // headless / 更老的宿主：没有 inject、或注入后缺 connection / effect 时**一条路由都不挂**，
+  // 也绝不抛——挂不上就是这一个功能不可用，插件其余部分照常
+  const nothing = [];
+  const bare = { inject: (names, handler) => handler({}) };
+  assert.doesNotThrow(() => registerAttemptRoutes(undefined));
+  assert.doesNotThrow(() => registerAttemptRoutes(null));
+  assert.doesNotThrow(() => registerAttemptRoutes({}));
+  assert.doesNotThrow(() => registerAttemptRoutes(bare));
+  assert.doesNotThrow(() => registerAttemptRoutes({
+    inject: (names, handler) => handler({ connection: {}, effect: () => {} }),
+  }));
+  assert.doesNotThrow(() => registerAttemptRoutes({
+    inject: (names, handler) => handler({ connection: { fetch: { register: (route) => nothing.push(route) } } }),
+  }));
+  assert.deepEqual(nothing, [], '缺 effect 时不许注册');
 });
 
 /* ── 1. 落盘 + 跨请求读回 + 重放 ──────────────────────────────────────── */
@@ -227,8 +244,8 @@ test('另一个写入者改过之后：409 拒绝、不写盘、带回当前内�
   assert.equal(stale.status, 409);
   const refused = await stale.json();
   assert.equal(refused.ok, false);
-  assert.equal(refused.error, 'version-conflict');
-  assert.match(refused.message, /版本号对不上/, '拒绝的原因要是一句人话，前端原样带给学生');
+  assert.equal(refused.error.code, 'version-conflict');
+  assert.match(refused.error.message, /版本号对不上/, '拒绝的原因要是一句人话，前端原样带给学生');
   assert.equal(refused.version, 甲.version, '冲突时顺手带回当前版本号 = 已经重读过了');
   assert.deepEqual(refused.attempts, 甲.attempts, '带回来的是甲写的那份：乙的数据没丢也没覆盖');
   assert.deepEqual(fs.readFileSync(file), bytes, '被拒绝的那次不写盘');
@@ -303,7 +320,7 @@ test('坏请求：非 JSON、缺字段、越界科目/节点、没有课件 —�
 
   const notJson = await post(route, null, { body: '这不是 JSON' });
   assert.equal(notJson.status, 400);
-  assert.equal((await notJson.json()).error, 'body-invalid');
+  assert.equal((await notJson.json()).error.code, 'body-invalid');
 
   const cases = [
     ['operation-id-invalid', { operationId: undefined }],
@@ -317,16 +334,16 @@ test('坏请求：非 JSON、缺字段、越界科目/节点、没有课件 —�
     const response = await post(route, submission(workspace, Object.assign({ operationId: op('bad') }, overrides)));
     assert.equal(response.status, 400, error);
     const body = await response.json();
-    assert.equal(body.error, error);
-    assert.equal(typeof body.message, 'string');
-    assert.notEqual(body.message, '', '拒绝必须带一句能给学生看的话');
+    assert.equal(body.error.code, error);
+    assert.equal(typeof body.error.message, 'string');
+    assert.notEqual(body.error.message, '', '拒绝必须带一句能给学生看的话');
   }
   assert.equal(countFiles(attemptsDir), 0, '坏请求一律不写盘');
 
   // 只收 POST：别的动词给 405（宿主按 methods 过滤，这里是第二道）
   const wrongMethod = await route.fetch(new Request('http://127.0.0.1' + ATTEMPTS_PATH, { method: 'GET' }));
   assert.equal(wrongMethod.status, 405);
-  assert.equal((await wrongMethod.json()).error, 'method-not-allowed');
+  assert.equal((await wrongMethod.json()).error.code, 'method-not-allowed');
 });
 
 test('没配工作区：500 加一句能自救的话，不抛', async () => {
@@ -336,8 +353,8 @@ test('没配工作区：500 加一句能自救的话，不抛', async () => {
   const response = await post(route, { subject: SUBJECT, node: NODE });
   assert.equal(response.status, 500);
   const body = await response.json();
-  assert.equal(body.error, 'no-workspace');
-  assert.match(body.message, /studymate-config\.yaml/);
+  assert.equal(body.error.code, 'no-workspace');
+  assert.match(body.error.message, /studymate-config\.yaml/);
 });
 
 /* ── 4. 题库逐字不变 ──────────────────────────────────────────────────── */

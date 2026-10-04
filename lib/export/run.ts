@@ -19,6 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { isWithin } from '../paths.ts';
 import { OUT_DIR_NAME } from './page.ts';
 import { planExport } from './plan.ts';
 import type { ExportManifest, ExportPlan, ManifestSubject } from './plan.ts';
@@ -74,17 +75,11 @@ export class ExportCancelledError extends Error {
   }
 }
 
-/** 前后都补分隔符再比，避免 /a/bc 被当成在 /a/b 里面。 */
-function inside(parent: string, child: string): boolean {
-  const relative = path.relative(parent, child);
-  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-}
-
 /** `out` 的判据（见文件头）。返回规范化后的绝对路径。 */
 export function resolveOutDir(workspace: string, out?: string): string {
   const resolved = path.resolve(out ?? path.join(workspace, OUT_DIR_NAME));
   const learning = path.join(workspace, '.learning');
-  if (inside(learning, resolved)) {
+  if (isWithin(learning, resolved)) {
     throw new Error(`[EXPORT_OUT] 导出落点不能放进 .learning/ 里（那是学习数据）：${resolved}。`
       + `默认落点是 ${path.join(workspace, OUT_DIR_NAME)}，要换地方用 --out 指到工作区之外或工作区根之下。`);
   }
@@ -98,7 +93,7 @@ export function resolveOutDir(workspace: string, out?: string): string {
 /** 默认落盘口：只许写在 `out` 之下。路径判据是**这里**做的——它比工具的域声明更靠得住。 */
 export function writeUnder(out: string, relPath: string, data: string | Buffer): string {
   const full = path.resolve(out, relPath);
-  if (!inside(out, full) || full === out) {
+  if (!isWithin(out, full) || full === out) {
     throw new Error(`[EXPORT_ESCAPE] 产物路径跑到导出目录外面了：${relPath}（导出目录 ${out}）`);
   }
   fs.mkdirSync(path.dirname(full), { recursive: true });

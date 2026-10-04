@@ -1,21 +1,20 @@
 /* ─────────────────────────────────────────────────────────────────────────
    StudyMate · 纯函数域 —— 「带位置的 YAML 读取」
 
-   校验器要报的是 `文件:行`，而 `lib/yaml.mjs` 的 `parseYaml` 只给值、不给位置。三条约束
-   决定了这里另起一层，而不是去改 `lib/yaml.mjs`：
+   校验器要报的是 `文件:行`，而 `lib/yaml.ts` 的 `parseYaml` 只给值、不给位置。两条约束
+   决定了这里另起一层，而不是去改 `lib/yaml.ts`：
 
-     1. `lib/yaml.mjs` 正在被 #65 改名成 `lib/yaml.ts`，改它是撞车；
-     2. `decisions.md` §2 规定 `lib/core/**` **不 import `lib/core/**` 之外的任何东西**，
+     1. `decisions.md` §2 规定 `lib/core/**` **不 import `lib/core/**` 之外的任何东西**，
         所以这一层连 `parseYaml` 都用不上；
-     3. 想要的不是「再解析一遍值」，只是**结构 → 行号**的索引。值仍由调用方用
+     2. 想要的不是「再解析一遍值」，只是**结构 → 行号**的索引。值仍由调用方用
         `lib/yaml.ts` 解析好传进来，两边各管一段。
 
-   这一层刻意**不抛异常、也不构造值**：它沿着与 `lib/yaml.mjs` 同一套块结构规则走一遍，
+   这一层刻意**不抛异常、也不构造值**：它沿着与 `lib/yaml.ts` 同一套块结构规则走一遍，
    把「映射键」「列表项」「单行流式集合的元素」记进一张 `路径 → 行:列` 的表；遇到自己没有
    把握的结构（跨行流式集合、`- - ` 嵌套列表、非常规缩进）就**不记**，让调用方回退到最近的
    祖先位置——位置会粗一点，但永远不会指到别的行上去。
 
-   对齐由测试保证：`test_validators_curriculum.mjs` 拿 `lib/yaml.{ts,mjs}` 真解析一遍，
+   对齐由测试保证：`test_validators_curriculum.mjs` 拿 `lib/yaml.ts` 真解析一遍，
    再把值树里的每一条路径拿来问这一层「你在第几行」，对不上就红。
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -38,7 +37,7 @@ export interface YamlPositionIndex {
   readonly size: number;
 }
 
-/* ── 行扫描：规则与 lib/yaml.mjs 的 indexLines 逐条对齐 ─────────────────── */
+/* ── 行扫描：规则与 lib/yaml.ts 的 indexLines 逐条对齐 ─────────────────── */
 
 interface SrcLine {
   indent: number;
@@ -62,7 +61,7 @@ function isSequenceEntry(content: string): boolean {
 /**
  * 找「映射用的冒号」：流式深度 0、不在引号里、后面跟空白或行尾。
  * `url: https://x` 里的 `https:` 后面是 `/`，所以不算键冒号——这条判据抄自
- * `lib/yaml.mjs` 的 `findKeyColon`，改一个字 `title: 关于 a: b` 就会解析成两种结构。
+ * `lib/yaml.ts` 的 `findKeyColon`，改一个字 `title: 关于 a: b` 就会解析成两种结构。
  */
 function findKeyColon(text: string): number {
   let inSingle = false;
@@ -92,7 +91,7 @@ function findKeyColon(text: string): number {
   return -1;
 }
 
-/** 去掉行尾注释（`#` 只有在行首或前面是空白时才是注释）。与 `lib/yaml.mjs` 同一判据。 */
+/** 去掉行尾注释（`#` 只有在行首或前面是空白时才是注释）。与 `lib/yaml.ts` 同一判据。 */
 function stripComment(text: string): string {
   let inSingle = false;
   let inDouble = false;
@@ -124,7 +123,7 @@ function scanLines(text: string): SrcLine[] {
     const raw = rawLines[i];
     let indent = 0;
     while (indent < raw.length && raw[indent] === ' ') indent++;
-    // Tab 缩进在 lib/yaml.mjs 里是硬错误；真出现时文本根本解析不出来，这里不猜它的结构。
+    // Tab 缩进在 lib/yaml.ts 里是硬错误；真出现时文本根本解析不出来，这里不猜它的结构。
     if (indent < raw.length && raw[indent] === '\t') continue;
     const content = raw.slice(indent);
     if (content === '' || content[0] === '#') continue;
@@ -152,7 +151,7 @@ const FLOAT_RE = /^[-+]?(?:[0-9][0-9_]*\.[0-9_]*(?:[eE][-+][0-9]+)?|\.[0-9_]+(?:
 
 /**
  * 把「键的 YAML 写法」还原成「解析后的键字符串」。
- * PyYAML 会把 `no:` / `1:` 解析成布尔/数字键，`lib/yaml.mjs` 跟着 `String()` 一下，
+ * PyYAML 会把 `no:` / `1:` 解析成布尔/数字键，`lib/yaml.ts` 跟着 `String()` 一下，
  * 所以这里也得跟。还原不出来就退回原文本——退回的后果只是索引里少一条，不是指错行。
  */
 function decodeKey(raw: string): string {
@@ -267,7 +266,7 @@ class Scanner {
     return this.positions.size;
   }
 
-  /** 先记的赢：重复键在 `lib/yaml.mjs` 里是后者生效，位置取第一个只影响提示的行号，不影响判定。 */
+  /** 先记的赢：重复键在 `lib/yaml.ts` 里是后者生效，位置取第一个只影响提示的行号，不影响判定。 */
   private record(path: Path, line: number, contentColumn: number): void {
     const key = pathKey(path);
     if (this.positions.has(key)) return;
@@ -290,7 +289,7 @@ class Scanner {
   private parseBlock(indent: number, base: Path): void {
     const line = this.peek();
     if (!line) return;
-    // 缩进比预期深：它自成一档，按它自己的缩进解析（与 lib/yaml.mjs 的 parseChild 同义）。
+    // 缩进比预期深：它自成一档，按它自己的缩进解析（与 lib/yaml.ts 的 parseChild 同义）。
     const effective = line.indent >= indent ? line.indent : indent;
     if (isSequenceEntry(line.content)) this.parseSequence(effective, base);
     else this.parseMapping(effective, base);
@@ -324,7 +323,7 @@ class Scanner {
       }
       const colon = findKeyColon(rest);
       if (colon >= 0) {
-        // `- key: value`：本行的键属于这个项的映射，续行按 column 对齐（lib/yaml.mjs 也是
+        // `- key: value`：本行的键属于这个项的映射，续行按 column 对齐（lib/yaml.ts 也是
         // 把这一行就地改写成「从 column 列起的块」再解析）。
         const key = decodeKey(rest.slice(0, colon));
         const childPath = [...itemPath, key];

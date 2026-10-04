@@ -184,7 +184,7 @@ test('同一个 operationId 换内容：409 拒绝，并带回当前作答与版
   }));
   assert.equal(conflict.ok, false);
   assert.equal(conflict.status, 409);
-  assert.equal(conflict.error, 'operation-id-conflict');
+  assert.equal(conflict.error.code, 'operation-id-conflict');
   assert.equal(conflict.version, first.version);
   assert.deepEqual(conflict.attempts, first.attempts);
   assert.equal(countFiles(attemptsDir), filesAfterFirst, '这次不写盘');
@@ -208,7 +208,7 @@ test('版本号对不上：409 拒绝并重读，不丢数据（重读后仍是�
   }));
   assert.equal(乙.ok, false);
   assert.equal(乙.status, 409);
-  assert.equal(乙.error, 'version-conflict');
+  assert.equal(乙.error.code, 'version-conflict');
   // 拒绝时不引入文件锁，而是把当前作答与版本号一起带回去（ADR-0007 的「拒绝并重读」）
   assert.equal(乙.version, 甲.version);
   assert.deepEqual(乙.attempts, 甲.attempts, '带回去的就是对方写的那份，乙的数据没丢也没覆盖');
@@ -234,17 +234,17 @@ test('坏请求先过一遍：operationId 缺失/超长、questions 为空、没
   for (const operationId of [undefined, '', '   ', 'x'.repeat(201)]) {
     const result = writeAttempts({ ...base, operationId });
     assert.equal(result.status, 400, JSON.stringify(operationId));
-    assert.equal(result.error, 'operation-id-invalid');
+    assert.equal(result.error.code, 'operation-id-invalid');
   }
   for (const questions of [undefined, null, [], 'x', {}]) {
     const result = writeAttempts({ ...base, questions, operationId: op('questions') });
     assert.equal(result.status, 400, JSON.stringify(questions));
-    assert.equal(result.error, 'questions-invalid');
+    assert.equal(result.error.code, 'questions-invalid');
   }
   for (const expectedVersion of [undefined, null, '', '   ']) {
     const result = writeAttempts({ ...base, expectedVersion, operationId: op('no-version') });
     assert.equal(result.status, 400);
-    assert.equal(result.error, 'expected-version-required');
+    assert.equal(result.error.code, 'expected-version-required');
   }
   assert.equal(countFiles(attemptsDir), 0, '坏请求一律不写盘');
 
@@ -260,18 +260,18 @@ test('科目、节点与课件都要对得上：subject-invalid / node-invalid /
   for (const subject of [undefined, '', '演示/科目', '..', '查无此科目']) {
     const result = writeAttempts({ ...base, subject, operationId: op('subject') });
     assert.equal(result.status, 400, JSON.stringify(subject));
-    assert.equal(result.error, 'subject-invalid');
+    assert.equal(result.error.code, 'subject-invalid');
   }
   // 节点 id 的写法与 curriculum.schema.json 的 nodes[].id 一致：大写、斜杠、.. 都不行
   for (const node of [undefined, '', 'Net.Layers', '../net.layers', 'net/layers', 'net layers']) {
     const result = writeAttempts({ ...base, node, operationId: op('node') });
     assert.equal(result.status, 400, JSON.stringify(node));
-    assert.equal(result.error, 'node-invalid');
+    assert.equal(result.error.code, 'node-invalid');
   }
   // 节点合法但课件不在：作答数据与课件一一对应，不先造一份空档案
   const missing = writeAttempts({ ...base, node: 'net.tcp', operationId: op('lesson') });
   assert.equal(missing.status, 400);
-  assert.equal(missing.error, 'lesson-missing');
+  assert.equal(missing.error.code, 'lesson-missing');
   assert.equal(countFiles(attemptsDir), 0);
 });
 
@@ -365,7 +365,7 @@ test('写坏的作答文件不当场炸：读不到就当没作答过（派生�
   assert.match(version, /^[0-9a-f]{16}$/);
   const refused = writeAttempts(request(workspace, { expectedVersion: '0000000000000000' }));
   assert.equal(refused.status, 409);
-  assert.equal(refused.error, 'version-conflict');
+  assert.equal(refused.error.code, 'version-conflict');
   assert.equal(fs.readFileSync(path.join(attemptsDir, '0001-net.layers.json'), 'utf8'), '{ 这不是 JSON', '坏文件没被覆盖');
 });
 
@@ -374,12 +374,12 @@ test('题 id 不能是空串；一次最多 200 道题', () => {
   const base = request(workspace);
   const emptyId = writeAttempts({ ...base, questions: { '   ': { 选: 0, 对: true } }, operationId: op('empty-id') });
   assert.equal(emptyId.status, 400);
-  assert.equal(emptyId.error, 'questions-invalid');
+  assert.equal(emptyId.error.code, 'questions-invalid');
 
   const many = {};
   for (let i = 0; i < 201; i++) many[`锚点#${i}`] = { 选: 0, 对: true };
   const tooMany = writeAttempts({ ...base, questions: many, operationId: op('many') });
   assert.equal(tooMany.status, 400);
-  assert.equal(tooMany.error, 'questions-invalid');
-  assert.match(tooMany.message, /最多写 200 道题/);
+  assert.equal(tooMany.error.code, 'questions-invalid');
+  assert.match(tooMany.error.message, /最多写 200 道题/);
 });

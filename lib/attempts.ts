@@ -19,6 +19,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { IdempotencyLedger, checkOperationId, fingerprintOf, OPERATION_ID_MAX } from './core/fence.ts';
+import { errorBody } from './route-envelope.ts';
+import type { RouteErrorEnvelope } from './route-envelope.ts';
 
 /* ── 形状 ──────────────────────────────────────────────────────────────── */
 
@@ -79,12 +81,11 @@ export interface AttemptsRead {
   file: string;
 }
 
-/** 拒绝写入：HTTP 语义由调用方（`bin/dsh-plugin.ts` 一类）映射成状态码。 */
-export interface AttemptsRefusal {
-  ok: false;
+/** 拒绝写入：HTTP 语义由调用方（`bin/dsh-plugin.ts` 一类）映射成状态码。
+ *  形状就是阅读端路由的唯一错误信封（`lib/route-envelope.ts`）：`error` 是
+ *  `{ code, message }` 而不是一个字符串——客户端既要按码分支、也要取那句话给人看。 */
+export interface AttemptsRefusal extends RouteErrorEnvelope {
   status: number;
-  error: string;
-  message: string;
   /** 冲突时顺手带回去的当前作答数据与版本号：界面不必再跑一趟 */
   attempts?: AttemptsData;
   version?: string;
@@ -296,7 +297,7 @@ export function attemptsVersion({ workspace, subject, node }:
 /* ── 写入 ──────────────────────────────────────────────────────────────── */
 
 function refusal(status: number, error: string, message: string): AttemptsRefusal {
-  return { ok: false, status, error, message };
+  return { status, ...errorBody(error, message) };
 }
 
 /** now 可注入（测试用）：Date / 毫秒数 / 可解析的字符串都行，读不出来的退回当前时间。 */
@@ -477,7 +478,7 @@ export function writeAttempts({ workspace, subject, node, questions, expectedVer
 /** 拒绝并**重读**：把当前作答与版本号一起带回去（ADR-0007 的「拒绝并重读」，不引入文件锁）。 */
 function conflict(error: string, message: string, subjectDir: string, node: string, number: string, lessonName: string): AttemptsRefusal {
   const current = loadAttempts(subjectDir, node, number, lessonName);
-  const base = refusal(409, error, message);
+  const base: AttemptsRefusal = refusal(409, error, message);
   base.version = current.version;
   if (current.data !== null) base.attempts = current.data;
   return base;

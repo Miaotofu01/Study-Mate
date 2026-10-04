@@ -8,30 +8,20 @@
       文本搜索会指向注释那一行，解析位置不会。
    2. **每类问题逐条报**，带上 file / line / blocking，而不是一句「失败」。
 
-   另外拿 `lib/yaml.{ts,mjs}` 真解析一遍，把值树里**每一条路径**拿来问位置索引
+   另外拿 `lib/yaml.ts` 真解析一遍，把值树里**每一条路径**拿来问位置索引
    「你在第几行」：对不上就红。这条是这一层与解析器不失配的兜底。 */
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { indexYaml } from '../../lib/core/yamlpos.ts';
+import { parseYaml } from '../../lib/yaml.ts';
 import { validateCurriculum } from '../../lib/core/validate.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CURRICULUM_SCHEMA = JSON.parse(fs.readFileSync(path.join(ROOT, 'schemas', 'curriculum.schema.json'), 'utf8'));
-
-/** #65 正在把 lib/yaml.mjs 改名成 lib/yaml.ts，两边都在的时候取存在的那个。 */
-async function loadYamlParser() {
-  for (const name of ['yaml.ts', 'yaml.mjs']) {
-    const file = path.join(ROOT, 'lib', name);
-    if (fs.existsSync(file)) return import(pathToFileURL(file).href);
-  }
-  throw new Error('lib/yaml.ts 与 lib/yaml.mjs 都不在：交叉校验这一步没有解析器可用');
-}
-
-const { parseYaml } = await loadYamlParser();
 
 function parseFixture(text) {
   return parseYaml(text, { file: '内存夹具' });

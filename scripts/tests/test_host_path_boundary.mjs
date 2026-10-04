@@ -1,4 +1,4 @@
-/* 特征化测试：Host 半数据层 · 路径越界（lib/assets.mjs 与 lib/reference.mjs 的取址/读取）
+/* 特征化测试：Host 半数据层 · 路径越界（lib/assets.ts 与 lib/reference.ts 的取址/读取）
    ────────────────────────────────────────────────────────────────────────
    钉住「哪些路径解得开、哪些一律拒绝」：`..`、绝对路径、科目名里的分隔符、清单会跳过的
    名字段、非文本扩展名、内容其实是二进制。断言只看取址/读取的返回值，不看内部判据写法。
@@ -290,7 +290,7 @@ test('reference/ 自己指向科目外面的符号链接：写入被拒，外面
   });
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
-  assert.equal(result.error, 'path-invalid');
+  assert.equal(result.error.code, 'path-invalid');
   assert.deepEqual(fs.readdirSync(outside).sort(), before, '科目外面的目录一个文件都不许多');
 
   // 同一处口子的另外两面：清单不列外面那些，读也读不到

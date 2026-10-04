@@ -38,7 +38,7 @@
    Python 的 `str.strip()` 与 `re` 的 `\s` 认的空白比 JS 多 `\x1c-\x1f`（文件/组分隔符）
    与 `\x85`（NEL），少 `\ufeff`（BOM）。锚点归一化、去空白这些地方差一个字符就是
    「stale 变成 resolved」这种静默结论差别，所以显式写出这个集合，**不要**改用 JS 的 `\s`。
-   同一个集合在 `lib/yaml.mjs` 里也有一份（那边为 PyYAML 对齐服务）；core 域不许 import
+   同一个集合在 `lib/yaml.ts` 里也有一份（那边为 PyYAML 对齐服务）；core 域不许 import
    `lib/**`，所以这里必须自带一份——两份都是「Python 空白集」这一件事的镜像。 */
 
 const PY_WS = '\\t\\n\\v\\f\\r \\x1c-\\x1f\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
@@ -78,16 +78,17 @@ export function cmpCodePoints(a: string, b: string): number {
   return left.length - right.length;
 }
 
-/* ── HTML 转义（口径来自 pagetpl.esc） ─────────────────────────────────────
+/* ── HTML 转义：文本节点与属性值**两条路** ─────────────────────────────────
 
-   Python 的 `html.escape(s, quote=False)` 转 `& < >` **和 `'`**（`&#x27;`），只留 `"`；
-   `quote=True` 再多转 `"`（`&quot;`）。单引号两种模式都转——这一点很容易抄错，
-   而 `data-quiz` 的属性值恰恰是**单引号包裹**的，转错就是属性被截断。 */
+   `escText` 只转 `& < >`，`escAttr` 再多转 `"` 与 `'`。这个区分逐字继承自迁移前那份
+   Python 渲染器（`html.escape(s, quote=False)` 转 `& < >`，`quote=True` 再多转 `"`），
+   而它今天仍然是硬要求：`data-quiz` 的属性值恰恰是**单引号包裹**的，属性位置少转一个
+   单引号就是属性被截断。 */
 
-/** 文本节点：只转 `& < >`（对齐 `pagetpl.esc` → `html.escape(quote=False)`）。
+/** 文本节点：只转 `& < >`（对齐 Python 的 `html.escape(quote=False)`）。
  *
- *  **单引号**在 Python 的 `html.escape(quote=False)` 里**不转**——只有属性值那条路
- *  （`quote=True`）才转 `&#x27;`。抄错这一处，代码块里的 `'->'` 就会多出实体。 */
+ *  **单引号不转**——只有属性值那条路（`quote=True`）才转 `&#x27;`。抄错这一处，
+ *  代码块里的 `'->'` 就会多出实体。 */
 export function escText(value: unknown): string {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -131,13 +132,17 @@ export const CARD_CLASS: Readonly<Record<string, string>> = {
   tip: 'lesson-tip', warn: 'lesson-warn', note: 'lesson-note',
 };
 
-/** 会着色的语言标签（13 个）；必须与 `templates/assets/learn-theme.js` 的 `var LANGS` 键逐个相等。 */
+/** 上色档的语言标签（13 个）：写进代码围栏里算合法（`isKnownLang` 认它）。
+ *
+ *  名单的来历是迁移前那份主题文件里的 `var LANGS`——那份文件随静态渲染一起退役了，
+ *  所以这里不再有「必须与某份主题逐个相等」的对账对象。它今天只回答「认不认这个标签」；
+ *  怎么显示由阅读端定（`lib/client.js` 把标签写在代码块顶上，不做着色）。 */
 export const COLORED_LANGS = [
   'cpp', 'sh', 'bash', 'shell', 'term', 'html', 'js', 'javascript',
   'ts', 'typescript', 'json', 'python', 'py',
 ] as const;
 
-/** 接受但明确不上色的语言标签（14 个）。 */
+/** 接受、但按口径不属于上色档的语言标签（14 个）。 */
 export const PLAIN_LANGS = [
   'text', 'plain', 'markdown', 'md', 'http', 'yaml', 'yml', 'toml',
   'sql', 'ini', 'diff', 'mermaid', 'powershell', 'java',
@@ -152,9 +157,10 @@ export const TITLE_SOFT_LIMIT = 16;
 /**
  * 「什么算 HTML 标签」的唯一名单（小写）：**完整**标准 HTML 元素表 + SVG 元素名。
  *
- * 三份逐字一致，由 `scripts/tests/test_core_lesson.mjs` 断言：这里的集合 =
- *迁移前的 Python 渲染器（`HTML_TAG_NAMES`） = `docs/规范/课件内容格式.md` §2 的名单。
- * 改名单时三处同步。
+ * 两份逐字一致，由 `scripts/tests/test_core_format.mjs` 断言：这里的集合 =
+ * `docs/规范/课件内容格式.md` §2 的名单（迁移前那份 Python 渲染器的 `HTML_TAG_NAMES`
+ * 随引擎一起退役了，两边对账的关系还在，只是对面换成了文档）。
+ * 改名单时两处同步。
  *
  * **加名字有硬边界**：两个形状正则捕获的名字都是 `[a-zA-Z][a-zA-Z0-9]*`，**不含连字符**，
  * 所以 `<syo-editor>` 这类自定义元素加多少名字都匹配不上——它只能做成 `:::` 指令。

@@ -550,3 +550,81 @@ test('台账落在 DSH_HOME 下、每次跑都写一份（跨进程对账要用�
   void dir;
 });
 
+
+/* ── 结构对齐：LabToolSpec 是手抄的，抄的那份不许漂 ────────────────────────
+   `lib/lab/tools.ts` 的 `LabToolSpec` 是 `lib/tools/define.ts` 的 `StudyToolSpec` 的
+   **手抄副本**——实验域不许 import 工具域（域图会成环），所以只能抄。而抄件的两边都
+   没有东西钉着：`registerLabTools` 里那句 `as unknown as` 把类型不符也一起咽下去了，
+   `grep 'StudyToolSpec|LabToolSpec' scripts/tests/*.mjs` 当时零命中。
+
+   于是这里补一条：把两份接口的**顶层键与可选性**从源码里读出来对账，并把运行期真的造出来
+   的那个对象也拿来数键。改一边不改另一边就红——三种红法都验过（见下面的反证用例）。 */
+
+/** 从一份源码里读一个接口的顶层成员：`键 → 是否可选`。只认缩进恰好两格的成员，
+ *  所以嵌套对象（`output: { schema…; render… }`）里的键不会被误当成顶层键。 */
+function interfaceMembers(source, name) {
+  const head = new RegExp(`export interface ${name} \\{`);
+  const start = source.search(head);
+  assert.notEqual(start, -1, `源码里找不到 export interface ${name}`);
+  const body = source.slice(start).split('\n').slice(1);
+  const members = new Map();
+  for (const line of body) {
+    if (line.startsWith('}')) break;                     // 接口结束
+    const match = /^ {2}([A-Za-z_$][\w$]*)(\??):/.exec(line);
+    if (match) members.set(match[1], match[2] === '?');
+  }
+  assert.ok(members.size >= 5, `${name} 只读出 ${members.size} 个成员，解析器或排版变了`);
+  return members;
+}
+
+function specMembers() {
+  return {
+    study: interfaceMembers(fs.readFileSync(path.join(ROOT, 'lib', 'tools', 'define.ts'), 'utf8'), 'StudyToolSpec'),
+    lab: interfaceMembers(fs.readFileSync(path.join(ROOT, 'lib', 'lab', 'tools.ts'), 'utf8'), 'LabToolSpec'),
+  };
+}
+
+/** 对账：返回违规清单（空数组 = 对齐）。抽出来是为了能用**合成的一对**验判据不空转。 */
+function specMismatches(study, lab) {
+  const problems = [];
+  for (const key of lab.keys()) {
+    if (!study.has(key)) problems.push(`LabToolSpec 多了 StudyToolSpec 没有的键「${key}」：注册时会以类型不符被咽下去`);
+  }
+  for (const [key, optional] of study) {
+    if (!optional && !lab.has(key)) problems.push(`StudyToolSpec 的必填键「${key}」不在 LabToolSpec 里：实验工具会缺这一格`);
+  }
+  return problems;
+}
+
+test('LabToolSpec 与 StudyToolSpec 结构对齐：手抄的那份键集合与可选性都对得上', () => {
+  const { study, lab: declared } = specMembers();
+  assert.deepEqual(specMismatches(study, declared), []);
+
+  /* 运行期真的造出来的那个对象：键要与接口声明的必填键逐个相等。
+     `output` 那格是对象、`execute` 是函数，都算「有值」；`requires` 两边都没写，不该冒出来。 */
+  const built = lab.labRunTool(tasks.taskService());
+  const required = [...declared].filter(([, optional]) => !optional).map(([key]) => key).sort();
+  assert.deepEqual(Object.keys(built).sort(), required,
+    'labRunTool 造出来的对象与 LabToolSpec 声明的键对不上（接口对实现撒了谎）');
+});
+
+test('反证：结构对齐判据不空转——一边漂了必须报出来', () => {
+  const { study, lab: declared } = specMembers();
+  // ① LabToolSpec 多一个 StudyToolSpec 没有的键
+  const extra = new Map(declared);
+  extra.set('凭空多出来的键', false);
+  assert.match(specMismatches(study, extra).join('\n'), /多了 StudyToolSpec 没有的键/);
+  // ② StudyToolSpec 多一个必填键而 LabToolSpec 没跟上
+  const stricter = new Map(study);
+  stricter.set('新加的必填键', false);
+  assert.match(specMismatches(stricter, declared).join('\n'), /必填键「新加的必填键」不在 LabToolSpec 里/);
+  // ③ 两边都少了一个键（抄件与正本同时漂，运行期的对象却不会跟着少）
+  const shrunk = new Map(declared);
+  shrunk.delete('execute');
+  const loose = new Map(study);
+  loose.delete('execute');
+  assert.deepEqual(specMismatches(loose, shrunk), [], '键集合一致时判据应当放行');
+  assert.notDeepEqual(Object.keys(lab.labRunTool(tasks.taskService())).sort(),
+    [...shrunk].filter(([, optional]) => !optional).map(([key]) => key).sort(),
+    '两边同时删掉一个键时，运行期对象与声明应当对不上——这一条就是防「一起漂」的');
+});

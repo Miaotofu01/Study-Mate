@@ -1,7 +1,8 @@
 /* 解析层核心 · 锚点与题库的逐字对账（lib/core/anchors.ts）
 
    这是 issue #66 验收里最要紧的一层：四态语义（resolved / stale / ambiguous / missing）
-   与「多匹配绝不静默取第一个」。今天 `lib/library.mjs` 那份实现带着三个洞，这里逐条钉住：
+   与「多匹配绝不静默取第一个」。收编时堵掉的三个洞，这里逐条钉住（洞的来历写在
+   `lib/core/anchors.ts` 的文件头——那份旧 JS 实现随 #66 一起删了，只留下这三条断言）：
 
      1. **exact 撞键**：题库同时有 `" x"` 与 `"x"` 时必须判 `ambiguous`，
         而且**两种 JSON 键序给同一结论**（旧实现是 Map 后写覆盖先写，看键序）；
