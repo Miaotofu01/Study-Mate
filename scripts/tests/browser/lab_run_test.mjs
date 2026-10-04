@@ -161,14 +161,15 @@ ${hostTokenCss()}</style>
 async function startHost(workspace) {
   const labRoutes = [];
   const attemptRoutes = [];
-  registerLabRoute({
-    connection: { fetch: { register: (route) => { labRoutes.push(route); return () => {}; } } },
-    effect: (fn) => fn(),
+  // 注册约定：收外层 ctx、自己 inject(['connection'])（与 registerAskRoute 同一姿势）
+  const fakeOuter = (sink) => ({
+    inject: (names, handler) => handler({
+      connection: { fetch: { register: (route) => { sink.push(route); return () => {}; } } },
+      effect: (fn) => fn(),
+    }),
   });
-  registerAttemptRoutes({
-    connection: { fetch: { register: (route) => { attemptRoutes.push(route); return () => {}; } } },
-    effect: (fn) => fn(),
-  });
+  registerLabRoute(fakeOuter(labRoutes));
+  registerAttemptRoutes(fakeOuter(attemptRoutes));
   const labRoute = labRoutes[0];
   const attemptRoute = attemptRoutes[0];
   const html = fixtureHtml();

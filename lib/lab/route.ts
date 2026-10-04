@@ -55,9 +55,14 @@ interface FetchRegistry {
 }
 
 /** `ctx.inject(['connection'], …)` 给的那层上下文；缺成员就不挂（headless / 更老的宿主）。 */
-interface RouteContext {
+interface ConnectionContext {
   connection?: { fetch?: FetchRegistry };
   effect?: (fn: () => unknown, description?: string) => unknown;
+}
+
+/** 外层 ctx：只用到 `inject`（没有它的宿主里整条路由不挂，插件其余部分照常）。 */
+interface RouteContext {
+  inject?: (names: string[], handler: (ctx: ConnectionContext) => unknown) => unknown;
 }
 
 /** 请求体的形状；多一个字段都不认（`assertJson` 那套「不猜」的口径）。 */
@@ -125,28 +130,29 @@ export async function runRouteRequest(body: unknown): Promise<Response> {
 }
 
 /**
- * 把这条路由挂到 connection 上。返回是否挂上了（缺 connection / effect 时给 false，
- * 调用方不必判——挂不上就是「学生点不了跑一次」这一个功能不可用，插件其余部分照常）。
+ * 把这条路由挂到插件上。
+ *
+ * 与 `registerAskRoute` / `registerAttemptRoutes` / `registerTaskRoute` 同一种姿势：收**外层
+ * ctx**、自己 `inject(['connection'])`，`connection` 就绪才注册、缺了就不挂（headless / 更老
+ * 的宿主）——挂不上就是「学生点不了跑一次」这一个功能不可用，插件其余部分照常。
  */
-export function registerLabRoute(connectionCtx: unknown): boolean {
-  const ctx = connectionCtx as RouteContext | null | undefined;
-  const connection = ctx && ctx.connection;
-  if (!connection || !connection.fetch || typeof connection.fetch.register !== 'function') return false;
-  if (typeof ctx.effect !== 'function') return false;
-  const registry = connection.fetch;
-  try {
-    ctx.effect(() => registry.register({
-      path: LAB_RUN_PATH,
-      methods: ['POST'],
-      requestBody: 'buffered',
-      fetch: async (request: Request): Promise<Response> => {
-        const body = await request.json().catch(() => null);
-        return runRouteRequest(body);
-      },
-    }), 'studymate: 实验代跑路由');
-    return true;
-  } catch {
-    // 同一个 path 注册第二次会抛（`bin/dsh-plugin.ts` 里那几条同源的判词）：挂不上就是挂不上
-    return false;
-  }
+export function registerLabRoute(ctx: RouteContext | null | undefined): void {
+  if (!ctx || typeof ctx.inject !== 'function') return;
+  ctx.inject(['connection'], (connectionCtx: ConnectionContext) => {
+    const connection = connectionCtx?.connection;
+    if (!connection?.fetch?.register || typeof connectionCtx.effect !== 'function') return;
+    try {
+      connectionCtx.effect(() => connection.fetch!.register({
+        path: LAB_RUN_PATH,
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: async (request: Request): Promise<Response> => {
+          const body = await request.json().catch(() => null);
+          return runRouteRequest(body);
+        },
+      }), 'studymate: 实验代跑路由');
+    } catch {
+      // 同一个 path 注册第二次会抛（`bin/dsh-plugin.ts` 里那几条同源的判词）：挂不上就是挂不上
+    }
+  });
 }
