@@ -47,25 +47,39 @@ test('bootstrap initializes a separate workspace without requiring legacy config
   assert.doesNotMatch(adapted.get('record-keeping'), /开场从.*config\.yaml/);
 });
 
-test('renderer commands quote paths and always give gen_home an explicit workspace', () => {
-  let homeCalls = 0;
+test('无头降级表里的引擎命令都带引号、走探测到的解释器，gen_home 始终显式传工作区', () => {
   for (const [name, content] of adapted) {
-    // `-B` 之类的标志可出现在 `-X utf8` 之后（源技能要求跑引擎脚本一律加 `-B`），
-    // 所以这里不能假定 `utf8` 后面紧跟脚本路径的引号。
+    // DSH 侧正文已经不调引擎脚本（原生工具接管）；脚本只活在导出时注入的降级表里，
+    // 那张表是本宿主唯一的执行面，所以命令形状由它守：解释器要经探测（`<python>`），
+    // 路径与占位符一律带引号。
     for (const match of content.matchAll(/`(<python> -X utf8(?: -[A-Za-z]+)* '[^`]+)`/g)) {
-      const command = match[1];
-      if (command.includes('/gen_home.py')) {
-        homeCalls += 1;
-        assert.match(command, /gen_home\.py' '<LEARN_WORKSPACE>'$/, name);
-      }
-      assert.doesNotMatch(command, /(?<!')<(?:subject_path|节点id|页面路径|curriculum\.yaml|tsv)>/, name);
+      // `<python>` 是宿主约定的解释器占位，先摘掉再看剩下的占位符有没有裸着进命令。
+      const command = match[1].replace('<python>', 'PY');
+      assert.doesNotMatch(command, /(?<!')<[^>]+>/,
+        `${name}: 降级表里的占位符没加引号 —— ${match[1]}`);
+    }
+    assert.doesNotMatch(content, /python3 -B/, `${name}: Codex 侧不许留裸 python3（要走探测到的解释器）`);
+    // 八个原生工具都要有降级做法：少一行就等于导出一句本宿主做不到的话。
+    for (const tool of ['studymate_workspace_context', 'studymate_validate_curriculum',
+      'studymate_validate_lesson', 'studymate_validate_pool', 'studymate_validate_handoff',
+      'studymate_renumber_lessons', 'studymate_apply_empty_reasons', 'studymate_export']) {
+      assert.ok(content.includes(tool), `${name}: 无头降级表缺 ${tool}`);
     }
   }
-  // 每个出现的 gen_home 调用都已在上面断言过「必须带显式工作区」；这里只钉住
-  // 「学习系统总控 + 档案维护」两处主场，档案里的收尾（落点搬完刷根主页）会再引一次（当前共 3 处）。
-  assert.ok(homeCalls >= 2, `gen_home 调用偏少：${homeCalls}`);
-  assert.match(adapted.get('learning-system'), /hashlib\.md5\(pathlib\.Path\(sys\.argv\[1\]\)\.read_bytes\(\)\)/);
-  assert.match(adapted.get('learning-system'), /practice-evaluator-<节点id>\/deliver\/.*目录内容原样合并复制/);
+  assert.match(adapted.get('learning-system'),
+    /<python> -X utf8 -B '<root>\/scripts\/gen_home\.py' '<LEARN_WORKSPACE>'/, 'gen_home 必须显式传工作区');
+});
+
+test('DSH 侧技能正文不再自己跑引擎脚本（脚本只留给无头降级表）', () => {
+  // #80 的验收：总控与档案不再跑脚本、不看退出码。这三个技能是本张票的靶子；
+  // 角色侧（#81）的脚本调用由那一张票清，这里不越界断言。
+  for (const name of ['learning-system', 'record-keeping', 'local-qa']) {
+    const body = sources.get(name);
+    assert.doesNotMatch(body, /python3/, `${name}: DSH 侧正文不该再出现 python3`);
+    assert.doesNotMatch(body, /<root>\/scripts\//, `${name}: DSH 侧正文不该再出现引擎脚本路径`);
+    assert.doesNotMatch(body, /exit code|cp -a/, `${name}: DSH 侧正文不该再出现退出码与 cp -a`);
+    assert.doesNotMatch(body, /md5|\.studymate-stage/, `${name}: 暂存模式与摘要比对已删`);
+  }
 });
 
 test('teaching contracts and role ownership survive export', () => {

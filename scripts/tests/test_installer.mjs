@@ -195,15 +195,15 @@ test('a Desktop installation is found when no dsh is on PATH', { skip: process.p
 });
 
 test('installed skill copies get the write-boundary conventions in machine terms', () => {
-  const sample = ['暂存模式：`<WS>` = `/tmp/studymate-stage/<slug>`',
+  const sample = ['临时目录：`/tmp/studymate-scratch/<slug>`',
     '角色产出走 `<subject_path>/.stage/practice-evaluator-<节点id>/deliver/`',
-    'cp -r /tmp/practice-evaluator-<节点id>/deliver/. <subject_path>/'].join('\n');
+    '原样合并 `/tmp/practice-evaluator-<节点id>/deliver/.` 到科目目录'].join('\n');
   const adapted = adaptSkill(sample, {
     platform: 'win32', pythonExecutable: 'C:\\Python\\python.exe',
     configFile: 'C:\\Users\\me\\.dsh\\studymate-config.yaml', tempDirectory: 'C:/Temp',
   });
   assert.ok(!adapted.includes('`/tmp`'), '临时目录应换成本机实值');
-  assert.match(adapted, /C:\/Temp\/studymate-stage\/<slug>/);
+  assert.match(adapted, /C:\/Temp\/studymate-scratch\/<slug>/);
   assert.match(adapted, /先写科目自己的 `<subject_path>\/\.stage\//);
 });
 
@@ -245,12 +245,13 @@ test('install, reinstall and downgrade preserve workspace and unrelated profile 
   assert.match(fs.readFileSync(f.preset, 'utf8'), /@deepseek-ai\/dsh-workflow-ptc/);
   // 安装完必须说清"会话开在哪"：会话目录不在工作区里时，StudyMate 每一步落盘都要授权。
   assert.match(result.stdout, /启动会话时把工作目录设为/);
-  // 装出来的技能副本是本机口径：暂存约定保留，`/tmp` 写成这台机器的临时目录
-  // （Linux 上两者常常都是 /tmp，所以真正钉住改写的是下面那条注入临时目录的断言）。
+  // 装出来的技能副本是本机口径：产物交接的 `.stage/` 约定保留，`/tmp` 写成这台机器的
+  // 临时目录（Linux 上两者常常都是 /tmp，所以真正钉住改写的是上面那条注入临时目录的断言）；
+  // **工作区暂存模式已删**（ADR-0008），副本里不该再有会话目录下的暂存根。
   const skillCopy = fs.readFileSync(path.join(f.env.DSH_HOME, 'studymate', 'engine',
     '.dsh', 'skills', 'learning-system', 'SKILL.md'), 'utf8');
   assert.match(skillCopy, /<subject_path>\/\.stage\//);
-  assert.ok(skillCopy.includes('.studymate-stage/<slug>'), '暂存根应落在会话目录下');
+  assert.ok(!skillCopy.includes('.studymate-stage'), '暂存模式已删：副本里不该再有工作区暂存根');
   const config = f.yaml(f.config);
   config.custom = 'keep';
   fs.writeFileSync(f.config, JSON.stringify(config));

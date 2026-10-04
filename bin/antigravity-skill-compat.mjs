@@ -234,14 +234,6 @@ function applyCommonRewrites(text) {
     .replaceAll('/tmp', '<STUDYMATE_SCRATCH>')
     .replaceAll('`ask_user_question`', '`ask_question`')
     .replaceAll('（`read` 那个文件）', '（用 `view_file` 查看那个文件）')
-    .replaceAll(
-      '`md5sum <文件> | cut -c1-12`',
-      '`python3 -B -c "import hashlib,pathlib,sys; print(hashlib.md5(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest()[:12])" \'<文件>\'`'
-    )
-    .replaceAll(
-      "`cp -r '<subject_path>/.stage/practice-evaluator-<节点id>/deliver/.' '<subject_path>/'`",
-      '把 `<subject_path>/.stage/practice-evaluator-<节点id>/deliver/` 内的目录内容原样合并复制到 `<subject_path>/`'
-    )
     .replaceAll('`cp -r`', '目录复制')
     .replaceAll('`cp`', '原样复制')
     .replaceAll('→ cp 落', '→ 原样复制落')
@@ -276,8 +268,24 @@ function adaptAntigravityController(body) {
   result = replaceRequired(
     result,
     /^1\. \*\*加载 `record-keeping` 并读状态\*\*[^\n]+/m,
-    '1. **加载协议并恢复记忆**：按本技能开头的「Antigravity 宿主约定」加载调度与交互协议，并读 `record-keeping`；结合 `<LEARN_WORKSPACE>/.learning/MEMORY.md`、当前活跃科目进度表与最近会话摘要恢复学习断点。优先处理本次消息中的回答或续学意图。',
+    '1. **加载协议并恢复记忆**：按本技能开头的「Antigravity 宿主约定」加载调度与交互协议，并读 `record-keeping`；结合 `<LEARN_WORKSPACE>/.learning/MEMORY.md`、当前活跃科目进度表与最近的学习记录恢复学习断点。优先处理本次消息中的回答或续学意图。',
     'controller recovery'
+  );
+
+  // 总控现在把机械步骤交给原生工具（DSH）；无头宿主没有工具，这两条开头的自述要换成
+  // 「按宿主约定的降级表跑脚本」，否则导出稿会让学生读到一句本宿主做不到的话。
+  result = replaceRequired(
+    result,
+    /^- \*\*会话可以在任意目录启动\*\*[^\n]+/m,
+    '- **会话可以在任意目录启动**：学习数据全在配置好的学习工作区里，按「Antigravity 宿主约定」选定并记作 `<LEARN_WORKSPACE>`，不在会话目录里另建临时工作区。',
+    'controller workspace bullet'
+  );
+
+  result = replaceRequired(
+    result,
+    /^- \*\*机械步骤归工具\*\*[^\n]+/m,
+    '- **机械步骤归宿主命令**：本宿主没有原生工具，按「Antigravity 宿主约定」的降级表用文件读写与 `<root>/scripts/` 下的脚本完成校验与改写；拿到的是逐条问题与结论，不看退出码、不比对摘要。',
+    'controller mechanics bullet'
   );
 
   result = replaceRequired(
@@ -318,7 +326,7 @@ function adaptAntigravityController(body) {
   result = replaceRequired(
     result,
     /## 会话结束\r?\n[\s\S]*?(?=## 子 agent 派发规范)/,
-    '## 会话结束\n\n学生明确暂停/结束或当前学习单元已完成时执行收尾：\n1. 按 `record-keeping` 写会话摘要，更新当前科目进度、记录阶段与下一步。\n2. 刷新主页，输出已保存位置与下次恢复点。不追加挽留弹窗。\n\n',
+    '## 会话结束\n\n学生明确暂停/结束或当前学习单元已完成时执行收尾：\n1. 按 `record-keeping` 更新学习进度、误解记录与学习记录（有可观察证据才写），把当前科目、节点、阶段与下一步存进交互断点。\n2. 输出已保存位置与下次恢复点。不追加挽留弹窗。\n\n',
     'Antigravity session end'
   );
 
@@ -331,8 +339,8 @@ function adaptAntigravityController(body) {
 
   result = replaceRequired(
     result,
-    /^9\. 刷新主页，然后问学生[^\n]+/m,
-    '9. 刷新主页并更新进度。学生已明确继续时推进对应下一步；只报告“学完了”而未选择后续时，给一次“下一课 / 补练 / 暂停”选择。',
+    /^9\. 问学生继续下一个节点还是结束[^\n]*/m,
+    '9. 更新交互断点。学生已明确继续时推进对应下一步；只报告“学完了”而未选择后续时，给一次“下一课 / 补练 / 暂停”选择。',
     'node boundary'
   );
 
@@ -376,21 +384,16 @@ function adaptAntigravityController(body) {
     '按第 9 步衔接下一节点', 'next node handoff');
   result = replaceRequired(result, /→ 开始第一课（仍按「对话节奏」问"开始吗"）[^\n]*/,
     '→ 按用户已表达的范围继续第一课或交付大纲', 'parallel chain end');
-  result = replaceRequired(result, /^\s*- 再 `xdg-open` \/ `open` 作补充[^\n]*/m,
-    '提示学生使用浏览器打开绝对链接，并按“Antigravity 对话衔接”交付当前材料与一个学生行动', 'page open + handoff');
+  result = replaceRequired(result, /^4\. \*\*课件交给学生\*\*[^\n]+/m,
+    '4. **课件交给学生**：在回复中输出课件的**绝对路径超链接**（`[打开课件](file://...)`），并可在 `<appDataDir>/brain/<conversation-id>/` 写入伴读 Artifact；按“Antigravity 对话衔接”交付当前材料与一个学生行动',
+    'page delivery');
   result = replaceRequired(result, /^1\. \*\*你亲自确认\*\*[^\n]*/m,
     '1. **核对变更意图**：学生明确要求从 A 改成 B 就执行该范围变更；目标含糊或扩大范围时调用 `ask_question` 澄清一次',
     'mission change intent');
   result = replaceRequired(result, /\*\*建池与拟大纲并行\*\*[^\n]*/,
     '**建池与拟大纲并发派发**——「资源清单」落位后，通过 `invoke_subagent` 数组同时派发下面两个角色：', 'parallel pool + outline');
-  result = replaceRequired(result, /→ 同时派两个[^\n]*/,
-    '→ 通过 `invoke_subagent` 并发派发两角色：', 'parallel dispatch arrow');
-  result = replaceRequired(result,
-    /^\s*- \*\*回复里给出可点的页面\*\*[^\n]*/m,
-    '在回复中输出课件的**绝对路径超链接**（`[打开课件](file://...)`），并可在 `<appDataDir>/brain/<conversation-id>/` 写入伴读 Artifact', 'page delivery');
 
   result = result.replaceAll('~/.dsh/studymate-config.yaml', '宿主的全局工作区配置');
-  result = result.replaceAll("'<学习工作区>'", "'<WS>'");
   result = result.replaceAll('<WS>', '<LEARN_WORKSPACE>');
 
   return `${AGY_HOST_GUIDE}\n${result}`;
@@ -408,25 +411,22 @@ export function adaptAntigravitySkill(content, name) {
   if (name === 'learning-system') {
     adaptedBody = adaptAntigravityController(adaptedBody);
   } else if (name === 'record-keeping') {
+    // 工作区来源是 DSH 与无头宿主差异最大的一处：DSH 由 `studymate_workspace_context`
+    // 回报配置里的工作区，这里换成 Antigravity 的选定顺序（用户指定 → 环境变量 → 默认
+    // `~/StudyMate`）。**暂存模式已删**（ADR-0008），所以没有落点问答、没有偏好文件、
+    // 也没有搬运——只在写不进去时问一次可写位置。
     adaptedBody = replaceRequired(
       adaptedBody,
-      /^- \*\*别拿 `\/tmp` 当中转站\*\*[^\n]*/m,
-      '- **别拿临时目录当中转站**：需要后续步骤读到的内容写进学习工作区或 `<subject_path>/.stage/`，临时目录只放不需要留存的中间文件',
-      'DSH staging rationale'
+      /^学习状态由你（主教练）亲自读写，不派角色。\*\*工作区根[^\n]*/m,
+      '学习状态由你（主教练）亲自读写，不派角色。**工作区根**：按「Antigravity 宿主约定」选定 `<LEARN_WORKSPACE>`（用户本次指定目录 → 环境变量 → 默认 `~/StudyMate`）；学习数据全在它下面，不另建临时工作区，也不在会话目录里找学习文件。',
+      'record-keeping workspace root'
     );
     adaptedBody = replaceRequired(
       adaptedBody,
-      /^- \*\*暂时写不进去\*\*[^\n]*/m,
-      '- **暂时写不进去**（会话目录不可写）→ 跟学生说清缺的是哪一项可写位置，由学生指定一个可写目录；**不要靠反复提权推进**',
+      /^- \*\*只在 `<LEARN_WORKSPACE>` 下写学习文件\*\*[^\n]*/m,
+      '- **只在 `<LEARN_WORKSPACE>` 下写学习文件**，不写插件目录或工作区之外的目录；写不进去就跟学生说清缺的是哪一项可写位置，由他指定一个可写目录——**不要靠反复提权推进**',
       'DSH sandbox fallback'
     );
-    adaptedBody = replaceRequired(
-      adaptedBody,
-      /路径以\*\*工作区根 `<WS>`\*\* 为前缀[\s\S]*?下面所有路径里的 `<WS>` 都指这一个值：/,
-      '路径以 `<LEARN_WORKSPACE>`（总控开场按用户目录、环境变量或默认 `~/StudyMate` 确定）为前缀；下面所有路径里的 `<LEARN_WORKSPACE>` 都指这一个值：',
-      'record-keeping workspace'
-    );
-    adaptedBody = adaptedBody.replace('绝不写会话目录', '不写插件目录或工作区之外的目录');
     adaptedBody = adaptedBody.replaceAll('~/.dsh/studymate-config.yaml', '宿主的全局工作区配置')
       .replaceAll('<WS>', '<LEARN_WORKSPACE>');
     adaptedBody = adaptedBody.replace('`goal` 先跟学生确认', '`goal` 以学生明确指令为准，有歧义才澄清');

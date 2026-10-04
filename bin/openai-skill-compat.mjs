@@ -7,10 +7,21 @@ const HOST_GUIDE = `## OpenAI 宿主约定（导出时生成）
 
 - **引擎定位**：本文件位于 \`<root>/skills/<技能名>/SKILL.md\`；从实际文件路径定位包含 \`skills/\`、\`scripts/\`、\`templates/\`、\`schemas/\`、\`docs/\` 的插件根目录，记为 \`<root>\`。引擎与插件缓存只读，学习数据写入另一个可写工作区。所有相对的脚本、模板、schema、文档路径均相对 \`<root>\`；参考文档中的旧宿主安装说明不参与本插件启动。
 - **加载协议**：正文说“加载某技能”时，用宿主文件读取工具读 \`<root>/skills/<技能名>/SKILL.md\`；不需要专门的技能调用工具。缺少文件读取能力时说明具体缺项，不声称已加载。所有角色的教学职责与文件归属保持不变。
+- **原生工具（DSH 专属）在本宿主不存在**：正文里出现的 \`studymate_*\` 是 DSH 侧的原生工具（契约见 \`<root>/skills/learning-system/references/tools.md\`），**本宿主一个都调不到**。按下面这张降级表用文件读写与 \`<root>/scripts/\` 下的脚本完成同一件事；缺的能力如实说明，**不要假装调用过工具**。
+  | 正文里的工具 | 本宿主怎么做 |
+  |---|---|
+  | \`studymate_workspace_context\` | 读配置里的工作区、\`.learning/MEMORY.md\`、当前科目的 \`progress.yaml\` 与最近的学习记录 |
+  | \`studymate_validate_curriculum\` | \`<python> -X utf8 -B '<root>/scripts/check_curriculum.py' '<数据文件>'\`（给科目目录就逐份校验） |
+  | \`studymate_validate_lesson\` | \`<python> -X utf8 -B '<root>/scripts/check_lesson.py' '<内容文件>' --subject '<subject_path>' --node '<节点id>'\` |
+  | \`studymate_validate_pool\` | \`<python> -X utf8 -B '<root>/scripts/check_pool.py' '<subject_path>'\` |
+  | \`studymate_validate_handoff\` | \`<python> -X utf8 -B '<root>/scripts/check_handoff.py' '<stage_dir>' --role '<角色>' [--node '<节点id>']\` |
+  | \`studymate_renumber_lessons\` | \`<python> -X utf8 -B '<root>/scripts/renumber_lessons.py' '<subject_path>' [--dry-run] [--render]\` |
+  | \`studymate_apply_empty_reasons\` | \`<python> -X utf8 -B '<root>/scripts/apply_empty_reasons.py' '<subject_path>' '<节点id>' '<tsv>'\` |
+  | \`studymate_export\` | \`<python> -X utf8 -B '<root>/scripts/render_lesson.py' '<subject_path>' '<节点id>'\` 出课件页，\`<python> -X utf8 -B '<root>/scripts/gen_home.py' '<LEARN_WORKSPACE>'\` 出主页 |
 - **工作区**：总控传入的 \`<LEARN_WORKSPACE>\` 与 \`subject_path\` 必须是实际绝对路径；新会话按总控的“会话开场”恢复。不要把插件目录、缓存或未知的当前目录当作学习数据目录。角色不另选工作区。
 - **工具能力**：只使用宿主实际提供的提问、浏览、文件读写、图片查看、命令执行、委派与预览工具。提问工具不可用时总控用普通对话提问；角色把待问事项交给总控。检索不可用时记录未核验来源与 Gaps，不编造核验结果；图片不可取得时允许空图片库。文件或执行工具不可用时可以继续讨论，但具体生成、持久化与校验必须如实标为未完成。
 - **角色执行**：总控阶段的调度动作由总控执行（角色自己能派什么由各自规格决定，规格没写就不派）。有委派工具时按总控规范分工；没有委派工具时由总控按角色规格串行执行，每段读取对应规格，以“准备讲解/核对练习”等工作内容报告进度，完成产物与检查后才切回总控。不得假称启动了子 agent；串行执行仍保留正文→出题→原样搬运→渲染的顺序、题目唯一 owner 与档案归属，不能用总控身份随手改角色产物。
-- **暂存位置**：总控在宿主允许的可写临时目录，或工作区内专用暂存目录，分配每会话唯一的 \`<STUDYMATE_SCRATCH>\`，再按角色与节点分目录并传绝对路径。不同会话、不同角色不共享固定草稿目录；不要假定任何操作系统的临时目录路径。
+- **暂存位置**：产物交接与 DSH 侧同一套约定——角色按最终相对路径写 \`<subject_path>/.stage/<角色>-<节点id或slug>/deliver/\`，总控过交接门禁后原样搬入、搬完清掉这一轮。不需要留存的中间文件写本会话的 \`<STUDYMATE_SCRATCH>\`；不同会话、不同角色不共享固定草稿目录，也不要假定任何操作系统的临时目录路径。
 - **Python 与命令**：先探测 Python 3.9+、PyYAML（\`yaml\`）与 JSON Schema 校验器（\`jsonschema\`）可用；\`<python>\` 表示已验证的解释器调用，可为 \`python3\`、\`python\`、\`py -3\` 或绝对路径；后续调用加 \`-X utf8\`。PowerShell 调用带引号的可执行文件路径要加 \`&\`；路径参数使用宿主 shell 的字面值引用与转义（PowerShell 单引号内的单引号写两次）。优先使用工具的参数数组，不能把路径或学生文本拼成未引用的命令。按当前操作系统选择可用的 lab 测试命令。依赖缺失由总控在获准的可写环境内处理，角色不建环境，插件缓存内不装依赖。
 - **逐次显式传参**：调用主页生成器始终传 \`'<LEARN_WORKSPACE>'\`；各命令都传脚本与数据的绝对路径。环境变量、工作目录与 shell 状态不保证跨工具调用保留，确需设置时在每次调用内设置。跨会话只信实际存在的文件，不能以聊天记忆替代磁盘恢复。
 - **原样搬运**：用宿主文件复制工具，或 Python 标准库 \`shutil.copy2\`（文件）、\`shutil.copytree(..., dirs_exist_ok=True)\`（目录合并）完成；保留 \`deliver/\` 中相对路径，不经模型重写题面、答案与长产物。Windows 可用 PowerShell 的 \`Copy-Item -LiteralPath\`；不要依赖别的平台的复制、摘要或打开页面命令。
@@ -29,8 +40,16 @@ function replaceRequired(text, pattern, replacement, name) {
 function adaptController(body) {
   let result = replaceRequired(body, /^0\. \*\*定位工作区与引擎\*\*：[^\n]+/m,
     BOOTSTRAP, 'learning-system bootstrap');
+  // 总控现在把机械步骤交给原生工具（DSH）；无头宿主没有工具，这两条开头的自述要换成
+  // 「按宿主约定的降级表跑脚本」，否则导出稿会让学生读到一句本宿主做不到的话。
+  result = replaceRequired(result, /^- \*\*会话可以在任意目录启动\*\*[^\n]+/m,
+    '- **会话可以在任意目录启动**：学习数据全在配置好的学习工作区里，按「OpenAI 宿主约定」选定并记作 `<LEARN_WORKSPACE>`，不在会话目录里另建临时工作区。',
+    'controller workspace bullet');
+  result = replaceRequired(result, /^- \*\*机械步骤归工具\*\*[^\n]+/m,
+    '- **机械步骤归宿主命令**：本宿主没有原生工具，按「OpenAI 宿主约定」的降级表用文件读写与 `<root>/scripts/` 下的脚本完成校验与改写；拿到的是逐条问题与结论，不看退出码、不比对摘要。',
+    'controller mechanics bullet');
   result = replaceRequired(result, /^1\. \*\*加载 `record-keeping` 并读状态\*\*[^\n]+/m,
-    '1. **加载交互与档案协议并恢复**：先读本技能 `references/codex-interaction.md` 与 `record-keeping`；用 `<root>/scripts/interaction_state.py` 读取断点（首次无文件正常），结合最近会话摘要、共享记忆与学习进度恢复。先处理本次消息中的回答、纠正或续学意图，不能一律重跑开场菜单。', 'controller recovery');
+    '1. **加载交互与档案协议并恢复**：先读本技能 `references/codex-interaction.md` 与 `record-keeping`；用 `<root>/scripts/interaction_state.py` 读取断点（首次无文件正常），结合共享记忆、学习进度与最近的学习记录恢复。先处理本次消息中的回答、纠正或续学意图，不能一律重跑开场菜单。', 'controller recovery');
   result = replaceRequired(result, /^2\. \*\*没有科目\*\*[^\n]+/m,
     '2. **没有科目**：吸收本次消息已给出的目标、基础与偏好，仅走下方增量盘问；回答当轮保存，不等建完科目才记。不先问一遍三件事再重复盘问。', 'initial intake');
   result = replaceRequired(result, /^3\. \*\*已有科目\*\*[^\n]+/m,
@@ -42,19 +61,19 @@ function adaptController(body) {
   result = replaceRequired(result, /## 对话节奏[^\n]*\n[\s\S]*?(?=## 学习循环)/,
     `${DIALOGUE}\n`, 'Codex dialogue');
   result = replaceRequired(result, /## 会话结束\n[\s\S]*?(?=## 子 agent 派发规范)/,
-    '## 会话结束\n\n学生明确暂停/结束或当前请求已完成时才执行下面的收尾。等待异步回复时即使宿主必须交还控制，也只按交互协议保留 pending 并让出执行，不运行学习结束流程、不输出完成总结。\n\n1. 按 `record-keeping` 写会话摘要，保存当前科目、节点、阶段与下一步；显式结束时交互状态设为 paused 并清除待问项。\n2. 刷新主页，简短说明本次完成内容与续学位置。已有明确授权的偏好正常记录；需要学生确认的新长期观察先保留在摘要，下次相关时再确认，不为此追加弹窗。\n\n', 'Codex session end');
+    '## 会话结束\n\n学生明确暂停/结束或当前请求已完成时才执行下面的收尾。等待异步回复时即使宿主必须交还控制，也只按交互协议保留 pending 并让出执行，不运行学习结束流程、不输出完成总结。\n\n1. 按 `record-keeping` 更新学习进度、误解记录与学习记录（有可观察证据才写），把当前科目、节点、阶段与下一步存进交互断点；显式结束时交互状态设为 paused 并清除待问项。\n2. 简短说明本次完成内容与续学位置。已有明确授权的偏好正常记录；需要学生确认的新长期观察先保留在断点里，下次相关时再确认，不为此追加弹窗。\n\n', 'Codex session end');
   result = replaceRequired(result, /^1\. 学生同意学当前节点[^\n]+/m,
     '1. 学生明确选择当前节点或已说开始/继续 → 直接进入当前节点并将状态置为“学习中”；先检查已生成材料与断点，只补未完成步骤，不重复确认或重新生成。', 'node start');
-  result = replaceRequired(result, /^9\. 刷新主页，然后问学生[^\n]+/m,
-    '9. 刷新主页并保存交互断点。学生已明确继续时推进对应下一步；只报告“学完了”而未选择后续时，给一次“下一课 / 补练 / 暂停”选择，不再叠加开始确认。', 'node boundary');
+  result = replaceRequired(result, /^4\. \*\*课件交给学生\*\*[^\n]+/m,
+    '4. **课件交给学生**：把渲染出的课件页与 lab 的绝对路径给成可点击的链接（有预览工具就打开），并按“Codex 对话衔接”交付当前材料与一个学生行动', 'page delivery');
+  result = replaceRequired(result, /^9\. 问学生继续下一个节点还是结束[^\n]*/m,
+    '9. 保存交互断点。学生已明确继续时推进对应下一步；只报告“学完了”而未选择后续时，给一次“下一课 / 补练 / 暂停”选择，不再叠加开始确认。', 'node boundary');
   result = replaceRequired(result, /直接进下一节点[^\n]*/,
     '按第 9 步衔接下一节点', 'next node handoff');
   result = replaceRequired(result, /→ 开始第一课（仍按「对话节奏」问"开始吗"）[^\n]*/,
     '→ 按用户已表达的范围继续第一课或交付大纲', 'parallel chain end');
   result = replaceRequired(result, /   4\. 派 `curriculum-designer` 产大纲[^\n]*/,
     '   4. 接收第 3 步已经派发的 `curriculum-designer` 大纲并校验；不再次派同一份大纲任务。采图缺失按 Gaps 处理，不让可选图片阻塞已可交付的课程', 'single curriculum handoff');
-  result = replaceRequired(result, /^\s*- 再 `xdg-open` \/ `open` 作补充[^\n]*/m,
-    '有可用浏览器/页面预览工具时打开页面作补充，并按“Codex 对话衔接”交付当前材料与一个学生行动', 'page open + handoff');
   result = replaceRequired(result, /^1\. \*\*你亲自确认\*\*[^\n]*/m,
     '1. **核对变更意图**：学生明确要求从 A 改成 B 就执行该范围的变更；只有目标含糊或会扩大范围时才澄清一次，不重复确认已经清楚的指令', 'mission change intent');
   result = replaceRequired(result,
@@ -71,12 +90,8 @@ function adaptController(body) {
     'plugin cache writes');
   result = replaceRequired(result, /\*\*建池与拟大纲并行\*\*[^\n]*/,
     '**建池与拟大纲可并行**——「资源清单」落位后，有委派工具时同时派下面两个；没有时按角色规格串行完成：', 'parallel pool + outline');
-  result = replaceRequired(result, /→ 同时派两个[^\n]*/,
-    '→ 有委派工具时并行、否则串行执行两角色：', 'parallel dispatch arrow');
   result = result.replace(/- \*\*验收不过就退回[^\n]+/,
     '- **验收不过由产出角色自己改**：有角色消息/继续执行工具时，向原角色发送失败原文证据；串行模式切回同一角色规范修正。不要用总控身份代改；无法继续原子 agent 时，重新执行该角色并给原产物路径与失败证据。');
-  result = replaceRequired(result, /^\s*- \*\*回复里给出可点的页面\*\*[^\n]*/m,
-    '使用宿主文件预览或附件呈上页面 + 文字写明**实际保存位置**并给可点击的文件链接', 'page delivery');
   return result;
 }
 
@@ -100,41 +115,22 @@ export function adaptOpenAiSkill(content, name) {
   let body = source.slice(frontmatter[0].length).trim();
   if (name === 'learning-system') body = adaptController(body);
   if (name === 'record-keeping') {
+    // 工作区来源是 DSH 与无头宿主差异最大的一处：DSH 由 `studymate_workspace_context`
+    // 回报配置里的工作区，这里换成「OpenAI 宿主约定」的选定顺序（用户指定 → 环境变量 →
+    // 显式配置 → 既有学习数据）。**暂存模式已删**（ADR-0008），所以没有落点问答、
+    // 没有偏好文件、也没有搬运——只在写不进去时问一次可写位置。
     body = replaceRequired(body,
-      /路径以\*\*工作区根 `<WS>`\*\* 为前缀[\s\S]*?下面所有路径里的 `<WS>` 都指这一个值：/,
-      '路径以 `<LEARN_WORKSPACE>`（总控开场按用户目录、环境变量、显式配置或既有学习数据确定）为前缀；下面所有路径里的 `<LEARN_WORKSPACE>` 都指这一个值：',
-      'record-keeping workspace');
-    body = body.replace('绝不写会话目录', '不写插件缓存或工作区之外的会话目录');
-    // 暂存与落点是宿主差异最大的一块：DSH 的「会话目录暂存 + 沙箱模式名」在这里换成
-    // 「OpenAI 宿主约定」的工作区与 `<STUDYMATE_SCRATCH>` 口径。规则正文在 record-keeping，
-    // 这里只改写法——不改「先暂存、结束前问一次落点」这套流程本身。
-    body = replaceRequired(body,
-      /^\*\*工作区根 `<WS>`\*\*：[^\n]*/m,
-      '**工作区根**：按「OpenAI 宿主约定」选定 `<LEARN_WORKSPACE>`（用户本次指定目录 → 环境变量 → 显式配置 → 既有学习数据），不假定操作系统临时目录路径；暂存与中间产物写本会话的 `<STUDYMATE_SCRATCH>`（或工作区内专用暂存目录），需要后续步骤读到的内容一律写进 `<LEARN_WORKSPACE>`。',
+      /^学习状态由你（主教练）亲自读写，不派角色。\*\*工作区根[^\n]*/m,
+      '学习状态由你（主教练）亲自读写，不派角色。**工作区根**：按「OpenAI 宿主约定」选定 `<LEARN_WORKSPACE>`（用户本次指定目录 → 环境变量 → 显式配置 → 既有学习数据）；学习数据全在它下面，不在插件目录或会话目录里找学习文件，也不另建临时工作区。',
       'record-keeping workspace root');
     body = replaceRequired(body,
-      /^- \*\*暂时写不进去\*\*[^\n]*/m,
-      '- **暂时写不进去**（工作区不可写）→ 只询问学生保存位置，并说明缺的是哪一项能力；**不要靠反复提权推进**',
+      /^- \*\*只在 `<LEARN_WORKSPACE>` 下写学习文件\*\*[^\n]*/m,
+      '- **只在 `<LEARN_WORKSPACE>` 下写学习文件**，不写插件缓存或工作区之外的会话目录；插件目录只读。写不进去就只询问学生一个可写位置，并说明缺的是哪一项能力——**不要靠反复提权推进**',
       'record-keeping write fallback');
-    body = replaceRequired(body,
-      /^- \*\*别拿 `\/tmp` 当中转站\*\*[^\n]*/m,
-      '- **别拿临时目录当中转站**：需要后续步骤读到的内容写进 `<LEARN_WORKSPACE>` 或 `<subject_path>/.stage/`，临时目录只放不需要留存的中间文件',
-      'record-keeping staging rationale');
-    body = replaceRequired(body,
-      /^- \*\*落点偏好开场恢复\*\*[^\n]*/m,
-      '- **落点偏好开场恢复**：顺手读一次 `<STUDYMATE_SCRATCH>/prefs.md` 的 `default_delivery`——有、且那个目录还在 → 记成**默认落点**，收尾时它排在第一项、**不再重复问**；没有或路径已失效 → 照常问一次',
-      'record-keeping prefs restore');
-    body = replaceRequired(body,
-      /^- \*\*落点要记住（这是持久化那一步，别漏）\*\*[^\n]*/m,
-      '- **落点要记住（这是持久化那一步，别漏）**：搬完用 `write` 把偏好写进 **`<STUDYMATE_SCRATCH>/prefs.md`**，形如 `default_delivery: <绝对路径>`；已有这个文件就**只改这一行**，别整文件覆盖',
-      'record-keeping prefs write');
-    // 本插件不读 DSH 的 studymate-config.yaml，工作区根一律记作 `<LEARN_WORKSPACE>`
     body = body.replaceAll('~/.dsh/studymate-config.yaml', '宿主的全局工作区配置')
       .replaceAll('<WS>', '<LEARN_WORKSPACE>');
     body = replaceRequired(body, /^\s*- `current` 变了先跟学生确认[^\n]*/m,
       '`current` 按学生明确选择更新，有歧义才澄清', 'record-keeping project current');
-    body = replaceRequired(body, /同时在对话里给一条 `memory_updates` 建议[^\n]*/,
-      '需要确认的 `memory_updates` 先保留在摘要，不在学生结束时追加弹窗；仅在获得实际确认后写入共享记忆', 'record-keeping memory updates');
     body += `\n\n${RECORD_CONTINUITY}`;
   }
   if (name === 'learning-system') {
@@ -142,21 +138,14 @@ export function adaptOpenAiSkill(content, name) {
       '`goal` 以学生明确指令为准，有歧义才澄清', 'controller goal confirmation');
     body = replaceRequired(body, /必须学生确认；旧使命留痕[^\n]*/,
       '按学生明确变更指令执行，歧义才澄清；旧使命留痕', 'mission change confirmation');
-    // 暂存模式：本插件不读 DSH 的 studymate-config.yaml，工作区根一律记作 `<LEARN_WORKSPACE>`。
-    // 中文占位符 `<学习工作区>` 先换成 `<WS>`，否则下面 python 命令的占位符替换会把它
-    // 拆成「去尖括号 + 保留原引号」的 `''<学习工作区>''`。
+    // 本插件不读 DSH 的 studymate-config.yaml，工作区根一律记作 `<LEARN_WORKSPACE>`。
     body = body.replaceAll('~/.dsh/studymate-config.yaml', '宿主的全局工作区配置');
-    body = body.replaceAll("'<学习工作区>'", "'<WS>'");
     body = body.replaceAll('<WS>', '<LEARN_WORKSPACE>');
   }
   body = body.replaceAll('.dsh/skills/', 'skills/')
     .replaceAll('/tmp', '<STUDYMATE_SCRATCH>')
     .replaceAll('`ask_user_question`', '宿主提问工具')
     .replaceAll('（`read` 那个文件）', '（用宿主图片查看工具打开那个文件）')
-    .replaceAll('`md5sum <文件> | cut -c1-12`',
-      '`<python> -X utf8 -c \'import hashlib,pathlib,sys; print(hashlib.md5(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest()[:12])\' \'<文件>\'`')
-    .replaceAll("`cp -r '<subject_path>/.stage/practice-evaluator-<节点id>/deliver/.' '<subject_path>/'`",
-      '把 `<subject_path>/.stage/practice-evaluator-<节点id>/deliver/` 内的目录内容原样合并复制到 `<subject_path>/`')
     .replaceAll('`cp -r`', '目录复制')
     .replaceAll('`cp`', '原样复制')
     .replaceAll('→ cp 落', '→ 原样复制落')

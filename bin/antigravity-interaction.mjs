@@ -31,15 +31,25 @@ const KIND_LIST = schemaEnum('curriculum.schema.json',
 export const AGY_HOST_GUIDE = `## Antigravity 宿主约定（导出时生成）
 
 - **引擎定位与只读资产**：本文件位于 \`<root>/skills/<技能名>/SKILL.md\`；从实际文件路径定位包含 \`skills/\`、\`agents/\`、\`scripts/\`、\`templates/\`、\`schemas/\`、\`rules/\`、\`docs/\` 的插件根目录，记为 \`<root>\`。引擎与插件安装目录属于只读静态资产，严禁在 \`<root>\` 下写入临时脚本、数据、测试文件或编译缓存（\`__pycache__\`）。所有相对的脚本、模板、schema、文档路径均相对 \`<root>\` 解析。
+- **原生工具（DSH 专属）在本宿主不存在**：技能正文里出现的 \`studymate_*\` 是 DSH 侧的原生工具（契约见 \`<root>/skills/learning-system/references/tools.md\`），**本宿主一个都调不到**。按下面这张降级表用文件读写与 \`<root>/scripts/\` 下的脚本完成同一件事；缺的能力如实说明，**不要假装调用过工具**。
+  | 正文里的工具 | 本宿主怎么做 |
+  |---|---|
+  | \`studymate_workspace_context\` | 读配置里的工作区、\`.learning/MEMORY.md\`、当前科目的 \`progress.yaml\` 与最近的学习记录 |
+  | \`studymate_validate_curriculum\` | \`python3 -B '<root>/scripts/check_curriculum.py' '<数据文件>'\`（给科目目录就逐份校验） |
+  | \`studymate_validate_lesson\` | \`python3 -B '<root>/scripts/check_lesson.py' '<内容文件>' --subject '<subject_path>' --node '<节点id>'\` |
+  | \`studymate_validate_pool\` | \`python3 -B '<root>/scripts/check_pool.py' '<subject_path>'\` |
+  | \`studymate_validate_handoff\` | \`python3 -B '<root>/scripts/check_handoff.py' '<stage_dir>' --role '<角色>' [--node '<节点id>']\` |
+  | \`studymate_renumber_lessons\` | \`python3 -B '<root>/scripts/renumber_lessons.py' '<subject_path>' [--dry-run] [--render]\` |
+  | \`studymate_apply_empty_reasons\` | \`python3 -B '<root>/scripts/apply_empty_reasons.py' '<subject_path>' '<节点id>' '<tsv>'\` |
+  | \`studymate_export\` | \`python3 -B '<root>/scripts/render_lesson.py' '<subject_path>' '<节点id>'\` 出课件页，\`python3 -B '<root>/scripts/gen_home.py' '<LEARN_WORKSPACE>'\` 出主页 |
 - **原生多智能体协同（invoke_subagent）**：总控调度专业角色时，必须使用宿主原生 \`invoke_subagent\` 工具委派对应角色（TypeName 为 \`resource-scout\`、\`image-scout\`、\`curriculum-designer\`、\`learning-coach\`、\`practice-evaluator\`，角色规格在 \`<root>/agents/<角色名>.md\` 中声明）。角色在独立的后台子会话中执行，完成后宿主通过事件驱动通知自动唤醒总控，**严禁使用 sleep 循环或 manage_task 频繁轮询状态**。
   - **调度协同节奏**：资源收集（\`resource-scout\`）先行；资源就绪后，建图片池（\`image-scout\`）与拟大纲（\`curriculum-designer\`）通过 \`invoke_subagent\` 单次数组**并发派发**；课件阶段保持**严格串行**（讲解角色 \`learning-coach\` 交付正文与锚点后，再派 \`practice-evaluator\` 配套出题与设计 Lab）。
   - **边界与通道隔离**：子代理无面向用户的会话通道，不向用户提问，不调用 \`ask_question\`。若缺少上下文或遇到异常，在完成报告中说明并交回总控。
-- **结构化交互模态（ask_question）**：总控拥有与用户直接对话的唯一通道。需要用户做关键决策（新科目盘问的目标与深度、前置知识自评、主线项目挑选题、实操载体偏好、方向探索每步问答、暂存搬运落点选择）时，优先使用宿主原生 \`ask_question\` 工具渲染交互式单选/多选卡片。
+- **结构化交互模态（ask_question）**：总控拥有与用户直接对话的唯一通道。需要用户做关键决策（新科目盘问的目标与深度、前置知识自评、主线项目挑选题、实操载体偏好、方向探索每步问答）时，优先使用宿主原生 \`ask_question\` 工具渲染交互式单选/多选卡片。
   - **交互规范与格式**：每次只发 1 个决策问题（必要时设 \`is_multi_select: true\`），选项 2-4 个且互斥明晰；推荐项排在第一位并显式标注 \`(Recommended)\`；选项文本必须使用用户直接回答的第一人称口吻（例如 \`"(Recommended) 能独立写简单代码，但缺乏大型项目经验"\`），绝不描述 AI 自身的动作；严禁在选项数组中手动添加“其他”或“以上都不是”项（宿主 UI 已内置自由输入框）。
   - **正交边界**：教学题目、代码题与理论自测必须在课件或正文文本中展开，不包装为设置卡片；平台权限确认依赖宿主原生审批，不通过课程选项代劳。
-- **学习工作区与分级暂存机制**：学习工作区记为 \`<LEARN_WORKSPACE>\`，默认使用 \`~/StudyMate\`（按本次显式指定目录 → 环境变量 \`STUDYMATE_WORKSPACE\` → \`LEARN_WORKSPACE\` → 默认 \`~/StudyMate\` 优先级仲裁）。
-  - **会话级免授权暂存**：会话在外部项目目录（如已有代码仓）启动且未指定工作区时，新科目一律先在当前工作目录的 \`<SESSION_DIR>/.studymate-stage/<slug>\` 暂存建课，全流程零授权；全部生成并校验通过后，通过 \`ask_question\` 确认目标落点（默认工作区、桌面、文档目录或就地保留），单次安全搬移。
-  - **角色级隔离暂存**：子代理产物统一写入 \`<subject_path>/.stage/<角色名>-<节点id>/deliver/<相对路径>\`，隔离中间产物，杜绝并发覆写与半成品质态污染。
+- **学习工作区与暂存位置**：学习工作区记为 \`<LEARN_WORKSPACE>\`，默认使用 \`~/StudyMate\`（按本次显式指定目录 → 环境变量 \`STUDYMATE_WORKSPACE\` → \`LEARN_WORKSPACE\` → 默认 \`~/StudyMate\` 优先级仲裁）。**工作区就是配置好的那一个**：不在会话目录里另建临时工作区，也没有"收尾问落点、再搬过去"这一步。
+  - **角色级隔离暂存**：子代理产物统一写入 \`<subject_path>/.stage/<角色名>-<节点id>/deliver/<相对路径>\`，隔离中间产物，杜绝并发覆写与半成品质态污染；总控过交接门禁后原样搬入，搬完清掉这一轮。
   - **系统临时目录（\`<STUDYMATE_SCRATCH>\`）**：宿主提供的系统临时目录记为 \`<STUDYMATE_SCRATCH>\`，只放不需要留存的中间文件；需要后续步骤读到的内容一律写在 \`<LEARN_WORKSPACE>\` 或 \`<subject_path>/.stage/\` 之下，不拿临时目录当中转站。
 - **Python 引擎执行与沙箱策略**：依赖环境要求 Python 3.9+、PyYAML（\`yaml\`）与 JSON Schema（\`jsonschema\`）。
   - **执行参数**：调用 Python 引擎脚本一律执行 \`python3 -B '<root>/scripts/<脚本名>.py' ...\`（带 \`-B\` 防止在只读插件目录生成 \`__pycache__\`）。
@@ -54,7 +64,7 @@ export const AGY_HOST_GUIDE = `## Antigravity 宿主约定（导出时生成）
 
 export const AGY_BOOTSTRAP = `0. **定位工作区与引擎**：按“Antigravity 宿主约定”从本技能文件定位 \`<root>\`。学习工作区按以下顺序选定并记为 \`<LEARN_WORKSPACE>\`：用户本次明确指定的目录 → 非空环境变量 \`STUDYMATE_WORKSPACE\` → 非空 \`LEARN_WORKSPACE\` → 默认使用 \`~/StudyMate\`。
    - **首次初始化**：在选定工作区创建 \`.learning/subjects/\`，并在缺失时从 \`<root>/templates/MEMORY.md\` 复制初始化 \`.learning/MEMORY.md\`；保留已有科目与记忆。向学生清晰说明实际学习工作区。
-   - **执行准备**：确认 Python 3.9+ 与 PyYAML（\`yaml\`）环境可用。调用生成器与校验器一律使用 \`<root>/scripts/\` 下脚本的绝对路径加 \`-B\` 参数。检查临时暂存环境，新开科目优先在当前目录 \`.studymate-stage/<slug>\` 免授权起步。`;
+   - **执行准备**：确认 Python 3.9+ 与 PyYAML（\`yaml\`）环境可用。调用生成器与校验器一律使用 \`<root>/scripts/\` 下脚本的绝对路径加 \`-B\` 参数。工作区直接就是配置好的那一个，不另建临时工作区。`;
 
 export const AGY_INTAKE = `## 新科目盘问（总控执行，交互式单题推进）
 
