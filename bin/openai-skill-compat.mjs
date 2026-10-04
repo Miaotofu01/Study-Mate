@@ -26,6 +26,17 @@ function replaceRequired(text, pattern, replacement, name) {
   return text.replace(pattern, replacement);
 }
 
+// 源技能里的 `studymate_*` 是本插件在 DSH 里的原生工具（#68），这个宿主没有它们：
+// 导出时逐名翻译成等价的引擎命令，调用面不留悬空引用。命令故意写成
+// `python3 -B <root>/scripts/x.py`（脚本路径不带引号），下面那段通用的 python 规整
+// 才认得出来、会把它变成 `<python> -X utf8 -B '<root>/scripts/x.py' …`。
+// 新增原生工具时这里加一行——scripts/tests/test_skill_tool_refs.mjs 会检查覆盖率。
+export const NATIVE_TOOL_FALLBACK = {
+  studymate_validate_pool: "python3 -B <root>/scripts/check_pool.py '<subject_path>'",
+  studymate_validate_curriculum: "python3 -B <root>/scripts/check_curriculum.py '<curriculum.yaml>'",
+  studymate_validate_lesson: "python3 -B <root>/scripts/render_lesson.py '<subject_path>' '<节点id>' --check",
+};
+
 function adaptController(body) {
   let result = replaceRequired(body, /^0\. \*\*定位工作区与引擎\*\*：[^\n]+/m,
     BOOTSTRAP, 'learning-system bootstrap');
@@ -148,6 +159,11 @@ export function adaptOpenAiSkill(content, name) {
     body = body.replaceAll('~/.dsh/studymate-config.yaml', '宿主的全局工作区配置');
     body = body.replaceAll("'<学习工作区>'", "'<WS>'");
     body = body.replaceAll('<WS>', '<LEARN_WORKSPACE>');
+  }
+  // 原生工具名先落到本宿主的等价命令，再走下面那段通用的 python 规整（顺序不能反：
+  // 规整只认脚本路径不带引号的写法）。
+  for (const [tool, fallback] of Object.entries(NATIVE_TOOL_FALLBACK)) {
+    body = body.replaceAll(tool, fallback);
   }
   body = body.replaceAll('.dsh/skills/', 'skills/')
     .replaceAll('/tmp', '<STUDYMATE_SCRATCH>')

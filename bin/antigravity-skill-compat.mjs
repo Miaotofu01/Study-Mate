@@ -44,8 +44,8 @@ const ROLE_TOOL_NOTES = {
   'image-scout': [
     { tools: ['view_file'], note: '读取科目资源清单 `RESOURCES.md`、术语表 `GLOSSARY.md` 与已有索引。' },
     { tools: ['search_web', 'read_url_content'], note: '在允许的官方站点内下钻查找图解（限制 2 跳之内）。' },
-    { tools: ['run_command'], note: '使用标准 Python 脚本或 curl/wget 安全下载图片，校验图片头与尺寸。' },
-    { tools: ['write_to_file'], note: '写入图片库索引 `<subject_path>/.stage/image-scout-<slug>/deliver/assets/img/pool.md`。' },
+    { tools: ['run_command'], note: '下载图片到「图片库」，并校验图片头与尺寸（宿主允许的命令行工具即可）。' },
+    { tools: ['write_to_file'], note: '图片与索引**写盘即交付**：图落「图片库」、索引落「图片库索引」，不写暂存目录、不写别处。' },
     { tools: ['invoke_subagent'], note: '角色默认不派子 agent；规格写明要派的才派，一次派完、不占自己的上下文。' },
   ],
   'curriculum-designer': [
@@ -154,6 +154,7 @@ const ROLE_PROMPTS = {
    - \`概念\`：核心理论与概念模型，以讲为主，不配 Lab。
    - \`实操\`：理论与动手结合，讲练并重，配套轻量实验任务与代码。
    - \`实验\`：项目里程碑验收课，以练为主，必须在 \`prerequisites\` 中验收至少一个前面学过的实操节点。
+   - 课型只决定**产不产 lab 材料**：题的深度由节点 \`objective\` 决定，不由课型定上限。
 3. **大纲字段规范（对齐 \`curriculum.schema.json\`）**：
    - \`title\`: ≤16 字，教材风格命名。
    - \`objective\`: ≤34 字，一句话、可观察的行为目标。
@@ -187,7 +188,7 @@ const ROLE_PROMPTS = {
    - 引用图片库位图时使用 \`::: figure\`，必须包含 \`alt:\` 与单句 \`caption:\`，图片来源与许可由渲染器自动根据索引注入，不要手动写“图 1”。
 4. **题目与练习锚点（核心职责分工）**：
    - 严禁在课件中手写题目与答案！题目唯一归 \`practice-evaluator\` 负责。
-   - 在需要测验处写：\`::: quiz <层级> 锚点：<锚点文本>\`（层级为 L1/L2/L3/L4）。
+   - 在需要测验处写：\`::: quiz <层级> 锚点：<锚点文本>\`（层级写 读懂／改对／查错／造出）。
    - 在动手练习段落写：\`::: practice <阶段> | <标题>\`。每个块必须以独立的 \`:::\` 收尾。
 5. **交付前自检**：
    - 运行 \`python3 -B '<root>/scripts/render_lesson.py' '<subject_path>' '<node_id>' --check\`。
@@ -195,16 +196,16 @@ const ROLE_PROMPTS = {
 
   'practice-evaluator': `## 角色定位与核心职责
 你是 StudyMate 的题目与实操评估子代理（Practice & Evaluation Specialist）。由学习总控通过 \`invoke_subagent\` 派发。
-你是全系统所有题目、Lab 任务、测试断言与评估记录的**唯一 Owner**。你负责根据课件锚点设计四层练习，为实操课与实验课构建整套 Lab 代码环境，并在阶段评估时根据可运行证据进行严谨批改。你直接向父智能体汇报，不直接与用户交互。
+你是全系统所有题目、Lab 任务与测试断言的**唯一 Owner**。你负责根据课件锚点设计四层练习，为实操课与实验课构建整套 Lab 代码环境，并在**实验课验收**时依据可运行证据严谨判定（普通节点不做第三方验收）。你直接向父智能体汇报，不直接与用户交互。
 
 {{TOOL_GUIDE}}
 
 ## 出题与评估核心准则
 1. **四层练习架构（\`layered-practice\`）**：
-   - L1 理解：核心概念辨析，客观选择题或极简阐述，必须配有清晰的 \`why\` 与判分要点 \`criteria\`。
-   - L2 改造：在已有正确代码/结构上完成参数调整、逻辑微调或填空。
-   - L3 排错：给出包含经典 Bug 或逻辑漏洞的代码片段，要求定位根因并修复。
-   - L4 应用：端到端项目任务或完整模块开发。
+   - 读懂：核心概念辨析，客观题或极简阐述，必须配有清晰的 \`why\` 与判分要点 \`criteria\`。
+   - 改对：在已有正确代码/结构上完成参数调整、逻辑微调或填空，**先写下预测再跑起来验证**。
+   - 查错：给出包含经典 Bug 或逻辑漏洞的代码片段，要求定位根因、给出修复与预防。
+   - 造出：端到端项目任务或完整模块开发，交付物要能跑通并说清取舍。
 2. **课件练习题库规范（\`quiz.json\`）**：
    - 顶层 Key 必须与课件 Markdown 中的 \`::: quiz\` 锚点文本**完全逐字一致**。
    - 题目数据结构符合 \`quiz.js\` 契约；若某个锚点经过权衡无需出题，必须交回 \`empty_reason: <理由>\`。
@@ -212,8 +213,8 @@ const ROLE_PROMPTS = {
    - \`kind: 实操\`：提供完整 \`lab/\` 目录结构（\`README.md\`、初始留白代码、自动化单元测试/断言入口、\`solutions/\` 参考答案）。
    - \`kind: 实验\`：编写实验说明页正文（\`lessons/<NNNN>-<node_id>.md\`）与综合验收任务，说明页包含“做出什么、怎么算过、自查清单、踩坑预警”。
 4. **证据核验原则（\`evidence-check\`）**：
-   - 评估学生的掌握度必须以实际运行结果、单元测试通过输出或明确的代码逻辑证据为准，口头声称一律不作为掌握凭证。
-   - 产出阶段评估记录 \`assessments/NNNN-<node_id>.md\`，包含规范 YAML frontmatter 与学生真实作答原文。`,
+   - 判定必须以实际运行结果、单元测试通过输出或明确的代码逻辑证据为准，口头声称一律不作为独立通过证据。
+   - 验收结论写进「学习记录」（由总控落盘）；\`assessments/\` 不再产生新文件——模型输出不能直接改进度状态。`,
 };
 
 function splitFrontmatter(content) {
@@ -227,10 +228,27 @@ function replaceRequired(text, pattern, replacement, name) {
   return text.replace(pattern, replacement);
 }
 
+// 源技能里的 `studymate_*` 是本插件在 DSH 里的原生工具（#68），Antigravity 没有它们：
+// 导出时逐名翻译成等价的引擎命令，调用面不留悬空引用。命令故意写成
+// `python3 -B <root>/scripts/x.py`（脚本路径不带引号），下面那段通用的 python 规整
+// 才认得出来、会把它变成 `python3 -B '<root>/scripts/x.py' …`。
+// 新增原生工具时这里加一行——scripts/tests/test_skill_tool_refs.mjs 会检查覆盖率。
+export const NATIVE_TOOL_FALLBACK = {
+  studymate_validate_pool: "python3 -B <root>/scripts/check_pool.py '<subject_path>'",
+  studymate_validate_curriculum: "python3 -B <root>/scripts/check_curriculum.py '<curriculum.yaml>'",
+  studymate_validate_lesson: "python3 -B <root>/scripts/render_lesson.py '<subject_path>' '<节点id>' --check",
+};
+
 // Host-neutral rewrites shared by adapted skills and generated agents: the same DSH text
 // must not be normalized in one place and left raw in the other.
 function applyCommonRewrites(text) {
-  let result = text
+  // 原生工具名先落到本宿主的等价命令，再走下面的 python 规整（顺序不能反：规整只认
+  // 脚本路径不带引号的写法）。两个适配器各存一份，源技能不写引擎命令。
+  let result = text;
+  for (const [tool, fallback] of Object.entries(NATIVE_TOOL_FALLBACK)) {
+    result = result.replaceAll(tool, fallback);
+  }
+  result = result
     .replaceAll('/tmp', '<STUDYMATE_SCRATCH>')
     .replaceAll('`ask_user_question`', '`ask_question`')
     .replaceAll('（`read` 那个文件）', '（用 `view_file` 查看那个文件）')
