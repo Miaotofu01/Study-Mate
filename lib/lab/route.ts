@@ -26,6 +26,7 @@
 
 // 域 guard 与工作区 vault 住在 `lib` 域（Host 数据层）：实验域不许 import 工具域
 // （域图上 tools → lab 是注册点那条边，反过去就成环），所以这两样从实现处直接取。
+import { routeError } from '../route-envelope.ts';
 import { createWorkspaceVault } from '../host/vault.ts';
 import { createAccess } from '../host/access.ts';
 import {
@@ -73,7 +74,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function badRequest(error: string, message: string): Response {
-  return Response.json({ error, message }, { status: 400 });
+  // 信封只有一份（`lib/route-envelope.ts`）：`{ ok:false, error:{ code, message } }`
+  return routeError(400, error, message);
 }
 
 /**

@@ -27,6 +27,7 @@ import { buildAskContext, assembleAnswer, topicFromQuestion, AskContextError } f
 import type { AskRequestBody } from '../core/ask.ts';
 import { probeModel } from '../core/model.ts';
 import { cmpCodePoints } from '../core/format.ts';
+import { errorBody, routeError } from '../route-envelope.ts';
 import { resolveWorkspace } from '../workspace.ts';
 import { writeMisconception, ASK_SOURCE } from '../misconceptions.ts';
 
@@ -57,8 +58,9 @@ export interface AskView {
   answer?: string;
   /** 刚落的那条误解记录（字段与 misconceptions.schema.json 逐个相等） */
   misconception?: { topic: string; source: string; evidence: string; status: string; at: string };
-  /** 写盘结果：写成了、回放了、还是没写成（没写成也不影响回答已经拿到） */
-  write?: { ok: boolean; version?: string; replayed?: boolean; error?: string; message?: string };
+  /** 写盘结果：写成了、回放了、还是没写成（没写成也不影响回答已经拿到）。
+   *  没写成时那一格也是唯一信封（`{ ok:false, error:{ code, message } }`，见 lib/route-envelope.ts）。 */
+  write?: { ok: boolean; version?: string; replayed?: boolean; error?: { code: string; message: string } };
   /** 失败时的可读原因与机器码 */
   error?: { code: string; message: string; version?: string };
   /** 不可用时的原因（与工具域同一份文案） */
@@ -220,8 +222,14 @@ export async function resolveSelection(
 
 /* ── 主流程 ────────────────────────────────────────────────────────────── */
 
+/** 失败的那一格：走唯一信封（`lib/route-envelope.ts`），`available` 是同级字段。 */
 function errorView(code: string, message: string, extra: { version?: string } = {}): AskView {
-  return { available: true, ok: false, error: { code, message, ...extra } };
+  return { available: true, ...errorBody(code, message, extra) } as AskView;
+}
+
+/** 没有可用模型：`available:false` 是**协商结果**，与工具域的 `{available:false, reason}` 同一形状。 */
+function unavailableView(reason: string): AskView {
+  return { available: false, reason, ...errorBody('model-unavailable', reason) } as AskView;
 }
 
 /**
@@ -251,7 +259,7 @@ export async function askPanel(deps: AskDeps, input: AskRequestInput = {}): Prom
   if (!capability.available) {
     // 如实说明，不假装会答：这一条**不写误解记录**——没有回答就没有「回答摘要」，
     // 写一条空壳进学生的档案比不写更糟（报告里记了这处判断）。
-    return { available: false, ok: false, reason: capability.reason ?? '模型能力不可用', error: { code: 'model-unavailable', message: capability.reason ?? '模型能力不可用' } };
+    return unavailableView(capability.reason ?? '模型能力不可用');
   }
 
   const selection = deps.defaultSelection ?? null;
@@ -260,7 +268,7 @@ export async function askPanel(deps: AskDeps, input: AskRequestInput = {}): Prom
     model: input.model ?? selection?.model,
   });
   if (!chosen.provider || !chosen.model) {
-    return { available: false, ok: false, reason: chosen.reason ?? '没有选定模型', error: { code: 'model-unavailable', message: chosen.reason ?? '没有选定模型' } };
+    return unavailableView(chosen.reason ?? '没有选定模型');
   }
 
   let body: AskRequestBody;
@@ -331,7 +339,9 @@ export async function askPanel(deps: AskDeps, input: AskRequestInput = {}): Prom
     view.write = { ok: true, version: write.version, replayed: write.replayed };
   } else {
     // 回答已经拿到了，写盘失败不该把它一起吞掉：两件事分开报
-    view.write = { ok: false, error: write.error, message: write.message, version: write.version };
+    // 写盘失败那半段也走同一份信封（`{ ok:false, error:{ code, message } }`）：面板按码分支、
+    // 取那句话给人看，与顶层失败同一个解析路
+    view.write = { ok: false, error: write.error, version: write.version };
   }
   return view;
 }
@@ -390,11 +400,11 @@ export function registerAskRoute(ctx: AskRouteContext): void {
       fetch: async (request: Request): Promise<Response> => {
         const body = await request.json().catch(() => null);
         if (!body || typeof body !== 'object') {
-          return Response.json({ available: true, ok: false, error: { code: 'body-invalid', message: '请求体要是 JSON 对象：{ subject, node, selection, question, operationId }' } }, { status: 400 });
+          return routeError(400, 'body-invalid', '请求体要是 JSON 对象：{ subject, node, selection, question, operationId }', { available: true });
         }
         const workspace = resolveWorkspace();
         if (!workspace) {
-          return Response.json({ available: true, ok: false, error: { code: 'workspace-missing', message: '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。' } }, { status: 500 });
+          return routeError(500, 'workspace-missing', '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。', { available: true });
         }
         const llm = connectionCtx.get?.('llm');
         // 宿主默认模型就是总控用的那个（dsh-agent-default-model）；拿不到就退回 provider 自己
@@ -424,7 +434,7 @@ export function registerAskRoute(ctx: AskRouteContext): void {
           return Response.json(view, { status });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          return Response.json({ available: true, ok: false, error: { code: 'ask-failed', message } }, { status: 500 });
+          return routeError(500, 'ask-failed', message, { available: true });
         }
       },
     }), 'studymate: 问答面板路由');

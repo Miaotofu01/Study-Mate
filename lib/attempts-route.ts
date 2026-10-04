@@ -24,6 +24,8 @@
        四条路由因此有两种姿势——同一个插件里「挂一条路由」不该有两套写法。
    ───────────────────────────────────────────────────────────────────────── */
 
+import { routeError } from './route-envelope.ts';
+
 /** 路由路径：前端 `lib/client.js` 的 `ATTEMPTS_ENDPOINT` 必须与它逐字一致。 */
 export const ATTEMPTS_PATH = '/api/studymate/attempts';
 
@@ -86,28 +88,27 @@ export function registerAttemptRoutes(ctx: RouteContext | null | undefined): voi
  *     · `operationId`：幂等键——重放只回放上次的回执，不写第二遍（双击、超时重试）；
  *     · `expectedVersion`：前端读 payload 时看到的作答版本号，对不上就 409 拒绝并重读。
  *
- * 返回就是 `writeAttempts` 的回执，HTTP 状态码取回执里的 `status`（成功恒 200）：
+ * 返回就是 `writeAttempts` 的回执，HTTP 状态码取回执里的 `status`（成功恒 200）；
+ * 失败那一侧的信封是 `lib/route-envelope.ts` 那一份（`{ ok: false, error: { code, message } }`，
+ * 契约的人读版在 `docs/规范/工程约束.md` §三）：
  *   200 `{ ok: true, attempts, version }`
- *   409 `{ ok: false, error: 'version-conflict' | 'operation-id-conflict', message, attempts?, version }`
- *   400 `{ ok: false, error: 'operation-id-invalid' | 'subject-invalid' | 'node-invalid' |
- *             'lesson-missing' | 'questions-invalid' | 'expected-version-required', message }`
+ *   409 `{ ok: false, error: { code: 'version-conflict' | 'operation-id-conflict', message }, attempts?, version }`
+ *   400 `{ ok: false, error: { code: 'operation-id-invalid' | 'subject-invalid' | 'node-invalid' |
+ *             'lesson-missing' | 'questions-invalid' | 'expected-version-required', message } }`
  */
 export async function handleAttempts(request: Request): Promise<Response> {
   try {
     if (request.method !== 'POST') {
-      return Response.json({ error: 'method-not-allowed', message: '作答写入只收 POST' }, { status: 405 });
+      return routeError(405, 'method-not-allowed', '作答写入只收 POST');
     }
     const { resolveWorkspace } = await import('./workspace.ts');
     const workspace = resolveWorkspace();
     if (!workspace) {
-      return Response.json({ error: 'no-workspace', message: NO_WORKSPACE }, { status: 500 });
+      return routeError(500, 'no-workspace', NO_WORKSPACE);
     }
     const body = await request.json().catch(() => null) as Record<string, unknown> | null;
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return Response.json({
-        error: 'body-invalid',
-        message: '请求体要是 JSON 对象：{ subject, node, questions, operationId, expectedVersion }',
-      }, { status: 400 });
+      return routeError(400, 'body-invalid', '请求体要是 JSON 对象：{ subject, node, questions, operationId, expectedVersion }');
     }
     const { writeAttempts } = await import('./attempts.ts');
     const result = writeAttempts({
@@ -121,6 +122,6 @@ export async function handleAttempts(request: Request): Promise<Response> {
     return Response.json(result, { status: result.ok ? 200 : result.status });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return Response.json({ error: 'internal', message }, { status: 500 });
+    return routeError(500, 'internal', message);
   }
 }

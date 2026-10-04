@@ -21,6 +21,8 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 import { createHash } from 'node:crypto';
+import { errorBody } from './route-envelope.ts';
+import type { RouteErrorEnvelope } from './route-envelope.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -43,11 +45,10 @@ export interface MisconceptionInput {
   at?: unknown;
 }
 
-export interface MisconceptionRefusal {
-  ok: false;
+/** 拒绝写入。形状就是阅读端路由的唯一错误信封（`lib/route-envelope.ts`）：
+ *  `error` 是 `{ code, message }`，不是一句字符串——面板要按码分支，也要取那句话给人看。 */
+export interface MisconceptionRefusal extends RouteErrorEnvelope {
   status: number;
-  error: string;
-  message: string;
   /** 冲突时顺手带回去的当前版本号（客户端不必再读一次） */
   version?: string;
 }
@@ -180,7 +181,7 @@ export function serializeMisconception(entry: Misconception): string {
 /* ── 写入 ──────────────────────────────────────────────────────────────── */
 
 function refusal(status: number, error: string, message: string): MisconceptionRefusal {
-  return { ok: false, status, error, message };
+  return { status, ...errorBody(error, message) };
 }
 
 /** 本地日期 `YYYY-MM-DD`（与 learning-records 的写法一致；不走 toISOString，那按 UTC 算）。 */
@@ -192,7 +193,7 @@ export function localDay(now: Date = new Date()): string {
 /**
  * 追加一条误解记录。
  *
- * 返回 `{ok:true, entry, version, replayed}` 或 `{ok:false, status, error, message, version?}`。
+ * 返回 `{ok:true, entry, version, replayed}` 或 `{ok:false, status, error:{code,message}, version?}`。
  * 400 的口子：科目不合法/不存在、topic 或 evidence 空、缺 operationId、expectedVersion 对不上。
  */
 export function writeMisconception({

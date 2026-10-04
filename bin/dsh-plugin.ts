@@ -102,6 +102,12 @@ export async function apply(ctx: PluginContext): Promise<void> {
     console.warn(`StudyMate：原生工具模块加载不了，总控只能退回旧路径。${error instanceof Error ? error.message : String(error)}`);
   }
 
+  /* 错误信封的唯一构造点（`lib/route-envelope.ts`）。**动态取**：这个文件会被
+     `test_bundle.mjs` 单独拷进一个没有 `lib/` 的目录里跑（那里模拟的是安装器边界失败），
+     顶层静态 import 会让那条用例在解析期就崩——与下面几条路由的 lib/ 依赖同一姿势。 */
+  const envelope = async (status: number, code: string, message: string): Promise<Response> =>
+    (await import('../lib/route-envelope.ts')).routeError(status, code, message);
+
   // ── 阅读端的数据通路 ───────────────────────────────────────────────────
   // 每次请求现读工作区：学习文件是纯文本、体量小（目标态 §12「按需扫描足够」），
   // 不落盘索引、不加缓存，也就没有「文件变了页面还是旧的」这类要同步的状态。
@@ -122,12 +128,12 @@ export async function apply(ctx: PluginContext): Promise<void> {
           ]);
           const workspace = resolveWorkspace();
           if (!workspace) {
-            return Response.json({ error: '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。' }, { status: 500 });
+            return envelope(500, 'no-workspace', '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。');
           }
           return Response.json(readLibrary({ workspace }));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          return Response.json({ error: message }, { status: 500 });
+          return envelope(500, 'internal', message);
         }
       },
     }), 'studymate: 阅读端数据路由');
@@ -172,7 +178,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
           const { resolveWorkspace } = await import('../lib/workspace.ts');
           const workspace = resolveWorkspace();
           if (!workspace) {
-            return Response.json({ error: '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。' }, { status: 500 });
+            return envelope(500, 'no-workspace', '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。');
           }
           const { readReference, writeReference } = await import('../lib/reference.ts');
 
@@ -184,7 +190,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
               relPath: url.searchParams.get('path') || '',
             });
             if (!found) {
-              return Response.json({ error: 'not-found', message: '读不到这份资料：不存在、越界，或者它不是文本（二进制只能在界面上按文件看）' }, { status: 404 });
+              return envelope(404, 'not-found', '读不到这份资料：不存在、越界，或者它不是文本（二进制只能在界面上按文件看）');
             }
             return Response.json(found);
           }
@@ -193,7 +199,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
           // 这里只负责把请求体解出来 + 把结果映射成 HTTP 状态
           const body = await request.json().catch(() => null);
           if (!body || typeof body !== 'object') {
-            return Response.json({ error: 'body-invalid', message: '请求体要是 JSON 对象：{ subject, title, markdown, operationId, expectedVersion }' }, { status: 400 });
+            return envelope(400, 'body-invalid', '请求体要是 JSON 对象：{ subject, title, markdown, operationId, expectedVersion }');
           }
           const result = writeReference({
             workspace,
@@ -206,7 +212,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
           return Response.json(result, { status: result.ok ? 200 : result.status });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          return Response.json({ error: message }, { status: 500 });
+          return envelope(500, 'internal', message);
         }
       },
     }), 'studymate: 参考资料路由');

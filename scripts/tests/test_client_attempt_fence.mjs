@@ -45,7 +45,7 @@ function makeSend() {
     },
     /** 与真实 sendAttempt 同形：网络断了也不抛，只给 status 0 + 一句话。 */
     fail(index, message) {
-      waiting[index]({ status: 0, body: { error: 'network', message } });
+      waiting[index]({ status: 0, body: { ok: false, error: { code: 'network', message } } });
     },
   };
 }
@@ -225,8 +225,8 @@ test('版本冲突：Host 拒了这次写入，回执里的当前内容就是重
   const job = I.attemptJob({ subject: 'demo', node: NODE, stateKey: KEY0, patch: { chosen: 3, correct: false }, seq: 7, expectedVersion: 'v0' });
   writer.push(job);
   send.reply(0, 409, {
-    ok: false, status: 409, error: 'version-conflict',
-    message: '作答数据已经变了：版本号对不上，这次不写（请按当前内容重来）',
+    ok: false, status: 409,
+    error: { code: 'version-conflict', message: '作答数据已经变了：版本号对不上，这次不写（请按当前内容重来）' },
     version: 'v9', attempts: { 节点: NODE, 课件: '0001-' + NODE + '.md', 最后写入: '2026-09-24T13:05:00.000Z', 题: { '每层各管一段#0': { 上次结果: last(0, true, { 错因: '别处刚写的' }) } } },
   });
   await tick();
@@ -257,7 +257,7 @@ test('第二次还撞：不再自动重来，如实说「这次没写进去」�
   writer.push(I.attemptJob({ subject: 'demo', node: NODE, stateKey: KEY0, patch: { chosen: 1, correct: false }, seq: 1, expectedVersion: 'v0' }));
   writer.push(I.attemptJob({ subject: 'demo', node: NODE, stateKey: KEY1, patch: { chosen: 2, correct: false }, seq: 2, expectedVersion: 'v0' }));
 
-  const conflict = { ok: false, status: 409, error: 'version-conflict', message: '作答数据已经变了：版本号对不上，这次不写（请按当前内容重来）', version: 'v9' };
+  const conflict = { ok: false, status: 409, error: { code: 'version-conflict', message: '作答数据已经变了：版本号对不上，这次不写（请按当前内容重来）' }, version: 'v9' };
   send.reply(0, 409, conflict);
   await tick();
   send.reply(1, 409, conflict);

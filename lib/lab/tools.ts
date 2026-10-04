@@ -250,7 +250,7 @@ export async function runLabJob(job: TaskJob, input: unknown): Promise<TaskOutco
   entry.written = written.ok;
   entry.writeNote = written.ok
     ? ''
-    : `没能写进作答数据（${written.error}）：${written.message}`;
+    : `没能写进作答数据（${written.error.code}）：${written.error.message}`;
   ledger.put(entry);
 
   job.progress(`跑完了：退出码 ${facts.退出码 === null ? '（无，被信号杀掉）' : facts.退出码}｜${facts.毫秒} 毫秒`

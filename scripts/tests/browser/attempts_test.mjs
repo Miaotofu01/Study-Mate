@@ -315,8 +315,8 @@ try {
     await ctx.sleep(900);
     const seen = await ctx.evaluate(PROBE);
     const fresh = host.posts.slice(postsBefore);
-    check('第一笔被 409 拒（拒绝写入，不静默）', fresh[0] && fresh[0].status === 409 && fresh[0].body.error === 'version-conflict',
-      JSON.stringify(fresh.map((p) => [p.status, p.body.error])));
+    check('第一笔被 409 拒（拒绝写入，不静默）', fresh[0] && fresh[0].status === 409 && fresh[0].body.error.code === 'version-conflict',
+      JSON.stringify(fresh.map((p) => [p.status, p.body.error && p.body.error.code])));
     check('客户端拿回执里的版本号重来了一次（重读 + 重试同一个 operationId）',
       fresh[1] && fresh[1].status === 200
       && fresh[1].body.attempts['题'][QUESTION]['作答历史'].length === 2,

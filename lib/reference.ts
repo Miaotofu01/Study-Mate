@@ -20,6 +20,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { isWithin, isWithinReal, realPathOf } from './paths.ts';
+import { errorBody } from './route-envelope.ts';
+import type { RouteErrorEnvelope } from './route-envelope.ts';
 
 // 复用仓库里那份对齐 PyYAML 的隐式类型解析器：判断一个标题裸着写会不会被读成非字符串
 import { resolvePlainScalar } from './yaml.ts';
@@ -63,12 +65,10 @@ export interface ReferenceEntry {
   added_at: string;
 }
 
-/** 拒绝写入：HTTP 语义由 bin/dsh-plugin.ts 映射成状态码。reference/version 是冲突时顺手带回去的当前清单。 */
-export interface ReferenceRefusal {
-  ok: false;
+/** 拒绝写入：HTTP 语义由 bin/dsh-plugin.ts 映射成状态码。reference/version 是冲突时顺手带回去的当前清单。
+ *  形状就是阅读端路由的唯一错误信封（`lib/route-envelope.ts`）：`error` 是 `{ code, message }`。 */
+export interface ReferenceRefusal extends RouteErrorEnvelope {
   status: number;
-  error: string;
-  message: string;
   reference?: ReferenceEntry[];
   version?: string;
 }
@@ -388,7 +388,7 @@ export function readReference({ workspace, subject, relPath }: { workspace?: unk
 /* ── 写入 ──────────────────────────────────────────────────────────────── */
 
 function refusal(status: number, error: string, message: string): ReferenceRefusal {
-  return { ok: false, status, error, message };
+  return { status, ...errorBody(error, message) };
 }
 
 /** now 可注入（测试用）：Date / 毫秒数 / 可解析的字符串都行，读不出来的退回当前时间。 */

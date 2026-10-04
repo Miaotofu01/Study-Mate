@@ -203,7 +203,7 @@ test('同一个 operationId 换内容：409 拒绝，并带回当前清单与版
   });
   assert.equal(conflict.ok, false);
   assert.equal(conflict.status, 409);
-  assert.equal(conflict.error, 'operation-id-conflict');
+  assert.equal(conflict.error.code, 'operation-id-conflict');
   // 冲突时一并给回当前清单与版本号，界面不必再跑一趟
   assert.deepEqual(conflict.reference, first.reference);
   assert.equal(conflict.version, first.version);
@@ -221,7 +221,7 @@ test('没有 operationId、或者它长得离谱：400 拒绝，且不占用一�
     const result = writeReference({ ...base, operationId });
     assert.equal(result.ok, false);
     assert.equal(result.status, 400);
-    assert.equal(result.error, 'operation-id-invalid');
+    assert.equal(result.error.code, 'operation-id-invalid');
   }
   assert.equal(countFiles(referenceDir), 0, '坏请求不写盘');
 
@@ -249,7 +249,7 @@ test('expectedVersion 对不上就拒绝，并重读当前清单带回去', () =
   });
   assert.equal(乙.ok, false);
   assert.equal(乙.status, 409);
-  assert.equal(乙.error, 'version-conflict');
+  assert.equal(乙.error.code, 'version-conflict');
   // 拒绝时不引入文件锁，而是把当前清单与版本号一起带回去（对齐 ADR-0010 的「拒绝并重读」）
   assert.deepEqual(乙.reference, 甲.reference);
   assert.equal(乙.version, 甲.version);
@@ -275,7 +275,7 @@ test('没带 expectedVersion：400 拒绝，宁可不给写也不让过期提交
     const result = writeReference({ ...base, expectedVersion });
     assert.equal(result.ok, false);
     assert.equal(result.status, 400);
-    assert.equal(result.error, 'expected-version-required');
+    assert.equal(result.error.code, 'expected-version-required');
   }
   assert.equal(countFiles(referenceDir), 0);
 });
@@ -293,13 +293,13 @@ test('科目名不合法或科目不存在：400 subject-invalid', () => {
     const result = writeReference({ ...base, subject });
     assert.equal(result.ok, false);
     assert.equal(result.status, 400);
-    assert.equal(result.error, 'subject-invalid');
+    assert.equal(result.error.code, 'subject-invalid');
   }
   const missing = writeReference({ ...base, subject: '查无此科目' });
   assert.equal(missing.ok, false);
   assert.equal(missing.status, 400);
-  assert.equal(missing.error, 'subject-invalid');
-  assert.match(missing.message, /科目不存在/);
+  assert.equal(missing.error.code, 'subject-invalid');
+  assert.match(missing.error.message, /科目不存在/);
 });
 
 test('标题与正文的判词：空标题、超长标题、空正文各自 400', () => {
@@ -320,7 +320,7 @@ test('标题与正文的判词：空标题、超长标题、空正文各自 400'
     const result = writeReference({ ...base, ...fields, operationId: op('body') });
     assert.equal(result.ok, false, `${JSON.stringify(fields)} 应当被拒绝`);
     assert.equal(result.status, 400);
-    assert.equal(result.error, error);
+    assert.equal(result.error.code, error);
   }
   // 120 字正好是上限之内
   const atLimit = writeReference({ ...base, title: '标'.repeat(120), markdown: '正文', operationId: op('limit') });
@@ -333,7 +333,7 @@ test('坏请求先于科目校验：没 operationId 时连科目都不用看', (
     workspace, subject: '../越界', title: '讲义', markdown: '正文\n',
     expectedVersion: 'whatever', operationId: '',
   });
-  assert.equal(result.error, 'operation-id-invalid', '请求体先过一遍，坏请求不该占用一个 operationId');
+  assert.equal(result.error.code, 'operation-id-invalid', '请求体先过一遍，坏请求不该占用一个 operationId');
 });
 
 /* ── 同名换号 ─────────────────────────────────────────────────────────── */

@@ -290,7 +290,7 @@ test('reference/ 自己指向科目外面的符号链接：写入被拒，外面
   });
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
-  assert.equal(result.error, 'path-invalid');
+  assert.equal(result.error.code, 'path-invalid');
   assert.deepEqual(fs.readdirSync(outside).sort(), before, '科目外面的目录一个文件都不许多');
 
   // 同一处口子的另外两面：清单不列外面那些，读也读不到

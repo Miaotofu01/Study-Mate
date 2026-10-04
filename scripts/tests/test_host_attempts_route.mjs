@@ -244,8 +244,8 @@ test('另一个写入者改过之后：409 拒绝、不写盘、带回当前内�
   assert.equal(stale.status, 409);
   const refused = await stale.json();
   assert.equal(refused.ok, false);
-  assert.equal(refused.error, 'version-conflict');
-  assert.match(refused.message, /版本号对不上/, '拒绝的原因要是一句人话，前端原样带给学生');
+  assert.equal(refused.error.code, 'version-conflict');
+  assert.match(refused.error.message, /版本号对不上/, '拒绝的原因要是一句人话，前端原样带给学生');
   assert.equal(refused.version, 甲.version, '冲突时顺手带回当前版本号 = 已经重读过了');
   assert.deepEqual(refused.attempts, 甲.attempts, '带回来的是甲写的那份：乙的数据没丢也没覆盖');
   assert.deepEqual(fs.readFileSync(file), bytes, '被拒绝的那次不写盘');
@@ -320,7 +320,7 @@ test('坏请求：非 JSON、缺字段、越界科目/节点、没有课件 —�
 
   const notJson = await post(route, null, { body: '这不是 JSON' });
   assert.equal(notJson.status, 400);
-  assert.equal((await notJson.json()).error, 'body-invalid');
+  assert.equal((await notJson.json()).error.code, 'body-invalid');
 
   const cases = [
     ['operation-id-invalid', { operationId: undefined }],
@@ -334,16 +334,16 @@ test('坏请求：非 JSON、缺字段、越界科目/节点、没有课件 —�
     const response = await post(route, submission(workspace, Object.assign({ operationId: op('bad') }, overrides)));
     assert.equal(response.status, 400, error);
     const body = await response.json();
-    assert.equal(body.error, error);
-    assert.equal(typeof body.message, 'string');
-    assert.notEqual(body.message, '', '拒绝必须带一句能给学生看的话');
+    assert.equal(body.error.code, error);
+    assert.equal(typeof body.error.message, 'string');
+    assert.notEqual(body.error.message, '', '拒绝必须带一句能给学生看的话');
   }
   assert.equal(countFiles(attemptsDir), 0, '坏请求一律不写盘');
 
   // 只收 POST：别的动词给 405（宿主按 methods 过滤，这里是第二道）
   const wrongMethod = await route.fetch(new Request('http://127.0.0.1' + ATTEMPTS_PATH, { method: 'GET' }));
   assert.equal(wrongMethod.status, 405);
-  assert.equal((await wrongMethod.json()).error, 'method-not-allowed');
+  assert.equal((await wrongMethod.json()).error.code, 'method-not-allowed');
 });
 
 test('没配工作区：500 加一句能自救的话，不抛', async () => {
@@ -353,8 +353,8 @@ test('没配工作区：500 加一句能自救的话，不抛', async () => {
   const response = await post(route, { subject: SUBJECT, node: NODE });
   assert.equal(response.status, 500);
   const body = await response.json();
-  assert.equal(body.error, 'no-workspace');
-  assert.match(body.message, /studymate-config\.yaml/);
+  assert.equal(body.error.code, 'no-workspace');
+  assert.match(body.error.message, /studymate-config\.yaml/);
 });
 
 /* ── 4. 题库逐字不变 ──────────────────────────────────────────────────── */
