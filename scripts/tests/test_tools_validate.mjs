@@ -3,9 +3,9 @@
    验收面是「逐条问题（文件 + 行号 + 是否阻断）+ 一句明确结论」，不是 exit code。
    所以每条造坏都断言三件事：结论是阻断、**具体那一条**在列表里、行号指向真位置。
 
-   四个工具替掉的四份现行口径：`check_curriculum.py`（外加 progress/subject 两份数据文件）、
-   `check_lesson.py` 的**内容部分**（DOM 检查随静态渲染退役）、`check_pool.py`（行为移植）、
-   `check_handoff.py`。夹具在 `fixtures/tools.mjs`，工作区现造现弃。 */
+   四个工具替掉的四份口径（迁移前都是 Python 校验器，随 #83 退役）：大纲/进度/科目三份数据文件、
+   课件**内容层**（DOM 检查随静态渲染退役）、图片库（行为移植）、交接门禁。
+   夹具在 `fixtures/tools.mjs`，工作区现造现弃。 */
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -206,7 +206,7 @@ test('科目目录一次校验目录下每一课；文件不存在报一条阻�
   assert.match(missing.reports[0].problems[0].message, /不存在/);
 });
 
-/* ── 三、studymate_validate_pool：图片库索引（check_pool.py 的行为移植） ── */
+/* ── 三、studymate_validate_pool：图片库索引（迁移前的 Python 校验器的行为移植） ── */
 
 function writePoolIndex(subject, text, files = {}) {
   const dir = path.join(subject.dir, 'assets', 'img', 'pool');
@@ -312,7 +312,7 @@ function manifestOf(overrides = {}) {
     node_id: null,
     status: 'succeeded',
     outputs: [{ path: 'curriculum.yaml', kind: 'file' }],
-    checks: [{ name: 'check_curriculum.py', status: 'passed' }],
+    checks: [{ name: 'studymate_validate_curriculum', status: 'passed' }],
     gaps: [],
     ...overrides,
   }, null, 2);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* ─────────────────────────────────────────────────────────────────────────
-   StudyMate · Codex 侧的交互断点（`interaction_state.py` 的 Node 移植）
+   StudyMate · Codex 侧的交互断点（原 Python 版的 Node 移植）
 
    为什么移植而不是删掉：Codex / ChatGPT Work 没有阅读端也没有原生工具，总控靠这份
    状态文件接着上次的盘问往下走（`codex-interaction.md` 的「持久化与恢复」）。

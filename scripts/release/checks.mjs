@@ -65,7 +65,7 @@ const groups = {
   core: {
     tests: [
       'scripts/release/release.test.mjs',
-      // #83 拆除：`install_preset.py` 的 TS 替代（形状逐字段一致）与 Codex 交互断点的 Node 移植。
+      // #83 拆除：预设注册的 TS 替代（形状逐字段一致）与 Codex 交互断点的 Node 移植。
       // 两条都是「原 Python 套件的验收面」，不是新功能——见脚本自己的文件头。
       'scripts/tests/test_preset_install.mjs',
       'scripts/tests/test_interaction_state.mjs',
