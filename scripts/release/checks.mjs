@@ -103,6 +103,10 @@ const groups = {
       'scripts/tests/test_tools_context.mjs',
       'scripts/tests/test_tools_validate.mjs',
       'scripts/tests/test_tools_rewrite.mjs',
+      // 任务域 lib/tasks/**（#73）：六态状态机、owner 句柄与越权、durable 落盘的**跨进程**接上、
+      // 五个 studymate_task_* 工具、阅读端的 GET /api/studymate/tasks。
+      // 跨进程那一半的「进程 A」是夹具 scripts/tests/fixtures/tasks_producer.mjs。
+      'scripts/tests/test_tasks_model.mjs',
     ],
   },
   '--static': {
