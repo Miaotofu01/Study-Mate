@@ -80,6 +80,9 @@ const groups = {
       // 阅读端五条 /api/studymate/* 路由的**错误信封**：形状（`{ok:false, error:{code,message}}`）、
       // 机读码词表（源码里用了表外的码就红）、以及两端一致（lib/client.js 是手写 JS，不进 tsc）。
       'scripts/tests/test_host_route_envelope.mjs',
+      // 性能预算（目标态规格 §10.3）：**相对规模的比例**，不写绝对秒数。数 readLibrary()
+      // 真的碰了几次文件系统，断言 4 倍规模 ≈ 4 倍工作量（线性 ≈ 4、平方 ≈ 16）。
+      'scripts/tests/test_host_perf_budget.mjs',
       'scripts/tests/test_host_yaml_workspace.mjs',
       // #71 的验收面：作答数据的幂等/版本栅栏，以及「拿一份 v0.2 真实工作区跑一遍」
       'scripts/tests/test_host_attempts_fence.mjs',
