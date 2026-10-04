@@ -1,15 +1,24 @@
 # StudyMate Web E2E 测试流程
 
-> 版本：v1.2（2026-10-02）
+> 版本：v1.9（2026-10-04，第二轮 UI 杂项轮）
 > 性质：测试流程文档——描述 E2E 用例如何映射上游插件的用户使用旅程（docs/使用/使用说明.md、docs/设计/设计方案.md），以及每条用例的步骤、断言与数据准备；不含测试代码。
 > 运行方式：`cd frontend && npm run test:e2e`（Playwright 自动拉起后端 8290 [fixture 模式] + 前端 dev 3810）。
 > 维护约定：新增/修改用户可见功能时，对照第 3 节的映射表补充或调整用例；本文与 `tests/e2e/` 同步演进。
+>
+> v1.9 修订（第二轮 UI 杂项轮，2026-10-04）：**新对话态新增「科目 + 工作区」关联行**（只在新对话态出现，见 §4.23 + `new-session-association.spec.ts`）；右栏「会话关联」整段移除、**小结与沉淀记忆入口悬空**（`memory-flow` 2 条 / `session-summary` 1 条改 `test.skip(true, …)` 挂起，见 §4.8 / §4.19）；`helpers.associateSubject` 改为直连关联行（不再展开右栏）、`openNodeDetail` 改为先切「大纲」段再点节点行（`theme-visual-inspection` 同步）；`workspace-onboarding` 改写为"关联行反映当前工作区"；`courses.spec` 补「科目总览状态可就地改」与「侧边栏科目选中态」两条、原第二条改为分段切换 + 画布不销毁（用标记验证）。E2E **53 条通过 + 3 条 skip**、后端 pytest **75 条 + 1 skip**（新增 `test_session_workspace.py` 11 条）。
+>
+> v1.8 修订（K 系列工具化轮，2026-10-04）：新增 `tool-cards.spec.ts`——fixture 模式下 chat 走 canned 工具脚本（`FIXTURE_TOOL_SCRIPTS["tools"]`：list_workspace → read_course_file → 最终答复），请求体的 `fixture_scenario` 由路由拦截改写，断言两张工具卡（`tool-card` / `tool-name` / `tool-result`）与工具轮后的最终答复。E2E 53 条、后端 pytest 64 条全绿（新增 `test_tooling.py` 22 条覆盖三格式 wire 映射 / 流式聚合 / agent loop 预算与降级 / 沙箱 / 审计 / K2 硬停兜底）。**工具调用后定为默认对所有模型开启**：模型编辑弹窗的「工具调用」开关已移除（改只读提示），`settings-models.spec.ts` 改用仍在的「JSON Schema 输出」验证能力开关可切换；探索目标 g13 同步。
+>
+> v1.7 修订（会话绑定与布局对调轮，2026-10-04）：随"科目绑死"拍板——`helpers.associateSubjectNode` 改 `associateSubject`（右栏节点下拉已移除，7 个 spec 调用点更新）；`chat-course-context` 重写（绑定锁 + 新会话不继承 + 数据层 node 为 null）；`subject-switch` 去课程页第二列路径；`courses.spec` 第二条重写（图谱收进右栏 + 大纲主区选节点）；`misconceptions.spec` 追加"定位节点 + 带参预填"；`chat-shell` 断言改"节点下拉 count 0"。后端 pytest 补 `test_binding_focus.py` 4 条（42 条全绿）。
 >
 > v1.1 修订：新增第 2 节「能力边界与补强计划」——人工试用清单（`反馈清单.md`，6 条）抓到的问题全部落在 E2E 射程之外，本文按三类盲区归因并给出 P1–P5 补强顺序；第 5 节维护约定同步追加"逆向前置状态"与"入口载荷断言"两条规则。
 >
 > v1.2 修订：反馈清单 10 条全部落地，用例数 25 → **34**，两轮幂等。新增 `chat-shell.spec.ts`、`chat-draft.spec.ts`、`settings-models.spec.ts`、`sidebar-resize.spec.ts`，`misconception-entry.spec.ts` 补 adverse 变体；同时修掉两处**测试侧路径 bug**（见 §1 末条），并变更两处选择器口径（顶栏标题改 `data-testid="chat-title"`、"新对话"改走侧边栏入口；概念本顶部筛选下拉的标签由「科目」改「学科」，避免与弹层新增的「科目」撞名）。
 >
 > v1.3 修订：提供商/模型域升到 **schema v3**（输入模态复选框组 / 最大输出 Token / 上下文窗口 / 推理档位 chip 编辑器；API Key 改为回填输入框），右侧边栏抽成共享外壳并支持**拖拽 + 折叠动画**，**课程图谱页的节点详情改由右侧边栏承载**。用例数 34 → **37**，两轮幂等。
+>
+> v1.4 修订（实施轮 A/B/H/I + G）：用例数 37 → **43**，两轮幂等。新增 `settings-workspace.spec.ts`、`memory-flow.spec.ts`、`attachments-area.spec.ts`；扩展 `assessment.spec.ts`（实验课联升 + 学习记录）、`session-summary.spec.ts`（同日多段追加）、`chat-basic.spec.ts`（「下一步」锚点）。工作区布局随实现改为 `<WS>/.learning/subjects`（`global-setup.ts` / `constants.ts` 同步）；E2E 后端改由 `STUDYMATE_CONFIG` + `STUDYMATE_DATA_DIR` **双注入**——前者让 `PUT /api/workspace` 可观测（`STUDYMATE_WORKSPACE` 优先级最高会架空它）、后者隔离 settings/sessions/exports；fixture 配置在 config 模块加载时写好（webServer 早于 globalSetup 启动，迟到会让后端回落到真实 `~/StudyMate` 并缓存整轮）。
+> v1.5 修订（裁定后实施轮，2026-10-03）：用例数 43 → **44**。新增 `workspace-onboarding.spec.ts`（新会话选工作区：仅工作区无科目时出现，切换即时生效且用例 finally 恢复）；`session-summary.spec.ts` 补「小结后的沉淀记忆入口」（用 fixture 新增的 `memory_updates` 预填确认弹窗并写入）；`assessment.spec.ts` 联升用例补「评估通过后的沉淀记忆入口」（走 suggest）。两份 Playwright 配置的 `reuseExistingServer` 统一为 `false`（不再静默复用陈旧端口）；`chat-shell.spec.ts` 的折叠断言改为宽度判据。
 
 ---
 
@@ -23,6 +32,8 @@
 数据隔离：globalSetup 每轮重建 `study-mate-web/data/e2e-ws`（种子科目 yaml + examples 的 lessons/assets）与 `study-mate-web/data/e2e-data`（settings/sessions/uploads/exports），真实开发数据零污染。fixture 工作区 settings 中 DeepSeek 带占位 key 保证输入可用。
 
 **路径口径（三处必须一致，2026-10-02 修）**：E2E 的运行时根目录是 `<study-mate-web>/data/`，由 `backend/app/config.py`（`WEB_ROOT`/`DATA_DIR`）、`frontend/playwright.config.ts`（`E2E_WORKSPACE`/`E2E_DATA_DIR`）、`frontend/tests/e2e/global-setup.ts`（落盘）与 `frontend/tests/e2e/constants.ts`（用例回读）四处共同约定。此前 `playwright.config.ts` 与 `constants.ts` 各自少算/多算一级，指向了仓库根的 `data/`，导致后端读到陈旧 fixture（无 key、无 lessons）而大面积失败；且因 `reuseExistingServer` 会复用手工启动的正确服务，这个错误长期不可见。**改动运行时目录时，这四处要一起改。**
+
+第三层「探索 agent」（`frontend/tests/explorer/`，LLM 驱动浏览器模拟用户）是**发现层**：按需触发、不设门禁，用法另见 [探索测试指南](StudyMate-Web_探索测试指南.md)；第 2 节 P1–P5 补强计划与其共享结论——探索发现的问题，毕业去向是脚本用例、组件测试或设计验收。
 
 ---
 
@@ -56,7 +67,7 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 - **P1 请求载荷断言**：用 `page.route` 在放行前读 `route.request().postDataJSON()`，断言关键入口的载荷必含用户刚输入的值——测试连接的 `api_key`、ModelSelector 切换的 `active`、"记入概念本"的 prefill 参数。成本最低，捕获整类"字段静默丢失"。**部分落地（2026-10-02）**：测试连接的 `provider_id` 回流与"留空回落已存 Key"已由 `settings-providers.spec.ts` 端到端断言；ModelSelector 切换与 prefill 的载荷断言仍待补。
 - **P2 已知缺口闭合**：① ModelSelector 下拉交互用例（打开 → 切换模型 → 断言顶栏标签与持久化）；② chat 无科目 → 记入概念本 → 保存 的 adverse-precondition 变体。**已落地（2026-10-02）**：② 见 `misconception-entry.spec.ts` 第二条用例；① 见 `settings-models.spec.ts`（对话侧思考档位切换），"切换后断言持久化"部分仍待补。
 - **P3 渲染矩阵**：playwright 配置加 `colorScheme` 矩阵跑 2~3 个关键页面；对 native `<select>` 暗色 option 颜色等已知雷区做定向 `toHaveCSS`。**不做**全页截图基线——那会把旅程级 E2E 变成视觉回归，与第 1 节分层冲突。**未落地**：本轮暗色下拉改用 CSS `option` 规则修（见 `globals.css`），未加渲染断言。
-- **P4 组件测试层**：分支逻辑（空 key、空模型列表、无科目 prefill）下沉 frontend 组件测试（当前为零），旅程级只保留聚合与落盘断言。**未落地**。
+- **P4 组件测试层**：分支逻辑（空 key、空模型列表、无科目 prefill）下沉 frontend 组件测试，旅程级只保留聚合与落盘断言。**已落地（2026-10-04）**：vitest + Testing Library（jsdom），`npm run test:component`，13 条用例见 `tests/component/`；选型理由（弃 Playwright CT）与"不进根门禁"口径见 Web_CHANGE 同日条目。
 - **P5 明确不覆盖清单**：logo、间距、对比度微调度等纯美学项归设计验收；写死边界，避免再次按旅程标准重复投入。**部分落地**：logo 与占位符间距本轮已修，但归口仍为人工走查，不加 E2E（`sidebar-resize.spec.ts` 只断言宽度数值与持久化，不断言视觉）。
 
 一条警示：`settings-providers.spec.ts` 中"无 key 时报缺少 API Key"用例断言的是合理分支，但**"已填 key"这一互补状态从未被观测**——若后端把填了 key 的请求也判成缺少，套件依然全绿。这正是 P1 存在的意义：每个"用户输入 → 请求"入口都要有载荷断言，而不是只断言错误分支。
@@ -69,35 +80,39 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 
 | 旅程阶段（插件侧） | Web 等价功能 | 用例文件 | 状态 |
 |---|---|---|---|
-| 安装与宿主适配 | 一键启动 + 首次种子工作区 | （由 webServer 承担）每条用例隐式冒烟 | 已覆盖 |
-| 选方向（learning-discovery） | —— 不做（Web 无此功能，PRD 边界） | —— | 不适用 |
-| 建科目（盘问五项 + 大纲门禁） | `/generate` 五项向导 → `check_curriculum.py` 当门 | `generate.spec.ts` | 已覆盖（2026-10-02） |
-| 开场恢复状态 | Chat 关联科目/节点 → 课程上下文注入 | `chat-course-context.spec.ts` | 已覆盖（2026-10-02） |
-| 产课（三件套） | —— Web 不产课，只消费已有产物 | （courses.spec 覆盖读取侧） | 不适用（写侧属插件） |
+| 安装与宿主适配 | 一键启动 + E2E fixture 工作区（global-setup 铺设） | （由 webServer 承担）每条用例隐式冒烟 | 已覆盖 |
+| 选方向（learning-discovery） | chat 欢迎区「不知道学什么」→ 建课会话（learning-discovery 全文注入，探索期不写盘） | `course-build.spec.ts` | 已覆盖（2026-10-03） |
+| 建科目（盘问五项 + 大纲门禁） | `/generate` 五项向导 → `check_curriculum.py` 当门；chat 内盘问（interview 会话收口标记 → 草稿 → 建课编排 → 落点确认） | `generate.spec.ts`、`course-build.spec.ts` | 已覆盖（2026-10-02 / 2026-10-03） |
+| 开场恢复状态 | Chat **新对话关联行**指定科目（发出首条消息后入口消失）→ 课程上下文注入（节点聚焦由后端自动推断）+ **开场状态切片**（MEMORY 分节 / 最近误解 / 学习记录 / 评估记录） | `chat-course-context.spec.ts`、`new-session-association.spec.ts`、pytest `test_binding_focus.py` | 已覆盖（2026-10-02；切片注入在 system 层由 TestClient 覆盖；绑定/推断 2026-10-04；关联行 + 会话级工作区 2026-10-04 第二轮） |
+| 产课（三件套） | 节点详情「产出此课」→ 讲解/出题角色派工 → render/check 收口（打回归属 + 质检工单） | `produce-chain.spec.ts`、`inspection-ticket.spec.ts` | 已覆盖（2026-10-03） |
 | 读课件 + 页内做题 | `/lesson` iframe + `quiz.js` 页内判分 | `lesson-quiz.spec.ts` | 已覆盖（2026-10-02） |
 | 开放题自评 → Web 增强为判分 lite | 判分面板（criteria + 强制证据） | `grading-panel.spec.ts` | 已覆盖（2026-10-02） |
 | 提问答疑记误解 | Chat 消息 hover"记入概念本"预填跳转（含无科目 adverse） | `misconception-entry.spec.ts` | 已覆盖（2026-10-02） |
-| 评估点（证据>口头） | 节点详情"申请评估" → 落盘 + 状态机更新 | `assessment.spec.ts` | 已覆盖（2026-10-02） |
+| 评估点（证据>口头） | 节点详情"申请评估" → 落盘 + **权威置位**（实验课通过连 `prerequisites` 一起置"已通过项目验证"并写学习记录） | `assessment.spec.ts` | 已覆盖（2026-10-02） |
 | 状态流转（保守推进） | 节点详情状态按钮 + 图谱着色 | `progress-transition.spec.ts` | 已覆盖（2026-10-02） |
-| 会话收尾摘要 | Chat"生成小结" → sessions 落盘 | `session-summary.spec.ts` | 已覆盖（2026-10-02） |
+| 会话收尾摘要 | ~~Chat"生成小结" → sessions 落盘（同日按段追加）~~ **已悬空**（2026-10-04 拍板：入口随右栏会话关联移除；后端端点与用例保留、`test.skip` 挂起） | `session-summary.spec.ts`（skip） | 悬空待接回 |
 | 误解双落点 | `/misconceptions` CRUD + 筛选 | `misconceptions.spec.ts` 扩展 | 已覆盖（2026-10-02） |
-| 多科目管理 | 侧边栏/图谱页科目切换 | `subject-switch.spec.ts` | 已覆盖（2026-10-02） |
-| （Web 特有）节点详情 | 课程图谱页右侧边栏（默认展开、可折叠 / 拖宽） | `courses.spec.ts` | 已覆盖（2026-10-02） |
+| 多科目管理 | 全局侧边栏科目切换（课程页第二列科目列表已删除） | `subject-switch.spec.ts` | 已覆盖（2026-10-02；2026-10-04 收敛为侧边栏单入口） |
+| （Web 特有）节点详情与大纲 | 课程图谱页**主区 = 科目头部（含科目状态/进度总览）+ 节点详情卡**；**右侧栏顶部「图谱（默认）/ 大纲」分段切换**（切换不销毁画布，右下角有重置视口）；概念本条目可定位节点（`?node=`） | `courses.spec.ts`、`misconceptions.spec.ts` | 已覆盖（2026-10-02；2026-10-04 布局对调 + 定位链路；同日第二轮二次对调 + 科目总览 + 分段切换） |
 | 静态产物互通 | "导出静态工作区"（gen_home 真跑） | `export.spec.ts` | 已覆盖（2026-10-02） |
-| 长期记忆 MEMORY.md 写侧 | —— 不做（PRD 边界，只读展示） | —— | 不适用 |
+| 长期记忆 MEMORY.md 写侧 | **只剩一个入口**：评估通过后的「沉淀记忆」（右栏手动 / 小结结果区建议两个入口 2026-10-04 随会话关联区移除而悬空）→ 建议条目逐条确认 → 增量写 `.learning/MEMORY.md` | `assessment.spec.ts`、pytest `test_memory*.py`；`memory-flow.spec.ts`（skip） | 部分覆盖（2026-10-02；触发入口 2026-10-03；2026-10-04 两入口悬空） |
 | 换机器迁移 | —— 属运维操作 | —— | 不适用 |
+| （Web 特有）工作区设置与会话级绑定 | 设置页查看/改选工作区（PUT 写 `studymate-config.yaml`）+ **新对话关联行的「工作区」下拉**（与科目并排，空选 = 默认工作区）+ 会话绑定写进会话元数据（`workspace`） | `settings-workspace.spec.ts`、`new-session-association.spec.ts`、`workspace-onboarding.spec.ts` | 已覆盖（2026-10-02 / 2026-10-03；2026-10-04 第二轮改为关联行 + 会话级绑定，原欢迎区引导块用例改写） |
+| （Web 特有）附件区 | 聊天页右栏列出术语表 / 本地资料 / 学习记录 / 会话摘要，原文新标签页可读 | `attachments-area.spec.ts` | 已覆盖（2026-10-02） |
 | （Web 特有）模型提供商 | settings 二级界面 + 模型行四操作 + 模型编辑弹窗 | `settings-providers.spec.ts`、`settings-models.spec.ts` | 已覆盖（2026-10-02） |
 | （Web 特有）暗夜模式 | 主题切换持久化 | `theme.spec.ts` | 已覆盖 |
-| （Web 特有）对话壳层 | 顶栏瘦身 + 右侧边栏（关联 / 小结 / 会话信息）+ 折叠动画 + 拖拽调宽 | `chat-shell.spec.ts` | 已覆盖（2026-10-02） |
+| （Web 特有）主题视觉巡检 | 四组主题/调色板组合下逐屏截图（设置页深浅 × 科技蓝/经典墨绿、工作台空态、真实对话、课程图谱含节点详情），人眼复核；机判只到 `data-theme` / `data-palette` 与关键元素可见 | `theme-visual-inspection.spec.ts` | 已覆盖（2026-10-04；截图落 `test-results/screenshots/`，对应探索目标 `g17`） |
+| （Web 特有）对话壳层 | 顶栏（标题 + 内联重命名 + 右栏开关）+ 右侧边栏（**附件区 + 会话信息**；关联已移到新对话关联行）+ 折叠动画 + 拖拽调宽；新对话态输入区上方的「科目 + 工作区」关联行 | `chat-shell.spec.ts`、`new-session-association.spec.ts` | 已覆盖（2026-10-02；2026-10-04 第二轮改内容与关联行） |
 | （Web 特有）输入框草稿 | 按会话缓存（切会话保留、刷新归空、发送后清空） | `chat-draft.spec.ts` | 已覆盖（2026-10-02） |
-| （Web 特有）侧边栏宽度 | 拖拽调宽 + 上下限 + 刷新保留 | `sidebar-resize.spec.ts` | 已覆盖（2026-10-02） |
+| （Web 特有）侧边栏宽度与折叠 | 拖拽调宽 + 上下限 + 刷新保留；**折叠成 60px 图标轨**（状态持久化） | `sidebar-resize.spec.ts`、`sidebar-collapse.spec.ts` | 已覆盖（2026-10-02 / 2026-10-04） |
 | （Web 特有）基础对话 | 流式回复 / 停止 / 附件 / 用户气泡靠右 | `chat-basic.spec.ts`、`chat-attachment.spec.ts` | 已覆盖 |
+| （Web 特有）工具化调用 | 声明工具调用能力的模型走 agent 循环：会话流内渲染可展开工具卡（调用 + 结果，兼审计 UI），工具轮之后给最终答复；chat 只读工具、建课/产课工具循环 | `tool-cards.spec.ts`（工具卡呈现）；建课/产课工具循环由 pytest `test_tooling.py` 覆盖（fixture 模式走单次派工，不进旅程级） | 已覆盖（2026-10-04） |
 
 覆盖原则：**旅程中每个"用户做什么"在 Web 有等价功能的，必须有至少一条旅程级用例**（从入口点到最终可见结果连续走完，不拆成孤立的字段级测试）。
 
-> **关于"已覆盖"的射程**：本表状态列仅指旅程**动作级**覆盖——逆向前置状态（如无科目对话、已填 key）、渲染正确性、请求载荷均不在射程内，见第 2 节；那三类按 P1–P5 计划补强后，再回来更新本表状态。
+> **关于"已覆盖"的射程**：本表状态列仅指旅程**动作级**覆盖——逆向前置状态（如无科目对话、已填 key）、渲染正确性、请求载荷均不在射程内，见第 2 节；那三类按 P1–P5 计划补强后，再回来更新本表状态。（状态分支层已于 2026-10-04 经组件测试落地，见 §2.3 P4；载荷断言 P1 仍部分开放，渲染矩阵 P3 未落地。）
 
-> **待翻转行（2026-10-02 决策，未实施）**：上表"选方向（learning-discovery）""产课（三件套）""长期记忆 MEMORY.md 写侧"三行现在标"不适用"，Web 目标已改为复现乃至拓展插件全功能（见《开发与计划》§5.1 实施队列 F / C / I）——对应功能落地后，把这三行改为"已覆盖"并各补旅程级用例；Q5 阅读端形态（iframe + 壳层）不变，`lesson-quiz` / `grading-panel` 现有用例继续有效。
+> **待翻转行（2026-10-02 决策）已于 2026-10-03 全部翻转**："选方向""产课（三件套）"随生产侧落地改为"已覆盖"（`course-build.spec.ts` / `produce-chain.spec.ts` / `inspection-ticket.spec.ts`）；"长期记忆 MEMORY.md 写侧"于 2026-10-02 翻转。Q5 阅读端形态（iframe + 壳层）不变，`lesson-quiz` / `grading-panel` 现有用例继续有效。fixture 说明：编排链路用 `STUDYMATE_E2E_SCENARIO`（chat 请求 `fixture_scenario` 字段）选固定流场景，仅 fixture 模式生效。
 
 ---
 
@@ -137,12 +152,13 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 4. 直接保存 → 列表出现该条目 → 打开 progress.yaml 断言 `misconceptions` 数组同步（双落点后端真实写入）。
 5. **adverse 变体（对应无科目对话）**：不关联科目发消息 → 记入概念本 → 断言弹层内科目为空、保存按钮禁用、页面出现"请先选择科目后再保存"的可见提示（不静默失败）；在弹层内补选科目 → 节点下拉联动加载 → 保存可用 → 保存成功且 misconceptions.yaml 落盘。
 
-### 4.13 chat-shell.spec.ts —— 对话壳层（顶栏瘦身 + 右侧边栏）
-1. 顶栏只剩会话标题与折叠按钮：旧顶栏元素（"＋ 新对话"、模型选择器、科目/节点下拉）在主列中数量为 0。
-2. 右侧边栏装载关联区（科目 / 节点 / 生成小结）与会话信息区（消息数 / 创建时间 / 关联科目）。
-3. 折叠：点击后用**宽度判据**断言收起（内容根宽度归零），并断言 `aria-hidden="true"` 与 `inert` 存在、内容未卸载；再点 → 复原。不要用 `toBeHidden()`——它判的是"可见性"，对宽度过渡的面板不可靠（v1.3 踩过）。
-4. 右侧边栏拖拽调宽：拖手柄 → 宽度增大并写入各自的 localStorage 键；刷新后保留；拖过下限被钳制。
-5. 关联科目并产生消息后，会话信息区的科目与消息数随会话更新。
+### 4.13 chat-shell.spec.ts —— 对话壳层（顶栏 + 右侧边栏 + 新对话关联行）
+1. 顶栏只剩会话标题、内联重命名按钮与折叠按钮：旧顶栏元素（"＋ 新对话"、模型选择器、科目/节点下拉）在主列中数量为 0。
+2. **新对话态**：输入区上方出现 `new-session-association` 关联行（`关联科目` + `new-session-workspace`）——见 §4.23。
+3. 右侧边栏装载**附件区**与会话信息区（消息数 / 创建时间 / 关联科目）；`关联科目` 下拉与 `生成小结` 按钮在右栏**已不存在**（2026-10-04 移出/悬空）；新对话态右栏**默认折叠**，断言前先展开。
+4. 折叠：点击后用**宽度判据**断言收起（内容根宽度归零），并断言 `aria-hidden="true"` 与 `inert` 存在、内容未卸载；再点 → 复原。不要用 `toBeHidden()`——它判的是"可见性"，对宽度过渡的面板不可靠（v1.3 踩过）。
+5. 右侧边栏拖拽调宽：拖手柄 → 宽度增大并写入各自的 localStorage 键；刷新后保留（宽度全局持久化；**折叠态只对已有会话持久化**，新对话刷新后仍回默认折叠，断言前需再展开）；拖过下限被钳制。
+6. 关联科目并产生消息后，会话信息区的科目与消息数随会话更新；**已有会话不再出现关联行**（count 0）。
 
 ### 4.14 chat-draft.spec.ts —— 输入框草稿按会话缓存
 1. 在新会话输入草稿 → 切到历史会话 → 输入框为空；切回新会话 → 草稿仍在。
@@ -153,27 +169,29 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 ### 4.15 sidebar-resize.spec.ts —— 侧边栏拖拽调宽
 1. 默认宽度为初始值 → 向右拖 → 宽度增大且写入 localStorage。
 2. reload 后宽度保留。
-3. 大幅向右 / 向左拖 → 宽度被钳制在上下限内，reload 后保留。
-（`/chat` 页上有两个 `aside`，故用拖拽手柄的祖先元素锁定左侧栏，不用裸 `page.locator("aside")`。）
+3. 大幅向右 / 向左拖 → 宽度被钳制在上下限内，reload 后保留；右栏宽度断言前先展开（新对话默认折叠）。
+（`/chat` 页上有两个可拖拽面板：左栏是唯一的 `<aside>`，右栏用 `div[role=complementary]`，故用拖拽手柄的祖先元素锁定左侧栏。）
 
 ### 4.16 settings-models.spec.ts —— 模型行四操作与推理档位
 1. 自建自定义提供商（用例尾部删净）→ "＋ 添加模型"打开模型编辑弹窗。
 2. 基础区填模型 ID / 显示名 / **最大输出 Token** / 上下文窗口，**模态用复选框**勾"图片"（并断言不存在模态 combobox）→ 保存模型。
-3. 保存提供商 → 只读摘要行出现上下文窗口徽标 `1M`、模态徽标、`思考 · <档位>`；显示名回退规则生效。
+3. **实时生效**：提供商改动不需要点"保存"（该按钮已移除），只读摘要行立即出现上下文窗口徽标 `1M`、模态徽标、`思考 · <档位>`；显示名回退规则生效。
 4. 模型行四个操作可见：测试 / 编辑 / 删除 / 启用开关；编辑可重新打开弹窗并回填当前值。
-5. API Key：输入框**回填已存密钥**（`type=password`、值非空、无旧占位符）→ 点"显示密钥"变 `type=text` → 点"隐藏密钥"变回；清空输入框后测试仍能回落已存 Key。
-6. **高级折叠区**：展开后编辑**推理档位 chip 列表**（增 / 删 / 改名 / 排序）与默认档位，切三个能力声明开关。
-7. 对话侧：模型选择器下拉里可为当前模型切换档位，切换写回当前使用三元组。
+5. API Key：输入框**回填已存密钥**（`type=password`、值非空、无旧占位符）→ 点"显示密钥"变 `type=text` → 点"隐藏密钥"变回；清空输入框后模型行"测试"仍能回落已存 Key。
+6. **高级折叠区**：展开后编辑**推理档位 chip 列表**（增 / 删 / 改名 / 排序）与默认档位；**启用推理时默认预置 `disabled / enabled` 两档、默认档位取最高档**；能力声明剩两个开关（JSON Schema 输出 / 原生联网搜索），「工具调用（Agent 循环，默认开启）」为只读提示。
+7. 对话侧：**输入区工具条上的「切换推理档位」下拉**（`reasoning-variant-selector`）——模型弹层里已无档位 chip；打开下拉 → 当前项 `aria-pressed` → 选另一档 → 触发按钮文案更新 → `page.reload()` 后仍保持（验证落盘）。点击前先点空白处收起模型弹层（它的 fixed 遮罩会挡住下拉）。
 （下拉一律用 `getByRole("combobox")` 定位；`<select>` 嵌在 `<label>` 内时其可访问名会带上选项文本，`getByLabel` + `exact` 匹配不到。**模态与能力开关是 `role="checkbox"` 的按钮**，用 `getByRole("checkbox", { name: "图片" })` 之类定位。）
 
-### 4.17 courses.spec.ts 扩展 —— 节点详情右侧边栏
-1. `/courses?subject=computer-networks` 打开 → 详情栏**默认展开**，图区仍显示"点击节点查看详情"空态提示。
-2. 点节点 → 详情在右侧边栏里渲染（既有的 `div.w-80.border-l` 锚点与 `NodeDetail` 内部 testid 全部保留）。
-3. 折叠（图区按钮）→ 宽度归零、内容 `aria-hidden` 但不卸载；展开 → 回到默认宽度、空态提示仍在。
-（新增用例用 `data-testid="course-node-detail"` 与 title 定位，不用结构选择器。）
+### 4.17 courses.spec.ts 扩展 —— 课程页（右栏分段切换 + 科目总览）
+1. `/courses?subject=computer-networks` 打开 → 主区显示"点击节点查看详情"空态；右栏默认显示**图谱**（`course-outline` 为 hidden、`graph-node-*` 已挂载）。
+2. 画布存在（cytoscape 铺 3 层 canvas）；折叠右栏 → 宽度归零、`aria-hidden`、sr-only 节点按钮仍挂载；展开 → 点「大纲」段 → 大纲行可见、点行后节点详情在主区出现。
+3. 点回「图谱」段 → **画布是同一份**（在 canvas 上打的标记仍在、层数不变），sr-only 节点按钮仍能选中节点（`graph-node-<id>` + `dispatchEvent("click")`——画布节点不能用坐标点击）。
+4. **科目总览**：头部 `subject-status` 显示当前状态与"进度 n/n · 平均掌握度 x%"；改成"暂停"后用 API 核对 `subject.yaml` 的 status，随后还原。
+5. **侧边栏科目选中态**：`/courses?subject=…` 下左侧边栏对应科目行带 `aria-current="page"`，点子边栏另一科目后选中态随之迁移。
+（大纲行断言前先点 `rail-view-outline`；详情用 `data-testid="course-node-detail"`。）
 
 ### 4.6 assessment.spec.ts —— 评估点（对应"证据>口头"）
-1. `/courses` 选 net.layers → 详情展开"申请评估"面板 → 选最近会话 → 提交。
+1. `/courses?subject=…` 经 `openNodeDetail`（先切「大纲」段再点节点行，见 §4.13 备注）选 net.layers → 详情展开"申请评估"面板 → 选最近会话 → 提交。
 2. fixture canned 评估通过真实链路：front matter 解析 → schema 校验 → `assessments/` 落盘 → 状态机更新。
 3. 断言：结果区 verdict 徽标"通过"、掌握度与 next 建议、"进度已更新"提示出现；节点状态徽标从"学习中"变为"能独立应用"；图谱节点颜色更新（重建后样式正确）。
 4. 断言（数据层）：`assessments/` 目录出现新记录文件；该会话上传目录之外无脏文件。
@@ -184,11 +202,10 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 3. 掌握度滑杆拉到 100% + 笔记输入 → 保存 → "已保存"反馈；数据层核对 progress.yaml 的 status/mastery/notes。
 4. （状态机 409 由 API 层测试保证，UI 只验证合法项渲染。）
 
-### 4.8 session-summary.spec.ts —— 会话小结（对应"会话收尾"）
-1. `/chat` 关联科目 → 发一轮消息 → 顶栏"生成小结"按钮点亮 → 点击。
-2. fixture canned 小结过 schema → 落盘 `sessions/<日期>.md`。
-3. 断言：顶栏下成功条出现（record_file + next_step 摘要）；数据层核对文件存在且 front matter 含 subject/learned。
-4. 空会话（无消息）时按钮保持禁用。
+### 4.8 session-summary.spec.ts —— 会话小结（**已悬空**）
+1. 2026-10-04 拍板：右栏「生成小结」入口随「会话关联」整段移除，本用例改 `test.skip(true, …)` **挂起**（后端端点、`api.generateSessionSummary`、fixture 的 `memory_updates` 都保留）。
+2. 原流程（保留供接回后恢复）：关联科目 → 发一轮消息 → 按钮点亮 → 点击 → 落 `sessions/<日期>.md` → 同日第二次追加"本场摘要（HH:MM）"分段 → 小结结果区的记忆建议预填弹窗。
+3. 恢复办法：把入口接回输入区工具条或消息操作条，删掉 `test.skip` 那行即可。
 
 ### 4.9 misconceptions.spec.ts 扩展 —— 筛选与编辑（对应"误解双落点"）
 在现有新建/删除基础上追加：
@@ -212,16 +229,59 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 2. 预设"恢复默认"→ 字段重置。
 3. "测试连接"：填不可达地址 → 显示错误 detail（fixture 模式下该请求仍真实外呼，用保留地址如 10.255.255.1 断言失败路径，不依赖网络成功）。
 
+### 4.18 settings-workspace.spec.ts —— 工作区设置（对应"工作区"节）
+1. `/settings/workspace` 渲染当前路径（= e2e 工作区）、来源（= 配置文件发现）、科目数下界、输入框回填；fs 核对 e2e 配置文件的 `workspace` 键。
+2. 改选到 `e2e-data/workspace-probe`（目录尚不存在）→ 成功条、路径回显、科目数 `0 门`、配置文件已更新；`finally` 无条件恢复原路径并断言全部还原（同轮后续用例仍跑在 e2e-ws 上）。
+
+### 4.19 memory-flow.spec.ts —— 共享记忆写侧（**已悬空**）
+1. 2026-10-04 拍板：聊天侧「沉淀记忆」入口随「会话关联」区移除，本文件两条用例改 `test.skip(true, …)` **挂起**（后端 `suggest`/`confirm`、`MemoryDialog.tsx` 都保留）。
+2. 原流程（保留供接回后恢复）：无消息时入口禁用 → 发一轮消息后启用 → 模态列 fixture 2 条建议 → 取消勾选一条 → 写入 MEMORY.md 并逐条核对 → 幂等去重；adverse 变体（mock 空建议）断言空态与禁用。
+3. 仍被覆盖的部分：评估结果面板的「沉淀记忆」入口在 `assessment.spec.ts` 里断言（打开 `memory-dialog`）。
+
+### 4.20 attachments-area.spec.ts —— 附件区（对应"附件区入口"）
+1. 未关联科目时右栏无附件区；关联 computer-networks 后**先展开右栏**（新对话默认折叠）→ 出现「术语表」组（e2e 科目目录带 `GLOSSARY.md`）。
+2. 术语表链接 `target="_blank"` 且 href 指向 `/api/courses/<slug>/files/GLOSSARY.md`；`request` GET 该链接返回 200 且正文含科目名与分节标题（原文可读）。
+3. `reference/` 为空 → 该组不渲染；切到只有 yaml 的 linear-algebra → 空态文案；切回恢复。
+
+### 4.21 workspace-onboarding.spec.ts —— 新对话关联行的工作区（原"新会话选工作区"）
+1. `/chat` 关联行可见；`new-session-workspace` 默认值为空（= 用当前默认工作区），首项文案「默认工作区」，候选里含 fixture 工作区绝对路径；科目下拉含 `计算机网络`。
+2. `try` 内用 `request` PUT 把工作区切到 `e2e-data/empty-ws` → `page.reload()` → 关联行仍在、左侧边栏显示"暂无科目"（科目列表随工作区为空）。
+3. `finally` 无条件 PUT 恢复原工作区（避免污染同轮其他用例）。
+（原「欢迎区引导块」已随 2026-10-04 拍板移除，本文件随之改写；`WorkspaceOnboarding.tsx` 目前无引用。）
+
+### 4.22 tool-cards.spec.ts —— 工具化 chat 的工具卡（对应"工具化调用"）
+1. `page.route` 拦截 `/api/chat/stream`，把请求体补上 `fixture_scenario: "tools"`（fixture 模式下 chat 由此走 canned 工具脚本，不在生产 UI 上开入口）。
+2. 关联 computer-networks → 发送一条消息 → 等流式结束。
+3. 断言两张工具卡（`tool-card`：`list_workspace` + `read_course_file`）；展开首卡的 `summary` → `tool-result` 可见。
+4. 断言工具轮之后的最终答复文本出现（fixture 脚本末段）。
+
+> 建课/产课的工具循环（`submit_curriculum` / `write_deliver_file` / `run_check`）在 fixture 模式下走单次派工，不在旅程级覆盖；其行为由后端 `test_tooling.py` 以 monkeypatch 的假 turn source 覆盖（真实门禁/渲染器仍真跑）。
+
+### 4.23 new-session-association.spec.ts —— 新对话关联行与会话级工作区（对应"工作区"节，2026-10-04 新增）
+1. `/chat` 新对话态：`new-session-association` 可见；`new-session-workspace` 默认值为空（首项「默认工作区」）、候选里含 fixture 工作区绝对路径；科目下拉含 `计算机网络`。
+2. 用关联行把工作区显式选到 `E2E_WORKSPACE_DIR` → 科目下拉按该工作区重载（`计算机网络` 仍在；选 workspace 会重置此前的科目关联）。
+3. 选科目 `computer-networks` → 发送一条消息 → 用 `request` 拉会话：`workspace` 等于所选工作区（大小写不敏感比较）、`subject_slug` 为 `computer-networks`（会话级绑定真的落盘）。
+4. 成为正式会话后 `new-session-association` 数量归 0（关联行只在新对话态存在）。
+
+### 4.24 sidebar-collapse.spec.ts —— 左侧边栏折叠成图标轨（2026-10-04 新增）
+1. 默认展开（宽度 = 默认值）→ 点「折叠侧边栏」→ 宽度变 **60px**。
+2. `reload` 后仍是 60px（折叠态持久化在 localStorage）。
+3. 点「展开侧边栏」→ 回到默认宽度。
+
 ---
 
 ## 5. 运行与维护约定
 
-- 顺序敏感：`workers: 1` + 文件名字母序（chat 用例先于 settings-providers，后者会把 active 切到无 key 的"我的中转"；`sidebar-resize` 排在 settings-* 之后）；globalSetup 每轮重建工作区与 settings，保证幂等。本轮用例数 **37**，两轮连跑全绿。
+- 顺序敏感：`workers: 1` + 文件名字母序（chat 用例先于 settings-providers，后者会把 active 切到无 key 的"我的中转"；`sidebar-resize` 排在 settings-* 之后）；globalSetup 每轮重建工作区与 settings，保证幂等。本轮 **53 条通过 + 3 条 skip**（`memory-flow` 2 + `session-summary` 1，悬空占位）**0 失败**；K 系列轮起两轮连跑均全绿。
 - 新增用例命名沿用旅程语义（`<旅程>.spec.ts`），归入第 3 节映射表并保持表格与文件一致。
 - 逆向前置状态：新入口用例除 happy path 外，须为关键入口补 adverse 前置变体（无科目对话、已填 key 的测试连接、空模型列表等）；组合爆炸的分支下沉组件测试（第 2 节 P4），不堆在旅程级。
 - 入口载荷断言：凡"用户输入 → 请求"的入口（测试连接、模型切换、概念本 prefill），必须有一条 `page.route` 载荷断言，防止字段被前端静默丢弃（第 2 节 P1）。
 - fixture 扩展规则：canned 内容必须通过真实解析链路（判分 JSON 过 extract_json、评估/小结过 front matter + schema、大纲过 check_curriculum）；需要新的失败分支时优先用 UI route mock，不为单一分支扩建 fixture。
-- 长期目标：真实 Key 可用后，加一个 `SMOKE_REAL_LLM=1` 门控的冒烟 project（仅 1 条真实流式对话），默认跳过——沿用 DeepTutor 的"环境门 + skip 注明原因"模式。
+- **真实 LLM 冒烟（2026-10-03 已做，方法留在档）**：维护者本机已配 my-api（本机 new-api 中转 `http://localhost:4000/v1`）。冒烟**不走 Playwright**，是进程内脚本：隔离 `STUDYMATE_DATA_DIR`/`STUDYMATE_WORKSPACE` + 拷贝 settings 并**自己钉死模型**（live settings 会被 UI 改掉）+ TestClient 打真实端点。三条生产链（判分/评估/课件产出）各跑一遍；口径：渠道**串行不并发**，参评模型均带思考档位。已验证：判分与评估一次通过；产出链全机制走通、两参评模型最终都转质检工单（检查器比模型严格，转人工是常态）。
+  - 坑一：**TestClient 的 ASGI 传输不增量吐 SSE**——整条编排响应跑完才一次性交付，进程内冒烟看不到阶段进度；要看进度得起真 uvicorn，或在途状态看磁盘产物与 `Get-NetTCPConnection`。
+  - 坑二：E2E fixture 探针只测 `data` 形状会漏 `files[]` 契约——产出链的真实风险在 files（畸形 envelope）。
+  - 坑三：**Windows 注册表系统代理会经手本机网关**（httpx 经 urllib 读注册表），本机 base_url 已在 `llm.py` 挂精确 host 直连 mounts；换机器复现冒烟若遇长流中断先查这条。
+- 长期目标：把上面的真实冒烟固化成 `SMOKE_REAL_LLM=1` 门控的 Playwright project（默认跳过、skip 注明原因），沿用 DeepTutor 的"环境门"模式。
 
 ### 5.1 实现偏差备注（以实际代码为准，2026-10-02 落地时修正）
 
@@ -239,6 +299,13 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 12. 概念本**顶部筛选栏**的科目下拉标签由「科目」改为「学科」：弹层内新增了必填的「科目」字段，而 Playwright 的 `getByLabel` 是子串匹配，两者会撞名。
 13. 原生 `<select>` 一律用 `getByRole("combobox")` 定位；模型编辑弹窗与概念本弹窗内的下拉补了显式 `aria-label`（嵌在 `<label>` 里时，可访问名会把选项文本算进去，`getByLabel` + `exact` 匹配不到）。
 14. 模型行的"测试"与底部"测试连接"都按编辑器当前表单值发起；fixture 模式下无 Key 走真实 422，"清空输入框回落已存 Key"用带占位 key 的 DeepSeek 断言。
-15. **可折叠面板不要用 `toBeHidden()` 断言收起**：v1.3 右侧边栏用宽度过渡折叠，元素仍在（只是宽度归零），`toBeHidden()` 会误判为"可见"。改用宽度判据（`boundingBox()` 宽度为 0）+ `aria-hidden` / `inert` 属性断言。这一条同时抓出过一个真 bug（最初只加了 `inert` 属性、宽度没参与计算，折叠在视觉上根本没发生）。
+15. **可折叠面板不要用 `toBeHidden()` 断言收起**（2026-10-03 已把 `chat-shell.spec.ts` 的旧写法一并改为宽度判据）：v1.3 右侧边栏用宽度过渡折叠，元素仍在（只是宽度归零），`toBeHidden()` 会误判为"可见"。改用宽度判据（`boundingBox()` 宽度为 0）+ `aria-hidden` / `inert` 属性断言。这一条同时抓出过一个真 bug（最初只加了 `inert` 属性、宽度没参与计算，折叠在视觉上根本没发生）。
 16. 右侧边栏根元素是 `div[role="complementary"]` 而不是 `<aside>`，与左侧主侧边栏区分；因此"页面上只有一个 `aside`"的既有写法仍然成立（`/courses` 上 `page.locator("aside")` 不会再双匹配）。
 17. 模型编辑弹窗的模态与能力开关是 `role="checkbox"` 的按钮（对齐 ZCode 的多选语义），不是原生 checkbox；推理档位是 chip 列表编辑器，定位用 `data-reasoning-variant-input` 之类的稳定锚点而不是结构选择器。
+18. **评估用例要自己恢复现场**：评估会写 `progress.yaml`（置位）并落 `assessments/`、`learning-records/`，还会经双落点新写 `misconceptions.yaml`（canonical 源优先于 progress）——实验课用例还会把 `prerequisites` 一起置位，字母序在后的 `progress-transition` 会读到被污染的初始状态（曾因此挂掉）。两条评估用例都在 `try/finally` 里备份/还原 `progress.yaml` 与 `misconceptions.yaml` 并删除本轮新增的落盘文件。
+19. **Windows 落盘是 CRLF**：断言 YAML 文本时正则要写 `\r?\n`（`\n` 匹配不上）；宽松模式（`[\s\S]*?`）天然不受影响，但严格逐行的断言要留意。
+20. **`status` 未必是节点条目的第一个键**：既有条目保留在前，联升只是补写 status——断言按"该节点的直属子键行"匹配（`(?:\s{4}[\w-]+:.*\r?\n)*?\s{4}status: …`），不要写死 `节点:\n  status`。
+21. **前端"加载完成回填输入框"要与用户输入竞争**：`WorkspaceView` 的 `load()` 曾在每次完成后 `setInput(data.path)`，dev 下并发/StrictMode 会覆盖用户刚填的路径，导致"保存的是旧值"——E2E 表现为成功条不出现（后端收到的是原路径）。修法是回填只做一次；新增同类页面时按此约定。
+22. **fixture 配置要在 config 加载时写好**：Playwright 的 webServer 早于 globalSetup 启动，后端"启动即发现工作区"并缓存整轮——配置若只靠 globalSetup 落盘，首轮后端会回落到真实 `~/StudyMate`。`ensureWorkspaceConfig()` 即为此。
+23. **`reuseExistingServer` 的复用陷阱**：8290 上若残留旧 env 的进程，会静音复用并让整轮跑在错误的数据目录里（本轮"丢失 `STUDYMATE_DATA_DIR`"就是这样被掩盖过一阵）。**2026-10-03 起两份配置统一 `reuseExistingServer: false`**——端口被占用时直接启动失败，比静默探索错误世界好；排查失败时先确认这两个端口没有陈旧进程。
+24. **真实 LLM 工具循环冒烟已固化为门控用例**（2026-10-04）：`backend/tests/test_smoke_real_llm.py`，`SMOKE_REAL_LLM=1` 才跑（默认 skip 并注明原因）。它真连开发 settings 里带 key 的活跃渠道，验"tools 声明 → tool_call 聚合 → 工具执行 → 结果回喂 → 最终答复"，`SMOKE_MODEL` 可钉死模型、`SMOKE_SETTINGS` 可换设置路径。注意它会 monkeypatch 关掉 `STUDYMATE_E2E_FIXTURE`（否则 `stream_turn` 直接吐 canned 文本），并直接按绝对路径读开发 settings（隔离 DATA_DIR 里没有提供商）。
