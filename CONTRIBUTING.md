@@ -21,15 +21,15 @@
 | 你要改 | 先读 |
 |---|---|
 | `.dsh/skills/**` 提示词与角色规格 | 该技能自己的 `SKILL.md`；课件规则归 `lesson-design`，题目归 `layered-practice` |
-| `scripts/*.py` 生成器、渲染器、校验器 | [工程约束](docs/规范/工程约束.md) §三 占位符契约、§四 脚本一览 |
-| `templates/**` 页面骨架与前端资源 | [工程约束](docs/规范/工程约束.md) §三、§五；[模板说明](templates/README.md) |
+| `lib/**` 引擎：纯函数域、工具域、任务域、监听域、导出域 | 该目录自己的文件头注释；[目标态规格](docs/设计/目标态规格.md) §3–§5 |
+| `templates/**` 工作区数据骨架 | [工程约束](docs/规范/工程约束.md) §二；[骨架说明](templates/README.md) |
 | `schemas/*.json` | 该 schema 本身；[文件归属](docs/规范/文件归属.md) |
 | `bin/*.mjs` 安装器与插件构建 | [安装说明](docs/使用/安装.md)；[Codex 与 ChatGPT](docs/使用/Codex与ChatGPT.md) |
 | `openai/studymate/**` 插件源 | [Codex 与 ChatGPT](docs/使用/Codex与ChatGPT.md) |
 | 课件内容文件 | [课件内容格式](docs/规范/课件内容格式.md) |
 | `docs/**`、`README.md` | 该文件已有的口径；新规则遵循「一处定义，别处只给指针」 |
 
-提示词、模板、`schemas/` 和 `scripts/` 里的 Python 会**同时**流进 DSH 预设与 Codex 插件（插件由 `npm run build:plugin` 从这些源转换而来），改完别只验 DSH 一侧。
+提示词、`schemas/` 与数据骨架会**同时**流进 DSH 预设与两个无头宿主插件（插件由 `npm run build:plugin` / `npm run build:antigravity` 从这些源转换而来），改完别只验 DSH 一侧。无头宿主没有引擎脚本也没有原生工具：那边只有技能 + schema + 数据骨架 + 一条导出 CLI（`npx -y @yunmiao/studymate export`）。
 
 ## 本地验证
 
@@ -74,17 +74,11 @@ refactor(大纲)!: 删掉节点「过关标准」字段，判分锚下移到 obj
 - `workspace/`：你自己的学习数据（已 gitignore）
 - `dist/`：插件构建产物（已 gitignore）
 - `~/.dsh/` 下的安装副本：那是产物，改源不改编产物
-- `examples/` 里的 `index.html` 与课件页：它们是生成器写出来的，手改下次重跑就没了
+- 任何**生成产物**：导出的静态页面、科目里的 `*.html`、科目组件副本。仓库里不入库示例工作区（[ADR-0009](docs/adr/0009-示例与生成产物不再入库.md)），测试用的科目现造现弃。
 
-## 示例是产物
+## 测试数据现造现弃
 
-`examples/` 是一份 clone 下来就能点开的完整示例工作区，页面全部由引擎生成。改过模板、渲染器、共享资源或科目数据之后，重跑一遍：
-
-```bash
-python3 scripts/build_examples.py    # 或 npm run build:examples：主页与每一课一条命令跑完
-```
-
-跑完看 `git status`，只该有你预期的改动。多出别的文件，就说明示例镜像和引擎当前输出已经不一致。
+门禁里的科目、工作区与封面数据都在临时目录现造，跑完即弃：没有 `examples/` 要跟着重建，也就不会出现"示例镜像和引擎当前输出不一致"。改过解析器、校验器或导出之后要验的样子，写成一条套件（`scripts/tests/`）比更新一份镜像更能说明问题。
 
 ## 发布
 

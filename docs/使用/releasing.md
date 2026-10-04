@@ -33,9 +33,9 @@ GitHub 发布 job 引用 `npm` environment，不要求设置审批人。仓库�
 2. 打开 **Actions → Release → Run workflow**，分支选择 `main`，选择版本增量。例如 `0.1.1` 选择 `patch` 会得到 `0.1.2`。
 3. 等待检查和发布完成。任务摘要会给出 npm 包、GitHub Release 和 OpenAI 插件 ZIP 链接。DSH 用户重跑安装命令；Codex 用户下载 ZIP，在已有插件页面上传新版本。
 
-发布前复用 **Checks**：在单个 Ubuntu runner 上使用 Node 24 / Python 3.13 运行 `npm test`，覆盖安装、OpenAI 插件打包、Python 功能测试、DOM 和发布逻辑。日常提交也使用这套检查，不再自动运行多系统、多版本或真实 DSH 的重复矩阵。当前包无 npm 依赖和 lockfile，因此不运行 `npm ci`。
+发布前复用 **Checks**：在单个 Ubuntu runner 上用 Node 24 运行 `npm test`，覆盖类型检查、安装器、两个宿主插件打包、引擎与发布逻辑。日常提交也使用这套检查，不再自动运行多系统、多版本或真实 DSH 的重复矩阵。`npm ci` 装 devDependencies（`typescript` 与 `@types/node`）——类型门禁要它。
 
-静态约束那一层（提示词规则、模板契约、Python 语法、宿主技能转换）**已并入 `npm test`**，发布前的 Checks 自然会跑；只想单独核对时仍可直接运行 `npm run test:static`。需要核对真实 DSH 兼容性时运行 `npm run test:dsh` 或 `npm run test:dsh-cli`。用法见 [测试说明](../../scripts/tests/README.md)。
+静态约束那一层（提示词规则、技能调用面、词表与发布元数据、宿主技能转换）**已并入 `npm test`**，发布前的 Checks 自然会跑；只想单独核对时仍可直接运行 `npm run test:static`。需要核对真实 DSH 兼容性时运行 `npm run test:dsh` 或 `npm run test:dsh-cli`。用法见 [测试说明](../../scripts/tests/README.md)。
 
 检查通过后，流程读取自上一版本 tag 以来的全部 commit，以及 GitHub 关联到这些 commit、已经合入 `main` 的 PR。提交标题和正文都会原样保留（提交写法见 [参与 StudyMate](../../CONTRIBUTING.md)；发布流程只做归类，不校验格式）。现有 `CHANGELOG.md` 内容保留，新条目放在前面。兼容历史 `v0.1` tag；若仓库没有版本 tag，则首次记录完整提交历史。
 
@@ -51,4 +51,4 @@ GitHub 发布 job 引用 `npm` environment，不要求设置审批人。仓库�
 
 本次版本 tag 已创建但发布尚未完成时，应重跑原任务，不要新开一次发布。已成功发布且没有新 commit 时，不会空增一个版本。发布流程使用全仓库固定 concurrency group，同一时间只运行一轮发布；GitHub 对等待队列的行为见 [concurrency 文档](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)。
 
-本地可运行 `node --test scripts/release/release.test.mjs` 检查版本计算、历史 tag、更新记录、PR 去重和重试保护。这些测试只在临时目录建立 Git 仓库，不会发布。CI 使用的 action 版本依据官方 [checkout](https://github.com/actions/checkout)、[setup-node](https://github.com/actions/setup-node) 和 [setup-python](https://github.com/actions/setup-python) 文档。
+本地可运行 `node --test scripts/release/release.test.mjs` 检查版本计算、历史 tag、更新记录、PR 去重和重试保护。这些测试只在临时目录建立 Git 仓库，不会发布。CI 使用的 action 版本依据官方 [checkout](https://github.com/actions/checkout) 与 [setup-node](https://github.com/actions/setup-node) 文档。

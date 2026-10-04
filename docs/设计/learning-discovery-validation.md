@@ -10,8 +10,8 @@
 
 | 实际执行的检查 | 结果与范围 |
 |---|---|
-| `python scripts/check_skill.py .dsh/skills/learning-discovery --expect-model-invocable` | 通过：frontmatter 与协议调用面 |
-| `python scripts/check_skill.py .dsh/skills/learning-system --expect-model-invocable` | 通过：总控调用面保留 |
+| `node --test scripts/tests/test_skill_frontmatter.mjs` | 通过：12 份技能的调用面与「谁是角色」对得上（协议与总控两个面都开） |
+| `node --test scripts/tests/test_skill_rules.mjs` | 通过：探索协议的规则片段、参考文件与七个可交叉入口 |
 | `python -X utf8 scripts/tests/test_skill_rules.py` | 483/483：原有 411 条断言全部保留，新增 65 条规则与 7 项结构／场景文件检查 |
 | `node scripts/release/checks.mjs` | 退出码 0：全部默认 Python 套件、两套 DOM 检查与 9 个发布逻辑单测；此命令不发布 |
 | `bash scripts/tests/run_tests.sh` | 退出码 0：全部默认套件；Git Bash 的 `python3` 指向同一测试环境，未启用 `--browser` |

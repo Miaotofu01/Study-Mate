@@ -16,13 +16,9 @@ StudyMate 的 OpenAI 版本是一个技能插件：包含总控 `learning-system
 
 ## 2. 选择学习工作区并开始
 
-课件生成和完整校验需要 **Python 3.9+、PyYAML、jsonschema**，依赖应安装在宿主实际使用的 Python 环境中：
-
-```bash
-python -m pip install pyyaml jsonschema
-```
-
-macOS / Linux 若命令为 `python3`，替换上述 `python` 即可。插件安装目录可能位于客户端缓存中；把课件和学习记录放在独立、可写的目录，例如 `D:/StudyMate-workspace` 或 `~/StudyMate-workspace`。
+**不需要装 Python 依赖**：这个插件里没有引擎脚本（Python 引擎随 #83 退役），校验按技能里的自查清单
+逐项核对。插件安装目录可能位于客户端缓存中；把学习数据放在独立、可写的目录，例如
+`D:/StudyMate-workspace` 或 `~/StudyMate-workspace`。
 
 在新任务中选择 StudyMate 的 `learning-system` 技能并发送：
 
@@ -33,11 +29,14 @@ macOS / Linux 若命令为 `python3`，替换上述 `python` 即可。插件安�
 
 Codex 可通过 `$` 选择技能，ChatGPT 可通过 `@` 选择；以客户端列表中的实际技能名称为准。后续说「继续上次的科目」「考考我」或「这里没懂」即可。技能调用方式见 [OpenAI：Skills & Plugins](https://learn.chatgpt.com/docs/skills-and-plugins)。
 
-总控会在工作区恢复进度、生成课程大纲和 HTML 课件，主页位于 `<工作区>/index.html`。学习数据应整体保留，包括隐藏的 `.learning/` 目录；插件升级与学习数据分开管理。
+总控会在工作区恢复进度、生成课程大纲与课件内容文件。**Codex 侧没有阅读端**：学生的阅读体验靠
+**导出**——课完跑一次 `npx -y @yunmiao/studymate@latest export`，产物落在 `<工作区>/export/`，
+入口是 `index.html`（样式、公式、图片、题目都在里面，`file://` 打开即可）。学习数据应整体保留，
+包括隐藏的 `.learning/` 目录；插件升级与学习数据分开管理。
 
-脚本也支持以下定位方式，优先级从上到下：
+工作区按以下顺序定位，优先级从上到下：
 
-1. 显式工作区参数，例如 `python scripts/gen_home.py "D:/StudyMate-workspace"`。
+1. 对话里明确指定的目录。
 2. 环境变量 `STUDYMATE_WORKSPACE`。
 3. 兼容环境变量 `LEARN_WORKSPACE`。
 4. `STUDYMATE_CONFIG` 指向的 YAML 文件中的 `workspace` 字段；未设置时兼容原有 DSH 配置。
@@ -73,7 +72,7 @@ workspace: "D:/StudyMate-workspace"
 
 ChatGPT Work 使用同一个 ZIP。若账户提供插件导入入口，选择 `studymate-openai.zip` 并安装，再新建 **Work** 对话，选择 `learning-system`。入口是否可用取决于当前产品功能和管理员设置。
 
-StudyMate 的完整工作流需要可执行 Python、读写文件的环境。云端工作区使用该环境内的可写路径；本机 `D:/...` 不会自动同步过去。需要续学时应把学习工作区文件一并带入，并及时导出保存。
+StudyMate 的完整工作流需要一个能读写文件、能跑命令的环境（导出那一步要 Node）。云端工作区使用该环境内的可写路径；本机 `D:/...` 不会自动同步过去。需要续学时应把学习工作区文件一并带入，并及时导出保存。
 
 ## 5. 离线导出（课完默认导一份）
 
@@ -89,14 +88,14 @@ npx -y @yunmiao/studymate export
 不联网也能看。`--subject <slug>` 只导一门、`--out <目录>` 换落点、`--json` 给一行机器可读的产物清单。
 导出需要一份 React（`npm i -g react react-dom`，或设 `STUDYMATE_REACT_DIR`）。
 
-> 上面「课件 HTML」那套是**现行**的静态渲染路径（Python 渲染器 + 每科目一份组件副本），
-> 它随目标态重构退役；导出的页面是它的替代品，两者在过渡期可能同时存在。
+> 导出的页面就是这一侧的阅读端：它自带样式、公式与判分脚本，不依赖任何插件资源。
+> 需要新内容时改源文件（`.md` / `.quiz.json`）再导一次即可，**没有页面文件要维护**。
 
 ## 更新与排查
 
 - **安装后没有技能**：确认安装的是完整插件；重启客户端并新建任务，在技能列表查找 `learning-system`。
 - **更新后仍是旧版**：核对已有插件页面中的版本与下载的 Release 一致，再新建任务。
-- **提示缺少 yaml / schema 校验被跳过**：在执行脚本的同一 Python 环境安装 `pyyaml` 和 `jsonschema`。
+- **提示导出跑不起来**：导出要 Node 与一份 React（`npm i -g react react-dom`，或设 `STUDYMATE_REACT_DIR`）；缺什么插件会明说。
 - **提示没有工作区**：给出明确的可写目录，或配置上述环境变量。OpenAI 版本不需要先安装 DSH。
 - **宿主没有联网或子代理**：按现有资料与可用工具执行；角色可以顺序完成，缺失的来源、图片或运行验证应如实说明。
 

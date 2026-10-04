@@ -30,11 +30,11 @@ flowchart TD
     LC -->|"课件 Markdown"| LS
     LS -->|"4. 配套四层题库与 Lab"| PE
     PE -->|"quiz.json & lab/"| LS
-    LS -->|"5. 交接门禁 + 渲染与领域校验"| Engine["Python 引擎 (scripts/)"]
-    Engine -->|"HTML 课件与导读 Artifact"| User
+    LS -->|"5. 交接门禁 + 逐项自查"| Check["按 schemas/*.schema.json 与格式规范自查"]
+    Check -->|"导出：npx -y @yunmiao/studymate export"| User["<工作区>/export/index.html"]
 ```
 
-- **主智能体（`learning-system`）**：全局学习规划、用户对话通道、调度子代理、档案管理、staged 交接门禁、课件渲染与领域校验。
+- **主智能体（`learning-system`）**：全局学习规划、用户对话通道、调度子代理、档案管理、staged 交接门禁、逐项自查与导出。
 - **5 个专属子智能体（`agents/`）**：
   - `resource-scout`：检索权威教材、官方文档与行业标准，产出资源清单与 `## Gaps`。
   - `image-scout`：抓取高质量概念图与流程图，校验尺寸格式，维护 7 列表头索引。
@@ -57,7 +57,7 @@ node bin/studymate.mjs build-antigravity --install
 
 该命令会自动：
 1. 编译适配 Antigravity 的 5 个 Subagent、12 个 Skill 规范与交互协议。
-2. 无损打包内置 Python 渲染器、校验脚本、Sayo UI 模板与 KaTeX 离线资产。
+2. 打包 schema、工作区数据骨架、文档与 logo——**没有引擎脚本**（Python 引擎随 #83 退役，校验按自查清单做）。
 3. 原子替换安装到 Antigravity 插件目录：`~/.gemini/config/plugins/studymate`。
 
 目标目录里已有非 StudyMate 文件时会拒绝安装（不会清空已有内容）；空目录或上一次构建的产物可以直接覆盖。要装到别处用 `--output <目录>`。
@@ -78,11 +78,10 @@ npm run build:antigravity
 
 ### 依赖环境准备
 
-课件渲染与拓扑校验依赖 **Python 3.9+、PyYAML、jsonschema**：
-
-```bash
-python3 -m pip install pyyaml jsonschema
-```
+**什么都不用装**：这个插件只有技能、schema、工作区数据骨架与文档，没有引擎脚本，也没有原生工具
+（Python 引擎随 #83 退役）。校验按技能里的自查清单逐项核对；要一份能离线看的，在 `run_command`
+里跑 `npx -y @yunmiao/studymate@latest export`——那条命令要 Node 与一份 React
+（`npm i -g react react-dom`，或设 `STUDYMATE_REACT_DIR`）。
 
 ---
 
@@ -149,9 +148,8 @@ npx -y @yunmiao/studymate export
 ## 5. 常见问题排查
 
 - **安装后技能未加载**：确认插件已正确部署在 `~/.gemini/config/plugins/studymate`，重启 Antigravity IDE 即可重新扫描并注册所有 12 个 Skill 与 5 个 Agent。
-- **提示缺少 yaml 模块**：在系统终端运行 `python3 -m pip install pyyaml jsonschema` 安装依赖。
-- **课件直接打开没有样式**：课件 HTML 会自动加载内置的 Sayo UI 静态样式库与 KaTeX 脚本，直接用 Chrome / Firefox / Edge 等现代浏览器打开即可。
-- **子代理运行报错**：走 `.stage/.../deliver/` 的交付会先过 `check_handoff.py`，再继续对应的领域校验（如 `check_curriculum.py`、`check_pool.py`、`render_lesson.py --check`、`check_lesson.py`）；任一阻断项未通过都不合盘并打回重试。
+- **看不到课件页**：阅读端只嵌在 DSH 里；Antigravity 侧的学生阅读体验靠**导出**——课完跑一次 `npx -y @yunmiao/studymate@latest export`，产物在 `<工作区>/export/`，`file://` 打开即可（样式、公式、图片、题目都在里面）。
+- **子代理运行报错**：走 `.stage/.../deliver/` 的交付先按 `deliver/` 清单自查（manifest 与文件一一对应、角色与节点对得上、路径不越界），再按对应领域的自查清单核对（大纲按 schema、图片库按七列索引、课件按内容格式与锚点）；任一阻断项未过都不合盘并打回重试。
 
 ---
 
