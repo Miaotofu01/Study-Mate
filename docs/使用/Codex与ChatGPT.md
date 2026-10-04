@@ -75,6 +75,23 @@ ChatGPT Work 使用同一个 ZIP。若账户提供插件导入入口，选择 `s
 
 StudyMate 的完整工作流需要可执行 Python、读写文件的环境。云端工作区使用该环境内的可写路径；本机 `D:/...` 不会自动同步过去。需要续学时应把学习工作区文件一并带入，并及时导出保存。
 
+## 5. 离线导出（课完默认导一份）
+
+Codex / ChatGPT Work 这一侧没有 DSH 的阅读端，**学生的阅读体验就是导出**（[ADR-0003](../adr/0003-阅读端只嵌DSH.md)）。
+流程约定：**一课做完（内容与题库都校验通过）就导一份**，命令没有参数也能跑：
+
+```sh
+npx -y @yunmiao/studymate export
+```
+
+工作区按 `--workspace` → `$LEARN_WORKSPACE` → `~/.dsh/studymate-config.yaml` → 当前目录 的顺序定位。
+产物落在 `<学习工作区>/export/`，入口是 `index.html`：样式、公式、图片、题目都在这个目录里，
+不联网也能看。`--subject <slug>` 只导一门、`--out <目录>` 换落点、`--json` 给一行机器可读的产物清单。
+导出需要一份 React（`npm i -g react react-dom`，或设 `STUDYMATE_REACT_DIR`）。
+
+> 上面「课件 HTML」那套是**现行**的静态渲染路径（Python 渲染器 + 每科目一份组件副本），
+> 它随目标态重构退役；导出的页面是它的替代品，两者在过渡期可能同时存在。
+
 ## 更新与排查
 
 - **安装后没有技能**：确认安装的是完整插件；重启客户端并新建任务，在技能列表查找 `learning-system`。
