@@ -121,7 +121,7 @@ apply_empty_reasons → { subject, node, file, dryRun, ok,
 | `studymate_export` | —（一份学习数据都不读） | `export/**` |
 | `studymate_lab_run` | workspace / pool / lab / attempts | `attempts/**`（只写「跑」那一格，走 `lib/attempts.ts` 的栅栏） |
 
-域词表（`DOMAINS`）：`workspace`（路径、配置、今天、时区、找科目）、`memory`、`subjects`、`curriculum`、`progress`、`lessons`、`pool`、`assets`、`records`、`reference`（学生自加的资料，ADR-0010）、`misconceptions`、`lab`（`subjects/<slug>/lab/<NNNN>-<短名>/`，读它要同时给 `node`）、`attempts`（`subjects/<slug>/attempts/<NNNN>-<节点id>.json`，读它也要给 `node`）、`handoff`、`export`（**只写**，读它会抛）。新增一个域要同时改域词表与 vault 的读法——词表、guard 与读法的实现在 `lib/lib/{domains,access,vault}.ts`（`lib/tools/` 下那三份只做转发，别再往转发处加逻辑）。
+域词表（`DOMAINS`）：`workspace`（路径、配置、今天、时区、找科目）、`memory`、`subjects`、`curriculum`、`progress`、`lessons`、`pool`、`assets`、`records`、`reference`（学生自加的资料，ADR-0010）、`misconceptions`、`lab`（`subjects/<slug>/lab/<NNNN>-<短名>/`，读它要同时给 `node`）、`attempts`（`subjects/<slug>/attempts/<NNNN>-<节点id>.json`，读它也要给 `node`）、`handoff`、`export`（**只写**，读它会抛）。新增一个域要同时改域词表与 vault 的读法——词表、guard 与读法的实现在 `lib/host/{domains,access,vault}.ts`（`lib/tools/` 下那三份只做转发，别再往转发处加逻辑）。
 
 **对技能的意味**：一个工具读不到的东西，就是它**不该**碰的东西。需要越界时不是绕开 guard，而是把域加进工具定义——那是改代码，不是改提示词。
 

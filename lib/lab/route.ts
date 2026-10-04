@@ -26,8 +26,8 @@
 
 // 域 guard 与工作区 vault 住在 `lib` 域（Host 数据层）：实验域不许 import 工具域
 // （域图上 tools → lab 是注册点那条边，反过去就成环），所以这两样从实现处直接取。
-import { createWorkspaceVault } from '../lib/vault.ts';
-import { createAccess } from '../lib/access.ts';
+import { createWorkspaceVault } from '../host/vault.ts';
+import { createAccess } from '../host/access.ts';
 import {
   LAB_READS, LAB_WRITES, planLabRun, startLabRun,
 } from './tools.ts';

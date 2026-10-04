@@ -43,18 +43,23 @@ const ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const DOMAIN_RULES = {
   core:   { allow: [], builtin: false, package: false },  // 纯函数域：一个外部依赖都不许
   lib:    { allow: ['core'], builtin: true, package: false },  // Host 数据层
+  // host 是「工具能碰哪些学习数据」那一层的落点（域词表、越权 guard、域数据读法）：它读 lib
+  // 的数据层与 core 的纯函数，自己**不**认识工具域与实验域——反过来 tools → host、lab → host
+  // 才是那两条边。放在 lib/ 下的二级目录而不是直接摊在 lib/ 里，是因为它要能被两个域同时
+  // import 而不制造反向边；目录名 `host` 指的是「Host 数据层的守卫」，不是宿主适配层。
+  host:   { allow: ['core', 'lib'], builtin: true, package: false },
   // tools 是**组合根**：#68 的注册点 `registerStudyMate` 要逐个调用各子系统自己目录里的
   // registerXxx，所以它必须 import 每个子系统（tools → tasks、tools → watch、tools → lab、
   // tools → export）。方向**只有**这一条——子系统一律不许 import tools（任务域就是把
   // `registerStudyTool` 当参数接过去的，正是为了不出现反向边，见 lib/tasks/tools.ts 文件头）。
   // 往后每落地一个注册进注册点的子系统，这里加一个域名，别改成通配。
-  tools:  { allow: ['core', 'lib', 'tasks', 'watch', 'lab', 'export'], builtin: true, package: false },  // 原生工具（#68）+ 任务（#73）+ 监听（#74）+ 实验（#77）+ 导出（#82）
+  tools:  { allow: ['core', 'lib', 'host', 'tasks', 'watch', 'lab', 'export'], builtin: true, package: false },  // 原生工具（#68）+ 任务（#73）+ 监听（#74）+ 实验（#77）+ 导出（#82）
   tasks:  { allow: ['core', 'lib'], builtin: true, package: false },  // 任务模型（#73）
-  // 实验域（#77）：判分三轨的第三轨。要 core（题型与必备字段）、lib（作答数据的落点、
-  // 域 guard 与 vault）、tasks（长命令走任务模型、可查可取消）。`node:child_process`
-  // 是它存在的理由，而它**不** import tools：guard 与 vault 在 `lib` 域里（#77 搬过去的），
-  // 所以 Web 路由那条入口不需要借道工具域。
-  lab:    { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },
+  // 实验域（#77）：判分三轨的第三轨。要 core（题型与必备字段）、lib（作答数据的落点）、
+  // tasks（长命令走任务模型、可查可取消）。`node:child_process` 是它存在的理由，而它
+  // **不** import tools：guard 与 vault 在 `host` 域里（#77 搬过去的），所以 Web 路由那条
+  // 入口不需要借道工具域。
+  lab:    { allow: ['core', 'lib', 'host', 'tasks'], builtin: true, package: false },
   // 问答域（#79）：阅读端问答面板那条 HTTP 路由。只依赖纯函数域与 Host 数据层——
   // 它**不** import 工具域（能力探测的本体在 `lib/core/model.ts`，见那里的文件头），
   // 所以这里没有 tools 这条边；反过来说，往这个域里加 `tools` 就是加了一条反向边。
@@ -486,11 +491,11 @@ test('架构边界：真实 import 图无违规', () => {
 
 test('扫描不是空转：已知的域与跨域边都在图里', () => {
   const domains = new Set(GRAPH.modules.map(domainOf));
-  for (const domain of ['core', 'lib', 'tools', 'bin', 'client']) {
+  for (const domain of ['core', 'lib', 'host', 'tools', 'bin', 'client']) {
     assert.ok(domains.has(domain), `域 ${domain} 一个模块都没扫到：扫描器瞎了，还是它真的不见了？`);
   }
   const pairs = new Set(GRAPH.edges.map(edge => `${domainOf(edge.from)} → ${domainOf(edge.to)}`));
-  for (const pair of ['core → core', 'lib → core', 'tools → core', 'tools → lib', 'bin → lib', 'bin → tools']) {
+  for (const pair of ['core → core', 'lib → core', 'host → lib', 'tools → core', 'tools → host', 'bin → lib', 'bin → tools']) {
     assert.ok(pairs.has(pair), `跨域边 ${pair} 没扫到：要么真的没了，要么扫描器漏了说明符`);
   }
   // 低水位线：只用来证明文件遍历没瞎，不是精确清单（精确清单就是扫描结果本身）
