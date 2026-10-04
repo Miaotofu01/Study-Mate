@@ -11,7 +11,8 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 
 // 支持文件与「按需手动跑」的脚本：新增套件要么接进某个组或 package.json 的按需入口，
 // 要么明确登记到这里——不登记就会在下面报出来，不再有第三种「谁也不跑」的状态。
-const SUPPORT_FILES = new Set(['README.md', 'run_tests.sh', 'fixtures.py']);
+// browser/harness.mjs 是浏览器套件共用的骨架（探测二进制 + CDP + summary.json），自己不是套件。
+const SUPPORT_FILES = new Set(['README.md', 'run_tests.sh', 'fixtures.py', 'browser/harness.mjs']);
 const MANUAL_ONLY = new Set([
   'browser/measure.mjs', 'browser/hovers.mjs', 'browser/shot.mjs',  // 手动看的浏览器脚本
   'probe_bundle.mjs',                                               // 排障用
@@ -101,6 +102,10 @@ const groups = {
       // 纯函数域的判据：写入栅栏（幂等台账 + 版本比较）、题库题型与字段、误解字段定型
       'scripts/tests/test_core_fence_questions.mjs',
       'scripts/tests/test_core_coverage_floor.mjs',
+      // 阅读端（lib/client.js）的契约：token 对比度达 WCAG AA（亮暗两套）、
+      // 动效四档与 prefers-reduced-motion、首次引导定位几何（纯函数，node:vm 里跑）
+      'scripts/tests/test_client_tokens.mjs',
+      'scripts/tests/test_client_pure.mjs',
       // #69：架构边界与依赖无环断言（扫真实 import 图，域规则表默认拒绝）
       'scripts/tests/test_architecture_boundaries.mjs',
       // 工具域 lib/tools/**（#68）：域声明与越权即抛、工作区摘要、四个校验器、两个改写工具。
@@ -129,7 +134,8 @@ const groups = {
     tests: ['scripts/tests/test_openai_skills.mjs', 'scripts/tests/test_openai_skill_ui.mjs', 'scripts/tests/test_antigravity_skills.mjs'],
   },
   '--browser': {
-    node: ['browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs'],
+    // 前三个测旧静态模板（file:// 夹具），reading_test.mjs 测阅读端本体（真 lib/client.js）
+    node: ['browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs', 'browser/reading_test.mjs'],
   },
 };
 const mode = process.argv[2] || 'core';

@@ -1,48 +1,19 @@
-// 题目里的代码块：在真实 Chrome 里验渲染与上色
+// 题目里的代码块：在真实浏览器里验渲染与上色
 //   node scripts/tests/browser/quiz_code_test.mjs
 //
 // 钉住两件在假 DOM 里测不到的事：
 //   1. 围栏渲染出的 <pre><code> 真的按等宽 + 保留缩进排（缩进靠 Range 量左边界）
 //   2. quiz.js 建完块会**自己**触发一次上色——learn-theme.js 的自动扫描挂在 head、
 //      DOMContentLoaded 先注册，扫描跑在 quiz.js 建块之前，不显式再扫就没有 syn-* 类
-import { spawn } from 'node:child_process';
-import { rmSync } from 'node:fs';
+//
+// 起浏览器、收控制台/页面错误/失败请求、出截图与 summary.json 都走 ./harness.mjs
+// （浏览器二进制在那里探测，不写死 google-chrome）。
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { openSession, finishSuite } from './harness.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = 'file://' + join(HERE, 'quiz-code-fixture.html');
-const PORT = 9500 + Math.floor(Math.random() * 300);
-const PROFILE = join(tmpdir(), 'smtest-quizcode-' + Date.now());
-
-const chrome = spawn('google-chrome', ['--headless=new', '--disable-gpu', '--hide-scrollbars',
-  '--no-first-run', `--user-data-dir=${PROFILE}`, `--remote-debugging-port=${PORT}`,
-  '--window-size=1200,900', 'about:blank'], { stdio: 'ignore' });
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function pageTarget() {
-  for (let i = 0; i < 60; i++) {
-    try {
-      const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-      const p = list.find((t) => t.type === 'page');
-      if (p) return p;
-    } catch {}
-    await sleep(200);
-  }
-  throw new Error('chrome 没起来');
-}
-
-async function killChrome() {
-  // 等 chrome 真的退出再删 profile：kill() 只是发信号，进程还在写盘时删会被它重建
-  await new Promise((resolve) => {
-    const done = () => resolve();
-    chrome.once('exit', done);
-    setTimeout(done, 3000);
-    chrome.kill();
-  });
-  try { rmSync(PROFILE, { recursive: true, force: true }); } catch {}
-}
 
 let failures = 0;
 function check(label, ok, extra = '') {
@@ -50,23 +21,12 @@ function check(label, ok, extra = '') {
   if (!ok) failures++;
 }
 
-const page = await pageTarget();
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-await new Promise((r) => (ws.onopen = r));
-let id = 0;
-const pending = new Map();
-ws.onmessage = (e) => {
-  const m = JSON.parse(e.data);
-  if (m.id && pending.has(m.id)) { pending.get(m.id)(m.result); pending.delete(m.id); }
-};
-const send = (method, params = {}) =>
-  new Promise((res) => { const i = ++id; pending.set(i, res); ws.send(JSON.stringify({ id: i, method, params })); });
-
-await send('Page.enable');
-await send('Page.navigate', { url: FIXTURE });
-await sleep(1800);
-
-const probe = `(() => {
+const session = await openSession({ suite: 'quiz-code', width: 1200, height: 900 });
+let v = null;
+try {
+  const record = await session.scene('quiz-code', async (ctx) => {
+    await ctx.navigate(FIXTURE, { settle: 1800 });
+    return ctx.evaluate(`(() => {
   const textNodes = (root) => {
     const nodes = [];
     (function rec(el) { for (const c of el.childNodes) { if (c.nodeType === 3) nodes.push(c); else rec(c); } })(root);
@@ -117,17 +77,15 @@ const probe = `(() => {
     q2Code: q2.querySelectorAll('.quiz__code').length,
     q2Text: q2.textContent,
   };
-})()`;
-
-const res = await send('Runtime.evaluate', { expression: probe, returnByValue: true });
-if (res.exceptionDetails) {
-  console.log('FAIL  探测脚本自身报错：' + (res.exceptionDetails.exception
-    ? res.exceptionDetails.exception.description : res.exceptionDetails.text));
-  ws.close();
-  await killChrome();
-  process.exit(1);
+})()`);
+  });
+  v = record.metrics || {};
+} catch (error) {
+  // 探测脚本自身报错也算失败：r 是 null 时下面的断言全部落空，原因记进 summary.json
+  console.log('FAIL  浏览器套件跑完（浏览器起来、页面能打开、探测脚本不抛错）  — ' + String(error));
+  failures++;
+  await session.scene('quiz-code-error', async (ctx) => { ctx.note('harness', String(error)); });
 }
-const v = res.result.value || {};
 
 check('围栏渲染出 .quiz__code', v.hasPre);
 check('data-lang=cpp 传到 pre 上', v.lang === 'cpp', String(v.lang));
@@ -151,7 +109,4 @@ check('没有围栏的题面不产生代码块', v.q2Code === 0, `实际 ${v.q2C
 check('纯散文题面的换行仍保留', v.q2Text.includes('n 是 5。') && v.q2Text.includes('循环体跑几次'));
 
 console.log(failures === 0 ? '\n全部通过' : `\n${failures} 项失败`);
-ws.close();
-chrome.kill();
-await killChrome();
-process.exit(failures === 0 ? 0 : 1);
+await finishSuite(session, { suite: 'quiz-code', failed: failures });

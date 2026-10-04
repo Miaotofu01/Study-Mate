@@ -5,14 +5,15 @@
    自足是要点：课件的 Markdown 正文**内联**进 payload（lesson_md），题库整段内联（pool），
    页面拿到这一份 JSON 就该能画出全部内容，不需要再回主机取第二次。
 
-   这份实现是 prototype/reading-client/tools/build-data.py 的 JS 版，语义逐条对齐它：
+   这份实现脱胎于阅读端版式原型里那个一次性构建脚本（`prototype/reading-client/`，
+   那个目录已在 #75 里删除），语义逐条对齐它：
    三档状态映射、按前置依赖分层、锚点四态对账、术语表 / Mission / 学习记录 / lab 的解析口径、
    「继续学」的挑选顺序、零节点科目跳过、无可读科目时报错。刻意不同的地方只有三处，
    都写在各自位置的注释里：
      1. 课件正文内联（lesson_md），不再让前端去 fetch lessons/<slug>/<file>.md；
      2. 顶层多出 workspace 与 memory_md（Host 半要知道自己在读哪个库、共享记忆是什么）；
-     3. 顶层不再有 source / note —— 那是原型构建脚本自己的元信息（相对路径、"
-        由 tools/build-data.py 抽出"），放进插件 payload 会误导人。
+     3. 顶层不再有 source / note —— 那是原型构建脚本自己的元信息（相对路径、
+        「由构建脚本抽出」），放进插件 payload 会误导人。
 
    缺失的可选文件一律给空值，不抛错；但 YAML 里出现本解析器不支持的构造时**必须**抛错，
    那是真错，不是缺失。
