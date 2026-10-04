@@ -69,10 +69,14 @@ const groups = {
       // 两条都是「原 Python 套件的验收面」，不是新功能——见脚本自己的文件头。
       'scripts/tests/test_preset_install.mjs',
       'scripts/tests/test_interaction_state.mjs',
-      // Host 半数据层的特征化测试（lib/{workspace,library,assets,yaml,reference,attempts}.mjs）
+      // Host 半数据层的特征化测试（lib/{workspace,library,assets,yaml,reference,attempts}.ts）
       'scripts/tests/test_host_library_payload.mjs',
       'scripts/tests/test_host_reference_fence.mjs',
       'scripts/tests/test_host_path_boundary.mjs',
+      // 路径包含判据本身（lib/paths.ts）：reference / assets / export / lab 四处共用的那一份，
+      // 边界值（同前缀兄弟目录、root 带尾分隔符、软链指出去、断链）逐条钉住。特征化测试测的
+      // 是「取址/落盘的结果」，判据换一种写法照样可能绿——所以判据自己也要有一条。
+      'scripts/tests/test_host_paths.mjs',
       'scripts/tests/test_host_yaml_workspace.mjs',
       // #71 的验收面：作答数据的幂等/版本栅栏，以及「拿一份 v0.2 真实工作区跑一遍」
       'scripts/tests/test_host_attempts_fence.mjs',

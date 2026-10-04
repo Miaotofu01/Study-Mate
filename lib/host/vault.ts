@@ -263,9 +263,16 @@ function pathFacts(target: string): PathFacts {
 
 /* ── #77 的两个域：实验目录与作答数据 ────────────────────────────────────
    这两个读法的共同点是「一个 slug 加一个节点」才定位得到东西，所以 `target` 之外还要一个
-   `options`。路径边界的判据与 `lib/lab/sandbox.ts` 用的是**同一条**（求解完判包含），
-   但这里多一层：slug 必须在盘上真的是一个目录名，不能是 `..` 或带分隔符的字符串——
-   在工作区里定位科目不该有第二种写法。 */
+   `options`。
+
+   **这里没有路径包含判据，也没有 realpath**——不是漏了，是这条路根本不由用户拼路径：
+     · 科目目录 = `<工作区>/.learning/subjects/<slug>`，而 slug 先验过「非空、不带 `/` 与 `\`、
+       不含 `..`」，再要求盘上真有这个目录（`requireSubjectDir`）；
+     · 实验目录名 = `readdirSync(<科目>/lab)` 列出来的**真实目录名**里挑一个，不是 `options`
+       里的字符串（`labRead`）。
+   两条都只吃盘上已有的名字，所以 `..` 没有入口。工具域那侧真正需要判包含的是
+   `lib/lab/sandbox.ts`（命令的 cwd、可写路径、参数里的路径），那里的判据只有一份，在
+   `lib/paths.ts`。 */
 
 /** `options` 里的一个字符串字段；不是字符串就当没给。 */
 function optionString(options: unknown, key: string): string {

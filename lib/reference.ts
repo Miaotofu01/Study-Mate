@@ -19,6 +19,8 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { isWithin, isWithinReal, realPathOf } from './paths.ts';
+
 // 复用仓库里那份对齐 PyYAML 的隐式类型解析器：判断一个标题裸着写会不会被读成非字符串
 import { resolvePlainScalar } from './yaml.ts';
 // 幂等与版本号这两件武器的**判据**住在纯函数域（ADR-0007/0010 共用一套，见 lib/core/fence.ts）。
@@ -129,43 +131,6 @@ function subjectDirOf(workspace: unknown, subject: unknown): string | null {
   if (typeof workspace !== 'string' || !workspace) return null;
   if (typeof subject !== 'string' || !subject || subject.includes('/') || subject.includes('\\') || subject.includes('..')) return null;
   return path.resolve(workspace, '.learning', 'subjects', subject);
-}
-
-/** 越界判据与 `lib/assets.ts` 同一写法：前后都补分隔符再比，避免 /a/bc 被当成在 /a/b 里面。 */
-function inside(root: string, full: string): boolean {
-  return full === root || full.startsWith(root + path.sep);
-}
-
-/**
- * 目标（或其最近存在的祖先）解掉符号链接之后的真实路径；解不出来返回 null。
- * 断链与不存在的目标都走这条路——调用方按「读不到」处理，不让 realpath 的异常冒成 500。
- */
-function realPathOf(target: string): string | null {
-  let current = path.resolve(target);
-  const tail: string[] = [];
-  for (;;) {
-    try {
-      const real = fs.realpathSync(current);
-      return tail.length === 0 ? real : path.join(real, ...tail);
-    } catch {
-      const parent = path.dirname(current);
-      if (parent === current) return null; // 走到根都不存在
-      tail.unshift(path.basename(current));
-      current = parent;
-    }
-  }
-}
-
-/**
- * 真实路径判据：target 解掉符号链接之后必须还在 realRoot（已解过链接的边界）里。
- * 边界给的是**科目目录**，不是 reference/：科目目录自己挂成符号链接是用户自己的布置
- * （真实工作区里合法），越界指的是目标逃出了科目目录（目标态规格 §4.3）。
- * 边界算不出来时一律判越界——宁可拒绝，也不要漏。
- */
-function insideReal(realRoot: string | null, target: string): boolean {
-  if (typeof realRoot !== 'string' || realRoot === '') return false;
-  const realTarget = realPathOf(target);
-  return realTarget !== null && inside(realRoot, realTarget);
 }
 
 function toPosix(rel: string): string {
@@ -332,7 +297,7 @@ function walkReference(root: string, realBoundary: string | null, prefix = '', o
       if (!entry.isSymbolicLink()) walkReference(full, realBoundary, rel, out, depth + 1);
     } else if (stat.isFile()) {
       // 指向文件的链接跟随，但解出来必须还在科目目录里（目标态规格 §4.3：路径越界一律拒绝）
-      if (insideReal(realBoundary, full)) out.push({ rel, stat });
+      if (isWithinReal(realBoundary, full)) out.push({ rel, stat });
     }
   }
   return out;
@@ -401,9 +366,9 @@ export function readReference({ workspace, subject, relPath }: { workspace?: unk
   if (subjectDir === null || typeof relPath !== 'string' || relPath === '') return null;
   const dir = path.join(subjectDir, 'reference');
   const full = path.resolve(dir, relPath);
-  if (!inside(dir, full)) return null;
+  if (!isWithin(dir, full)) return null;
   // 文本判据挡不住符号链接：解掉链接后还得落在**科目目录**里（科目目录自己可以是链接）
-  if (!insideReal(realPathOf(subjectDir), full)) return null;
+  if (!isWithinReal(realPathOf(subjectDir), full)) return null;
   const relative = toPosix(path.relative(dir, full));
   if (relative.split('/').some((segment) => segment === '' || isSkippedName(segment))) return null;
   if (!TEXT_EXTS.has(path.extname(full).toLowerCase())) return null;
@@ -525,9 +490,9 @@ export function writeReference({ workspace, subject, title, markdown, expectedVe
   for (let index = 1; index <= COLLISION_MAX; index++) {
     const candidate = path.join(dir, `${stem}${index === 1 ? '' : `-${index}`}.md`);
     // 名字是拼出来的，理论上越不了界；写盘前再证一次，与取址那边同一个判据
-    if (!inside(dir, candidate)) return refusal(400, 'path-invalid', '算出来的文件名跑到 reference/ 外面了：标题里带了路径分隔符？');
+    if (!isWithin(dir, candidate)) return refusal(400, 'path-invalid', '算出来的文件名跑到 reference/ 外面了：标题里带了路径分隔符？');
     // 文本判据挡不住符号链接：reference/ 指向科目外面时，这一笔必须写不进去
-    if (!insideReal(realSubject, candidate)) {
+    if (!isWithinReal(realSubject, candidate)) {
       return refusal(400, 'path-invalid', '算出来的文件名落到科目目录外面了：reference/ 是不是指向别处的符号链接？');
     }
     try {
