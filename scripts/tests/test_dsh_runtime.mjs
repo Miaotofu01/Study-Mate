@@ -218,6 +218,171 @@ async function probeNativeTools(app, home) {
   return outcome;
 }
 
+/* ── #74：文件监听与变更推送在**真 DSH** 里的两条路 ────────────────────────
+
+   监听在插件 apply 时解析学习工作区（`~/.dsh/studymate-config.yaml`），所以下面这份
+   探针工作区必须**先**造好、**再**启动真 DSH。只在「原生安装 + web profile」这个
+   真会加载插件的组合里造它——别的场景有自己的配置断言，别去碰（migrated 用例要逐字节比对）。
+
+   验的三件事：
+     1. 生产路（`connection.fetch.register` 返回一个 body 没写完的 Response，挂在 /api 下）
+        真能建起 SSE：先用宿主打印的那条 URL 换会话 cookie，再读到建连问候；
+     2. 退路（`ctx.webServer.register` 的 exact 路由）在**真 webServer** 上也能建起来，
+        而且没有会话时必须 401——这条路不在 /api 围栏里，认证是自己判的；
+     3. 改一个课件文件 / 新建一个科目 → 通知真的推过来（`{kind:'changed',domains,at,seq}`）。
+
+   **不验**：浏览器里的 EventSource（那要真浏览器）。页面侧的接线由
+   scripts/tests/test_watch_client.mjs 拿同一份 lib/client.js 在 VM 里跑过。
+   `modelRequestsIssued: 0` 这条边界不变。 */
+function prepareWatchWorkspace(home) {
+  // 工作区用**夹具那一个**（LEARN_WORKSPACE）：插件 apply 时跑的 installPayload 会按
+  // 环境变量重写 studymate-config.yaml，另行造一个目录只会让监听盯错地方。
+  const workspace = fs.realpathSync(process.env.LEARN_WORKSPACE);
+  assert.ok(inside(home, workspace), '监听探针的工作区要在隔离 HOME 里');
+  const subject = writeSubject(workspace, 'demo');
+  return { workspace, lesson: path.join(subject.lessonsDir, '0001-var.md') };
+}
+
+/** 一条 SSE 流：收帧 + 等到条件成立（读流本身也要有超时，别把整支探针吊死）。 */
+function sseReader(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let cursor = 0;
+  const notices = [];
+  const harvest = () => {
+    for (;;) {
+      const start = text.indexOf('data: ', cursor);
+      if (start < 0) return;
+      const end = text.indexOf('\n\n', start);
+      if (end < 0) return;
+      const raw = text.slice(start + 'data: '.length, end);
+      cursor = end + 2;
+      try { notices.push(JSON.parse(raw)); } catch { /* 不是 JSON 的帧当没见过 */ }
+    }
+  };
+  const pump = async (done, what, timeout = 8000) => {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      harvest();
+      if (done()) return;
+      const left = deadline - Date.now();
+      if (left <= 0) throw new Error(`等不到${what}：${JSON.stringify(text.slice(-300))}`);
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise((resolve) => {
+          const timer = setTimeout(() => resolve({ timedOut: true }), left);
+          timer.unref?.();
+        }),
+      ]);
+      if (chunk.timedOut) throw new Error(`等不到${what}（读流超时）：${JSON.stringify(text.slice(-300))}`);
+      if (chunk.done) throw new Error(`流断了（在等${what}）`);
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+  };
+  return {
+    text: () => text,
+    notices: () => notices.slice(),
+    greeting: async (what) => { await pump(() => /: studymate connected backend=/.test(text), what); return text; },
+    waitForNotices: (count, what) => pump(() => notices.length >= count, what),
+    close: () => reader.cancel(),
+  };
+}
+
+/** 打开一条 SSE；路由是插件动态 import 之后才挂上的，所以前几秒允许 404。 */
+async function openSse(url, headers, tries = 50) {
+  let last = 0;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const response = await fetch(url, { headers: { accept: 'text/event-stream', ...headers } });
+    if (response.status === 200) return sseReader(response);
+    last = response.status;
+    try { await response.body?.cancel(); } catch { /* 丢掉这个响应体 */ }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`${url} 一直不是 200（最后是 ${last}）`);
+}
+
+async function probeWatch(app, probe) {
+  const connection = app.ctx.get('connection');
+  const origin = `http://127.0.0.1:${app.ctx.get('webServer').port}`;
+
+  // 宿主打印的那条 URL 自带一次性 token；换出会话 cookie，之后按正常浏览器的方式请求 /api
+  const authorized = await fetch(connection.authenticatedUrl(`${origin}/`), { redirect: 'manual' });
+  const cookie = (authorized.headers.getSetCookie?.() ?? [])
+    .map((value) => value.split(';')[0]).join('; ');
+  assert.ok(cookie, '换不到浏览器会话 cookie');
+  try { await authorized.body?.cancel(); } catch { /* 只是拿 Set-Cookie */ }
+
+  const watchModule = await import(pathToFileURL(path.join(project, 'lib/watch/index.ts')).href);
+  // 退路：把 exact 路由挂到**真 webServer** 上。生产里这条路只在拿不到
+  // connection.fetch.register 时才选（这里显式挂一次，把它也验到）。
+  const disposeFallback = watchModule.registerWatchChannel({
+    get: (name) => ((name === 'webServer' || name === 'connection') ? app.ctx.get(name) : undefined),
+  }, { route: 'webServer' });
+
+  const api = await openSse(`${origin}/api/studymate/events`, { cookie });
+  const fallback = await openSse(`${origin}/plugins/studymate/events`, { cookie });
+  try {
+    // 退路不在 /api 围栏里：没有会话必须自己拒（不是 200）
+    const denied = await fetch(`${origin}/plugins/studymate/events`);
+    assert.equal(denied.status, 401, '退路没有会话时该 401');
+    try { await denied.body?.cancel(); } catch { /* 只要状态码 */ }
+
+    const apiGreeting = await api.greeting('/api 建连问候');
+    await fallback.greeting('退路建连问候');
+
+    // ① 改一个课件文件：两条通道都该收到通知。
+    // 监听是**异步**起来的（扫盘 + 每个目录等 chokidar ready），改动恰好落在观察者挂好之前时
+    // 那一条不补发（宿主自己的 HMR 也是靠重扫/重连兜底）。所以这里「改到收到为止，最多三次」，
+    // 顺手把用了第几次记进结果——如果每次都要第二次才收到，说明就绪窗口还偏长。
+    let attempt = 0;
+    let lessonNotice = null;
+    while (lessonNotice === null && attempt < 3) {
+      attempt += 1;
+      fs.appendFileSync(probe.lesson, `\n探针改动第 ${attempt} 次。\n`);
+      try { await api.waitForNotices(1, '/api 上「课件变了」的通知', 3000); } catch { /* 再试一次 */ }
+      lessonNotice = api.notices()[0] ?? null;
+    }
+    assert.ok(lessonNotice, '改了三次课件文件，一条通知都没收到');
+    await fallback.waitForNotices(1, '退路上「课件变了」的通知', 3000);
+    assert.equal(lessonNotice.kind, 'changed');
+    assert.deepEqual(lessonNotice.domains, ['lesson'], JSON.stringify(lessonNotice));
+    assert.match(lessonNotice.at, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(Number.isSafeInteger(lessonNotice.seq), true);
+
+    // 监听是**异步**起来的（扫盘 + 逐个挂观察者），所以建连问候可能是「那一刻」的旧标签。
+    // 收到通知说明它确实在跑；这时再连一条，读到的 backend 才是结论。
+    const settled = await openSse(`${origin}/api/studymate/events`, { cookie });
+    const settledGreeting = await settled.greeting('复核问候');
+    await settled.close();
+    const backend = /backend=([^\s]+)/.exec(settledGreeting)[1];
+
+    // ② 外层新建一个科目：阅读端要能自动看见（这里验通知，页面侧的重取在 test_watch_client.mjs）
+    writeSubject(probe.workspace, 'brand-new');
+    await api.waitForNotices(2, '「新建科目」的通知');
+    const all = api.notices();
+    assert.equal(all.some((notice) => notice.domains.includes('subjects')), true,
+      `没有一条通知说「科目层变了」：${JSON.stringify(all)}`);
+    assert.equal(all.every((notice) => notice.seq > lessonNotice.seq || notice === lessonNotice), true,
+      'seq 要单调递增');
+
+    return {
+      backend,
+      apiGreeting: apiGreeting.split('\n')[0],
+      settledGreeting: settledGreeting.split('\n')[0],
+      lessonNotice,
+      attempts: attempt,
+      notices: all,
+      fallbackNotices: fallback.notices(),
+      unauthorizedFallback: denied.status,
+    };
+  } finally {
+    await api.close().catch(() => {});
+    await fallback.close().catch(() => {});
+    await disposeFallback?.();
+  }
+}
+
 async function probe() {
   const stdout = process.stdout.write.bind(process.stdout);
   const quiet = (_chunk, encoding, callback) => {
@@ -266,6 +431,9 @@ async function probe() {
       fromRuntime('dsh-app-boot'), fromRuntime(isModern ? 'dsh-agent-preset-registry' : 'dsh-agent-presets'),
     ]);
     const profileName = process.env.STUDYMATE_RUNTIME_PROFILE || 'web';
+    // #74：监听探针要先有一份「插件加载时就存在」的学习工作区（监听在 apply 时解析配置）
+    const watchProbe = process.env.STUDYMATE_RUNTIME_SCENARIO === 'native' && profileName === 'web'
+      ? prepareWatchWorkspace(home) : null;
     app = await runProfile({
       environment: loadLayeredEnv('studymate-runtime-regression', home), profile: profileName, patchFiles: [],
       // Desktop owns this profile and supplies it directly to runProfile.
@@ -321,10 +489,14 @@ async function probe() {
     const pluginLoaded = nativeEntries.length === 1 && !nativeEntries[0].disabled;
     const nativeTools = modern(manifest.version) && pluginLoaded
       ? await probeNativeTools(app, home) : null;
+    // #74：监听与推送（两条路）——同样只在插件真的加载了的时候跑
+    const watch = watchProbe && pluginLoaded && modern(manifest.version)
+      ? await probeWatch(app, watchProbe) : null;
     result = { ok: true, version: manifest.version, webStarted: true, nativeDisabled: migrated,
       learningPresets: roster.filter(preset => preset.id === 'learning').length,
       learningReady: expectLearning && !downgraded, modelRequestsIssued: 0,
       ...nativeTools === null ? {} : { nativeTools },
+      ...watch === null ? {} : { watch },
       studyMateWarnings: warnings.filter((text) => text.includes('StudyMate')).slice(0, 5) };
   } catch (error) {
     process.exitCode = 1;
@@ -474,6 +646,19 @@ if (process.argv.includes('--probe')) {
       assert.match(tools.domainWriteViolation, /DOMAIN_VIOLATION/);
       assert.equal(tools.modelNegotiation.available, false);
       assert.equal(typeof tools.modelNegotiation.reason, 'string');
+      // #74：文件监听与变更推送（两条路）在真 DSH 里的实测
+      const watch = outcome.watch;
+      assert.ok(watch, `监听探针没跑：${JSON.stringify(outcome.studyMateWarnings || [])}`);
+      assert.equal(watch.backend, 'fs-service', 'web 组合里有 ctx.fs，该走宿主的 watch');
+      assert.match(watch.lessonNotice.at, /^\d{4}-\d{2}-\d{2}T/, 'at 是 ISO 时刻');
+      assert.ok(watch.attempts >= 1 && watch.attempts <= 3, `就绪窗口偏长：第 ${watch.attempts} 次改动才收到`);
+      assert.equal(watch.notices.some((notice) => notice.domains.includes('subjects')), true,
+        '新建科目要推出一条「科目层变了」的通知');
+      assert.match(watch.apiGreeting, /^: studymate connected backend=/);
+      assert.deepEqual(watch.lessonNotice.domains, ['lesson']);
+      assert.equal(watch.lessonNotice.kind, 'changed');
+      assert.equal(watch.fallbackNotices.length >= 1, true, '退路（webServer 精确路由）也要收到通知');
+      assert.equal(watch.unauthorizedFallback, 401, '退路没会话时必须自己拒');
     }
     if (!modern(metadata.version)) {
       assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate-config.yaml')), false);

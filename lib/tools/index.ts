@@ -35,6 +35,7 @@ import {
 } from './validate.ts';
 import { applyEmptyReasonsTool, renumberLessonsTool } from './rewrite.ts';
 import { exportTool } from './export.ts';
+import { registerWatch } from '../watch/index.ts';
 
 /** `ctx.inject(['tools'], …)` 给的那层上下文：只用得到这几个成员。 */
 export interface StudyPluginContext extends ServiceReader {
@@ -101,5 +102,6 @@ export function registerStudyMate(ctx: StudyPluginContext): void {
   registerValidatorTools(ctx);
   registerRewriteTools(ctx);
   registerExportTools(ctx);
+  registerWatch(ctx);
   // ↑↑↑ 加完为止：不要动 bin/dsh-plugin.ts，也不要在这里写具体工具 ↑↑↑
 }

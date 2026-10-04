@@ -103,6 +103,13 @@ const groups = {
       'scripts/tests/test_tools_context.mjs',
       'scripts/tests/test_tools_validate.mjs',
       'scripts/tests/test_tools_rewrite.mjs',
+      // 监听域 lib/watch/**（#74）：变更通知的形状与域映射（纯）、目录集合监听（真 fs）、
+      // 两条推送路（真 HTTP，bridge 与宿主同形）、阅读端「未变即同引用」（VM 里跑 lib/client.js）。
+      // 真 DSH 里的端到端在 scripts/tests/test_dsh_runtime.mjs 的监听探针里。
+      'scripts/tests/test_watch_notice.mjs',
+      'scripts/tests/test_watch_tree.mjs',
+      'scripts/tests/test_watch_push.mjs',
+      'scripts/tests/test_watch_client.mjs',
     ],
   },
   '--static': {

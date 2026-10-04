@@ -210,5 +210,10 @@ export async function apply(ctx: PluginContext): Promise<void> {
         }
       },
     }), 'studymate: 参考资料路由');
+
+    // 文件监听与变更推送（#74）：监听在学习工作区那一侧（lib/watch，由 lib/tools 的
+    // registerStudyMate 起），这里只挂推送路由——它要的 connection 只有这个注入点拿得到。
+    // 动态 import 与上面同一姿势（这个文件会被 test_bundle 拷到没有 lib/ 的临时目录里跑）。
+    void import('../lib/watch/index.ts').then((watch) => watch.registerWatchChannel(connectionCtx), (error) => console.warn(`StudyMate：变更推送通道没挂上。${error instanceof Error ? error.message : String(error)}`));
   });
 }

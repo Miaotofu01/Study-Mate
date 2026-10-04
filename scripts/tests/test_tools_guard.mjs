@@ -92,8 +92,11 @@ test('description 只有一句话：无换行、不超过常驻上下文的长�
 test('注册走 ctx.effect：每个工具都挂在可回收的副作用上', () => {
   const ctx = fakeContext();
   tools.registerStudyMate(ctx.ctx);
-  assert.equal(ctx.effects.length, 8, '八个工具各挂一个 effect');
-  for (const label of ctx.effects) assert.match(label, /^studymate: studymate_/);
+  // 只数**工具**的八个：这个注册点还会带上别的子系统（#74 的文件监听挂的是
+  // `studymate: 学习工作区文件监听`），各子系统自己的 effect 由各自的套件盯。
+  const toolEffects = ctx.effects.filter((label) => /^studymate: studymate_/.test(label));
+  assert.equal(toolEffects.length, 8, '八个工具各挂一个 effect');
+  for (const label of ctx.effects) assert.match(label, /^studymate: /);
 });
 
 /* ── 二、反证：越权读 / 越权写必须抛 ──────────────────────────────────── */
