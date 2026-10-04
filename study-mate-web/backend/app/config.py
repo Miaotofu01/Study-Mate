@@ -8,7 +8,7 @@ reasoning{enabled,variants[],default_variant}|None/capabilities{tool_call,
 json_schema_output,native_web_search}|None/enabled：
 - modalities 为 None 表示未配置，视觉判定回落内置前缀表；
 - reasoning.enabled 为 False 或 variants 为空时不发思考参数；
-- capabilities 仅落盘与展示，不参与请求。
+- 工具调用默认对所有配置的模型开启（2026-10-04），`capabilities.tool_call` 不再参与门控；
 旧模型字段（vision 三态 / thinking 四档）在读取时迁移为上述结构，
 active.thinking 迁移为 reasoning_variant；迁移对行为无感。
 旧单 provider 结构在读取时自动迁移，迁移立即写回且不丢 key。
@@ -65,7 +65,13 @@ PRESET_PROVIDERS: dict[str, dict[str, str]] = {
     },
 }
 
-DEFAULT_SYSTEM_PROMPT = (
+PERSONA_PROMPT = (
+    "你是 StudyMate 自学系统的主教练（学习模式），坚持 learn with doing：讲清概念后引导学习者动手练习，"
+    "用通俗的语言和具体的例子解释知识。开场先按学习者近期状态报告上次学到哪、这次建议学什么；"
+    "每轮回复的最后一行都按「**下一步**：<谁做什么> —— <怎么触发>」的格式给出下一步，别让学生停在那儿等。"
+)
+DEFAULT_SYSTEM_PROMPT = PERSONA_PROMPT
+_LEGACY_DEFAULT_SYSTEM_PROMPT = (
     "你是 StudyMate，一个陪伴式学习助手。你的原则是 learn with doing："
     "讲清概念后引导学习者动手练习，用通俗的语言和具体的例子解释知识。"
 )
@@ -244,6 +250,9 @@ def load_settings() -> dict[str, Any]:
     settings.setdefault("providers", [])
     settings.setdefault("active", {})
     settings.setdefault("system_prompt", DEFAULT_SYSTEM_PROMPT)
+    if settings.get("system_prompt") == _LEGACY_DEFAULT_SYSTEM_PROMPT:
+        settings["system_prompt"] = DEFAULT_SYSTEM_PROMPT
+        save_settings(settings)
     if _upgrade_settings(settings):
         save_settings(settings)
     return settings
@@ -316,6 +325,8 @@ def get_active_provider() -> dict[str, Any] | None:
         "max_output_tokens": _model_field(entries, model, "max_output_tokens", None),
         "reasoning": reasoning,
         "reasoning_variant": variant,
+        # 工具调用默认对所有模型开启（2026-10-04）；capabilities 保留落盘/展示
+        "capabilities": _model_field(entries, model, "capabilities", None),
         # 兼容 chat.py 既有的 provider["vision"] 读取方式：由 modalities 派生三态
         "vision": (
             "on"

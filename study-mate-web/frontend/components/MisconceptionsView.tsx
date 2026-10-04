@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import clsx from "clsx";
 import { AlertCircle, Loader2, NotebookPen, Pencil, Plus, Trash2, X } from "lucide-react";
@@ -53,7 +54,8 @@ export function MisconceptionsView() {
 
   const [subjectSlug, setSubjectSlug] = useState(searchParams.get("subject") ?? "");
   const [importance, setImportance] = useState<MisconceptionImportance | "">("");
-  const [nodeId, setNodeId] = useState("");
+  // 支持从节点详情/图谱带参进入（?node= 预填筛选）
+  const [nodeId, setNodeId] = useState(searchParams.get("node") ?? "");
 
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [items, setItems] = useState<MisconceptionItem[]>([]);
@@ -350,13 +352,14 @@ export function MisconceptionsView() {
                 </span>
                 <span className="text-xs opacity-50">{item.date}</span>
                 {item.node && (
-                  <span
-                    className="max-w-[10rem] truncate rounded px-1.5 py-0.5 text-[11px]"
+                  <Link
+                    href={`/courses?subject=${encodeURIComponent(subjectSlug)}&node=${encodeURIComponent(item.node)}`}
+                    className="max-w-[10rem] truncate rounded px-1.5 py-0.5 text-[11px] hover:bg-[var(--muted)]"
                     style={{ background: "var(--muted)" }}
-                    title={item.node}
+                    title={`在课程图谱中定位：${nodeName(item.node)}`}
                   >
                     {nodeName(item.node)}
-                  </span>
+                  </Link>
                 )}
               </div>
 

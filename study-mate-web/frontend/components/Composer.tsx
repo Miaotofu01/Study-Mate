@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
-import { Check, FileText, Loader2, Paperclip, Send, Square, X } from "lucide-react";
+import { Brain, Check, ChevronDown, FileText, Loader2, Paperclip, Send, Square, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatFileSize } from "@/lib/format";
 import { useChatDraft } from "@/lib/workspace";
-import { ModelSelector } from "./ModelSelector";
+import { activeModelOf, modelVariant, modelVariants, ModelSelector } from "./ModelSelector";
 import type { AppSettings, AttachmentKind, UploadedAttachment } from "@/lib/types";
 
 const ACCEPT =
@@ -26,6 +26,112 @@ interface PendingAttachment {
   previewUrl: string | null;
   status: "uploading" | "done" | "error";
   uploaded?: UploadedAttachment;
+}
+
+// 推理档位下拉：从模型弹层迁出的对话侧档位切换（ModelSelector 的弹层只负责切提供商/模型）。
+// 触发按钮沿用「思考」指示同款 Brain 图标；外层包在 DROPDOWN_UPWARD 里，弹层
+// （.absolute.right-0）同样向上展开。保存路径与 ModelSelector.setVariant 相同：整份 settings
+// 写回 saveSettings，成功后再把新档位灌回上层状态；失败时红字就地提示（弹层此时已收起，
+// 放在触发按钮旁边而不是弹层里，否则一点开就看不见了）。
+interface ReasoningVariantSelectorProps {
+  settings: AppSettings | null;
+  onUpdated: (settings: AppSettings) => void;
+}
+
+function ReasoningVariantSelector({ settings, onUpdated }: ReasoningVariantSelectorProps) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const activeModel = settings ? activeModelOf(settings) : null;
+  const variants = modelVariants(activeModel);
+  const activeVariant = settings?.active.reasoning_variant || modelVariant(activeModel) || null;
+
+  // 当前模型没有可选档位（reasoning 未启用 / variants 为空），或没配置提供商时不渲染
+  if (!settings || settings.providers.length === 0 || variants.length === 0) {
+    return null;
+  }
+
+  const choose = (variant: string) => {
+    setOpen(false);
+    if (variant === activeVariant) {
+      setError(null);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    void api
+      .saveSettings({
+        providers: settings.providers,
+        active: { ...settings.active, reasoning_variant: variant },
+        system_prompt: settings.system_prompt,
+      })
+      .then(() =>
+        onUpdated({ ...settings, active: { ...settings.active, reasoning_variant: variant } }),
+      )
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <div className="relative shrink-0" data-testid="reasoning-variant-selector">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs hover:bg-[var(--muted)]"
+        style={{ borderColor: "var(--border)" }}
+        title="切换推理档位"
+      >
+        <Brain className="h-3 w-3 shrink-0 opacity-60" />
+        <span className="min-w-0 truncate">{activeVariant ? `思考 · ${activeVariant}` : "思考"}</span>
+        {saving ? (
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin opacity-60" />
+        ) : (
+          <ChevronDown className="h-3 w-3 shrink-0 opacity-50" />
+        )}
+      </button>
+
+      {error && (
+        <span
+          className="max-w-[12rem] shrink truncate text-[11px] text-red-500"
+          title={error}
+        >
+          {error}
+        </span>
+      )}
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div
+            data-testid="reasoning-variant-menu"
+            className="absolute right-0 z-40 mt-1.5 max-h-64 w-48 overflow-y-auto rounded-xl border shadow-lg"
+            style={{ borderColor: "var(--border)", background: "var(--background)" }}
+          >
+            <div className="px-3 pb-1 pt-2 text-[11px] font-medium opacity-50">思考档位</div>
+            {variants.map((variant) => {
+              const current = variant === activeVariant;
+              return (
+                <button
+                  key={variant}
+                  onClick={() => choose(variant)}
+                  aria-pressed={current}
+                  data-reasoning-variant={variant}
+                  className={clsx(
+                    "flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs transition-colors",
+                    current ? "bg-brand/10 text-brand" : "hover:bg-[var(--muted)]",
+                  )}
+                >
+                  <span className="min-w-0 truncate">{variant}</span>
+                  {current && <Check className="h-3 w-3 shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 interface ComposerProps {
@@ -207,11 +313,11 @@ export function Composer({
       <div className={clsx("mx-auto w-full", elevated ? "max-w-[720px]" : "max-w-3xl")}>
         <div
           className={clsx(
-            "flex flex-col rounded-3xl border bg-[var(--muted)]/40 transition-colors",
-            elevated ? "px-4 py-3" : "rounded-2xl px-3 py-2",
-            dragActive && "border-brand",
+            "flex flex-col rounded-3xl border bg-[var(--surface-card)] p-3 shadow-card transition-all",
+            "focus-within:border-brand focus-within:shadow-md focus-within:ring-2 focus-within:ring-brand/15",
+            dragActive && "border-brand ring-2 ring-brand/20",
           )}
-          style={dragActive ? undefined : { borderColor: "var(--border)" }}
+          style={{ borderColor: dragActive ? undefined : "var(--border)" }}
           onDragOver={(e) => {
             e.preventDefault();
             if (!disabled) setDragActive(true);
@@ -226,13 +332,14 @@ export function Composer({
             if (!disabled) addFiles(e.dataTransfer.files);
           }}
         >
+          {/* 待发送附件胶囊条 */}
           {pending.length > 0 && (
-            <div className="flex flex-wrap gap-2 px-1 pb-2 pt-1">
+            <div className="flex flex-wrap gap-2 px-1 pb-2.5 pt-0.5">
               {pending.map((p) => (
                 <div
                   key={p.key}
-                  className="flex items-center gap-2 rounded-xl border py-1 pl-1 pr-1.5 text-xs"
-                  style={{ borderColor: p.status === "error" ? "rgb(239 68 68 / 0.5)" : "var(--border)" }}
+                  className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] py-1 pl-1 pr-2 text-xs shadow-xs"
+                  style={{ borderColor: p.status === "error" ? "rgb(239 68 68 / 0.5)" : undefined }}
                   title={p.status === "error" ? "上传失败" : p.file.name}
                 >
                   {p.kind === "image" && p.previewUrl ? (
@@ -247,7 +354,7 @@ export function Composer({
                     </span>
                   )}
                   <span className="min-w-0">
-                    <span className="block max-w-[9rem] truncate">{p.file.name}</span>
+                    <span className="block max-w-[9rem] truncate font-medium">{p.file.name}</span>
                     <span className="block text-[10px] opacity-50">{formatFileSize(p.file.size)}</span>
                   </span>
                   {p.status === "uploading" && <Loader2 className="h-3 w-3 shrink-0 animate-spin opacity-60" />}
@@ -255,7 +362,7 @@ export function Composer({
                   {p.status === "error" && <span className="shrink-0 text-red-500">失败</span>}
                   <button
                     onClick={() => removePending(p.key)}
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-50 hover:bg-[var(--muted)] hover:opacity-100"
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md opacity-50 transition-opacity hover:bg-[var(--muted)] hover:opacity-100"
                     title="移除"
                   >
                     <X className="h-3 w-3" />
@@ -265,26 +372,8 @@ export function Composer({
             </div>
           )}
 
-          <div className="flex items-end gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept={ACCEPT}
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files) addFiles(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[var(--foreground)] opacity-60 transition-opacity hover:bg-[var(--muted)] hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
-              title="添加附件（图片或文档）"
-            >
-              <Paperclip className="h-4 w-4" />
-            </button>
+          {/* 舒畅输入区 */}
+          <div className="px-1">
             <textarea
               ref={textareaRef}
               value={value}
@@ -299,33 +388,62 @@ export function Composer({
               }
               disabled={disabled}
               className={clsx(
-                "min-h-[36px] flex-1 resize-none bg-transparent py-2 text-sm outline-none placeholder:opacity-50 disabled:cursor-not-allowed",
-                elevated && "py-1.5 text-[15px]",
+                "min-h-[38px] w-full resize-none bg-transparent py-1.5 text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--foreground)]/40 disabled:cursor-not-allowed",
+                elevated && "text-[15px]",
               )}
             />
-            {streaming ? (
-              <button
-                onClick={onStop}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--muted)] hover:opacity-80"
-                title="停止"
-              >
-                <Square className="h-4 w-4" />
-              </button>
-            ) : (
-              <button
-                onClick={() => void submit()}
-                disabled={!canSend}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-white transition-opacity hover:bg-brand-light disabled:opacity-30"
-                title="发送"
-              >
-                <Send className="h-4 w-4" />
-              </button>
-            )}
           </div>
 
-          {/* 模型快捷切换：从顶栏移入输入区底部 */}
-          <div className={clsx("mt-1 flex items-center gap-2 px-1", DROPDOWN_UPWARD)}>
-            <ModelSelector settings={settings} onUpdated={onUpdated} />
+          {/* 底部工具条 */}
+          <div className="mt-2 flex items-center justify-between border-t border-[var(--border)]/40 pt-2">
+            <div className="flex items-center gap-1.5">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ACCEPT}
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[var(--foreground)]/65 transition-all hover:bg-[var(--muted)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-30"
+                title="添加附件（图片或文档）"
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
+
+              {/* 模型快捷切换 + 推理档位下拉（都向上展开） */}
+              <div className={clsx("flex items-center gap-1", DROPDOWN_UPWARD)}>
+                <ModelSelector settings={settings} onUpdated={onUpdated} />
+                <ReasoningVariantSelector settings={settings} onUpdated={onUpdated} />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {streaming ? (
+                <button
+                  onClick={onStop}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--muted)] text-[var(--foreground)] transition-opacity hover:opacity-80"
+                  title="停止"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => void submit()}
+                  disabled={!canSend}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand text-white shadow-xs transition-all hover:bg-brand-light disabled:opacity-30"
+                  title="发送"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

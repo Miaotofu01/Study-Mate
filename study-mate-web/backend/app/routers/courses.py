@@ -1,13 +1,17 @@
 """课程图谱与进度路由。"""
 from __future__ import annotations
 
+from contextlib import contextmanager
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from .. import curriculum_store as cs
-from ..common import require_subject
+from .. import workspace_ctx
+from ..common import optional_workspace, require_subject
 from ..models import (
     CreateSubjectRequest,
     PatchSubjectRequest,
@@ -16,6 +20,14 @@ from ..models import (
 )
 
 router = APIRouter(prefix="/api", tags=["courses"])
+
+
+@contextmanager
+def bound_workspace(raw: str | None) -> Iterator[Path | None]:
+    """把可选的 ?workspace= query 挂进会话级上下文：没给走全局发现；
+    给了但目录不存在 422。yield 的是绑定后的路径（可能为 None）。"""
+    with workspace_ctx.bind(optional_workspace(raw)) as bound:
+        yield bound
 
 
 def _effective_views(slug: str) -> list[dict[str, Any]]:
@@ -30,8 +42,9 @@ def _effective_views(slug: str) -> list[dict[str, Any]]:
 
 
 @router.get("/courses")
-def list_courses() -> list[dict[str, Any]]:
-    return cs.list_subjects()
+def list_courses(workspace: str | None = None) -> list[dict[str, Any]]:
+    with bound_workspace(workspace):
+        return cs.list_subjects()
 
 
 @router.post("/courses")
@@ -50,24 +63,25 @@ def create_course(payload: CreateSubjectRequest) -> dict[str, Any]:
 
 
 @router.get("/courses/{slug}")
-def get_course(slug: str) -> dict[str, Any]:
-    subject = require_subject(slug)
-    curriculum = cs.get_curriculum(slug) or {}
-    edges = [
-        {"from": edge.get("from"), "to": edge.get("to"), "reason": edge.get("reason") or ""}
-        for edge in (curriculum.get("edges") or [])
-        if isinstance(edge, dict)
-    ]
-    return {
-        "subject": {
-            "name": subject.get("name", ""),
-            "slug": subject.get("slug") or slug,
-            "goal": subject.get("goal", ""),
-            "created_at": subject.get("created_at", ""),
-            "status": subject.get("status", ""),
-        },
-        "graph": {"nodes": _effective_views(slug), "edges": edges},
-    }
+def get_course(slug: str, workspace: str | None = None) -> dict[str, Any]:
+    with bound_workspace(workspace):
+        subject = require_subject(slug)
+        curriculum = cs.get_curriculum(slug) or {}
+        edges = [
+            {"from": edge.get("from"), "to": edge.get("to"), "reason": edge.get("reason") or ""}
+            for edge in (curriculum.get("edges") or [])
+            if isinstance(edge, dict)
+        ]
+        return {
+            "subject": {
+                "name": subject.get("name", ""),
+                "slug": subject.get("slug") or slug,
+                "goal": subject.get("goal", ""),
+                "created_at": subject.get("created_at", ""),
+                "status": subject.get("status", ""),
+            },
+            "graph": {"nodes": _effective_views(slug), "edges": edges},
+        }
 
 
 @router.put("/courses/{slug}/curriculum")

@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { Cable, FileText, Info } from "lucide-react";
+import { Cable, FileText, FolderOpen, Info, Palette } from "lucide-react";
 
 const navItems = [
   { href: "/settings/providers", label: "模型提供商", icon: Cable },
   { href: "/settings/system-prompt", label: "系统提示词", icon: FileText },
+  { href: "/settings/workspace", label: "工作区", icon: FolderOpen },
+  { href: "/settings/theme", label: "外观与主题", icon: Palette },
   { href: "/settings/about", label: "关于", icon: Info },
 ];
 

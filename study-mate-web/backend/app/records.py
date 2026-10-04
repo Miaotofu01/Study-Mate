@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,7 @@ from . import curriculum_store as cs
 from .config import SCHEMAS_DIR
 
 SEQ_RE = re.compile(r"^(\d+)-")
+_record_lock = threading.Lock()
 
 
 def _load_schema(name: str) -> dict[str, Any]:
@@ -116,21 +119,57 @@ def write_assessment(
     return rel
 
 
+def write_learning_record(
+    slug: str,
+    node_id: str,
+    node_title: str,
+    kind: str,
+    assessment_rel: str,
+) -> str:
+    """学习记录：仅可观察证据时写（当前入口是评估通过），编号递增、不删旧条。"""
+    with _record_lock:
+        directory = cs.subject_dir(slug) / "learning-records"
+        directory.mkdir(parents=True, exist_ok=True)
+        seq = next_seq(directory)
+        rel = f"learning-records/{seq:03d}-{node_id}.md"
+        text = (
+            "---\n"
+            f'date: "{date.today().isoformat()}"\n'
+            f"node: {node_id}\n"
+            "---\n\n"
+            f"# LR-{seq:03d} {kind}：{node_title}\n\n"
+            f"依据：`{assessment_rel}`（verdict=通过，评估作答原文为可观察证据）。\n"
+        )
+        (cs.subject_dir(slug) / rel).write_text(text, encoding="utf-8")
+        return rel
+
+
 def write_summary(slug: str, meta: dict[str, Any]) -> str:
-    directory = cs.subject_dir(slug) / "sessions"
-    directory.mkdir(parents=True, exist_ok=True)
-    day = str(meta.get("date") or "")
-    rel = f"sessions/{day}.md"
-    lines = [f"# {day} 会话摘要", "", "## 本次要点", ""]
-    lines.extend(f"- {item}" for item in meta.get("learned") or [])
-    lines.extend(["", "## 卡在哪", ""])
-    lines.extend(f"- {item}" for item in meta.get("weaknesses") or [])
-    lines.extend(["", "## 下次从哪继续", "", str(meta.get("next_step") or "")])
-    (cs.subject_dir(slug) / rel).write_text(
-        dump_front_matter(meta) + "\n" + "\n".join(lines),
-        encoding="utf-8",
-    )
-    return rel
+    with _record_lock:
+        directory = cs.subject_dir(slug) / "sessions"
+        directory.mkdir(parents=True, exist_ok=True)
+        day = str(meta.get("date") or "")
+        rel = f"sessions/{day}.md"
+        path = cs.subject_dir(slug) / rel
+        section_lines = ["## 本次要点", ""]
+        section_lines.extend(f"- {item}" for item in meta.get("learned") or [])
+        section_lines.extend(["", "## 卡在哪", ""])
+        section_lines.extend(f"- {item}" for item in meta.get("weaknesses") or [])
+        section_lines.extend(["", "## 下次从哪继续", "", str(meta.get("next_step") or "")])
+        section = "\n".join(section_lines)
+        if path.exists():
+            stamp = datetime.now().strftime("%H:%M")
+            existing = path.read_text(encoding="utf-8")
+            path.write_text(
+                existing.rstrip() + f"\n\n---\n\n## 本场摘要（{stamp}）\n\n{section}\n",
+                encoding="utf-8",
+            )
+            return rel
+        path.write_text(
+            dump_front_matter(meta) + "\n# " + f"{day} 会话摘要\n\n{section}\n",
+            encoding="utf-8",
+        )
+        return rel
 
 
 def list_records(slug: str) -> dict[str, list[dict[str, Any]]]:
@@ -170,4 +209,25 @@ def list_records(slug: str) -> dict[str, list[dict[str, Any]]]:
                     "subject": meta.get("subject", ""),
                 }
             )
-    return {"assessments": assessments, "summaries": summaries}
+    learning_records: list[dict[str, Any]] = []
+    lr_dir = base / "learning-records"
+    if lr_dir.is_dir():
+        for path in sorted(lr_dir.glob("*.md")):
+            try:
+                meta, _ = parse_front_matter(path.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+            if meta is None:
+                continue
+            learning_records.append(
+                {
+                    "file": f"learning-records/{path.name}",
+                    "date": str(meta.get("date", "")),
+                    "node": meta.get("node", ""),
+                }
+            )
+    return {
+        "assessments": assessments,
+        "summaries": summaries,
+        "learning_records": learning_records,
+    }

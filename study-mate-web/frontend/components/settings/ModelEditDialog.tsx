@@ -19,11 +19,18 @@ const INPUT_MODALITY_OPTIONS: { value: InputModality; label: string }[] = [
   { value: "pdf", label: "PDF" },
 ];
 
+// 工具调用默认对所有模型开启（2026-10-04），不再是可选项，故不在此列表；
+// 其余两项仍为落盘/展示声明。
 const CAPABILITY_OPTIONS: { key: keyof ProviderCapabilities; label: string }[] = [
-  { key: "tool_call", label: "工具调用" },
   { key: "json_schema_output", label: "JSON Schema 输出" },
   { key: "native_web_search", label: "原生联网搜索" },
 ];
+
+// 新建 / 未显式配置模态时的默认值：文本勾选
+const DEFAULT_MAX_OUTPUT_TOKENS = 32000;
+const DEFAULT_CONTEXT_WINDOW = 2560000;
+// 启用推理档位且尚无档位时的默认两档（低 → 高），默认档位取最高档
+const DEFAULT_REASONING_VARIANTS = ["disabled", "enabled"];
 
 const ADVANCED_PANEL_ID = "model-edit-advanced";
 
@@ -152,23 +159,32 @@ interface ModelEditDialogProps {
 export function ModelEditDialog({ title, initial, onSave, onCancel }: ModelEditDialogProps) {
   const [name, setName] = useState(initial.name);
   const [displayName, setDisplayName] = useState(initial.display_name ?? "");
-  const [checks, setChecks] = useState<Record<InputModality, boolean>>(() => ({
-    ...emptyModalities(),
-    ...(initial.modalities ?? {}),
-  }));
+  // 未配置过模态的模型默认勾选「文本」；已配置的按落盘值还原
+  const [checks, setChecks] = useState<Record<InputModality, boolean>>(() =>
+    initial.modalities
+      ? { ...emptyModalities(), ...initial.modalities }
+      : { ...emptyModalities(), text: true },
+  );
   const [maxOutputTokens, setMaxOutputTokens] = useState(
-    initial.max_output_tokens == null ? "" : String(initial.max_output_tokens),
+    initial.max_output_tokens == null
+      ? String(DEFAULT_MAX_OUTPUT_TOKENS)
+      : String(initial.max_output_tokens),
   );
   const [contextWindow, setContextWindow] = useState(
-    initial.context_window == null ? "" : String(initial.context_window),
+    initial.context_window == null
+      ? String(DEFAULT_CONTEXT_WINDOW)
+      : String(initial.context_window),
   );
   const [reasoningEnabled, setReasoningEnabled] = useState(initial.reasoning?.enabled ?? false);
   const [variants, setVariants] = useState<string[]>(initial.reasoning?.variants ?? []);
   const [defaultVariant, setDefaultVariant] = useState<string>(initial.reasoning?.default_variant ?? "");
-  const [capabilities, setCapabilities] = useState<ProviderCapabilities>(
-    initial.capabilities ?? { tool_call: false, json_schema_output: false, native_web_search: false },
-  );
-  const [enabled, setEnabled] = useState(initial.enabled ?? true);
+  const [capabilities, setCapabilities] = useState<ProviderCapabilities>({
+    json_schema_output: false,
+    native_web_search: false,
+    ...(initial.capabilities ?? {}),
+    // 工具调用默认对所有模型开启（2026-10-04）：落盘恒为 true，界面不再提供开关
+    tool_call: true,
+  });
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -193,6 +209,17 @@ export function ModelEditDialog({ title, initial, onSave, onCancel }: ModelEditD
     let index = variants.length + 1;
     while (variants.includes(`${base}-${index}`)) index += 1;
     setVariants((list) => [...list, `${base}-${index}`]);
+  };
+
+  // 启用推理档位：尚无档位时补默认两档（disabled / enabled），默认档位取最高档
+  const toggleReasoning = (next: boolean) => {
+    setReasoningEnabled(next);
+    if (!next) return;
+    const list = variants.length > 0 ? variants : [...DEFAULT_REASONING_VARIANTS];
+    if (variants.length === 0) setVariants(list);
+    if (!defaultVariant || !list.includes(defaultVariant)) {
+      setDefaultVariant(list[list.length - 1] ?? "");
+    }
   };
 
   const renameVariant = (index: number, value: string) => {
@@ -250,7 +277,8 @@ export function ModelEditDialog({ title, initial, onSave, onCancel }: ModelEditD
       max_output_tokens: outputTokens,
       reasoning,
       capabilities,
-      enabled,
+      // 启停由模型列表行的开关控制，弹窗不再暴露，保持原值
+      enabled: initial.enabled ?? true,
     });
   };
 
@@ -357,12 +385,17 @@ export function ModelEditDialog({ title, initial, onSave, onCancel }: ModelEditD
               id={ADVANCED_PANEL_ID}
               inert={!advancedOpen}
               className={clsx(
-                "grid border-t transition-[grid-template-rows]",
+                "grid transition-[grid-template-rows]",
                 advancedOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
               )}
-              style={{ borderColor: "var(--border)" }}
             >
-              <div className="flex flex-col gap-4 overflow-hidden px-3 py-3">
+              {/* 折叠行：外层 min-h-0 + overflow-hidden 让 grid-rows-[0fr] 真正收到 0 高；
+                  内边距与分隔线放在内层，收起时不残留一片空白条（此前「折叠不全」的根因） */}
+              <div className="min-h-0 overflow-hidden">
+              <div
+                className="flex flex-col gap-4 border-t px-3 py-3"
+                style={{ borderColor: "var(--border)" }}
+              >
               <div className="flex items-center justify-between">
                 <div className="flex flex-col">
                   <span className="text-xs font-medium opacity-70">推理档位</span>
@@ -372,7 +405,7 @@ export function ModelEditDialog({ title, initial, onSave, onCancel }: ModelEditD
                 </div>
                 <EnableSwitch
                   checked={reasoningEnabled}
-                  onChange={setReasoningEnabled}
+                  onChange={toggleReasoning}
                   label="启用推理档位"
                   title="启用或停用推理档位"
                 />
@@ -476,7 +509,18 @@ export function ModelEditDialog({ title, initial, onSave, onCancel }: ModelEditD
 
               <div className="flex flex-col gap-2">
                 <span className="text-xs font-medium opacity-70">能力声明</span>
-                <span className="text-[11px] opacity-50">仅落盘与展示，暂不影响请求</span>
+                <span className="text-[11px] opacity-50">
+                  工具调用默认对所有模型开启（上游拒绝 tools 时自动回落纯文本）；下列两项仅落盘与展示
+                </span>
+                <div className="flex items-center gap-2 text-left text-xs opacity-70" data-testid="capability-tool-call">
+                  <span
+                    className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-brand bg-brand text-white"
+                    aria-hidden="true"
+                  >
+                    <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                  </span>
+                  <span>工具调用（Agent 循环，默认开启）</span>
+                </div>
                 <div className="flex flex-col gap-2">
                   {CAPABILITY_OPTIONS.map((option) => (
                     <CapabilityCheckbox
@@ -492,20 +536,8 @@ export function ModelEditDialog({ title, initial, onSave, onCancel }: ModelEditD
                 </div>
               </div>
               </div>
+              </div>
             </div>
-          </div>
-
-          <div className="flex items-center justify-between rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)" }}>
-            <div className="flex flex-col">
-              <span className="text-xs font-medium opacity-70">启用</span>
-              <span className="text-[11px] opacity-50">停用后不出现在对话的模型选择里</span>
-            </div>
-            <EnableSwitch
-              checked={enabled}
-              onChange={setEnabled}
-              label="启用模型"
-              title="启用或停用此模型"
-            />
           </div>
 
           {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}

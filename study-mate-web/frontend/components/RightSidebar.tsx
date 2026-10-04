@@ -1,18 +1,20 @@
 "use client";
 
-import { Loader2, ScrollText } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ExternalLink, FileText, Loader2 } from "lucide-react";
+import { api } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
-import type { GraphNode } from "@/lib/types";
+import type { AttachmentsArea } from "@/lib/types";
 
-// 纯内容组件：外壳（宽度动画 / 拖拽 / inert）在 RightRail，本组件只渲染两个区段。
+// 纯内容组件：外壳（宽度动画 / 拖拽 / inert）在 RightRail，本组件只渲染各区段。
 // 折叠不再卸载内容，区段状态（如科目下拉的本地态）在折叠后依然保留。
+//
+// 2026-10-04 拍板：「会话关联」整段（科目下拉 / 生成小结 / 沉淀记忆）移除——关联改在
+// 新对话态的输入区上方；小结与沉淀记忆的入口暂时悬空（后端能力保留）。右栏只剩
+// 附件区与会话信息。
 interface RightSidebarProps {
   sessionId: string | null;
   messageCount: number;
-  nodes: GraphNode[];
-  summarizing: boolean;
-  canSummarize: boolean;
-  onSummarize: () => void;
 }
 
 function formatCreatedAt(epochSeconds: number): string {
@@ -23,83 +25,16 @@ function formatCreatedAt(epochSeconds: number): string {
   )}`;
 }
 
-export function RightSidebar({
-  sessionId,
-  messageCount,
-  nodes,
-  summarizing,
-  canSummarize,
-  onSummarize,
-}: RightSidebarProps) {
-  const { sessions, subjects, activeSubjectSlug, activeNodeId, setActiveSubject } = useWorkspace();
+export function RightSidebar({ sessionId, messageCount }: RightSidebarProps) {
+  const { sessions, subjects, activeSubjectSlug, activeWorkspace } = useWorkspace();
 
   const meta = sessionId ? sessions.find((s) => s.id === sessionId) : undefined;
   const subjectName = subjects.find((s) => s.slug === activeSubjectSlug)?.name ?? null;
 
   return (
     <>
-      {/* 关联区：科目 / 节点下拉 + 生成小结（自顶栏移入） */}
-      <div className="flex flex-col gap-3 border-b px-4 py-4" style={{ borderColor: "var(--border)" }}>
-        <span className="text-xs font-medium opacity-50">会话关联</span>
-
-        <div className="flex flex-col gap-1">
-          <span className="text-[11px] opacity-50">科目</span>
-          <select
-            value={activeSubjectSlug ?? ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              setActiveSubject(value === "" ? null : value, null);
-            }}
-            className="w-full truncate rounded-lg border bg-transparent px-2 py-1 text-xs outline-none"
-            style={{ borderColor: "var(--border)" }}
-            title="关联科目"
-          >
-            <option value="">不关联</option>
-            {subjects.map((s) => (
-              <option key={s.slug} value={s.slug}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <span className="text-[11px] opacity-50">节点</span>
-          <select
-            value={activeNodeId ?? ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              setActiveSubject(activeSubjectSlug, value === "" ? null : value);
-            }}
-            disabled={!activeSubjectSlug}
-            className="w-full truncate rounded-lg border bg-transparent px-2 py-1 text-xs outline-none disabled:opacity-40"
-            style={{ borderColor: "var(--border)" }}
-            title="关联节点"
-          >
-            <option value="">整门科目</option>
-            {nodes.map((n) => (
-              <option key={n.id} value={n.id}>
-                {n.index}. {n.title}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <button
-          onClick={onSummarize}
-          disabled={!canSummarize || summarizing}
-          className="flex items-center justify-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ borderColor: "var(--border)" }}
-          title={canSummarize ? "为本会话生成学习小结" : "需关联科目且会话中有消息"}
-        >
-          {summarizing ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <ScrollText className="h-3.5 w-3.5" />
-          )}
-          生成小结
-        </button>
-      </div>
+      {/* 附件区：仅关联科目后出现，四组文件链接（新标签页打开；按会话工作区读取） */}
+      {activeSubjectSlug && <AttachmentsAreaSection slug={activeSubjectSlug} workspace={activeWorkspace} />}
 
       {/* 元信息区 */}
       <div className="flex flex-col gap-2 px-4 py-4">
@@ -128,5 +63,106 @@ export function RightSidebar({
         </div>
       </div>
     </>
+  );
+}
+
+interface AttachmentFile {
+  /** 展示用文件名 */
+  name: string;
+  /** 相对科目目录的路径，拼到 /api/courses/{slug}/files/ 后 */
+  relPath: string;
+}
+
+/** 附件区：术语表 / 本地资料 / 学习记录 / 会话摘要，按科目目录扫描后经 /files/ 打开 */
+function AttachmentsAreaSection({ slug, workspace }: { slug: string; workspace: string | null }) {
+  const [area, setArea] = useState<AttachmentsArea | null>(null);
+
+  // 右侧栏（RightRail）挂载、科目切换、会话工作区切换时各拉一次；先清空，避免用新 slug +
+  // 旧文件名拼出脏链接
+  useEffect(() => {
+    let alive = true;
+    setArea(null);
+    api
+      .getAttachmentsArea(slug, workspace)
+      .then((res) => {
+        if (alive) setArea(res);
+      })
+      .catch(() => {
+        if (alive) setArea(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [slug, workspace]);
+
+  const groups: { label: string; files: AttachmentFile[] }[] = [
+    {
+      label: "术语表",
+      files: area?.glossary ? [{ name: area.glossary, relPath: area.glossary }] : [],
+    },
+    {
+      label: "本地资料",
+      files: (area?.reference ?? []).map((name) => ({ name, relPath: `reference/${name}` })),
+    },
+    {
+      label: "学习记录",
+      files: (area?.learning_records ?? []).map((name) => ({
+        name,
+        relPath: `learning-records/${name}`,
+      })),
+    },
+    {
+      label: "会话摘要",
+      files: (area?.sessions ?? []).map((name) => ({ name, relPath: `sessions/${name}` })),
+    },
+  ];
+
+  return (
+    <div
+      data-testid="chat-attachments-area"
+      className="flex flex-col gap-3 border-b px-4 py-4"
+      style={{ borderColor: "var(--border)" }}
+    >
+      <span className="text-xs font-medium opacity-50">附件区</span>
+
+      {!area && (
+        <div className="flex items-center gap-1.5 text-[11px] opacity-50">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          读取中…
+        </div>
+      )}
+
+      {area?.glossary === null &&
+        area.reference.length === 0 &&
+        area.learning_records.length === 0 &&
+        area.sessions.length === 0 && (
+          <span className="text-[11px] opacity-40">该科目暂无附件文件</span>
+        )}
+
+      {groups.map((group) =>
+        group.files.length === 0 ? null : (
+          <div key={group.label} className="flex flex-col gap-1">
+            <span className="text-[11px] opacity-40">
+              {group.label} · {group.files.length}
+            </span>
+            {group.files.map((file) => (
+              <a
+                key={file.relPath}
+                href={api.courseFileUrl(slug, file.relPath, workspace)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 rounded-lg px-1 py-0.5 text-[11px] transition-colors hover:bg-[var(--muted)]"
+                style={{ color: "var(--link)" }}
+                title={`${file.relPath}（新标签页打开）`}
+              >
+                <FileText className="h-3 w-3 shrink-0 opacity-60" />
+                <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-40" />
+              </a>
+            ))}
+          </div>
+        ),
+      )}
+    </div>
   );
 }

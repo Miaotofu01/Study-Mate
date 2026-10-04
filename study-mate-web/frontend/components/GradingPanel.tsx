@@ -64,33 +64,58 @@ export function GradingPanel({ slug, nodeId, onClose }: GradingPanelProps) {
   return (
     <aside
       className={clsx(
-        "flex h-full shrink-0 flex-col border-l",
-        wide ? "w-[36rem]" : "w-[22rem]",
+        "flex h-full shrink-0 flex-col border-l bg-[var(--surface-subtle)]",
+        // 宽度不超过视口的 85%/95%：窄屏下判分面板不会把 iframe 挤成 0 宽或撑宽壳层
+        wide ? "w-[min(36rem,95vw)]" : "w-[min(24rem,85vw)]",
       )}
       style={{ borderColor: "var(--border)" }}
     >
       <div
-        className="flex shrink-0 items-center gap-2 border-b px-3 py-2"
-        style={{ borderColor: "var(--border)" }}
+        className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-card)] px-4 py-2.5 shadow-xs"
       >
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">判分面板</span>
+        <span className="min-w-0 flex-1 truncate font-serif text-sm font-semibold text-[var(--foreground)]">
+          判分与练习面板
+        </span>
         <button
           onClick={() => setWide((v) => !v)}
-          className="rounded p-1 opacity-60 hover:bg-[var(--muted)] hover:opacity-100"
+          className="rounded-lg p-1.5 text-[var(--foreground)]/60 transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
           title={wide ? "收窄" : "加宽"}
         >
           {wide ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
         </button>
         <button
           onClick={onClose}
-          className="rounded p-1 opacity-60 hover:bg-[var(--muted)] hover:opacity-100"
+          className="rounded-lg p-1.5 text-[var(--foreground)]/60 transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
           title="关闭"
         >
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-3">
+      {/* 题号快速定位导轨（Chips） */}
+      {items && items.length > 0 && (
+        <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[var(--border)]/60 bg-[var(--surface-subtle)] px-4 py-2">
+          <span className="text-[11px] font-medium text-[var(--foreground)]/45">题目:</span>
+          {items.map((_, i) => (
+            <a
+              key={i}
+              href={`#quiz-item-${i}`}
+              className={clsx(
+                "flex h-6 min-w-6 items-center justify-center rounded-lg px-1.5 text-[11px] font-medium transition-all shadow-xs",
+                results[i]
+                  ? "bg-brand text-white"
+                  : answers[i]?.trim()
+                    ? "bg-brand/20 text-brand border border-brand/30"
+                    : "border border-[var(--border)] bg-[var(--surface-card)] text-[var(--foreground)]/70 hover:bg-[var(--muted)]",
+              )}
+            >
+              Q{i + 1}
+            </a>
+          ))}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-4 py-4">
         {loadError && (
           <div className="flex items-start gap-2 rounded-xl border border-red-300/50 bg-red-500/10 px-3 py-2.5 text-xs text-red-600 dark:text-red-400">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -100,60 +125,64 @@ export function GradingPanel({ slug, nodeId, onClose }: GradingPanelProps) {
 
         {!loadError && items === null && (
           <div className="flex justify-center py-10">
-            <Loader2 className="h-5 w-5 animate-spin opacity-50" />
+            <Loader2 className="h-5 w-5 animate-spin text-brand" />
           </div>
         )}
 
         {!loadError && items !== null && items.length === 0 && (
-          <p className="py-10 text-center text-sm opacity-50">该节点暂无题目</p>
+          <p className="py-10 text-center text-sm text-[var(--foreground)]/50">该节点暂无题目</p>
         )}
 
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-4">
           {items?.map((item, idx) => {
             const isChoice = Array.isArray(item.opts) && item.opts.length > 0;
             return (
               <div
                 key={idx}
-                className="rounded-xl border p-3"
-                style={{ borderColor: "var(--border)" }}
+                id={`quiz-item-${idx}`}
+                className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 shadow-xs transition-all"
               >
-                <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="rounded-md bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand">
+                    第 {idx + 1} 题 · {isChoice ? "选择题" : "开放思考题"}
+                  </span>
+                </div>
+                <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-[var(--foreground)]">
                   {item.q}
                 </pre>
 
                 {isChoice ? (
                   <>
-                    <div className="mt-2 flex flex-col gap-1">
+                    <div className="mt-3 flex flex-col gap-1.5">
                       {item.opts!.map((opt, oi) => (
                         <div
                           key={oi}
                           className={clsx(
-                            "rounded-lg px-2 py-1 text-xs",
+                            "rounded-lg px-3 py-1.5 text-xs transition-colors",
                             oi === item.ans
-                              ? "bg-green-500/10 text-green-600 dark:text-green-400"
-                              : "bg-[var(--muted)] opacity-70",
+                              ? "bg-green-500/10 text-green-700 dark:text-green-300 font-medium"
+                              : "bg-[var(--surface-subtle)] text-[var(--foreground)]/80",
                           )}
                         >
-                          {String.fromCharCode(65 + oi)}. {opt}
-                          {oi === item.ans && <span className="ml-1.5">✓ 正确答案</span>}
+                          <span className="font-semibold">{String.fromCharCode(65 + oi)}.</span> {opt}
+                          {oi === item.ans && <span className="ml-2 font-medium">✓ 正确答案</span>}
                         </div>
                       ))}
                     </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      <span className="rounded bg-brand/10 px-1.5 py-0.5 text-[10px] text-brand">
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                      <span className="rounded-md bg-brand/10 px-2 py-0.5 text-[10px] font-medium text-brand">
                         页内判分
                       </span>
-                      {item.why && <span className="text-[11px] opacity-60">✓ {item.why}</span>}
+                      {item.why && <span className="text-[11px] text-[var(--foreground)]/60">✓ {item.why}</span>}
                     </div>
                   </>
                 ) : (
                   <>
                     {item.criteria && (
-                      <div className="mt-2">
-                        <div className="mb-0.5 text-[11px] font-medium opacity-50">判分要点</div>
+                      <div className="mt-3">
+                        <div className="mb-1 text-[11px] font-medium text-[var(--foreground)]/50">判分要点与证据标准</div>
                         <pre
-                          className="whitespace-pre-wrap break-words rounded-lg px-2 py-1.5 font-mono text-[11px] leading-relaxed opacity-80"
-                          style={{ background: "var(--muted)" }}
+                          className="whitespace-pre-wrap break-words rounded-lg border border-[var(--border)]/50 bg-[var(--surface-subtle)] p-2.5 font-mono text-[11px] leading-relaxed text-[var(--foreground)]/80"
                         >
                           {item.criteria}
                         </pre>
@@ -164,36 +193,36 @@ export function GradingPanel({ slug, nodeId, onClose }: GradingPanelProps) {
                       onChange={(e) => setAnswers((prev) => ({ ...prev, [idx]: e.target.value }))}
                       rows={4}
                       placeholder="在此作答，然后提交判分…"
-                      className="mt-2 w-full resize-y rounded-lg border bg-transparent px-2 py-1.5 text-sm outline-none"
-                      style={{ borderColor: "var(--border)" }}
+                      className="mt-3 w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-2.5 text-xs text-[var(--foreground)] outline-none focus:border-brand"
                     />
-                    <button
-                      onClick={() => void submitGrade(idx, item)}
-                      disabled={busy[idx] || !(answers[idx] ?? "").trim()}
-                      className="mt-2 flex items-center gap-1.5 rounded-lg bg-brand px-2.5 py-1 text-xs text-white hover:bg-brand-light disabled:opacity-40"
-                    >
-                      {busy[idx] ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <Send className="h-3 w-3" />
-                      )}
-                      提交判分
-                    </button>
+                    <div className="mt-2 flex items-center justify-between">
+                      <button
+                        onClick={() => void submitGrade(idx, item)}
+                        disabled={busy[idx] || !(answers[idx] ?? "").trim()}
+                        className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white shadow-xs transition-colors hover:bg-brand-light disabled:opacity-40"
+                      >
+                        {busy[idx] ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Send className="h-3 w-3" />
+                        )}
+                        提交判分
+                      </button>
+                    </div>
                     {errors[idx] && (
                       <p className="mt-2 break-all text-xs text-red-500">{errors[idx]}</p>
                     )}
                     {results[idx] && (
                       <div
-                        className="mt-3 flex flex-col gap-2 rounded-lg border p-2.5"
-                        style={{ borderColor: "var(--border)" }}
+                        className="mt-3 flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-3 shadow-xs"
                       >
                         <VerdictBadge verdict={results[idx].verdict} />
                         {results[idx].evidence.length > 0 && (
                           <div>
-                            <div className="mb-0.5 text-[11px] font-medium opacity-50">证据引用</div>
-                            <ul className="list-disc pl-4">
+                            <div className="mb-1 text-[11px] font-medium text-[var(--foreground)]/50">证据引用</div>
+                            <ul className="list-disc pl-4 text-xs text-[var(--foreground)]/80">
                               {results[idx].evidence.map((e, i) => (
-                                <li key={i} className="whitespace-pre-wrap break-words opacity-80">
+                                <li key={i} className="whitespace-pre-wrap break-words">
                                   {e}
                                 </li>
                               ))}
@@ -202,10 +231,10 @@ export function GradingPanel({ slug, nodeId, onClose }: GradingPanelProps) {
                         )}
                         {results[idx].missing.length > 0 && (
                           <div>
-                            <div className="mb-0.5 text-[11px] font-medium opacity-50">缺口</div>
-                            <ul className="list-disc pl-4">
+                            <div className="mb-1 text-[11px] font-medium text-[var(--foreground)]/50">缺口与建议</div>
+                            <ul className="list-disc pl-4 text-xs text-[var(--foreground)]/80">
                               {results[idx].missing.map((m, i) => (
-                                <li key={i} className="whitespace-pre-wrap break-words opacity-80">
+                                <li key={i} className="whitespace-pre-wrap break-words text-amber-600 dark:text-amber-400">
                                   {m}
                                 </li>
                               ))}
@@ -213,7 +242,7 @@ export function GradingPanel({ slug, nodeId, onClose }: GradingPanelProps) {
                           </div>
                         )}
                         {results[idx].comment && (
-                          <p className="whitespace-pre-wrap break-words opacity-80">
+                          <p className="whitespace-pre-wrap break-words text-xs text-[var(--foreground)]/80 leading-relaxed">
                             {results[idx].comment}
                           </p>
                         )}

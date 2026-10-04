@@ -125,21 +125,34 @@ class ProviderTestRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     """发送一条消息。session_id 为空时新建会话；attachment_ids 引用
-    POST /api/uploads 返回的附件标识。"""
+    POST /api/uploads 返回的附件标识。mode 只在新建会话时生效（建课会话=interview）。
+    workspace 只在新建会话时生效：本次会话的工作区（绝对路径字符串）。"""
 
     message: str
     session_id: str | None = None
     subject_slug: str | None = None
     node_id: str | None = None
     attachment_ids: list[str] = Field(default_factory=list)
+    mode: Literal["chat", "interview"] | None = None
+    workspace: str | None = None
+    """仅 fixture 模式生效：E2E 按请求选固定流场景（interview），免改后端 env。"""
+    fixture_scenario: str | None = None
 
 
 class NewSessionRequest(BaseModel):
     title: str = "新的对话"
+    workspace: str | None = None
 
 
-class RenameSessionRequest(BaseModel):
-    title: str
+class SessionPatchRequest(BaseModel):
+    """PATCH /api/sessions/{id}：title 与 workspace 均可选。
+
+    两者的「缺省」与「显式 null」靠 model_fields_set 区分：只传 title 维持旧行为；
+    传 workspace=null 表示显式清空会话级工作区（回到全局发现）。
+    """
+
+    title: str | None = None
+    workspace: str | None = None
 
 
 class SessionMeta(BaseModel):
@@ -210,6 +223,33 @@ class GenerateCourseRequest(BaseModel):
     project: str | None = None
     carrier: str | None = None
     slug: str | None = None
+
+
+class MaterialRequest(BaseModel):
+    """建课草稿的落盘结构化资料（粘贴文本 → 转 Markdown 入 reference/）。"""
+
+    title: str
+    text: str
+
+
+class PromoteRequest(BaseModel):
+    """落点确认：target 为空时用发现链给出的工作区。"""
+
+    target: str | None = None
+
+
+class RetryTicketRequest(BaseModel):
+    """工单重试/复检：hint 为可选的学习者补充说明（进派工值）。"""
+
+    session_id: str | None = None
+    hint: str | None = None
+
+
+class TicketQuickEditRequest(BaseModel):
+    """工单单文件快改（textarea 保存回科目目录）。"""
+
+    path: str
+    content: str
 
 
 class SubjectSummary(BaseModel):

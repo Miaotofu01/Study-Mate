@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from .. import curriculum_store as cs
+from .. import prompts
 from ..common import require_node, require_provider
 from ..llm import chat_once, extract_json
 from ..models import GradeRequest
@@ -35,6 +36,9 @@ async def grade_answer(slug: str, node_id: str, payload: GradeRequest) -> dict:
     answer = payload.answer.strip()
     if not question or not criteria or not answer:
         raise HTTPException(422, "question、criteria、answer 均不能为空")
+    skill_text, missing_skills = prompts.inject("grade")
+    if missing_skills:
+        raise HTTPException(503, f"技能规范缺失，无法保证判分口径：{'、'.join(missing_skills)}")
     user_lines = [
         f"【题目】{question}",
         f"【判分要点】{criteria}",
@@ -47,6 +51,7 @@ async def grade_answer(slug: str, node_id: str, payload: GradeRequest) -> dict:
             provider,
             [
                 {"role": "system", "content": GRADE_SYSTEM_PROMPT},
+                *([{"role": "system", "content": skill_text}] if skill_text else []),
                 {"role": "user", "content": "\n".join(user_lines)},
             ],
             json_mode=True,

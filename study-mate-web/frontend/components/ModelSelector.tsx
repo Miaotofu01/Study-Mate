@@ -3,23 +3,31 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
-import { Brain, ChevronDown, Loader2 } from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ActiveProvider, AppSettings, ProviderModel } from "@/lib/types";
 
 const isUsableProvider = (p: { enabled?: boolean }) => p.enabled !== false;
 const isUsableModel = (m: { enabled?: boolean }) => m.enabled !== false;
 
-function modelVariant(model: ProviderModel | null): string | null {
+/** 某模型的默认推理档位；reasoning 未启用时为 null */
+export function modelVariant(model: ProviderModel | null): string | null {
   const reasoning = model?.reasoning;
   if (!reasoning?.enabled) return null;
   return reasoning.default_variant ?? null;
 }
 
-function modelVariants(model: ProviderModel | null): string[] {
+/** 模型的可选推理档位列表；reasoning 未启用时为空 */
+export function modelVariants(model: ProviderModel | null): string[] {
   const reasoning = model?.reasoning;
   if (!reasoning?.enabled) return [];
   return (reasoning.variants ?? []).filter((item) => item.trim().length > 0);
+}
+
+/** 当前 active 配置指向的那个模型；提供商或模型没配好时为 null */
+export function activeModelOf(settings: AppSettings): ProviderModel | null {
+  const entry = settings.providers.find((p) => p.id === settings.active.provider_id) ?? null;
+  return entry?.models.find((m) => m.name === settings.active.model) ?? null;
 }
 
 interface ModelSelectorProps {
@@ -52,11 +60,7 @@ export function ModelSelector({ settings, onUpdated }: ModelSelectorProps) {
     ? `${activeEntry.name} / ${settings.active.model || "未选模型"}`
     : "未选择模型";
 
-  const activeModel: ProviderModel | null =
-    activeEntry?.models.find((m) => m.name === settings.active.model) ?? null;
-  const variants = modelVariants(activeModel);
-  const activeVariant: string | null =
-    settings.active.reasoning_variant || modelVariant(activeModel);
+  const activeModel: ProviderModel | null = activeModelOf(settings);
 
   const save = async (active: ActiveProvider) => {
     setOpen(false);
@@ -86,14 +90,6 @@ export function ModelSelector({ settings, onUpdated }: ModelSelectorProps) {
       model: model.name,
       reasoning_variant: modelVariant(model),
     });
-  };
-
-  const setVariant = (variant: string) => {
-    if (!settings.active.provider_id || variant === activeVariant) {
-      setOpen(false);
-      return;
-    }
-    void save({ ...settings.active, reasoning_variant: variant });
   };
 
   return (
@@ -158,35 +154,6 @@ export function ModelSelector({ settings, onUpdated }: ModelSelectorProps) {
             ))}
             {settings.providers.filter(isUsableProvider).length === 0 && (
               <p className="px-3 py-2 text-[11px] opacity-40">没有已启用的提供商</p>
-            )}
-
-            {variants.length > 0 && (
-              <div className="border-t px-3 py-2" style={{ borderColor: "var(--border)" }}>
-                <div className="mb-1.5 flex items-center gap-1 text-[11px] font-medium opacity-50">
-                  <Brain className="h-3 w-3" />
-                  思考档位
-                </div>
-                <div className="flex flex-wrap items-center gap-1">
-                  {variants.map((variant) => (
-                    <button
-                      key={variant}
-                      onClick={() => setVariant(variant)}
-                      aria-pressed={activeVariant === variant}
-                      data-reasoning-variant={variant}
-                      className={clsx(
-                        "rounded-md px-1.5 py-1 text-[11px] transition-colors",
-                        activeVariant === variant
-                          ? "bg-brand text-white"
-                          : "border hover:bg-[var(--muted)]",
-                      )}
-                      style={activeVariant === variant ? undefined : { borderColor: "var(--border)" }}
-                      title={`思考档位：${variant}`}
-                    >
-                      {variant}
-                    </button>
-                  ))}
-                </div>
-              </div>
             )}
           </div>
         </>

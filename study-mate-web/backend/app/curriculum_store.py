@@ -1,10 +1,9 @@
-"""课程仓储层：<workspace>/subjects/<slug>/{subject,curriculum,progress}.yaml。
+"""课程仓储层：<workspace>/.learning/subjects/<slug>/{subject,curriculum,progress}.yaml。
 
-工作区默认在 <study-mate-web>/data/workspace（`STUDYMATE_WORKSPACE` 可覆盖）。
+工作区与插件 `.learning` 布局同构，发现规则见 app/workspace.py（复用上游 learn_workspace()）。
 """
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import uuid
@@ -14,7 +13,7 @@ from typing import Any
 
 import yaml
 
-from .config import BASE_DIR, DATA_DIR
+from . import workspace_ctx
 
 NODE_STATUSES = [
     "未开始",
@@ -42,16 +41,13 @@ TRANSITIONS: dict[str, list[str]] = {
 }
 DONE_STATUSES = {"能独立应用", "已通过项目验证"}
 
-SEED_DIR = BASE_DIR / "seed"
-
-
 def workspace_dir() -> Path:
-    override = os.getenv("STUDYMATE_WORKSPACE")
-    return Path(override) if override else DATA_DIR / "workspace"
+    # 会话级上下文收口点：bundle 了 ContextVar 绑定就用它，否则回到全局发现
+    return workspace_ctx.resolve()
 
 
 def subjects_dir() -> Path:
-    return workspace_dir() / "subjects"
+    return workspace_dir() / ".learning" / "subjects"
 
 
 def subject_dir(slug: str) -> Path:
@@ -76,20 +72,9 @@ def _write_yaml(path: Path, data: dict[str, Any]) -> None:
         yaml.safe_dump(data, fh, allow_unicode=True, sort_keys=False)
 
 
-def _yaml_only(_dir: str, names: list[str]) -> set[str]:
-    return {n for n in names if not n.endswith((".yaml", ".yml"))}
-
-
 def ensure_workspace() -> None:
-    subjects = subjects_dir()
-    subjects.mkdir(parents=True, exist_ok=True)
-    if any(subjects.iterdir()):
-        return
-    if not SEED_DIR.exists():
-        return
-    for child in sorted(SEED_DIR.iterdir()):
-        if child.is_dir():
-            shutil.copytree(child, subjects / child.name, ignore=_yaml_only)
+    # 只建目录，不种入示例：默认工作区与插件共用，不往插件在用的目录塞示例数据
+    subjects_dir().mkdir(parents=True, exist_ok=True)
 
 
 def is_valid_slug(slug: str) -> bool:

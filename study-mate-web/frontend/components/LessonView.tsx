@@ -58,10 +58,12 @@ export function LessonView() {
   };
 
   return (
-    <div className="flex h-full flex-col">
+    // 壳层自身不产出横向滚动：主体行 overflow-hidden，判分面板再宽也只在内部裁切，
+    // 返回/工具按钮（shrink-0）在窄屏下始终可达；iframe 内的渲染产物不受影响。
+    <div className="flex h-full min-w-0 flex-col overflow-hidden">
       {/* 顶栏 */}
       <div
-        className="flex items-center gap-3 border-b px-4 py-2.5"
+        className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5 sm:gap-3 sm:px-4"
         style={{ borderColor: "var(--border)" }}
       >
         <button
@@ -69,7 +71,7 @@ export function LessonView() {
           className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs hover:bg-[var(--muted)]"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          返回图谱
+          <span className="hidden sm:inline">返回图谱</span>
         </button>
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
           {lesson?.title ?? nodeId ?? "课件"}
@@ -84,16 +86,16 @@ export function LessonView() {
           style={panelOpen ? undefined : { borderColor: "var(--border)" }}
         >
           <ListChecks className="h-3.5 w-3.5" />
-          判分面板
+          <span className="hidden sm:inline">判分面板</span>
         </button>
       </div>
 
-      {/* 主体 */}
-      <div className="flex min-h-0 flex-1">
+      {/* 主体：iframe 与判分面板都限制在本行内，不把壳层撑宽 */}
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {fileSrc ? (
           <iframe src={fileSrc} title={lesson?.title ?? "课件"} className="h-full min-w-0 flex-1 border-0" />
         ) : (
-          <div className="flex h-full flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+          <div className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
             {!subject || !nodeId ? (
               <p className="text-sm opacity-60">缺少 subject 或 node 参数</p>
             ) : error ? (

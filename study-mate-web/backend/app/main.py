@@ -20,10 +20,13 @@ from .routers import (
     generate,
     lessons,
     misconceptions,
+    memory,
     practice,
+    production,
     records,
     settings_router,
     uploads,
+    workspace,
 )
 
 
@@ -36,7 +39,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="StudyMate Web Runtime", version="0.4.0-beta", lifespan=lifespan)
+app = FastAPI(title="StudyMate Web Runtime", version="0.5.0-beta", lifespan=lifespan)
 
 # 开发阶段允许前端 dev server 跨域；生产由 Next.js 同源代理，CORS 不生效
 app.add_middleware(
@@ -49,14 +52,17 @@ app.add_middleware(
 
 app.include_router(chat.router)
 app.include_router(settings_router.router)
+app.include_router(workspace.router)
 app.include_router(uploads.router)
 app.include_router(courses.router)
 app.include_router(misconceptions.router)
+app.include_router(memory.router)
 app.include_router(lessons.router)
 app.include_router(practice.router)
 app.include_router(records.router)
 app.include_router(export.router)
 app.include_router(generate.router)
+app.include_router(production.router)
 
 
 @app.get("/api/health")

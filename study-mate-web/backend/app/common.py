@@ -2,17 +2,30 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
 from . import curriculum_store as cs
+from . import workspace_ctx
 from .config import get_active_provider
 from .llm import is_fixture_mode
 
 
 def today() -> str:
     return date.today().isoformat()
+
+
+def optional_workspace(raw: str | None) -> Path | None:
+    """可选的工作区路径参数：没传（或空串）返回 None；给了就必须是存在的目录，
+    否则 422。返回值直接交给 workspace_ctx.bind 使用。"""
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        return workspace_ctx.validate_dir(str(raw))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 def require_subject(slug: str) -> dict[str, Any]:

@@ -8,8 +8,10 @@ from fastapi.responses import JSONResponse
 
 from .. import curriculum_store as cs
 from .. import misconceptions as mc
+from .. import prompts
 from .. import records as records_svc
 from .. import storage
+from .. import workspace_ctx
 from ..common import require_node, require_provider, require_subject, today
 from ..llm import chat_once
 from ..models import AssessRequest, SummaryRequest
@@ -74,9 +76,19 @@ def _format_messages(messages: list[dict[str, Any]], limit: int = 30, width: int
 
 @router.post("/courses/{slug}/nodes/{node_id}/assess")
 async def assess_node(slug: str, node_id: str, payload: AssessRequest):
+    """评估：请求带 session_id 时，沿该会话绑定的会话级工作区落盘与读课程。"""
+    context = storage.session_workspace(payload.session_id)
+    with workspace_ctx.bind(context):
+        return await _assess_node(slug, node_id, payload)
+
+
+async def _assess_node(slug: str, node_id: str, payload: AssessRequest):
     subject = require_subject(slug)
     node, index = require_node(slug, node_id)
     provider = require_provider()
+    skill_text, missing_skills = prompts.inject("assess")
+    if missing_skills:
+        raise HTTPException(503, f"技能规范缺失，无法保证评估口径：{'、'.join(missing_skills)}")
     session = _session_for_subject(slug, payload.session_id)
     messages_text = _format_messages(session.get("messages") or [])
     topics_text = (
@@ -120,6 +132,7 @@ async def assess_node(slug: str, node_id: str, payload: AssessRequest):
             provider,
             [
                 {"role": "system", "content": ASSESS_SYSTEM_PROMPT},
+                *([{"role": "system", "content": skill_text}] if skill_text else []),
                 {"role": "user", "content": "\n".join(user_lines)},
             ],
             fixture_kind="assess",
@@ -145,33 +158,75 @@ async def assess_node(slug: str, node_id: str, payload: AssessRequest):
 
     progress_updated = False
     effective = None
+    promoted: list[dict[str, Any]] = []
+    learning_record: str | None = None
     if meta.get("verdict") == "通过":
         progress = cs.get_progress(slug)
         entries = progress.setdefault("nodes", {})
         node_entry = dict(entries.get(node_id) or {})
-        current = node_entry.get("status") or node.get("status") or "未开始"
         target = "已通过项目验证" if node.get("kind") == "实验" else "能独立应用"
-        if target in cs.TRANSITIONS.get(current, []) and target != current:
-            node_entry["status"] = target
-            mastery = meta.get("mastery")
-            if isinstance(mastery, (int, float)) and not isinstance(mastery, bool):
-                node_entry["mastery"] = round(max(0.0, min(1.0, float(mastery))), 2)
-            entries[node_id] = node_entry
-            cs.save_progress(slug, progress)
-            progress_updated = True
-            effective = cs.effective_node(node, node_entry, index, cs.TRANSITIONS)
+        # 评估通过是权威置位（record-keeping 硬规则）；实验课再连 prerequisites 一起置位
+        node_entry["status"] = target
+        mastery = meta.get("mastery")
+        if isinstance(mastery, (int, float)) and not isinstance(mastery, bool):
+            suggested = round(max(0.0, min(1.0, float(mastery))), 2)
+            if node.get("kind") == "实验":
+                # 上游 record-keeping：实验课置位时掌握度「保留或上调」，不因单次评估降级
+                previous = node_entry.get("mastery")
+                if isinstance(previous, (int, float)) and not isinstance(previous, bool):
+                    suggested = max(suggested, round(float(previous), 2))
+            node_entry["mastery"] = suggested
+        entries[node_id] = node_entry
+        promoted.append({"id": node_id, "title": node.get("title", ""), "status": target})
+        if node.get("kind") == "实验":
+            curriculum = cs.get_curriculum(slug) or {}
+            for prereq_id in node.get("prerequisites") or []:
+                prereq_entry = dict(entries.get(prereq_id) or {})
+                if prereq_entry.get("status") == "已通过项目验证":
+                    continue
+                prereq_entry["status"] = "已通过项目验证"
+                entries[prereq_id] = prereq_entry
+                prereq_title = next(
+                    (
+                        str(n.get("title") or "")
+                        for n in curriculum.get("nodes") or []
+                        if isinstance(n, dict) and n.get("id") == prereq_id
+                    ),
+                    prereq_id,
+                )
+                promoted.append({"id": prereq_id, "title": prereq_title, "status": "已通过项目验证"})
+        cs.save_progress(slug, progress)
+        progress_updated = True
+        effective = cs.effective_node(node, node_entry, index, cs.TRANSITIONS)
+        learning_record = records_svc.write_learning_record(
+            slug,
+            node_id,
+            str(node.get("title") or ""),
+            "实验通过" if node.get("kind") == "实验" else "评估通过",
+            record_file,
+        )
 
     return {
         "ok": True,
         "record_file": record_file,
         "assessment": meta,
         "progress_updated": progress_updated,
+        "promoted": promoted,
+        "learning_record": learning_record,
         "node": effective,
     }
 
 
 @router.post("/courses/{slug}/sessions/{session_id}/summary")
 async def summarize_session(slug: str, session_id: str, payload: SummaryRequest | None = None):
+    """会话小结：沿该会话绑定的会话级工作区写 records/sessions。"""
+    with workspace_ctx.bind(storage.session_workspace(session_id)):
+        return await _summarize_session(slug, session_id, payload)
+
+
+async def _summarize_session(
+    slug: str, session_id: str, payload: SummaryRequest | None = None
+) -> Any:
     subject = require_subject(slug)
     session = storage.get_session(session_id)
     if session is None:
@@ -180,6 +235,9 @@ async def summarize_session(slug: str, session_id: str, payload: SummaryRequest 
     if not messages:
         raise HTTPException(422, "会话没有消息，无法生成小结")
     provider = require_provider()
+    skill_text, missing_skills = prompts.inject("summary")
+    if missing_skills:
+        raise HTTPException(503, f"技能规范缺失，无法保证小结口径：{'、'.join(missing_skills)}")
 
     user_lines = [
         f"【科目】{subject.get('name', '')}",
@@ -208,6 +266,7 @@ async def summarize_session(slug: str, session_id: str, payload: SummaryRequest 
             provider,
             [
                 {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+                *([{"role": "system", "content": skill_text}] if skill_text else []),
                 {"role": "user", "content": "\n".join(user_lines)},
             ],
             fixture_kind="summary",

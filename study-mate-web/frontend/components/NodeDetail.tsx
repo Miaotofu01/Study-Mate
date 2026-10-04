@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   BookOpen,
+  Brain,
   Check,
   ClipboardCheck,
   ExternalLink,
@@ -12,10 +13,13 @@ import {
   MessageSquare,
   Save,
   Sparkles,
+  Wand2,
 } from "lucide-react";
 import clsx from "clsx";
-import { api } from "@/lib/api";
+import { api, produceNode } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
+import { InspectionDialog } from "./InspectionDialog";
+import { MemoryDialog } from "./MemoryDialog";
 import { VerdictBadge } from "./VerdictBadge";
 import type {
   AssessResponse,
@@ -23,6 +27,7 @@ import type {
   GraphNode,
   LabStatus,
   LessonInfo,
+  MisconceptionItem,
   NodeKind,
   NodeStatus,
 } from "@/lib/types";
@@ -72,6 +77,22 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
   const [assessResult, setAssessResult] = useState<AssessResponse | null>(null);
   const [assessError, setAssessError] = useState<string | null>(null);
   const [records, setRecords] = useState<AssessmentRecord[] | null>(null);
+  // 本次评估实际使用的会话 id：评估通过后的「沉淀记忆」入口从该会话提炼
+  const [assessedSessionId, setAssessedSessionId] = useState<string | null>(null);
+  // 「沉淀记忆」确认面板（评估通过后开，不预填，走 suggest）
+  const [memoryOpen, setMemoryOpen] = useState(false);
+
+  // 产课链（§5.1 C 行）：讲解→出题→渲染→检查→打回；进度内联播报，失败开工单
+  const [producing, setProducing] = useState(false);
+  const [produceLines, setProduceLines] = useState<string[]>([]);
+  const [produceError, setProduceError] = useState<string | null>(null);
+  const [produced, setProduced] = useState(false);
+  const [openTicketId, setOpenTicketId] = useState<string | null>(null);
+  const [nodeTicketId, setNodeTicketId] = useState<string | null>(null);
+  const nodeIdRef = useRef(node.id);
+  useEffect(() => {
+    nodeIdRef.current = node.id;
+  }, [node.id]);
 
   useEffect(() => {
     setMastery(node.mastery);
@@ -83,6 +104,13 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
     setAssessResult(null);
     setAssessError(null);
     setExtraContext("");
+    setAssessedSessionId(null);
+    setMemoryOpen(false);
+    setProducing(false);
+    setProduceLines([]);
+    setProduceError(null);
+    setProduced(false);
+    setOpenTicketId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在切换节点时重置；保存后的值由 save() 自己同步，避免抹掉"已保存"反馈
   }, [node.id]);
 
@@ -107,6 +135,68 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
       alive = false;
     };
   }, [slug, node.id]);
+
+  // 本节点未关闭的质检工单（角标入口）
+  useEffect(() => {
+    let alive = true;
+    api
+      .listTickets(slug, true)
+      .then((tickets) => {
+        if (alive) {
+          const mine = tickets.find((t) => t.node_id === node.id);
+          setNodeTicketId(mine?.id ?? null);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [slug, node.id]);
+
+  const runProduce = () => {
+    if (producing) return;
+    const runningNodeId = node.id;
+    setProducing(true);
+    setProduceLines([]);
+    setProduceError(null);
+    setProduced(false);
+    const mark = (line: string) => setProduceLines((prev) => [...prev, line]);
+    void produceNode(slug, runningNodeId, {
+      onSession: () => undefined,
+      onStage: (payload) => {
+        if (payload.status === "done") mark(`✅ ${payload.stage}完成`);
+        else if (payload.status === "fail") mark(`⚠ ${payload.stage}未过`);
+      },
+      onRetry: (payload) =>
+        mark(
+            `🔁 第 ${payload.round} 轮打回（${payload.owners.join("、")}）${
+                payload.reason ? `：${payload.reason}` : "，附报错原文重派"
+            }`,
+        ),
+      onHandoff: (payload) => {
+        mark("⛔ 打回两轮仍未通过，已转人工");
+        setNodeTicketId(payload.ticket.id);
+      },
+      onDone: () => {
+        if (nodeIdRef.current !== runningNodeId) return; // 在途产课的结果不写进切走后的节点视图
+        setProduced(true);
+        setHasLesson(true);
+        lessonsCache.delete(slug); // 课件列表缓存失效：切走再切回不回退按钮标签
+      },
+      onError: (message) => {
+        if (nodeIdRef.current !== runningNodeId) return;
+        setProduceError(message);
+      },
+    })
+      .catch((err) => {
+        if (nodeIdRef.current === runningNodeId) {
+          setProduceError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (nodeIdRef.current === runningNodeId) setProducing(false);
+      });
+  };
 
   const save = async (payload: {
     status?: NodeStatus;
@@ -169,6 +259,8 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
         extra_context: trimmed ? trimmed : undefined,
       });
       setAssessResult(res);
+      // 记下本次评估用的会话：评估通过后的记忆入口按它提炼
+      setAssessedSessionId(selectedSessionId);
       if (res.node) onUpdated(res.node);
     } catch (err) {
       setAssessError(err instanceof Error ? err.message : String(err));
@@ -207,6 +299,47 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
             打开课件
           </button>
         )}
+
+        {/* 产课链入口（§5.1 C 行）：讲解→出题→渲染→检查，打回耗尽转人工 */}
+        <div className="mb-4 flex flex-col gap-2 rounded-xl border p-3" style={{ borderColor: "var(--border)" }}>
+          <button
+            data-testid="produce-button"
+            onClick={runProduce}
+            disabled={producing}
+            className="flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-[var(--muted)] disabled:opacity-50"
+            style={{ borderColor: "var(--border)" }}
+            title="为该节点产出课件：讲解与出题由角色子代理完成，渲染与质检由后端跑上游脚本"
+          >
+            {producing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+            {producing ? "产课进行中…" : hasLesson ? "重新产出此课" : "产出此课"}
+          </button>
+          {nodeTicketId && (
+            <button
+              data-testid="node-ticket-entry"
+              onClick={() => setOpenTicketId(nodeTicketId)}
+              className="flex items-center justify-center gap-1.5 rounded-lg border border-amber-400/50 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+            >
+              ⚠ 有待处理的质检工单，点击查看
+            </button>
+          )}
+          {produceLines.length > 0 && (
+            <div data-testid="produce-progress" className="flex flex-col gap-1 rounded-lg px-2 py-1.5 text-xs" style={{ background: "var(--muted)" }}>
+              {produceLines.map((line, i) => (
+                <span key={i}>{line}</span>
+              ))}
+            </div>
+          )}
+          {produced && !producing && (
+            <div data-testid="produce-done" className="flex items-center gap-1.5 text-xs text-emerald-600">
+              <Check className="h-3.5 w-3.5" /> 课件已产出并通过质检，可以打开学习了。
+            </div>
+          )}
+          {produceError && (
+            <div data-testid="produce-error" className="text-xs text-amber-600">
+              {produceError}
+            </div>
+          )}
+        </div>
 
         <Section label="目标">
           <p className="text-sm leading-relaxed">{node.objective || "—"}</p>
@@ -402,6 +535,9 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
           </div>
         )}
 
+        {/* 本节点误解（概念本的节点维度入口，2026-10-04 连贯化拍板） */}
+        <NodeMisconceptions slug={slug} nodeId={node.id} />
+
         {/* 申请评估 */}
         <div
           className="mt-4 flex flex-col gap-3 rounded-xl border p-3"
@@ -468,8 +604,21 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
               {assessError && <p className="break-all text-xs text-red-500">{assessError}</p>}
 
               {assessResult && (
-                <div data-testid="assess-result">
+                <div data-testid="assess-result" className="flex flex-col gap-2">
                   <AssessResultPanel result={assessResult} />
+                  {/* 评估通过：把本次评估会话里值得长期记住的内容写进 MEMORY.md */}
+                  {assessResult.assessment.verdict === "通过" && assessedSessionId && (
+                    <button
+                      onClick={() => setMemoryOpen(true)}
+                      data-testid="memory-entry-assess"
+                      className="flex items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs hover:bg-[var(--muted)]"
+                      style={{ borderColor: "var(--border)" }}
+                      title="从本次评估会话提炼值得长期记住的内容，逐条确认后写入 MEMORY.md"
+                    >
+                      <Brain className="h-3.5 w-3.5" />
+                      沉淀记忆
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -513,6 +662,96 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
           问 StudyMate
         </button>
       </div>
+
+      {/* 记忆写侧确认面板：fixed 遮罩，挂在节点详情根上避免被滚动容器裁切 */}
+      {memoryOpen && assessedSessionId && (
+        <MemoryDialog
+          key={`${node.id}-${assessedSessionId}`}
+          sessionId={assessedSessionId}
+          onClose={() => setMemoryOpen(false)}
+        />
+      )}
+
+      {/* 质检工单模态（产课失败 / 节点角标入口） */}
+      {openTicketId && (
+        <InspectionDialog
+          ticketId={openTicketId}
+          onClose={() => setOpenTicketId(null)}
+          onResolved={() => setNodeTicketId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+const MISCONCEPTION_IMPORTANCE_LABEL: Record<string, string> = {
+  high: "高",
+  medium: "中",
+  low: "低",
+};
+
+/** 本节点误解：概念本的节点维度入口（列出条目 + 带参跳转概念本管理）。 */
+function NodeMisconceptions({ slug, nodeId }: { slug: string; nodeId: string }) {
+  const [items, setItems] = useState<MisconceptionItem[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setItems(null);
+    api
+      .listMisconceptions(slug, { node_id: nodeId })
+      .then((res) => {
+        if (alive) setItems(res.items);
+      })
+      .catch(() => {
+        if (alive) setItems([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [slug, nodeId]);
+
+  return (
+    <div className="mt-4 flex flex-col gap-2 rounded-xl border p-3" style={{ borderColor: "var(--border)" }}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">本节点误解</span>
+        <a
+          href={`/misconceptions?subject=${encodeURIComponent(slug)}&node=${encodeURIComponent(nodeId)}`}
+          className="flex shrink-0 items-center gap-1 text-xs text-brand-light hover:underline"
+          title="在概念本中查看与管理"
+        >
+          概念本
+          <ExternalLink className="h-3 w-3" />
+        </a>
+      </div>
+      {items === null && (
+        <span className="flex items-center gap-1.5 text-xs opacity-50">
+          <Loader2 className="h-3 w-3 animate-spin" /> 读取中…
+        </span>
+      )}
+      {items !== null && items.length === 0 && (
+        <span className="text-xs opacity-40">本节点暂无误解记录</span>
+      )}
+      {items !== null && items.length > 0 && (
+        <ul className="flex flex-col gap-1.5">
+          {items.map((item) => (
+            <li
+              key={item.id}
+              className="rounded-lg px-2 py-1.5 text-xs"
+              style={{ background: "var(--muted)" }}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="shrink-0 rounded px-1 text-[10px] font-medium opacity-70">
+                  {MISCONCEPTION_IMPORTANCE_LABEL[item.importance] ?? item.importance}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-medium" title={item.topic}>
+                  {item.topic}
+                </span>
+              </div>
+              <p className="mt-0.5 line-clamp-2 opacity-70">{item.misunderstanding}</p>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

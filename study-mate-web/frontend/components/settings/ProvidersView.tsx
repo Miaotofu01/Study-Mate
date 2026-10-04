@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   Cable,
@@ -75,7 +75,8 @@ function defaultModel(name: string): ProviderModel {
     context_window: null,
     max_output_tokens: null,
     reasoning: null,
-    capabilities: null,
+    // 工具调用默认对所有模型开启（2026-10-04）
+    capabilities: { tool_call: true, json_schema_output: false, native_web_search: false },
     enabled: true,
   };
 }
@@ -103,7 +104,7 @@ function normalizeModel(model: ProviderModel): ProviderModel {
       : null,
     capabilities: model.capabilities
       ? {
-          tool_call: model.capabilities.tool_call ?? false,
+          tool_call: model.capabilities.tool_call ?? true,
           json_schema_output: model.capabilities.json_schema_output ?? false,
           native_web_search: model.capabilities.native_web_search ?? false,
         }
@@ -193,16 +194,28 @@ export function ProvidersView() {
   const [draft, setDraft] = useState<ProviderDraft | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [justSaved, setJustSaved] = useState(false);
+  // 实时生效：所有编辑走防抖落盘，状态只用于头部反馈（无需「保存」按钮）
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [actionError, setActionError] = useState<string | null>(null);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ latency_ms: number; sample: string } | null>(null);
-  const [testError, setTestError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [modelTests, setModelTests] = useState<Record<number, ModelTestState>>({});
+
+  // 防抖落盘要读最新值：state 在事件回调里可能还是旧的，统一用 ref 兜住
+  const settingsRef = useRef<AppSettings | null>(null);
+  settingsRef.current = settings;
+  const draftRef = useRef<ProviderDraft | null>(null);
+  draftRef.current = draft;
+  const apiKeyRef = useRef("");
+  apiKeyRef.current = apiKeyInput;
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedFlashRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flashSaved = useCallback(() => {
+    setSaveState("saved");
+    if (savedFlashRef.current) clearTimeout(savedFlashRef.current);
+    savedFlashRef.current = setTimeout(() => setSaveState("idle"), 1600);
+  }, []);
 
   const clearEditorState = useCallback(() => {
     setMenuOpen(false);
@@ -222,7 +235,6 @@ export function ProvidersView() {
         setSelectedId(entry?.id ?? null);
         setDraft(entry ? toDraft(entry, false) : null);
         setApiKeyInput(entry?.api_key ?? "");
-        setDirty(false);
         clearEditorState();
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : String(err));
@@ -235,41 +247,121 @@ export function ProvidersView() {
     void load();
   }, [load]);
 
-  const clearTransient = () => {
-    setTestResult(null);
-    setTestError(null);
-    setActionError(null);
-  };
+  /**
+   * 即时落盘：把当前（或显式传入的）草稿合并进 providers 后 PUT。
+   * 不回读 settings，避免把用户正在输入的内容冲掉；本地状态即权威。
+   */
+  const saveDraft = useCallback(
+    async (
+      opts: { draftOverride?: ProviderDraft; active?: ActiveProvider; apiKey?: string } = {},
+    ): Promise<boolean> => {
+      const current = opts.draftOverride ?? draftRef.current;
+      const s = settingsRef.current;
+      if (!current || !s) return true;
+      if (!current.name.trim()) {
+        setActionError("请填写提供商名称");
+        return false;
+      }
+      const key = opts.apiKey ?? apiKeyRef.current;
+      const cleaned = cleanModels(current.models);
+      let providers = s.providers;
+      let active = opts.active ?? s.active;
+      const entry: ProviderEntry = {
+        id: current.id,
+        name: current.name.trim(),
+        kind: current.kind,
+        preset_key: current.preset_key,
+        base_url: current.base_url.trim(),
+        api_key: key || current.api_key,
+        has_key: current.has_key || key.length > 0,
+        api_format: current.api_format,
+        models: cleaned,
+        created_at: current.created_at,
+        enabled: current.enabled,
+      };
+      providers = current.isNew
+        ? [...providers.filter((p) => p.id !== current.id), entry]
+        : providers.map((p) => (p.id === current.id ? entry : p));
+      // 当前使用中的模型被删掉时顺延到该提供商的第一个模型（没有则回退到其它可用提供商）
+      if (active.provider_id === current.id && !cleaned.some((m) => m.name === active.model)) {
+        if (cleaned.length > 0) {
+          active = {
+            provider_id: current.id,
+            model: cleaned[0].name,
+            reasoning_variant: modelVariant(cleaned[0]),
+          };
+        } else {
+          const fallback = providers.find(
+            (p) =>
+              p.id !== current.id &&
+              (p.enabled ?? true) &&
+              p.models.some((m) => m.enabled ?? true),
+          );
+          active = fallback ? activeForProvider(fallback) : { provider_id: "", model: "" };
+        }
+      }
+      setSettings((prev) => (prev ? { ...prev, providers, active } : prev));
+      setActionError(null);
+      setSaveState("saving");
+      try {
+        await api.saveSettings({ providers, active, system_prompt: s.system_prompt });
+        flashSaved();
+        return true;
+      } catch (err) {
+        setSaveState("idle");
+        setActionError(err instanceof Error ? err.message : String(err));
+        return false;
+      }
+    },
+    [flashSaved],
+  );
 
-  const leaveDraft = (): boolean => {
-    if (!dirty) return true;
-    if (!window.confirm("当前提供商有未保存的更改，确定放弃？")) return false;
-    if (draft?.isNew) {
-      setSettings((s) =>
-        s ? { ...s, providers: s.providers.filter((p) => p.id !== draft.id) } : s,
-      );
-    }
-    return true;
-  };
+  // 防抖落盘：编辑期间合并请求；切换提供商 / 卸载前用 flushSave 立即落盘
+  const scheduleSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      void saveDraft();
+    }, 500);
+  }, [saveDraft]);
 
-  const selectProvider = (id: string) => {
+  const flushSave = useCallback(async (): Promise<boolean> => {
+    if (!saveTimerRef.current) return true;
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    return saveDraft();
+  }, [saveDraft]);
+
+  // 卸载（含切页）时把挂起的防抖改动落盘
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void saveDraft();
+      }
+      if (savedFlashRef.current) clearTimeout(savedFlashRef.current);
+    },
+    [saveDraft],
+  );
+
+  const selectProvider = async (id: string) => {
     if (!adding && id === selectedId) return;
-    if (!leaveDraft()) return;
-    clearTransient();
+    await flushSave();
     clearEditorState();
     setAdding(false);
-    const entry = settings?.providers.find((p) => p.id === id) ?? null;
+    setActionError(null);
+    const entry = settingsRef.current?.providers.find((p) => p.id === id) ?? null;
     setSelectedId(entry ? id : null);
     setDraft(entry ? toDraft(entry, false) : null);
     setApiKeyInput(entry?.api_key ?? "");
-    setDirty(false);
   };
 
-  const openAdd = () => {
+  const openAdd = async () => {
     if (adding) return;
-    if (!leaveDraft()) return;
-    clearTransient();
+    await flushSave();
     clearEditorState();
+    setActionError(null);
     setAdding(true);
   };
 
@@ -310,24 +402,26 @@ export function ProvidersView() {
       };
     }
     setSettings((s) => (s ? { ...s, providers: [...s.providers, entry] } : s));
-    clearTransient();
     clearEditorState();
     setAdding(false);
     setSelectedId(id);
-    setDraft(toDraft(entry, true));
+    const nextDraft = toDraft(entry, true);
+    setDraft(nextDraft);
     setApiKeyInput("");
-    setDirty(true);
+    setActionError(null);
+    // 新提供商立即落盘（否则切换后本地状态与磁盘不一致）
+    void saveDraft({ draftOverride: nextDraft, apiKey: "" });
   };
 
   const updateDraft = (patch: Partial<ProviderDraft>) => {
     setDraft((d) => (d ? { ...d, ...patch } : d));
-    setDirty(true);
+    scheduleSave();
   };
 
   const updateModels = (fn: (models: ProviderModel[]) => ProviderModel[]) => {
     setDraft((d) => (d ? { ...d, models: fn(d.models) } : d));
     setModelTests({});
-    setDirty(true);
+    scheduleSave();
   };
 
   const updateModel = (index: number, patch: Partial<ProviderModel>) => {
@@ -347,7 +441,6 @@ export function ProvidersView() {
     const index = draft.models.length;
     setDraft((d) => (d ? { ...d, models: [...d.models, next] } : d));
     setModelTests({});
-    setDirty(true);
     setEditingIndex(index);
   };
 
@@ -372,76 +465,14 @@ export function ProvidersView() {
     if (!draft?.preset_key) return;
     const preset = PROVIDER_PRESETS.find((p) => p.key === draft.preset_key);
     if (!preset) return;
-    updateDraft({
+    const nextDraft: ProviderDraft = {
+      ...draft,
       base_url: preset.base_url,
       models: [defaultModel(preset.model)],
-    });
+    };
+    setDraft(nextDraft);
     setMenuOpen(false);
-  };
-
-  const persist = async (
-    opts: { active?: ActiveProvider; draftOverride?: ProviderDraft } = {},
-  ): Promise<boolean> => {
-    if (!settings) return false;
-    const current = opts.draftOverride ?? draft;
-    let providers = settings.providers;
-    let active = opts.active ?? settings.active;
-    if (current) {
-      if (!current.name.trim()) {
-        setActionError("请填写提供商名称");
-        return false;
-      }
-      const cleaned = cleanModels(current.models);
-      if (cleaned.length === 0) {
-        setActionError("至少保留一个模型名称");
-        return false;
-      }
-      const entry: ProviderEntry = {
-        id: current.id,
-        name: current.name.trim(),
-        kind: current.kind,
-        preset_key: current.preset_key,
-        base_url: current.base_url.trim(),
-        api_key: apiKeyInput || current.api_key,
-        has_key: current.has_key || apiKeyInput.length > 0,
-        api_format: current.api_format,
-        models: cleaned,
-        created_at: current.created_at,
-        enabled: current.enabled,
-      };
-      providers = current.isNew
-        ? [...providers.filter((p) => p.id !== current.id), entry]
-        : providers.map((p) => (p.id === current.id ? entry : p));
-      if (
-        active.provider_id === current.id &&
-        !cleaned.some((m) => m.name === active.model)
-      ) {
-        active = {
-          ...active,
-          provider_id: current.id,
-          model: cleaned[0].name,
-          reasoning_variant: modelVariant(cleaned[0]),
-        };
-      }
-    }
-    setSaving(true);
-    setActionError(null);
-    try {
-      await api.saveSettings({
-        providers,
-        active,
-        system_prompt: settings.system_prompt,
-      });
-      await load(current?.id ?? selectedId ?? undefined);
-      setJustSaved(true);
-      window.setTimeout(() => setJustSaved(false), 2000);
-      return true;
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
-      return false;
-    } finally {
-      setSaving(false);
-    }
+    void saveDraft({ draftOverride: nextDraft });
   };
 
   const activate = async () => {
@@ -452,7 +483,7 @@ export function ProvidersView() {
     }
     const cleaned = cleanModels(draft.models);
     if (cleaned.length === 0) {
-      setActionError("至少保留一个模型名称");
+      setActionError("至少有一个模型名称才能设为当前使用");
       return;
     }
     const usable = cleaned.filter((m) => m.enabled ?? true);
@@ -464,13 +495,14 @@ export function ProvidersView() {
       (keepActive ? pool.find((m) => m.name === settings.active.model) : undefined) ?? pool[0];
     const variant =
       (keepActive ? settings.active.reasoning_variant : undefined) ?? modelVariant(target);
-    await persist({
+    // 同时把草稿里最新编辑过的模型一并落盘
+    await saveDraft({
       active: { provider_id: draft.id, model: target.name, reasoning_variant: variant },
     });
     setMenuOpen(false);
   };
 
-  const toggleProviderEnabled = async () => {
+  const toggleProviderEnabled = () => {
     if (!draft || !settings) return;
     const nextEnabled = !draft.enabled;
     let active = settings.active;
@@ -480,15 +512,21 @@ export function ProvidersView() {
       );
       active = fallback ? activeForProvider(fallback) : { provider_id: "", model: "" };
     }
-    await persist({ active, draftOverride: { ...draft, enabled: nextEnabled } });
+    const nextDraft = { ...draft, enabled: nextEnabled };
+    setDraft(nextDraft);
+    void saveDraft({ active, draftOverride: nextDraft });
   };
 
   const deleteProvider = async () => {
     if (!draft || draft.kind !== "custom" || !settings) return;
     if (!window.confirm(`删除提供商「${draft.name || "未命名"}」？此操作不可撤销。`)) return;
     setMenuOpen(false);
-    setSaving(true);
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
     setActionError(null);
+    setSaveState("saving");
     try {
       const providers = settings.providers.filter((p) => p.id !== draft.id);
       let active = settings.active;
@@ -500,40 +538,12 @@ export function ProvidersView() {
       setSelectedId(null);
       setDraft(null);
       setApiKeyInput("");
-      setDirty(false);
       clearEditorState();
       await load();
+      flashSaved();
     } catch (err) {
+      setSaveState("idle");
       setActionError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const runTest = async () => {
-    if (!draft) return;
-    const model = cleanModels(draft.models)[0]?.name ?? "";
-    if (!draft.base_url.trim() || !model) {
-      setTestResult(null);
-      setTestError("请先填写 Base URL 和至少一个模型名称");
-      return;
-    }
-    setTesting(true);
-    setTestResult(null);
-    setTestError(null);
-    try {
-      const res = await api.testConnection({
-        base_url: draft.base_url.trim(),
-        api_key: apiKeyInput,
-        api_format: draft.api_format,
-        model,
-        provider_id: draft.id,
-      });
-      setTestResult({ latency_ms: res.latency_ms, sample: res.sample });
-    } catch (err) {
-      setTestError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setTesting(false);
     }
   };
 
@@ -618,7 +628,7 @@ export function ProvidersView() {
                 return (
                   <button
                     key={p.id}
-                    onClick={() => selectProvider(p.id)}
+                    onClick={() => void selectProvider(p.id)}
                     className={clsx(
                       "rounded-xl border px-3 py-2.5 text-left transition-colors",
                       selected ? "bg-brand/5" : "hover:bg-[var(--muted)]",
@@ -648,7 +658,6 @@ export function ProvidersView() {
                     <div className="mt-1.5 flex items-center gap-1.5 text-[11px] opacity-60">
                       <FormatBadge format={p.api_format} />
                       <span>{usableModels} 个模型</span>
-                      {p.id === draft?.id && dirty && <span>· 未保存</span>}
                     </div>
                   </button>
                 );
@@ -656,7 +665,7 @@ export function ProvidersView() {
             </div>
 
             <button
-              onClick={openAdd}
+              onClick={() => void openAdd()}
               className={clsx(
                 "mt-3 flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-colors",
                 adding ? "bg-brand/5" : "hover:bg-[var(--muted)]",
@@ -702,7 +711,7 @@ export function ProvidersView() {
                   <button
                     onClick={() => {
                       setAdding(false);
-                      clearTransient();
+                      setActionError(null);
                     }}
                     className="rounded-lg border px-3 py-1.5 text-xs hover:bg-[var(--muted)]"
                     style={{ borderColor: "var(--border)" }}
@@ -730,7 +739,12 @@ export function ProvidersView() {
                   >
                     {draft.kind === "preset" ? "预设" : "自定义"}
                   </span>
-                  {dirty && <span className="text-[11px] opacity-50">未保存</span>}
+                  {/* 实时生效：编辑即落盘，这里只给一个轻量的状态反馈 */}
+                  {saveState !== "idle" && (
+                    <span className="text-[11px] opacity-50">
+                      {saveState === "saving" ? "保存中…" : "已保存"}
+                    </span>
+                  )}
                   <div className="ml-1 flex shrink-0 items-center gap-1.5">
                     <span className="text-[11px] opacity-50">启用</span>
                     <EnableSwitch
@@ -814,7 +828,7 @@ export function ProvidersView() {
                         value={apiKeyInput}
                         onChange={(e) => {
                           setApiKeyInput(e.target.value);
-                          setDirty(true);
+                          scheduleSave();
                         }}
                         placeholder="粘贴你的 API Key"
                         autoComplete="off"
@@ -977,52 +991,11 @@ export function ProvidersView() {
                     })}
                   </div>
 
-                  {/* 测试连接结果 */}
-                  {testResult && (
-                    <div
-                      className="flex items-start gap-2 rounded-xl px-3 py-2 text-xs"
-                      style={{ background: "rgb(var(--brand-rgb) / 0.08)" }}
-                    >
-                      <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" />
-                      <span className="min-w-0 flex-1">
-                        连接成功 · {testResult.latency_ms} ms
-                        {testResult.sample && (
-                          <span className="mt-0.5 block break-all opacity-60">{testResult.sample}</span>
-                        )}
-                      </span>
-                    </div>
-                  )}
-                  {testError && (
-                    <div className="flex items-start gap-2 rounded-xl border border-red-300/50 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-                      <span className="min-w-0 flex-1 break-all">{testError}</span>
-                    </div>
-                  )}
                   {actionError && (
                     <div className="flex items-start gap-2 rounded-xl border border-red-300/50 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
                       <span className="min-w-0 flex-1 break-all">{actionError}</span>
                     </div>
                   )}
-
-                  {/* 动作行 */}
-                  <div className="flex flex-wrap items-center gap-2 border-t pt-4" style={{ borderColor: "var(--border)" }}>
-                    <button
-                      onClick={() => void persist()}
-                      disabled={saving}
-                      className="flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-xs font-medium text-white transition-opacity hover:bg-brand-light disabled:opacity-50"
-                    >
-                      {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : justSaved ? <Check className="h-3.5 w-3.5" /> : null}
-                      {justSaved ? "已保存" : "保存"}
-                    </button>
-                    <button
-                      onClick={() => void runTest()}
-                      disabled={testing || saving}
-                      className="rounded-lg border px-3.5 py-2 text-xs transition-colors hover:bg-[var(--muted)] disabled:opacity-50"
-                      style={{ borderColor: "var(--border)" }}
-                    >
-                      {testing ? <Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" /> : null}
-                      测试连接
-                    </button>
-                  </div>
                 </div>
               </section>
             ) : (

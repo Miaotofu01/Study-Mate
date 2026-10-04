@@ -10,11 +10,15 @@ export const metadata: Metadata = {
   icons: { icon: "/icon-192.png" },
 };
 
-// 首帧前写入 data-theme：localStorage 优先，否则跟随系统
+// 首帧前写入 data-theme 与 data-palette：localStorage 优先，默认蓝色调色板
 const themeInit =
-  "(function(){try{var t=localStorage.getItem('studymate-theme');" +
+  "(function(){try{" +
+  "var p=localStorage.getItem('studymate-palette')||'blue';" +
+  "document.documentElement.dataset.palette=p;" +
+  "var t=localStorage.getItem('studymate-theme');" +
   "if(t!=='light'&&t!=='dark'){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}" +
-  "document.documentElement.dataset.theme=t;}catch(e){}})()";
+  "document.documentElement.dataset.theme=t;" +
+  "}catch(e){}})()";
 
 export default function RootLayout({
   children,

@@ -1,6 +1,6 @@
 {
   "name": "studymate-web-frontend",
-  "version": "0.4.0-beta",
+  "version": "0.5.0-beta",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3800",
@@ -9,6 +9,7 @@
     "start": "next start -p 3800",
     "lint": "next lint",
     "test:e2e": "playwright test",
+    "test:component": "vitest run",
     "explore": "playwright test -c explorer.config.ts"
   },
   "dependencies": {
@@ -27,12 +28,17 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.20",
+    "jsdom": "^29.1.1",
     "postcss": "^8",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.3"
   }
 }

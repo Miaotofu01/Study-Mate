@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from .. import curriculum_store as cs
 from ..common import require_subject
 from ..config import REPO_ROOT
+from .courses import bound_workspace
 
 router = APIRouter(prefix="/api", tags=["lessons"])
 
@@ -68,20 +69,40 @@ def list_lessons(slug: str) -> dict[str, list[dict[str, Any]]]:
 
 
 @router.get("/courses/{slug}/files/{file_path:path}")
-def get_file(slug: str, file_path: str) -> Any:
-    require_subject(slug)
-    base = cs.subject_dir(slug).resolve()
-    target = (base / file_path).resolve()
-    if target != base and base not in target.parents:
-        raise HTTPException(400, "路径越出科目目录")
-    if not target.is_file():
-        if file_path == "index.html":
-            return HTMLResponse(
-                f'<meta http-equiv="refresh" content="0;url=/courses?subject={slug}">',
-            )
-        raise HTTPException(404, f"文件不存在：{file_path}")
-    media_type = CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream")
-    return FileResponse(target, media_type=media_type)
+def get_file(slug: str, file_path: str, workspace: str | None = None) -> Any:
+    with bound_workspace(workspace):
+        require_subject(slug)
+        base = cs.subject_dir(slug).resolve()
+        target = (base / file_path).resolve()
+        if target != base and base not in target.parents:
+            raise HTTPException(400, "路径越出科目目录")
+        if not target.is_file():
+            if file_path == "index.html":
+                return HTMLResponse(
+                    f'<meta http-equiv="refresh" content="0;url=/courses?subject={slug}">',
+                )
+            raise HTTPException(404, f"文件不存在：{file_path}")
+        media_type = CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream")
+        return FileResponse(target, media_type=media_type)
+
+
+@router.get("/courses/{slug}/attachments-area")
+def list_attachments_area(slug: str, workspace: str | None = None) -> dict[str, Any]:
+    """附件区清单：术语表、reference/ 本地资料、学习记录、会话摘要（内容经 /files/ 读）。"""
+    with bound_workspace(workspace):
+        require_subject(slug)
+        base = cs.subject_dir(slug)
+
+        def list_dir(name: str) -> list[str]:
+            directory = base / name
+            return sorted(path.name for path in directory.glob("*.md")) if directory.is_dir() else []
+
+        return {
+            "glossary": "GLOSSARY.md" if (base / "GLOSSARY.md").is_file() else None,
+            "reference": list_dir("reference"),
+            "learning_records": list_dir("learning-records"),
+            "sessions": list_dir("sessions"),
+        }
 
 
 @router.get("/courses/assets/{file_path:path}")
@@ -90,7 +111,7 @@ def get_shared_asset(file_path: str) -> FileResponse:
     name = file_path.replace("\\", "/")
     if name.startswith("/") or ".." in name.split("/"):
         raise HTTPException(400, "路径非法")
-    for base in (cs.workspace_dir() / "assets", REPO_ROOT / "templates" / "assets"):
+    for base in (cs.workspace_dir() / ".learning" / "assets", REPO_ROOT / "templates" / "assets"):
         target = (base / name).resolve()
         if target == base or base not in target.parents:
             continue

@@ -7,8 +7,8 @@ import type { AppSettings } from "@/lib/types";
 
 // 与后端 config.py DEFAULT_SETTINGS.system_prompt 保持一致
 export const DEFAULT_SYSTEM_PROMPT =
-  "你是 StudyMate，一个陪伴式学习助手。你的原则是 learn with doing：" +
-  "讲清概念后引导学习者动手练习，用通俗的语言和具体的例子解释知识。";
+  "你是 StudyMate 自学系统的主教练（学习模式），按 learning-system 技能规范调度学习流程。" +
+  "坚持 learn with doing：讲清概念后引导学习者动手练习，用通俗的语言和具体的例子解释知识。";
 
 export function SystemPromptView() {
   const [settings, setSettings] = useState<AppSettings | null>(null);

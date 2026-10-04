@@ -7,11 +7,14 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
+import logging
 import os
 import re
 from collections.abc import AsyncGenerator
 from typing import Any
+from urllib.parse import urlparse
 
 from openai import AsyncOpenAI
 
@@ -20,16 +23,35 @@ try:
 except ImportError:  # openai v3 自带 httpx2（同 API 的分叉）
     import httpx2 as httpx
 
+logger = logging.getLogger(__name__)
+
 API_FORMATS = ("openai_chat", "openai_responses", "anthropic")
 ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_MAX_TOKENS = 4096
-REQUEST_TIMEOUT = 60.0
+# 推理模型（含 reasoning 链）长产出时 60s 偏紧：实测 mimo-v2.6-flash（medium）
+# 单次课件派工纯思考约 10 分钟、全程 694s；300s 读超时在网关负载下会误杀长产出。
+REQUEST_TIMEOUT = float(os.getenv("STUDYMATE_LLM_TIMEOUT", "900.0") or 900.0)
+# 个人中转网关（new-api 一类）会间歇性返回 401/空响应/读超时：每个请求整体重试
+# 少量次数，只对"连接已建立但上游不稳"的失败类型重试，写盘型副作用不存在所以安全。
+LLM_RETRIES = max(1, int(os.getenv("STUDYMATE_LLM_RETRIES", "3") or 3))
 TEMPERATURE = 0.2
 _ERROR_TEXT_LIMIT = 2000
 REASONING_OFF_VARIANT = "off"
 ANTHROPIC_THINKING_BUDGETS = {"low": 2048, "medium": 8192, "high": 24576}
 # Anthropic 要求 budget_tokens < max_tokens
 ANTHROPIC_THINKING_HEADROOM = 4096
+
+
+class ProviderTransientError(RuntimeError):
+    """上游瞬时失败（鉴权抖动 / 读超时 / 空响应）：值得整体重试。"""
+
+
+def _is_transient(exc: Exception) -> bool:
+    """网关的鉴权抖动（同一把 key 时好时坏）、读超时、空响应按瞬时失败重试。"""
+    name = type(exc).__name__
+    if name in ("APITimeoutError", "TimeoutError", "APIConnectionError", "InternalServerError", "AuthenticationError"):
+        return True
+    return isinstance(exc, ProviderTransientError)
 
 
 def _reasoning_variant(provider: dict[str, Any]) -> str:
@@ -58,11 +80,56 @@ class ProviderError(RuntimeError):
     """上游返回错误（含状态码与响应体摘要）。"""
 
 
+def _loopback_mounts(base_url: str) -> dict[str, None] | None:
+    """base_url 指向本机时返回强制直连的 mounts；否则 None（保持默认代理行为）。
+
+    httpx 在 Windows 上会经 urllib 读到注册表里的系统代理，连发往 127.0.0.1 的
+    请求也扔进代理——本机网关（new-api 一类）多这一跳，代理一抖长流就断。
+    mount 值为 None 即命中后回落默认 transport（httpx 自己的 no_proxy 机制）。
+    """
+    try:
+        host = (urlparse(base_url).hostname or "").lower()
+    except ValueError:
+        return None
+    if host and host != "localhost":
+        try:
+            if not ipaddress.ip_address(host).is_loopback:
+                return None
+        except ValueError:
+            return None
+    if not host:
+        return None
+    mounts: dict[str, None] = {
+        "all://localhost": None,
+        "all://127.0.0.1": None,
+        "all://[::1]": None,
+    }
+    if host not in ("localhost", "127.0.0.1", "::1", "[::1]"):
+        mounts[f"all://{host}"] = None
+    return mounts
+
+
+def _raw_client(provider: dict[str, Any]) -> httpx.AsyncClient:
+    """裸 httpx 客户端（responses / anthropic 协议用）；本机 base_url 显式直连。"""
+    mounts = _loopback_mounts(str(provider.get("base_url") or ""))
+    if mounts is None:
+        return httpx.AsyncClient(timeout=REQUEST_TIMEOUT)
+    return httpx.AsyncClient(timeout=REQUEST_TIMEOUT, mounts=mounts)
+
+
 def build_client(provider: dict[str, Any]) -> AsyncOpenAI:
+    mounts = _loopback_mounts(str(provider.get("base_url") or ""))
+    if mounts is None:
+        return AsyncOpenAI(
+            base_url=provider.get("base_url") or None,
+            api_key=provider.get("api_key") or "missing",
+            timeout=REQUEST_TIMEOUT,
+        )
     return AsyncOpenAI(
         base_url=provider.get("base_url") or None,
         api_key=provider.get("api_key") or "missing",
         timeout=REQUEST_TIMEOUT,
+        http_client=httpx.AsyncClient(timeout=REQUEST_TIMEOUT, mounts=mounts),
     )
 
 
@@ -91,10 +158,110 @@ def _data_url_parts(url: str) -> tuple[str, str] | None:
     return match.group(1), match.group(2)
 
 
+class ToolCallAccumulator:
+    """流式 tool_call 增量聚合（DSH assembler / DeepTutor ToolCallAccumulator 同规）。
+
+    按 wire `index` 建块；`id`/`name` **赋值不追加**（网关重复发 id 会涨到几万
+    字符被 400，见尽调存档）；`arguments` 拼接。`block-end`（协议给出完整块时）
+    覆盖为权威值，先到先得。
+    """
+
+    def __init__(self) -> None:
+        self._blocks: dict[int, dict[str, str]] = {}
+        self._order: list[int] = []
+
+    def _ensure(self, index: int) -> dict[str, str]:
+        block = self._blocks.get(index)
+        if block is None:
+            block = {"id": "", "name": "", "arguments": ""}
+            self._blocks[index] = block
+            self._order.append(index)
+        return block
+
+    def push(
+        self,
+        index: int,
+        *,
+        id: str | None = None,
+        name: str | None = None,
+        arguments_delta: str = "",
+        arguments_full: str | None = None,
+    ) -> None:
+        block = self._ensure(index)
+        if id:
+            block["id"] = str(id)
+        if name:
+            block["name"] = str(name)
+        if arguments_delta:
+            block["arguments"] += arguments_delta
+        if arguments_full is not None:
+            block["arguments"] = arguments_full
+
+    def finalize(self) -> list[dict[str, str]]:
+        calls: list[dict[str, str]] = []
+        for index in self._order:
+            block = self._blocks[index]
+            calls.append(
+                {
+                    "id": block["id"] or f"call-{index}",
+                    "name": block["name"],
+                    "arguments": block["arguments"],
+                }
+            )
+        return calls
+
+
+def _openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": tool["name"],
+                "description": tool.get("description", ""),
+                "parameters": tool.get("parameters") or {"type": "object", "properties": {}},
+            },
+        }
+        for tool in tools
+    ]
+
+
+def _responses_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "name": tool["name"],
+            "description": tool.get("description", ""),
+            "parameters": tool.get("parameters") or {"type": "object", "properties": {}},
+        }
+        for tool in tools
+    ]
+
+
+def _anthropic_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": tool["name"],
+            "description": tool.get("description", ""),
+            "input_schema": tool.get("parameters") or {"type": "object", "properties": {}},
+        }
+        for tool in tools
+    ]
+
+
 def _openai_wire_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """openai_chat 外发消息：剔除内部私有键（_filename 等下划线开头）。"""
-    wire = []
+    """openai_chat 外发消息：剔除内部私有键，并映射 tool_calls / role:tool。"""
+    wire: list[dict[str, Any]] = []
     for message in messages:
+        role = message.get("role")
+        if role == "tool":
+            wire.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": message.get("tool_call_id") or "",
+                    "content": _text_of_content(message.get("content")),
+                }
+            )
+            continue
         content = message.get("content")
         if isinstance(content, list):
             content = [
@@ -102,7 +269,20 @@ def _openai_wire_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]
                 for part in content
                 if isinstance(part, dict)
             ]
-        wire.append({**message, "content": content})
+        entry = {key: value for key, value in message.items() if not str(key).startswith("_")}
+        entry["content"] = content
+        calls = message.get("tool_calls")
+        if calls:
+            entry["content"] = _text_of_content(content) or None
+            entry["tool_calls"] = [
+                {
+                    "id": call["id"],
+                    "type": "function",
+                    "function": {"name": call["name"], "arguments": call["arguments"]},
+                }
+                for call in calls
+            ]
+        wire.append(entry)
     return wire
 
 
@@ -203,13 +383,23 @@ async def _chat_openai_chat(
     variant = _reasoning_variant(provider)
     if variant:
         kwargs["extra_body"] = {"reasoning_effort": variant}
-    response = await client.chat.completions.create(
+    # 走流式再聚合：部分中转网关对长非流式请求有 ~120s 硬超时（HTTP 524），
+    # 流式增量不受该窗口限制；语义等价（仍拿到完整文本），长产出（课件/题库）必需。
+    chunks: list[str] = []
+    stream = await client.chat.completions.create(
         model=provider.get("model") or "",
         messages=_openai_wire_messages(messages),  # type: ignore[arg-type]
         temperature=TEMPERATURE,
+        stream=True,
         **kwargs,
     )
-    return response.choices[0].message.content or ""
+    async for chunk in stream:
+        for choice in chunk.choices or []:
+            delta = getattr(choice, "delta", None)
+            text = getattr(delta, "content", None) if delta is not None else None
+            if text:
+                chunks.append(str(text))
+    return "".join(chunks)
 
 
 # ---------- openai_responses：{base}/responses，system→instructions ----------
@@ -220,6 +410,8 @@ def _responses_payload(
     messages: list[dict[str, Any]],
     json_mode: bool,
     stream: bool,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | None = None,
 ) -> dict[str, Any]:
     instructions = "\n\n".join(
         _text_of_content(message.get("content"))
@@ -230,6 +422,32 @@ def _responses_payload(
     for message in messages:
         role = message.get("role")
         if role == "system":
+            continue
+        if role == "tool":
+            input_items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": message.get("tool_call_id") or "",
+                    "output": _text_of_content(message.get("content")),
+                }
+            )
+            continue
+        calls = message.get("tool_calls")
+        if calls:
+            text = _text_of_content(message.get("content"))
+            if text:
+                input_items.append(
+                    {"role": "assistant", "content": [{"type": "output_text", "text": text}]}
+                )
+            for call in calls:
+                input_items.append(
+                    {
+                        "type": "function_call",
+                        "call_id": call["id"],
+                        "name": call["name"],
+                        "arguments": call["arguments"],
+                    }
+                )
             continue
         parts: list[dict[str, Any]] = []
         for part in _content_parts(message.get("content")):
@@ -257,6 +475,9 @@ def _responses_payload(
     variant = _reasoning_variant(provider)
     if variant:
         payload["reasoning"] = {"effort": variant}
+    if tools:
+        payload["tools"] = _responses_tools(tools)
+        payload["tool_choice"] = tool_choice or "auto"
     return payload
 
 
@@ -276,7 +497,7 @@ async def _stream_openai_responses(
     messages: list[dict[str, Any]],
 ) -> AsyncGenerator[str, None]:
     payload = _responses_payload(provider, messages, json_mode=False, stream=True)
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+    async with _raw_client(provider) as client:
         async with client.stream(
             "POST",
             _provider_url(provider, "/responses"),
@@ -302,7 +523,7 @@ async def _chat_openai_responses(
     if not _reasoning_variant(provider):
         # 推理模型不接受自定义 temperature，开启思考时留给协议默认值
         payload["temperature"] = TEMPERATURE
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+    async with _raw_client(provider) as client:
         response = await client.post(
             _provider_url(provider, "/responses"),
             headers=_bearer_headers(provider),
@@ -323,6 +544,8 @@ def _anthropic_payload(
     provider: dict[str, Any],
     messages: list[dict[str, Any]],
     json_mode: bool,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | None = None,
 ) -> dict[str, Any]:
     system_chunks = [
         _text_of_content(message.get("content"))
@@ -332,28 +555,71 @@ def _anthropic_payload(
     if json_mode:
         system_chunks.append("只输出一个合法的 JSON 对象，不要输出任何其他文字。")
     payload_messages: list[dict[str, Any]] = []
+    pending_results: list[dict[str, Any]] = []
+
+    def flush_results() -> None:
+        # Anthropic 要求 tool_result 块同处一条 user 消息且排在最前
+        if pending_results:
+            payload_messages.append({"role": "user", "content": list(pending_results)})
+            pending_results.clear()
+
     for message in messages:
         role = message.get("role")
         if role == "system":
             continue
+        if role == "tool":
+            pending_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": message.get("tool_call_id") or "",
+                    "content": _text_of_content(message.get("content")),
+                    "is_error": bool(message.get("is_error")),
+                }
+            )
+            continue
+        flush_results()
         blocks: list[dict[str, Any]] = []
-        for part in _content_parts(message.get("content")):
-            if part.get("type") == "text":
-                blocks.append({"type": "text", "text": part.get("text", "")})
-            elif part.get("type") == "image_url":
-                url = (part.get("image_url") or {}).get("url", "")
-                parsed = _data_url_parts(url)
-                if parsed:
-                    mime, encoded = parsed
-                    blocks.append(
-                        {
-                            "type": "image",
-                            "source": {"type": "base64", "media_type": mime, "data": encoded},
-                        }
-                    )
+        text = _text_of_content(message.get("content"))
+        calls = message.get("tool_calls")
+        if calls:
+            if text:
+                blocks.append({"type": "text", "text": text})
+            for call in calls:
+                try:
+                    parsed = json.loads(call.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    parsed = {}
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": call["id"],
+                        "name": call["name"],
+                        "input": parsed if isinstance(parsed, dict) else {},
+                    }
+                )
+        else:
+            for part in _content_parts(message.get("content")):
+                if part.get("type") == "text":
+                    blocks.append({"type": "text", "text": part.get("text", "")})
+                elif part.get("type") == "image_url":
+                    url = (part.get("image_url") or {}).get("url", "")
+                    parsed_url = _data_url_parts(url)
+                    if parsed_url:
+                        mime, encoded = parsed_url
+                        blocks.append(
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": mime,
+                                    "data": encoded,
+                                },
+                            }
+                        )
         if not blocks:
             blocks = [{"type": "text", "text": ""}]
         payload_messages.append({"role": role, "content": blocks})
+    flush_results()
     payload: dict[str, Any] = {
         "model": provider.get("model") or "",
         "max_tokens": _max_output_limit(provider) or DEFAULT_MAX_TOKENS,
@@ -368,6 +634,9 @@ def _anthropic_payload(
     system_text = "\n\n".join(chunk for chunk in system_chunks if chunk)
     if system_text:
         payload["system"] = system_text
+    if tools:
+        payload["tools"] = _anthropic_tools(tools)
+        payload["tool_choice"] = {"type": "auto"} if (tool_choice in (None, "auto")) else tool_choice
     return payload
 
 
@@ -377,7 +646,7 @@ async def _stream_anthropic(
 ) -> AsyncGenerator[str, None]:
     payload = _anthropic_payload(provider, messages, json_mode=False)
     payload["stream"] = True
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+    async with _raw_client(provider) as client:
         async with client.stream(
             "POST",
             _provider_url(provider, "/v1/messages"),
@@ -405,7 +674,7 @@ async def _chat_anthropic(
     if not _reasoning_variant(provider):
         # 开启 extended thinking 时 Anthropic 只接受协议默认 temperature
         payload["temperature"] = TEMPERATURE
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+    async with _raw_client(provider) as client:
         response = await client.post(
             _provider_url(provider, "/v1/messages"),
             headers=_anthropic_headers(provider),
@@ -421,14 +690,242 @@ async def _chat_anthropic(
     )
 
 
+# ---------- 工具化轮次（K0）：一次 LLM 调用 → 文本增量 + 聚合后的 tool_calls ----------
+
+
+async def _openai_chat_turn(
+    provider: dict[str, Any],
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    tool_choice: str | None,
+) -> AsyncGenerator[dict[str, Any], None]:
+    client = build_client(provider)
+    kwargs: dict[str, Any] = {}
+    limit = _max_output_limit(provider)
+    if limit is not None:
+        kwargs["max_tokens"] = limit
+    variant = _reasoning_variant(provider)
+    if variant:
+        kwargs["extra_body"] = {"reasoning_effort": variant}
+    if tools:
+        kwargs["tools"] = _openai_tools(tools)
+        kwargs["tool_choice"] = tool_choice or "auto"
+    accumulator = ToolCallAccumulator()
+    stream = await client.chat.completions.create(
+        model=provider.get("model") or "",
+        messages=_openai_wire_messages(messages),  # type: ignore[arg-type]
+        temperature=TEMPERATURE,
+        stream=True,
+        **kwargs,
+    )
+    async for chunk in stream:
+        for choice in chunk.choices or []:
+            delta = getattr(choice, "delta", None)
+            if delta is None:
+                continue
+            text = getattr(delta, "content", None)
+            if text:
+                yield {"type": "text", "content": str(text)}
+            for call in getattr(delta, "tool_calls", None) or []:
+                function = getattr(call, "function", None)
+                accumulator.push(
+                    int(getattr(call, "index", 0) or 0),
+                    id=getattr(call, "id", None),
+                    name=getattr(function, "name", None) if function is not None else None,
+                    arguments_delta=(
+                        (getattr(function, "arguments", None) or "") if function is not None else ""
+                    ),
+                )
+    calls = [call for call in accumulator.finalize() if call["name"]]
+    if calls:
+        yield {"type": "tool_calls", "tool_calls": calls}
+
+
+async def _openai_responses_turn(
+    provider: dict[str, Any],
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    tool_choice: str | None,
+) -> AsyncGenerator[dict[str, Any], None]:
+    payload = _responses_payload(
+        provider, messages, json_mode=False, stream=True, tools=tools, tool_choice=tool_choice
+    )
+    accumulator = ToolCallAccumulator()
+    by_item: dict[str, int] = {}
+    next_index = 0
+    async with _raw_client(provider) as client:
+        async with client.stream(
+            "POST",
+            _provider_url(provider, "/responses"),
+            headers=_bearer_headers(provider),
+            json=payload,
+        ) as response:
+            await _raise_for_status(response)
+            async for event_type, data in _iter_sse(response):
+                if event_type == "response.output_text.delta":
+                    piece = str(data.get("delta") or "")
+                    if piece:
+                        yield {"type": "text", "content": piece}
+                elif event_type == "response.output_item.added":
+                    item = data.get("item") or {}
+                    if item.get("type") == "function_call":
+                        item_id = str(item.get("id") or item.get("call_id") or next_index)
+                        by_item[item_id] = next_index
+                        accumulator.push(
+                            next_index,
+                            id=item.get("call_id") or item.get("id"),
+                            name=item.get("name"),
+                            arguments_delta=item.get("arguments") or "",
+                        )
+                        next_index += 1
+                elif event_type == "response.function_call_arguments.delta":
+                    index = by_item.get(str(data.get("item_id") or ""))
+                    if index is not None:
+                        accumulator.push(index, arguments_delta=str(data.get("delta") or ""))
+                elif event_type == "response.output_item.done":
+                    item = data.get("item") or {}
+                    if item.get("type") == "function_call":
+                        index = by_item.get(str(item.get("id") or item.get("call_id") or ""))
+                        if index is not None:
+                            accumulator.push(
+                                index,
+                                id=item.get("call_id") or item.get("id"),
+                                name=item.get("name"),
+                                arguments_full=item.get("arguments"),
+                            )
+                elif event_type in ("error", "response.failed"):
+                    raise ProviderError(json.dumps(data, ensure_ascii=False)[:_ERROR_TEXT_LIMIT])
+    calls = [call for call in accumulator.finalize() if call["name"]]
+    if calls:
+        yield {"type": "tool_calls", "tool_calls": calls}
+
+
+async def _anthropic_turn(
+    provider: dict[str, Any],
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    tool_choice: str | None,
+) -> AsyncGenerator[dict[str, Any], None]:
+    payload = _anthropic_payload(
+        provider, messages, json_mode=False, tools=tools, tool_choice=tool_choice
+    )
+    payload["stream"] = True
+    accumulator = ToolCallAccumulator()
+    async with _raw_client(provider) as client:
+        async with client.stream(
+            "POST",
+            _provider_url(provider, "/v1/messages"),
+            headers=_anthropic_headers(provider),
+            json=payload,
+        ) as response:
+            await _raise_for_status(response)
+            async for event_type, data in _iter_sse(response):
+                if event_type == "content_block_start":
+                    block = data.get("content_block") or {}
+                    if block.get("type") == "tool_use":
+                        accumulator.push(
+                            int(data.get("index") or 0),
+                            id=block.get("id"),
+                            name=block.get("name"),
+                        )
+                elif event_type == "content_block_delta":
+                    index = int(data.get("index") or 0)
+                    delta = data.get("delta") or {}
+                    if delta.get("type") == "text_delta" and delta.get("text"):
+                        yield {"type": "text", "content": str(delta["text"])}
+                    elif delta.get("type") == "input_json_delta":
+                        accumulator.push(index, arguments_delta=str(delta.get("partial_json") or ""))
+                elif event_type == "error":
+                    raise ProviderError(
+                        json.dumps(data.get("error") or data, ensure_ascii=False)[:_ERROR_TEXT_LIMIT]
+                    )
+    calls = [call for call in accumulator.finalize() if call["name"]]
+    if calls:
+        yield {"type": "tool_calls", "tool_calls": calls}
+
+
+TURN_IMPLEMENTATIONS = {
+    "openai_chat": _openai_chat_turn,
+    "openai_responses": _openai_responses_turn,
+    "anthropic": _anthropic_turn,
+}
+
+
+def supports_tools(provider: dict[str, Any] | None) -> bool:
+    """工具调用默认对所有配置的模型开启（2026-10-04 维护者定档，不再依赖能力声明）。
+
+    上游若不接受 tools 参数，`stream_turn` 会自动回落一次不带 tools 的调用，因此
+    这里无需做能力判定；只要有一个 provider 字典就走工具化路径。
+    """
+    return provider is not None
+
+
+async def stream_turn(
+    provider: dict[str, Any],
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | None = None,
+    fixture_scenario: str | None = None,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """一次带工具的轮次：yield {"type":"text"} 增量；结束时若有工具调用再 yield
+    {"type":"tool_calls","tool_calls":[{id,name,arguments}]}。
+
+    fixture 模式只吐纯文本（工具脚本由 agent 层提供，见 agent.py）；真实模式下
+    tools 参数被上游拒绝时，回落一次不带 tools 的调用（措辞因网关而异，不再按
+    错误文本筛选：凡首轮未吐任何内容的 ProviderError 都回落一次）。
+    """
+    if is_fixture_mode():
+        async for piece in _fixture_stream(fixture_scenario):
+            yield {"type": "text", "content": piece}
+        return
+    api_format = str(provider.get("api_format") or "openai_chat")
+    implementation = TURN_IMPLEMENTATIONS.get(api_format)
+    if implementation is None:
+        raise ValueError(f"未知 API 格式：{api_format}")
+    if tools:
+        emitted = False
+        try:
+            async for event in implementation(provider, messages, tools, tool_choice):
+                emitted = True
+                yield event
+            return
+        except ProviderError as exc:
+            # tools 参数被上游拒绝（一句 400 措辞各异）→ 回落纯文本一次，保证工具声明
+            # 本身不打挂整个请求；已吐出内容则不回落（避免重复输出）。
+            if emitted:
+                raise
+            logger.warning("tools 参数被上游拒绝，回落纯文本调用：%s", exc)
+            await asyncio.sleep(0.5)
+    async for event in implementation(provider, messages, None, None):
+        yield event
+
+
 # ---------- E2E fixture 模式：STUDYMATE_E2E_FIXTURE=1 时 LLM 调用不外呼 ----------
 
 FIXTURE_ENV = "STUDYMATE_E2E_FIXTURE"
+FIXTURE_SCENARIO_ENV = "STUDYMATE_E2E_SCENARIO"
 FIXTURE_STREAM_SEGMENTS = (
     "这是固定测试回复的第一段：先把要讲的概念立起来。",
     "第二段：用一个具体例子把要点串起来。",
     "第三段：轮到你动手练习，试着自己复述一遍。",
-    "第四段：本次回复到此结束，欢迎继续提问。",
+    "第四段：本次回复到此结束，欢迎继续提问。\n\n"
+    "**下一步**：回复「继续」就进入下一节。",
+)
+# 建课会话场景：助手按盘问节奏收口并输出标记（后端解析后建草稿、落确认卡）
+FIXTURE_INTERVIEW_SEGMENTS = (
+    "好——那我们不急着定科目。先聊聊：最近有没有什么事让你想学点新东西？\n\n"
+    "**下一步**：回答上面的问题，或直接说「帮我推荐」。",
+    "听起来你对动手做东西更有兴趣。给你三个可组合的方向：\n\n"
+    "1. **(Recommended)** 用 Python 做一个小工具（比如批量整理文件）\n"
+    "2. 做一个个人静态主页（HTML/CSS 入门）\n"
+    "3. 数据整理与可视化入门\n\n"
+    "**下一步**：挑一个方向，或说说你的想法。",
+    "好，就以「用 Python 做一个小工具」为目标来盘科目。\n\n"
+    "**下一步**：回答几个前置问题（目的/程度/基础），盘完我建草稿。",
+    "盘问收口：科目定为「Python 实用小工具」。"
+    '<!--INTERVIEW_RESULT-->{"name": "Python 实用小工具", "purpose": "能独立写出解决日常问题的小脚本", '
+    '"level": "能独立做项目", "background": "没学过编程", "project": "批量整理文件的命令行工具", '
+    '"carrier": "jupyter"}<!--/INTERVIEW_RESULT-->',
 )
 FIXTURE_STREAM_DELAY_SECONDS = 0.4
 _fixture_at_import = os.getenv(FIXTURE_ENV) == "1"
@@ -436,6 +933,12 @@ _fixture_at_import = os.getenv(FIXTURE_ENV) == "1"
 
 def is_fixture_mode() -> bool:
     return _fixture_at_import or os.getenv(FIXTURE_ENV) == "1"
+
+
+def _fixture_segments(scenario: str | None = None) -> tuple[str, ...]:
+    if (scenario or os.getenv(FIXTURE_SCENARIO_ENV)) == "interview":
+        return FIXTURE_INTERVIEW_SEGMENTS
+    return FIXTURE_STREAM_SEGMENTS
 
 
 FIXTURE_CURRICULUM: dict[str, Any] = {
@@ -538,15 +1041,33 @@ def _fixture_chat(fixture_kind: str | None) -> str:
             "next_step: 下次从链路层与以太网帧继续\n"
             "weaknesses:\n"
             "  - 还说不清首部与载荷在每一跳怎么变化\n"
+            "memory_updates:\n"
+            "  - 偏好先看一个具体例子再动手推演\n"
+            "  - 对协议分层这类抽象内容需要图示辅助\n"
             "---\n"
         )
     if fixture_kind == "generate":
-        return json.dumps(FIXTURE_CURRICULUM, ensure_ascii=False)
+        # 角色派工统一 envelope 交付：curriculum-designer 的 JSON 图放 data 键
+        return json.dumps(
+            {"files": [], "data": FIXTURE_CURRICULUM, "report": {"summary": ["fixture 大纲"]}},
+            ensure_ascii=False,
+        )
+    if fixture_kind == "memory_suggest":
+        return json.dumps(
+            {
+                "entries": [
+                    {"section": "教学偏好", "content": "讲解后偏好先看一次 HTTP 请求的实际例子再动手。"},
+                    {"section": "学习习惯", "content": "常见卡点：分层与封装的边界容易混。"},
+                ]
+            },
+            ensure_ascii=False,
+        )
     return "这是固定测试回复。"
 
 
-async def _fixture_stream() -> AsyncGenerator[str, None]:
-    for index, segment in enumerate(FIXTURE_STREAM_SEGMENTS):
+async def _fixture_stream(scenario: str | None = None) -> AsyncGenerator[str, None]:
+    segments = _fixture_segments(scenario)
+    for index, segment in enumerate(segments):
         if index:
             await asyncio.sleep(FIXTURE_STREAM_DELAY_SECONDS)
         yield segment
@@ -558,10 +1079,14 @@ async def _fixture_stream() -> AsyncGenerator[str, None]:
 async def stream_chat(
     provider: dict[str, Any],
     messages: list[dict[str, Any]],
+    fixture_scenario: str | None = None,
 ) -> AsyncGenerator[str, None]:
-    """流式返回 assistant 文本增量；provider 为当前生效 provider 字典。"""
+    """流式返回 assistant 文本增量；provider 为当前生效 provider 字典。
+
+    fixture_scenario 仅在 fixture 模式下生效（E2E 按请求选场景，免改后端 env）。
+    """
     if is_fixture_mode():
-        async for piece in _fixture_stream():
+        async for piece in _fixture_stream(fixture_scenario):
             yield piece
         return
     api_format = str(provider.get("api_format") or "openai_chat")
@@ -586,18 +1111,36 @@ async def chat_once(
     """非流式调用，temperature 0.2；json_mode 按协议启用结构化输出。
 
     fixture_kind 仅在 fixture 模式下生效，决定返回哪类 canned 内容；
-    非 fixture 模式下该参数被忽略。
+    非 fixture 模式下该参数被忽略。网关瞬时失败（鉴权抖动/读超时/空响应）
+    整体重试 LLM_RETRIES 次；某一格式持续失败仍抛原异常。
     """
     if is_fixture_mode():
         return _fixture_chat(fixture_kind)
     api_format = str(provider.get("api_format") or "openai_chat")
-    if api_format == "openai_chat":
-        return await _chat_openai_chat(provider, messages, json_mode)
-    if api_format == "openai_responses":
-        return await _chat_openai_responses(provider, messages, json_mode)
-    if api_format == "anthropic":
-        return await _chat_anthropic(provider, messages, json_mode)
-    raise ValueError(f"未知 API 格式：{api_format}")
+    if api_format not in API_FORMATS:
+        raise ValueError(f"未知 API 格式：{api_format}")
+    dispatched = {
+        "openai_chat": _chat_openai_chat,
+        "openai_responses": _chat_openai_responses,
+        "anthropic": _chat_anthropic,
+    }
+    last: Exception | None = None
+    for attempt in range(LLM_RETRIES):
+        try:
+            text = await dispatched[api_format](provider, messages, json_mode)
+        except Exception as exc:  # noqa: BLE001 - 只对瞬时失败重试，其余抛出
+            if not _is_transient(exc) or attempt == LLM_RETRIES - 1:
+                raise
+            last = exc
+            await asyncio.sleep(1.5 * (attempt + 1))
+            continue
+        if not text.strip():
+            if attempt == LLM_RETRIES - 1:
+                raise ProviderTransientError("上游返回空响应")
+            await asyncio.sleep(1.5 * (attempt + 1))
+            continue
+        return text
+    raise ProviderTransientError(str(last) if last else "上游调用失败")
 
 
 def extract_json(text: str) -> Any:

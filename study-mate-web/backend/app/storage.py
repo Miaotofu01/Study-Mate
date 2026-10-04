@@ -18,7 +18,12 @@ def _session_path(session_id: str) -> Path:
     return SESSIONS_DIR / f"{session_id}.json"
 
 
-def create_session(title: str = "新的对话") -> dict[str, Any]:
+def create_session(
+    title: str = "新的对话",
+    mode: str = "chat",
+    workspace: str | None = None,
+) -> dict[str, Any]:
+    """新建会话；workspace 为会话级工作区（绝对路径字符串），None 跟随全局发现。"""
     ensure_dirs()
     now = time.time()
     session = {
@@ -29,6 +34,8 @@ def create_session(title: str = "新的对话") -> dict[str, Any]:
         "updated_at": now,
         "subject_slug": None,
         "node_id": None,
+        "mode": mode,
+        "workspace": workspace,
     }
     _write(session)
     return session
@@ -55,16 +62,31 @@ def require_session(session_id: str) -> dict[str, Any]:
     return session
 
 
+def session_workspace(session_id: str | None) -> str | None:
+    """会话绑定的会话级工作区（绝对路径字符串）；会话不存在或没绑定为 None。"""
+    if not session_id:
+        return None
+    session = get_session(session_id)
+    if session is None:
+        return None
+    return session.get("workspace")
+
+
 def add_message(
     session_id: str,
     role: str,
     content: str,
     attachments: list[dict[str, Any]] | None = None,
+    **extra: Any,
 ) -> dict[str, Any]:
+    """追加消息；extra（kind/ticket_id/slug 等）原样并入消息记录。"""
     session = require_session(session_id)
     message: dict[str, Any] = {"role": role, "content": content}
     if attachments:
         message["attachments"] = attachments
+    for key, value in extra.items():
+        if value is not None:
+            message[key] = value
     session["messages"].append(message)
     # 第一条用户消息自动作为会话标题
     if role == "user" and len(session["messages"]) == 1:
@@ -97,6 +119,8 @@ def list_sessions() -> list[dict[str, Any]]:
                 "updated_at": s["updated_at"],
                 "subject_slug": s.get("subject_slug"),
                 "node_id": s.get("node_id"),
+                "mode": s.get("mode") or "chat",
+                "workspace": s.get("workspace"),
             }
         )
     return sorted(metas, key=lambda m: m["updated_at"], reverse=True)
