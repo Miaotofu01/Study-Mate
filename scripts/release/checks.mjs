@@ -80,6 +80,10 @@ const groups = {
       'scripts/tests/test_host_reference_fence.mjs',
       'scripts/tests/test_host_path_boundary.mjs',
       'scripts/tests/test_host_yaml_workspace.mjs',
+      // 纯函数域 lib/core/**：内容格式的解析与锚点题库对账（格式只有一个真相）
+      'scripts/tests/test_core_format.mjs',
+      'scripts/tests/test_core_anchors.mjs',
+      'scripts/tests/test_core_lesson.mjs',
     ],
   },
   '--static': {

@@ -165,8 +165,8 @@ test('科目与节点的键名是页面依赖的契约，逐个钉住', () => {
   const [node] = subject.nodes;
   assert.deepEqual(Object.keys(node).sort(), [
     'anchors', 'concepts', 'id', 'kind', 'lab', 'lesson', 'lesson_md', 'level', 'notes',
-    'number', 'objective', 'orphan_keys', 'pitfalls', 'pool', 'practice', 'prerequisites',
-    'problem', 'raw_status', 'realworld', 'resources', 'tier', 'title',
+    'number', 'objective', 'orphan_keys', 'orphans', 'pitfalls', 'pool', 'practice',
+    'prerequisites', 'problem', 'raw_status', 'realworld', 'resources', 'tier', 'title',
   ]);
 });
 
@@ -346,19 +346,27 @@ test('锚点四态各有结论，多匹配绝不静默取第一个', () => {
   const [subject] = readLibrary({ workspace }).subjects;
   const anchors = subject.nodes[0].anchors;
 
+  // 键在题库里的行号由 lib/core/anchors.ts 按 **JSON 的真实位置**算；这里的题库是
+  // 手写常量，没有原文可查，所以行号统一兜底成 1。逐字相等的那几条用 candidates 带上
+  // 候选键的行号与题数——读端想显示「题库：<键>（N 题）」就有得显示。
   assert.deepEqual(anchors, [
     // 逐字命中题库键 → resolved
-    { text: '精确命中', level: '理解', resolution: 'resolved', keys: ['精确命中'] },
+    { text: '精确命中', level: '理解', line: 3, resolution: 'resolved', keys: ['精确命中'],
+      candidates: [{ key: '精确命中', line: 1, count: 1 }] },
     // 只差空白、且题库里只有一个候选 → stale（题库改过词，正文还没跟上）
-    { text: '只差  空白', level: '改造', resolution: 'stale', keys: ['只差 空白'] },
+    { text: '只差  空白', level: '改造', line: 6, resolution: 'stale', keys: ['只差 空白'],
+      candidates: [{ key: '只差 空白', line: 1, count: 1 }] },
     // 归一化后有两个候选 → ambiguous，两个都报出来，让界面去问人
-    { text: '多  匹配', level: '排错', resolution: 'ambiguous', keys: ['多 匹配', '多匹配'] },
+    { text: '多  匹配', level: '排错', line: 9, resolution: 'ambiguous', keys: ['多 匹配', '多匹配'],
+      candidates: [{ key: '多 匹配', line: 1, count: 1 }, { key: '多匹配', line: 1, count: 1 }] },
     // 题库里根本没有 → missing
-    { text: '查无此锚', level: '应用', resolution: 'missing', keys: [] },
+    { text: '查无此锚', level: '应用', line: 12, resolution: 'missing', keys: [], candidates: [] },
     // 逐字命中优先于归一化：条文相同就是 resolved，即使归一化后会有歧义
-    { text: '多匹配', level: '理解', resolution: 'resolved', keys: ['多匹配'] },
+    { text: '多匹配', level: '理解', line: 15, resolution: 'resolved', keys: ['多匹配'],
+      candidates: [{ key: '多匹配', line: 1, count: 1 }] },
     // 题库键首尾的空白不算差异（两边都过 Python 的 strip）
-    { text: '两边空白', level: '理解', resolution: 'resolved', keys: [' 两边空白 '] },
+    { text: '两边空白', level: '理解', line: 18, resolution: 'resolved', keys: [' 两边空白 '],
+      candidates: [{ key: ' 两边空白 ', line: 1, count: 1 }] },
   ]);
 
   const ambiguous = anchors.find((anchor) => anchor.resolution === 'ambiguous');
@@ -369,6 +377,8 @@ test('正文里没声明的题库键进 orphan_keys，顺序按码位', () => {
   const { workspace } = anchorWorkspace();
   const [subject] = readLibrary({ workspace }).subjects;
   assert.deepEqual(subject.nodes[0].orphan_keys, ['没人声明']);
+  // orphans 与它同源，另带题数——这是收编前**没有任何消费方**的那份结论
+  assert.deepEqual(subject.nodes[0].orphans, [{ key: '没人声明', line: 1, count: 1 }]);
 });
 
 /* ── 坏数据当场抛错 ───────────────────────────────────────────────────── */
