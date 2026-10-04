@@ -56,9 +56,12 @@ const DECLARATIONS = {
     reads: ['workspace', 'curriculum', 'lessons'],
     writes: { lessons: ['lessons/*#empty_reason'] },
   },
+  // #82：导出读的是「整份阅读端快照要读到的东西」（readLibrary 一份全读，逐个列出来是为了让
+  // 「这个工具能碰什么」可读）；写域是导出产物的布局（lib/export/plan.ts 里那份清单）。
   studymate_export: {
-    reads: [],
-    writes: { export: ['**'] },
+    reads: ['workspace', 'memory', 'subjects', 'curriculum', 'progress', 'lessons', 'pool',
+      'assets', 'records', 'reference', 'misconceptions'],
+    writes: { export: ['index.html', 'data.js', 'host.js', 'boot.js', 'studymate-client.js', 'export.json', 'vendor/**', 'assets/**'] },
   },
   // #73 任务域：任务状态不是学习数据域（`lib/tools/domains.ts` 里没有它），
   // 所以五个工具一个域都不读、一个字段都不写——它们碰的是插件自己的台账。
@@ -110,8 +113,11 @@ test('注册走 ctx.effect：每个工具都挂在可回收的副作用上', () 
   for (const label of toolEffects) assert.match(label, /^studymate: studymate_/);
   // 任务域另外挂一条**服务级** effect：卸载时给销毁回执（请求取消活任务 + 落盘刷一遍）。
   // 夹具没有 inject，所以阅读端那条路由不在这份清单里（它在 test_tasks_model.mjs 里验）。
+  // 任务域另外挂一条**服务级** effect：卸载时给销毁回执（请求取消活任务 + 落盘刷一遍）。
+  // #82 又加了一条：导出任务类型在**加载时**登记（重开 DSH 之后 resume 要靠它按名字找回跑法），
+  // 卸载时注销。夹具没有 inject，所以阅读端那条路由不在这份清单里（它在 test_tasks_model.mjs 里验）。
   assert.deepEqual(ctx.effects.filter((label) => !label.startsWith('studymate: studymate_')),
-    ['studymate: 任务服务（销毁回执）']);
+    ['studymate: 导出任务类型（卸载时注销）', 'studymate: 任务服务（销毁回执）']);
 });
 
 /* ── 二、反证：越权读 / 越权写必须抛 ──────────────────────────────────── */

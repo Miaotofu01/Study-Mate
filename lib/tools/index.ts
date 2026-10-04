@@ -18,6 +18,7 @@
 
 import { registerStudyTool } from './define.ts';
 import { registerTaskTools } from '../tasks/index.ts';
+import { registerExportKind } from '../export/index.ts';
 
 // 转出去给「往注册点加一行」的子系统与测试用：造工具、域词表、越权错误。
 // （`registerStudyTool` 自己也在下面被用到，所以这里是 import + export 两件事。）
@@ -64,8 +65,12 @@ export function registerRewriteTools(ctx: StudyPluginContext): void {
   registerStudyTool(ctx, applyEmptyReasonsTool());
 }
 
-/** 导出（#82 落地前是占位）。 */
+/** 导出：一个原生工具 + 一种任务类型（「导出」，#82 落地）。 */
 export function registerExportTools(ctx: StudyPluginContext): void {
+  // 任务类型在**插件加载时**就登记：重开 DSH 之后 resume 要靠它按名字找回跑法
+  // （`lib/export/task.ts` 的文件头写了这条为什么不能偷懒到第一次导出时再登记）。
+  if (typeof ctx.effect === 'function') ctx.effect(() => registerExportKind(), 'studymate: 导出任务类型（卸载时注销）');
+  else registerExportKind();
   registerStudyTool(ctx, exportTool());
 }
 

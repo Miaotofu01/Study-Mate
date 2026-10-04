@@ -48,10 +48,13 @@ const DOMAIN_RULES = {
   // 子系统一律不许 import tools（任务域就是把 `registerStudyTool` 当参数接过去的，正是为了
   // 不出现反向边，见 lib/tasks/tools.ts 文件头）。往后每落地一个注册进注册点的子系统
   // （#74 的 watch、#82 的导出），这里加一个域名，别改成通配。
-  tools:  { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },  // 原生工具（#68）+ 任务模型（#73）
+  tools:  { allow: ['core', 'lib', 'tasks', 'export'], builtin: true, package: false },  // 原生工具（#68）+ 任务模型（#73）+ 导出（#82）
   tasks:  { allow: ['core', 'lib'], builtin: true, package: false },  // 任务模型（#73）
   watch:  { allow: ['core', 'lib'], builtin: true, package: false },  // 预留：#74 文件监听
-  export: { allow: ['core', 'lib', 'tools', 'tasks'], builtin: true, package: false },  // 预留
+  // 导出（#82）落地：它读 `lib`（library / reference / assets）与 `core`，登记任务类型要 `tasks`。
+  // **不许 import tools**（预登记的初值里有它）：工具域 import 导出域去注册 `studymate_export`，
+  // 反向再来一条就是域图成环——这条环由下面的环检测拦下，所以这里直接不写。
+  export: { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },
   bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'watch', 'export'], builtin: true, package: false },
   client: { allow: [], builtin: false, package: false },  // 浏览器侧单文件：只与模块加载器打交道
 };
