@@ -18,6 +18,41 @@
    已知后果：写 `title: no` 会得到布尔 false，跟 PyYAML 一样。这不是 bug，是对齐。
    ───────────────────────────────────────────────────────────────────────── */
 
+/* ── 可选构造（默认全关，只有 cordis 补丁/预设文件打开） ─────────────────────
+   学习文件的实测里没有标签与块标量，所以默认**见到就报错**是这套解析器的安全属性：
+   解析错的后果比报错难查得多。但安装器要读的两份文件是 DSH 自己的配置
+   （`~/.dsh/profiles/<profile>/cordis.patch.yml` 与 `preset/learning/agent.cordis.yml`），
+   它们合法地用了 `!!js` 标签与 `>-` / `|` 块标量——PyYAML 侧靠两个自定义 Loader 支持它们。
+
+   所以这里把这两类构造做成**显式开启**的能力，而不是放宽默认：不开就跟以前一字不差地报错，
+   开了才解析（调用方是 lib/preset.ts，见那里对两种标签语义的说明）。
+
+   `tags` 的两种语义对应 PyYAML 侧的两个 Loader：
+     · `'scalar'`     —— `!!js <原文>` 直接取原文（PatchLoader：profile 补丁文件用）；
+     · `'expression'` —— `!!js <原文>` 读成 `{__jsExpr: 原文}`，即 DSH 自己加载未求值 !!js 节点
+                         时的原生 JSON 表示（PresetLoader：预设文件用，它的结果要内联进补丁）。 */
+export type YamlTags = 'scalar' | 'expression';
+
+export interface YamlParseOptions {
+  /** 出错信息里要写的文件名（调用方从盘上读，只有它知道）。 */
+  file?: string;
+  /** 允许 `!!js` 标签并指定它的读法；省略＝见到标签报错。 */
+  tags?: YamlTags;
+  /** 允许 `|` / `>` 块标量；省略＝见到块标量报错。 */
+  blockScalars?: boolean;
+  /** 允许**一对**文档标记（开头的 `---`、结尾的 `...`）；省略＝见到就报错（一个文件只解析一个文档）。 */
+  documentMarkers?: boolean;
+}
+
+/** 当前这一次 parseYaml 的选项。解析是同步的、不重入，所以模块级一份就够。 */
+let active: YamlParseOptions = {};
+function tagsMode(): YamlTags | undefined { return active.tags; }
+function blockScalarsEnabled(): boolean { return active.blockScalars === true; }
+
+/** 这一次解析的**原始行**（含空行与整行注释，行尾的 \r 已归一）。块标量要按原文取，
+    而下面的行索引刻意丢掉了空行与注释行，所以这里单独留一份。 */
+let sourceLines: string[] = [];
+
 /** PyYAML 把日期当 date 对象、`=`/`<<` 走特殊标签，这些本子集都不支持，见到就报错。 */
 export class YamlParseError extends Error {
   // declare：只声明类型，运行期不留字段定义（Node 的类型擦除会把 `declare x: T` 整条抹掉）。
@@ -71,7 +106,7 @@ function fail(file: string, line: SourcePosition, column: number, text: string |
 const BOOL_TRUE = new Set(['yes', 'true', 'on']);
 const BOOL_FALSE = new Set(['no', 'false', 'off']);
 
-// 逐个抄自 PyYAML resolver.py，含 _ 分隔与六十进制这两种冷门写法：
+// 逐个抄自 PyYAML resolver，含 _ 分隔与六十进制这两种冷门写法：
 // 判错一个字符，`mastery: 0.85` 就会变成字符串混进统计里。
 const INT_RE = /^(?:[-+]?0b[0-1_]+|[-+]?0[0-7_]+|[-+]?(?:0|[1-9][0-9_]*)|[-+]?0x[0-9a-fA-F_]+|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)$/;
 const FLOAT_RE = /^(?:[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?|\.[0-9_]+(?:[eE][-+][0-9]+)?|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$/;
@@ -144,7 +179,8 @@ function setKey(obj: Record<string, unknown>, key: string, value: unknown): void
   else obj[key] = value;
 }
 
-/** 去掉行尾注释。`#` 只有在行首或前面是空白时才是注释（YAML 的规则）。 */
+/** 去掉行尾注释。`#` 只有在行首、前面是空白、或紧跟流式指示符（`[` `{` `,`）时才是注释
+    ——`[# 注释\n]` 是合法的空流式列表，PyYAML 也这么认。 */
 function stripComment(text: string): string {
   let inSingle = false;
   let inDouble = false;
@@ -164,7 +200,7 @@ function stripComment(text: string): string {
     }
     if (ch === '"') inDouble = true;
     else if (ch === "'") inSingle = true;
-    else if (ch === '#' && (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\t')) return text.slice(0, i);
+    else if (ch === '#' && (i === 0 || ' \t[{,'.includes(text[i - 1]))) return text.slice(0, i);
   }
   return text;
 }
@@ -202,9 +238,34 @@ function findKeyColon(text: string): number {
   return -1;
 }
 
+/** 只给 `documentMarkers` 用：把开头那一个 `---` 与结尾那一个 `...` 抹成空行。
+    中间再来一个就是真的多文档，那时照旧报错——多文档必须失败，不能只读第一份。 */
+function withoutDocumentMarkers(text: string): string {
+  const lines = text.split('\n');
+  const empty = (line: string) => line.trim() === '' || line.trimStart().startsWith('#');
+  let first = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (empty(lines[i])) continue;
+    first = i;
+    break;
+  }
+  if (first >= 0 && /^---(?:\s|$)/.test(lines[first])) lines[first] = '';
+  let last = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (empty(lines[i])) continue;
+    last = i;
+    break;
+  }
+  if (last >= 0 && last !== first && /^\.\.\.(?:\s|$)/.test(lines[last])) lines[last] = '';
+  return lines.join('\n');
+}
+
 function indexLines(text: string, file: string): SourceLine[] {
   // 实测 21 个真文件全是 \n 结尾；这里顺手归一 CRLF，免得 \r 混进标量尾巴。
-  const rawLines = String(text).replace(/\r\n?/g, '\n').split('\n');
+  // 开头的 BOM 按 YAML 的规矩跳过（PyYAML 也认）——两份 cordis 配置都可能带 BOM。
+  const normalized = String(text).replace(/^\ufeff/, '').replace(/\r\n?/g, '\n');
+  const source = active.documentMarkers ? withoutDocumentMarkers(normalized) : normalized;
+  const rawLines = source.split('\n');
   const lines: SourceLine[] = [];
   for (let i = 0; i < rawLines.length; i++) {
     const raw = rawLines[i];
@@ -303,6 +364,86 @@ function assertNodeStart(text: string, line: SourceLine, column: number, file: s
   }
 }
 
+/* ── 可选构造：`!!js` 标签与 `|` / `>` 块标量（见文件头 YamlParseOptions） ───── */
+
+/** 只认 js 标签；`!!js` / `!js` / `!<tag:yaml.org,2002:js>` 三种写法等价。 */
+const JS_TAG_RE = /^!!js(?=\s|$)|^!js(?=\s|$)|^!<tag:yaml\.org,2002:js>(?=\s|$)/;
+/** 块标量头：`|` / `>` 加可选的缩进指示与 chomping（两种顺序都合法）。 */
+const BLOCK_SCALAR_RE = /^[|>](?:[+-]?\d?|\d?[+-]?)$/;
+
+/**
+ * 拆掉开头的 `!!js` 标签。没开 tags 或没有标签时返回 null——那时文本会走
+ * `assertNodeStart`，仍旧报「不支持标签 !」。
+ */
+function splitTag(text: string): { rest: string; width: number } | null {
+  if (!tagsMode()) return null;
+  const match = JS_TAG_RE.exec(text);
+  if (!match) return null;
+  return { rest: pyStrip(text.slice(match[0].length)), width: match[0].length };
+}
+
+/** 标签节点读到的**字符串**值：`scalar` 取原文，`expression` 包成 DSH 的 `{__jsExpr}`。 */
+function applyTag(raw: string): unknown {
+  return tagsMode() === 'expression' ? { __jsExpr: raw } : raw;
+}
+
+function isBlockScalarHeader(text: string): boolean {
+  return blockScalarsEnabled() && BLOCK_SCALAR_RE.test(text);
+}
+
+/**
+ * 读一个块标量。行号取自 header 那一行，往后按**原始行**走——空行属于块内容，
+ * 而上面那份行索引刻意不留空行。
+ *
+ * 折行规则按 YAML 的常见情形实现：`|` 原样保留换行；`>` 把非空行之间的单个换行折成空格，
+ * 空行折成一个换行（更深的缩进行原样保留）。chomping：`-` 去掉结尾换行、默认留一个、`+` 全留。
+ */
+function readBlockScalar(header: SourceLine, headerText: string, parentIndent: number): { value: string; next: number } {
+  const indicator = headerText[1] ?? '';
+  const chomp = headerText.includes('-') ? 'strip' : headerText.includes('+') ? 'keep' : 'clip';
+  const explicit = /\d/.exec(headerText);
+  const start = header.line; // 1 起：下一行的下标就是它
+  const pieces: Array<{ indent: number; content: string }> = [];
+  let index = start;
+  let blockIndent: number | undefined = explicit ? parentIndent + Number(explicit[0]) : undefined;
+  for (; index < sourceLines.length; index++) {
+    const raw = sourceLines[index];
+    if (raw.trim() === '') {
+      pieces.push({ indent: -1, content: '' });
+      continue;
+    }
+    let indent = 0;
+    while (indent < raw.length && raw[indent] === ' ') indent++;
+    if (blockIndent === undefined) {
+      if (indent <= parentIndent) break; // 块是空的：下一行不属于它
+      blockIndent = indent;
+    }
+    if (indent < blockIndent) break;
+    pieces.push({ indent, content: raw.slice(blockIndent) });
+  }
+  // 结尾的空行不算内容（YAML 的 chomping 只按最后一个非空行判断）
+  while (pieces.length && pieces[pieces.length - 1].indent === -1) pieces.pop();
+  let text: string;
+  if (indicator === '|') {
+    text = pieces.map(piece => piece.content).join('\n');
+  } else {
+    let folded = '';
+    let previousBlank = false;
+    for (const piece of pieces) {
+      if (piece.indent === -1) { folded += '\n'; previousBlank = true; continue; }
+      if (folded !== '' && !previousBlank) folded += ' ';
+      folded += piece.content;
+      previousBlank = false;
+    }
+    text = folded;
+  }
+  if (text !== '') {
+    if (chomp === 'clip') text = `${text.replace(/\n+$/, '')}\n`;
+    else if (chomp === 'strip') text = text.replace(/\n+$/, '');
+  }
+  return { value: text, next: index };
+}
+
 function skipFlowSpace(text: string, i: number): number {
   while (i < text.length && (text[i] === ' ' || text[i] === '\t')) i++;
   return i;
@@ -313,8 +454,17 @@ function skipFlowSpace(text: string, i: number): number {
  * 所以 `{k: v}` 的键读成 `k`，而 `[https://a]`、`[1:30]` 里的冒号留在标量里。
  * 是不是映射由调用方看 next 指向的字符决定——同一段代码同时服务 `[...]` 与 `{...}`。
  */
-function parseFlowValue(text: string, i: number, line: SourceLine, file: string): { value: unknown; next: number } {
+function parseFlowValue(text: string, i: number, line: SourceLine, file: string, asText = false): { value: unknown; next: number } {
   i = skipFlowSpace(text, i);
+  const tag = splitTag(text.slice(i));
+  if (tag) {
+    // 标签下的值只支持标量：集合加标签在 cordis 配置里没有出现过，宁可不支持也不猜。
+    const inner = parseFlowValue(text, i + tag.width, line, file, true);
+    if (inner.value !== null && typeof inner.value === 'object') {
+      fail(file, line, i + 1, line.raw, '不支持给集合加 !!js 标签');
+    }
+    return { value: applyTag(String(inner.value)), next: inner.next };
+  }
   const ch = text[i];
   if (ch === undefined) fail(file, line, i + 1, line.raw, '流式集合没有闭合');
   if (ch === '[' || ch === '{') return parseFlowCollection(text, i, line, file);
@@ -327,7 +477,7 @@ function parseFlowValue(text: string, i: number, line: SourceLine, file: string)
   const raw = pyStrip(text.slice(i, j));
   if (raw === '') fail(file, line, i + 1, line.raw, '流式集合里有空项');
   assertNodeStart(raw, line, i + 1, file);
-  return { value: resolvePlainScalar(raw), next: j };
+  return { value: asText ? raw : resolvePlainScalar(raw), next: j };
 }
 
 function parseFlowCollection(text: string, start: number, line: SourceLine, file: string): { value: unknown; next: number } {
@@ -380,8 +530,16 @@ function parseFlowCollection(text: string, start: number, line: SourceLine, file
   return { value: isSeq ? seq : map, next: i };
 }
 
-/** 解析一个值：流式集合、引号标量，或到行尾为止的 plain 标量。 */
-function parseInlineValue(text: string, line: SourceLine, column: number, file: string): unknown {
+/** 解析一个值：流式集合、引号标量，或到行尾为止的 plain 标量。`asText` 保留 plain 原文
+    （标签下的标量取字符串，不做隐式类型判定——PyYAML 的 construct_scalar 就是这个口径）。 */
+function parseInlineValue(text: string, line: SourceLine, column: number, file: string, asText = false): unknown {
+  const tag = splitTag(text);
+  if (tag) {
+    if (tag.rest === '') fail(file, line, column, line.raw, '!!js 标签后面没有值');
+    const inner = parseInlineValue(tag.rest, line, column + (text.length - tag.rest.length), file, true);
+    if (inner !== null && typeof inner === 'object') fail(file, line, column, line.raw, '不支持给集合加 !!js 标签');
+    return applyTag(String(inner));
+  }
   const ch = text[0];
   if (ch === '[' || ch === '{') {
     const flow = parseFlowCollection(text, 0, line, file);
@@ -401,7 +559,7 @@ function parseInlineValue(text: string, line: SourceLine, column: number, file: 
     // 作者想要的嵌套结构吞掉，所以这里也报错。
     fail(file, line, column, line.raw, `plain 标量里出现 ": "，YAML 不允许（要么加引号，要么它就是键）：${text}`);
   }
-  return resolvePlainScalar(text);
+  return asText ? text : resolvePlainScalar(text);
 }
 
 function parseKey(raw: string, line: SourceLine, column: number, file: string): string {
@@ -421,6 +579,13 @@ function parseKey(raw: string, line: SourceLine, column: number, file: string): 
 }
 
 /* ── 块结构 ────────────────────────────────────────────────────────────── */
+
+/** 从 `lines` 的 from 起，找第一个行号不小于 lineNo 的下标（块标量跳行用）。 */
+function firstLineAtOrAfter(lines: SourceLine[], from: number, lineNo: number): number {
+  let i = from;
+  while (i < lines.length && lines[i].line < lineNo) i++;
+  return i;
+}
 
 function parseMapping(lines: SourceLine[], start: number, indent: number, file: string): [Record<string, unknown>, number] {
   const obj: Record<string, unknown> = {};
@@ -443,7 +608,11 @@ function parseMapping(lines: SourceLine[], start: number, indent: number, file: 
     }
     const key = parseKey(pyStrip(line.content.slice(0, colon)), line, line.indent + 1, file);
     const rest = pyStrip(stripComment(line.content.slice(colon + 1)));
-    if (rest === '') {
+    if (isBlockScalarHeader(rest)) {
+      const block = readBlockScalar(line, rest, indent);
+      setKey(obj, key, block.value);
+      i = firstLineAtOrAfter(lines, i + 1, block.next);
+    } else if (rest === '') {
       const child = parseChild(lines, i + 1, indent, file);
       setKey(obj, key, child.value);
       i = child.next;
@@ -472,6 +641,12 @@ function parseSequence(lines: SourceLine[], start: number, indent: number, file:
       column++;
     }
     const value = pyStrip(stripComment(rest));
+    if (isBlockScalarHeader(value)) {
+      const block = readBlockScalar(line, value, indent);
+      arr.push(block.value);
+      i = firstLineAtOrAfter(lines, i + 1, block.next);
+      continue;
+    }
     if (value === '') {
       const child = parseChild(lines, i + 1, indent, file);
       arr.push(child.value);
@@ -523,36 +698,56 @@ function parseChild(lines: SourceLine[], i: number, parentIndent: number, file: 
  * 解析这一小撮学习文件用的 YAML 子集。
  *
  * @param {string} text 文件全文
- * @param {{file?: string}} [options] 出错信息里要写的文件名（调用方从盘上读，只有它知道）
+ * @param {YamlParseOptions} [options] 出错信息里要写的文件名；以及两份 cordis 配置才需要的
+ *        `tags` / `blockScalars`（默认关闭，见文件头那段说明）
  * @returns {unknown} 映射、序列或标量；空文档返回 null
  */
-export function parseYaml(text: string, options: { file?: string } = {}): unknown {
+export function parseYaml(text: string, options: YamlParseOptions = {}): unknown {
   if (typeof text !== 'string') throw new TypeError('parseYaml 只接受字符串');
   const file = options.file || '<yaml>';
-  const lines = indexLines(text, file);
-  if (lines.length === 0) return null;
+  // 解析是同步的、不重入：选项与原始行放模块级一份，下面所有递归函数都读它。
+  // 用 try/finally 复位，免得一次带选项的解析把默认行为永久放宽。
+  const previous = active;
+  active = options;
+  try {
+    // 与 indexLines 同一份归一，块标量按行号取原文时才不会错位
+    sourceLines = String(text).replace(/\r\n?/g, '\n').split('\n');
+    const lines = indexLines(text, file);
+    if (lines.length === 0) return null;
 
-  const first = lines[0];
-  if (!isSeqEntry(first.content) && findKeyColon(first.content) < 0) {
-    // 整个文档就是一个流式集合或标量，例如 misconceptions.yaml 里的裸 `[]`。
-    if (lines.length > 1) {
-      const second = lines[1];
-      fail(file, second, second.indent + 1, second.raw,
-        '第一行既不是 key: value 也不是 "- " 列表项，本解析器不支持多行 plain 标量（YAML 会把续行折进同一个标量）');
+    const first = lines[0];
+    if (!isSeqEntry(first.content) && findKeyColon(first.content) < 0) {
+      // 整个文档就是一个流式集合或标量，例如 misconceptions.yaml 里的裸 `[]`。
+      const head = pyStrip(stripComment(first.content));
+      if (head.startsWith('[') || head.startsWith('{')) {
+        // 流式集合可以跨行（`[# 注释\n]\n`）。行尾注释先按行去掉，剩下的并成一行再解析——
+        // 这样「注释里有个 ]」不会把闭合判错。
+        let joined = head;
+        for (let k = 1; k < lines.length; k++) joined += ` ${pyStrip(stripComment(lines[k].content))}`;
+        return parseInlineValue(joined, first, first.indent + 1, file);
+      }
+      if (lines.length > 1) {
+        const second = lines[1];
+        fail(file, second, second.indent + 1, second.raw,
+          '第一行既不是 key: value 也不是 "- " 列表项，本解析器不支持多行 plain 标量（YAML 会把续行折进同一个标量）');
+      }
+      return parseInlineValue(head, first, first.indent + 1, file);
     }
-    return parseInlineValue(pyStrip(stripComment(first.content)), first, first.indent + 1, file);
-  }
 
-  let value;
-  let next;
-  if (isSeqEntry(first.content)) [value, next] = parseSequence(lines, 0, first.indent, file);
-  else [value, next] = parseMapping(lines, 0, first.indent, file);
+    let value;
+    let next;
+    if (isSeqEntry(first.content)) [value, next] = parseSequence(lines, 0, first.indent, file);
+    else [value, next] = parseMapping(lines, 0, first.indent, file);
 
-  if (next < lines.length) {
-    const line = lines[next];
-    fail(file, line, line.indent + 1, line.raw, '多出来的内容：这一行的缩进与上一块对不上');
+    if (next < lines.length) {
+      const line = lines[next];
+      fail(file, line, line.indent + 1, line.raw, '多出来的内容：这一行的缩进与上一块对不上');
+    }
+    return value;
+  } finally {
+    active = previous;
+    sourceLines = [];
   }
-  return value;
 }
 
 export default parseYaml;

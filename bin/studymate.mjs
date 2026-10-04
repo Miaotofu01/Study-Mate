@@ -8,6 +8,8 @@ import { adaptSkill } from './skill-compat.mjs';
 import { buildOpenAiPlugin } from './openai-plugin.mjs';
 import { buildAntigravityPlugin } from './antigravity-plugin.mjs';
 import { listDocMarkdown } from './docs-payload.mjs';
+import { readConfigObject } from '../lib/workspace.ts';
+import { installPreset } from '../lib/preset.ts';
 
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const metadata = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'));
@@ -21,7 +23,6 @@ https://github.com/Miaotofu01/Study-Mate/releases/latest/download/studymate-open
       studymate export [--workspace <目录>] [--out <目录>] [--subject <slug>] [--json] [--quiet]
       studymate build-plugin [--output <目录>]（开发者构建）
       studymate build-antigravity [--output <目录>] [--install]（Antigravity 插件构建）
-      studymate build-examples [工作区]（重建 examples/ 的示例页面，默认 examples）
       studymate --help | --version
 
 将学习模式和引擎安装到 DSH_HOME（默认 ~/.dsh）。
@@ -31,7 +32,7 @@ https://github.com/Miaotofu01/Study-Mate/releases/latest/download/studymate-open
 其余情况优先沿用上次安装的 profile，首次默认 web；都可用 --profile 覆盖。
 桌面端装在非默认目录时，用 --dsh "<安装目录>/resources/runtime/cli/bin/dsh.cmd" 指定。
 默认由安装器管理；已添加 DSH 原生插件时，可用 --mode native 显式切换。
-需要 Node.js ^22.19.0 或 >=24、dsh >=0.1.5-rc.2、Python 3.9+ 和 PyYAML。
+需要 Node.js ^22.19.0 或 >=24、dsh >=0.1.5-rc.2。
 安装器不会安装或升级 dsh，也不会重启正在运行的会话。
 
 更新使用相同的 install 命令，沿用已有学习工作区。
@@ -39,7 +40,7 @@ export 把学习工作区导成能离线打开的自包含页面：Antigravity /
 DSH 侧按需（学生说“导出一份能离线看的”才跑）。落点默认 <工作区>/export/，不需要 DSH；
 它要一份 React（npm i -g react react-dom，或设 STUDYMATE_REACT_DIR 指过去）。
 build-plugin 供开发者导出 Codex / ChatGPT Work 技能插件目录及 ZIP（默认 ./dist）。
-导出只需要 Node.js、Python 3.9+ 和 PyYAML，不需要 DSH，也不会更改客户端配置。`;
+导出只需要 Node.js，不需要 DSH，也不会更改客户端配置。`;
 
 function run(command, args, extra = {}) {
   return spawnSync(command, args, { encoding: 'utf8', timeout: 15000, windowsHide: true, ...extra });
@@ -179,51 +180,6 @@ export function supportsDsh(value) {
   return true;
 }
 
-export function findPython(platform = process.platform, execute = run) {
-  const candidates = [['python3', []], ['python', []]];
-  if (platform === 'win32') candidates.push(['py', ['-3']]);
-  const probe = 'import sys, json; print(json.dumps(dict(executable=sys.executable, version=list(sys.version_info[:3]))))';
-  let missingYaml, outdated;
-  for (const [command, prefix] of candidates) {
-    let result = execute(command, [...prefix, '-X', 'utf8', '-c', probe]);
-    if (platform === 'win32' && result.error) {
-      // Probe .cmd/.bat shims using constant arguments only. Later calls use
-      // sys.executable directly, so user paths never pass through cmd.exe.
-      result = execute(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c',
-        `"${command} ${[...prefix, '-X', 'utf8'].join(' ')} -c "${probe}""`],
-      { windowsVerbatimArguments: true });
-    }
-    if (result.status !== 0) continue;
-    try {
-      const { executable, version } = JSON.parse(result.stdout);
-      if (typeof executable !== 'string' || !executable || !Array.isArray(version) ||
-          version.length < 2 || !version.every(Number.isInteger)) continue;
-      if (version[0] < 3 || (version[0] === 3 && version[1] < 9)) {
-        outdated ??= version.join('.');
-        continue;
-      }
-      const python = { command: executable, prefix: ['-X', 'utf8'] };
-      if (execute(executable, [...python.prefix, '-c', 'import yaml']).status === 0) return python;
-      missingYaml ??= { executable, version: version.join('.'), launcher: [command, ...prefix].join(' ') };
-    } catch { /* A launcher that did not produce the probe result is not usable. */ }
-  }
-  const checked = candidates.map(([command, prefix]) => [command, ...prefix].join(' ')).join('、');
-  if (missingYaml) {
-    const terminal = platform === 'win32' ? '命令提示符（CMD）或 PowerShell' : '系统终端';
-    throw new Error(`已找到 Python ${missingYaml.version}：${missingYaml.executable}\n` +
-      `但这个 Python 缺少 PyYAML 或无法加载它。PyYAML 用于读取 StudyMate 的 YAML 配置，需要单独安装。\n\n` +
-      `1. 如果当前看到 Python 的 >>> 提示符，先输入 exit() 返回终端。\n` +
-      `2. 在${terminal}中复制执行下面的命令（使用本次检测到的 Python）：\n` +
-      `   ${missingYaml.launcher} -m pip install PyYAML\n` +
-      `3. 安装完成后，重新运行刚才的 StudyMate 命令，保留原有参数。\n\n` +
-      `如果提示 No module named pip，先执行：\n` +
-      `   ${missingYaml.launcher} -m ensurepip --upgrade\n` +
-      `然后重新执行上面的 PyYAML 安装命令。`);
-  }
-  if (outdated) throw new Error(`检测到 Python ${outdated}，需要 Python 3.9+（已检查 ${checked}）。请升级 Python 后重试。`);
-  throw new Error(`没有找到可用的 Python 3.9+（已检查 ${checked}）。请安装 Python 3.9+，并确认能从终端运行。`);
-}
-
 function checkDependencies({ explicit } = {}) {
   const [major, minor] = process.versions.node.split('.').map(Number);
   if (!(major >= 24 || (major === 22 && minor >= 19))) {
@@ -244,7 +200,7 @@ function checkDependencies({ explicit } = {}) {
       ? '请升级 DeepSeek Harness 桌面端。'
       : '请运行 npm install -g @deepseek-ai/dsh@latest。'));
   }
-  return { python: findPython(), version: dsh.version, desktop: dsh.desktop };
+  return { version: dsh.version, desktop: dsh.desktop };
 }
 
 function absolute(value) {
@@ -265,17 +221,24 @@ export function realDestination(directory) {
   return path.join(realDestination(parent), path.basename(directory));
 }
 
-export function readConfig(file, python) {
-  if (!fs.existsSync(file)) return {};
-  const result = run(python.command, [...python.prefix, '-c', `import json, pathlib, sys, yaml
-value = yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
-if value is None: value = {}
-if not isinstance(value, dict): raise ValueError('配置必须是 YAML 对象')
-workspace = value.get('workspace')
-if workspace is not None and not isinstance(workspace, str): raise ValueError('workspace 必须是路径字符串')
-print(json.dumps(value, ensure_ascii=True))`, file]);
-  if (result.status !== 0) throw new Error(`无法读取 ${file}，请修正配置后重试。\n${result.stderr?.trim() || result.error?.message || ''}`);
-  return JSON.parse(result.stdout);
+/**
+ * 读安装配置。与阅读端同一个读取器（`lib/workspace.ts` 的 `readConfigObject`）：
+ * 它认两种真实形态——安装器写的「注释 + JSON」，以及手改过的块映射。
+ *
+ * 配置存在却读不出来时报错而不是当空配置：安装器接下来要**改**这个文件，
+ * 猜着改会把学生的其它配置键弄丢。
+ */
+export function readConfig(file) {
+  const config = readConfigObject(file);
+  if (config) {
+    const workspace = config.workspace;
+    if (workspace !== undefined && workspace !== null && typeof workspace !== 'string') {
+      throw new Error('配置里的 workspace 必须是路径字符串，请修正后重试。');
+    }
+    return config;
+  }
+  if (fs.existsSync(file)) throw new Error(`无法读取 ${file}，请修正配置后重试。`);
+  return {};
 }
 
 // 造出 standalone 安装留在 <dshHome>/studymate/engine 的那份引擎载荷。
@@ -286,12 +249,6 @@ function copyPayload(destination) {
       recursive: true,
       filter: (file) => !['__pycache__', '.DS_Store'].includes(path.basename(file)),
     });
-  }
-  fs.mkdirSync(path.join(destination, 'scripts'), { recursive: true });
-  for (const entry of fs.readdirSync(path.join(source, 'scripts'), { withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith('.py')) {
-      fs.copyFileSync(path.join(source, 'scripts', entry.name), path.join(destination, 'scripts', entry.name));
-    }
   }
   // docs/ 按用途分子目录，必须按原相对路径铺开——技能里的 <root>/docs/<子目录>/<名>.md 指针依赖它
   for (const relative of listDocMarkdown(source)) {
@@ -309,11 +266,12 @@ function copyPayload(destination) {
  *
  * 原生插件加载（native）下，已安装的包自身就是引擎：它就在
  * `~/.dsh/profiles/<profile>/node_modules/@yunmiao/studymate`，package.json 的 `files`
- * 已经带了 `scripts/`、`templates/`、`schemas/`、`docs/`、`.dsh/skills`，所以再拷一份源码树到
+ * 已经带了 `templates/`、`schemas/`、`docs/`、`.dsh/skills`，所以再拷一份源码树到
  * `~/.dsh/studymate/engine/` 只是**同一份包的第二份副本**——两份会各自过期。
  *
- * 仍然是一个「含 `scripts/` 的目录」是刻意的过渡，不是遗漏：技能还在按
- * `python3 -B <root>/scripts/<名>.py` 调脚本，包里就有 `scripts/`，所以这段窗口里旧路径照样解析得到。
+ * standalone 的那份载荷是**只读材料**：技能、预设、schema、文档与工作区数据骨架
+ * （`templates/` 下的 MEMORY/MISSION/GLOSSARY/RESOURCES/subject.yaml）。**没有可执行文件**：
+ * 引擎已经是插件包本身，老宿主那条路只需要这些文件（Python 引擎已随 #83 退役）。
  *
  * `--mode native` 的**交接安装**（native 且 mode==='native'）走 standalone 的 <root>：
  * 那条路只改注册与归属，不落任何载荷，换成包目录反而会让 DSH 重启前的旧技能副本指错地方。
@@ -334,15 +292,14 @@ export function defaultProfile({ desktop, installModes }) {
 
 // Shared by the CLI and the DSH bundle. Native loading already runs inside DSH;
 // it must not launch a second, possibly different dsh executable from PATH.
-export function installPayload({ workspaceArg, profile, python, version, desktop = false,
+export function installPayload({ workspaceArg, profile, version, desktop = false,
   dshHome = absolute(process.env.DSH_HOME || path.join(os.homedir(), '.dsh')), native = false, mode = 'standalone' }) {
   if (!['standalone', 'native'].includes(mode) || native && mode !== 'standalone') {
     throw new Error('--mode 必须是 standalone 或 native；原生启动不执行安装方式切换。');
   }
-  python ??= findPython();
   dshHome = absolute(dshHome);
   const configFile = path.join(dshHome, 'studymate-config.yaml');
-  const config = readConfig(configFile, python);
+  const config = readConfig(configFile);
   const installModes = config.installModes ?? {};
   if (typeof installModes !== 'object' || Array.isArray(installModes)) {
     throw new Error('配置中的 installModes 必须是按 profile 记录安装方式的对象。');
@@ -411,8 +368,7 @@ export function installPayload({ workspaceArg, profile, python, version, desktop
         if (!fs.existsSync(skillFile)) continue;
         const skill = fs.readFileSync(skillFile, 'utf8');
         fs.writeFileSync(skillFile, adaptSkill(skill, {
-          platform: process.platform, pythonExecutable: python.command,
-          configFile, tempDirectory: os.tmpdir(),
+          platform: process.platform, configFile, tempDirectory: os.tmpdir(),
         }));
       }
     }
@@ -426,13 +382,13 @@ export function installPayload({ workspaceArg, profile, python, version, desktop
     if (!agent.includes('__STUDYMATE_SKILLS__')) throw new Error('预设缺少 __STUDYMATE_SKILLS__，安装包不完整。');
     fs.writeFileSync(agentFile, agent.replaceAll('__STUDYMATE_SKILLS__', path.join(payload, '.dsh', 'skills').split(path.sep).join('/').replaceAll("'", "''")));
 
+    // 注册预设：`lib/preset.ts`（迁移前的 Python 安装助手的 TS 替代，形状逐字段一致）。
+    // 它自己保证「失败时一个字节都不落盘」——所以这里不需要再回滚它那部分。
     const stagedPatch = path.join(staging, 'cordis.patch.yml');
-    const prepare = run(python.command, [...python.prefix, path.join(source, 'scripts', 'install_preset.py'),
-      '--preset-dir', stagedPreset, '--preset-target', preset, '--dsh-home', dshHome,
-      '--profile', profile, '--patch-output', stagedPatch,
-      ...(native ? ['--bundle'] : ['--dsh-version', version, '--mode', mode])]);
-    if (prepare.status !== 0) throw new Error(prepare.stderr?.trim() || prepare.error?.message || '无法注册学习预设。');
-    registration = JSON.parse(prepare.stdout);
+    registration = installPreset({
+      presetDir: stagedPreset, dshHome, profile, patchOutput: stagedPatch,
+      ...(native ? { bundle: true } : { dshVersion: version, mode }),
+    });
 
     fs.mkdirSync(path.join(workspace, '.learning', 'subjects'), { recursive: true });
     const realWorkspace = fs.realpathSync(workspace);
@@ -495,9 +451,9 @@ export function installPayload({ workspaceArg, profile, python, version, desktop
 }
 
 function install(workspaceArg, profile, mode, dshArg) {
-  const { python, version, desktop } = checkDependencies({ explicit: dshArg });
+  const { version, desktop } = checkDependencies({ explicit: dshArg });
   const { registration, engine, preset, configFile, workspace, profile: target } =
-    installPayload({ workspaceArg, profile, python, version, desktop, mode });
+    installPayload({ workspaceArg, profile, version, desktop, mode });
   const registered = registration.mode === 'bundle' ? `\n学习模式由 DSH 插件管理：${target}`
     : registration.mode === 'declarative' ? `\n已注册到 DSH profile：${target}` : '';
   const next = desktop
@@ -545,17 +501,8 @@ export async function main(args = process.argv.slice(2)) {
       if (args.length !== 1 && !(args.length === 3 && args[1] === '--output' && args[2] && !args[2].startsWith('--'))) {
         throw new Error(`用法：studymate build-plugin [--output <目录>]`);
       }
-      const result = buildOpenAiPlugin({ output: args[2], python: findPython() });
+      const result = buildOpenAiPlugin({ output: args[2] });
       console.log(`StudyMate ${result.version} OpenAI 插件已构建。\n插件目录：${result.plugin}\n插件 ZIP：${result.archive}\n安装方法见插件目录中的 README.md。`);
-    }
-    else if (args[0] === 'build-examples') {
-      if (args.length > 2) throw new Error('用法：studymate build-examples [工作区]');
-      const python = findPython();
-      const result = spawnSync(python.command, [...python.prefix, '-X', 'utf8',
-        path.join(source, 'scripts', 'build_examples.py'), ...args.slice(1)],
-        { stdio: 'inherit', windowsHide: true });
-      if (result.error) throw result.error;
-      if (result.status !== 0) throw new Error(`examples 重建失败（退出码 ${result.status}）`);
     }
     else if (args[0] === 'build-antigravity') {
       let output;
@@ -568,7 +515,7 @@ export async function main(args = process.argv.slice(2)) {
           throw new Error('用法：studymate build-antigravity [--output <目录>] [--install]');
         }
       }
-      const result = buildAntigravityPlugin({ output, python: findPython() });
+      const result = buildAntigravityPlugin({ output });
       console.log(`StudyMate ${result.version} Antigravity 插件已构建。\n插件目录：${result.plugin}\n插件 ZIP：${result.archive}`);
     }
     else {

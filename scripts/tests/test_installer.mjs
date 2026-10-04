@@ -5,12 +5,12 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { supportsDsh, findPython, findDsh, isDesktopLauncher, desktopResourceDirs, defaultProfile } from '../../bin/studymate.mjs';
+import { supportsDsh, findDsh, isDesktopLauncher, desktopResourceDirs, defaultProfile } from '../../bin/studymate.mjs';
 import { adaptSkill } from '../../bin/skill-compat.mjs';
+import { parseYaml } from '../../lib/yaml.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const cli = path.join(root, 'bin/studymate.mjs');
-const python = findPython();
 const launcher = process.platform === 'win32' ? 'dsh.cmd' : 'dsh';
 
 /** Write a runnable dsh at a Desktop-shaped location and return its path. */
@@ -47,11 +47,10 @@ function fixture(t) {
   function install(...args) {
     return spawnSync(process.execPath, [cli, 'install', ...args], { cwd: dir, env, encoding: 'utf8', timeout: 30000 });
   }
+  // 读配置与补丁用**本仓库自己的解析器**（与安装器同一份，所以读到的东西不会两边不一样）。
   function yaml(file) {
-    const result = spawnSync(python.command, [...python.prefix, '-c',
-      'import json,sys,yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1],encoding="utf-8"))))', file], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-    return JSON.parse(result.stdout);
+    return parseYaml(fs.readFileSync(file, 'utf8'),
+      { file, tags: 'scalar', blockScalars: true, documentMarkers: true });
   }
   version('0.1.7-alpha.1');
   return { dir, home, env, preset, patch, config, version, breakDsh, install, yaml };
@@ -182,7 +181,7 @@ test('a Desktop installation is found when no dsh is on PATH', { skip: process.p
   const profile = path.join(f.env.DSH_HOME, 'profiles', 'desktop');
   fs.mkdirSync(profile, { recursive: true });
   fs.writeFileSync(path.join(profile, 'package.json'), JSON.stringify({ name: 'dsh-profile-desktop' }));
-  // Keep the system PATH (Python must stay reachable) but let dsh fail, and point the
+  // Keep the system PATH (node must stay reachable) but let dsh fail, and point the
   // Windows installation roots at the fixture so no real Desktop installation decides this.
   f.breakDsh();
   const env = { ...f.env, LOCALAPPDATA: local,
@@ -199,7 +198,7 @@ test('installed skill copies get the write-boundary conventions in machine terms
     '角色产出走 `<subject_path>/.stage/practice-evaluator-<节点id>/deliver/`',
     '原样合并 `/tmp/practice-evaluator-<节点id>/deliver/.` 到科目目录'].join('\n');
   const adapted = adaptSkill(sample, {
-    platform: 'win32', pythonExecutable: 'C:\\Python\\python.exe',
+    platform: 'win32',
     configFile: 'C:\\Users\\me\\.dsh\\studymate-config.yaml', tempDirectory: 'C:/Temp',
   });
   assert.ok(!adapted.includes('`/tmp`'), '临时目录应换成本机实值');
@@ -207,16 +206,15 @@ test('installed skill copies get the write-boundary conventions in machine terms
   assert.match(adapted, /先写科目自己的 `<subject_path>\/\.stage\//);
 });
 
-test('installed script commands retain Python flags and use the detected interpreter', () => {
-  const source = 'python3 -B <root>/scripts/check_handoff.py <subject_path> --role learning-coach';
-  for (const platform of ['win32', 'linux']) {
-    const adapted = adaptSkill(source, {
-      platform, pythonExecutable: '/Python with spaces/python',
-      configFile: '/home/me/studymate-config.yaml', tempDirectory: '/tmp',
-    });
-    assert.equal(adapted.split('\n')[0],
-      `${platform === 'win32' ? '& ' : ''}'/Python with spaces/python' -X utf8 -B '<root>/scripts/check_handoff.py' '<subject_path>' --role learning-coach`);
-  }
+test('技能副本的本机命令约定不再提 Python 与引擎脚本（#83 退役）', () => {
+  // 引擎脚本随 #83 退役，`adaptSkill` 里的 python 规整也一并删掉：本机命令约定现在只讲
+  // 环境变量、路径引用与临时目录。这条守着它不会回来——样例里刻意不写脚本扩展名，
+  // 仓库里不再出现那两个字样。
+  const adapted = adaptSkill('临时目录：`/tmp/studymate-scratch/<slug>`', {
+    platform: 'linux', configFile: '/home/me/studymate-config.yaml', tempDirectory: '/tmp',
+  });
+  assert.doesNotMatch(adapted, /python/i, '命令约定里不该再提 Python');
+  assert.ok(adapted.includes('本机命令约定（安装器生成）'));
 });
 
 test('install, reinstall and downgrade preserve workspace and unrelated profile configuration', t => {
