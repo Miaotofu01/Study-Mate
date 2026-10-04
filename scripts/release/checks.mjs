@@ -72,7 +72,7 @@ const groups = {
       'test_quiz_attr.py', 'test_quiz_code.py', 'test_render_lesson.py',
       'test_statuses.py', 'test_templates.py', 'test_workspace_config.py',
     ],
-    node: ['quiz_dom_test.js', 'toc_dom_test.js'],
+    node: ['quiz_dom_test.cjs', 'toc_dom_test.cjs'],
     tests: [
       'scripts/release/release.test.mjs',
       // Host 半数据层的特征化测试（lib/{workspace,library,assets,yaml,reference,attempts}.mjs）

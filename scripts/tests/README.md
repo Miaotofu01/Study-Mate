@@ -21,7 +21,7 @@ npm test
 | `npm run test:release` | 版本、changelog、重试和发布保护 |
 | `npm run test:static` | Python 语法、技能调用面与提示词规则归属、提示词与模板文案契约、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
 | `npm run test:browser` | 三套真实 Chrome 渲染测试，需要 `google-chrome` |
-| `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录；native 安装下还验八个原生工具的注册、body 可调用（走真 dispatch）与越权抛 |
+| `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录；native 安装下还验八个原生工具的注册、body 可调用（走真 dispatch）与越权抛，以及 #70 的引擎路径：`root` 指向已安装的包、`~/.dsh/studymate/engine/` 不再出现 |
 | `npm run test:dsh-cli` | 真实 DSH CLI 安装、更新、卸载，还需要 `pnpm` |
 
 Python 语法、提示词与模板契约、两个宿主的技能转换这一层（`--static`）**已并入 `npm test`**，CI 每次都会跑；保留为本地按需命令的只剩真实宿主（`test:dsh` / `test:dsh-cli`）与真实 Chrome（`test:browser`）——它们要外部环境，不适合当默认门禁。`scripts/release/checks.mjs` 显式列出各层套件——**显式的代价是新增套件会静默地永远不跑**，所以那里有一条覆盖断言：`scripts/tests/` 下的每个文件必须属于某个组（core / `--static` / `--browser`）、package.json 的按需入口（`test:dsh` 等），或在 `MANUAL_ONLY` 里明确登记为手动脚本。漏登记时跑门禁会直接报出文件名并以退出码 2 停下。
@@ -51,7 +51,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_lessonfmt.py` | 内容文件语法（围栏判定、语言标签白名单、`:::` 不被误判成指令） |
 | `test_statuses.py` | 状态与课型词表：读自 schema、配色齐全、顺序即载荷（完成判据与主页排序）、缺 schema 时降级告警 |
 | `test_render_lesson.py`、`test_attachment_render.py` | 课件和附件渲染、题库锚点、转义、数学式、输出与检查器对接 |
-| `quiz_dom_test.js`、`toc_dom_test.js` | 题目判分、展开、代码和公式展示，侧栏目录与移动端行为 |
+| `quiz_dom_test.cjs`、`toc_dom_test.cjs` | 题目判分、展开、代码和公式展示，侧栏目录与移动端行为 |
 | `scripts/release/release.test.mjs` | 版本计算、更新记录、历史 tag、PR 去重、制品校验与重试保护 |
 | `test_host_library_payload.mjs`、`test_host_reference_fence.mjs`、`test_host_path_boundary.mjs`、`test_host_yaml_workspace.mjs` | Host 半数据层（`lib/{workspace,library,assets,yaml,reference}.ts`）的特征化测试：payload 顶层与科目/节点形状、旧六档→三档、锚点四态、`operationId` 幂等重放、`expectedVersion` 冲突拒绝、路径越界、YAML 子集与工作区配置读取。数据在临时目录现造现弃，不碰真实工作区 |
 | `test_core_schema_subset.mjs` | JSON Schema 子集校验器（`lib/core/schema.ts`）：关键字枚举表与六份真 schema 对齐（新增关键字会红）、不支持的关键字不静默放行、逐个断言的 `type`/`required`/`additionalProperties`/`enum`/`const`/`pattern`/`minLength`/`minimum`/`minItems`/`format` |
@@ -94,6 +94,8 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 测试创建临时 HOME、DSH_HOME 和工作区，启动仅监听本机随机端口的 Web，不调用模型。CLI 测试通过临时本地 registry 安装、更新和卸载实际打包的 StudyMate，检查普通模式、学习模式、安装方式切换、缺少 Python 及学习数据保留。
 
 `test:dsh` 的探针在**插件真的被加载**时（native 安装）还验一遍原生工具：八个 `studymate_*` 在 `ctx.tools` 上按名字查得到、模型侧投影只有一句话说明，走真 dispatch 调 `studymate_workspace_context` / 两个校验器 / 导出占位，并反证越权读、越权写会抛 `[DOMAIN_VIOLATION]`。**它验的不是「模型在真实会话里调了工具」**——那要花额度，默认门禁不跑（结果里的 `modelRequestsIssued` 恒为 0）。standalone 安装写的是声明式预设、插件包不进 profile，那种安装下没有原生工具，探针按 `nativeTools: null` 照实断言。
+
+同一套探针也钉 #70 的引擎路径：**native 安装下 `root` 指向已安装的包自身**（包里有 `scripts/`，技能仍按 `<root>/scripts/*.py` 调得动，这是刻意的迁移窗口），`~/.dsh/studymate/engine/` 不再出现源码树副本；standalone 安装照旧把引擎副本落在那里、`root` 也照旧指向它。另有一条从 standalone 交接（`--mode native`）到原生启动的用例，验 `root` 从 `engine/` 换成包目录。
 
 另设 `STUDYMATE_DSH_EXPECTED_VERSION` 可以核对实际宿主版本；设 `STUDYMATE_DSH_DOWNGRADE_PACKAGE` 为旧 DSH 包目录，可以检查旧版安装升级后的显式迁移，以及降级和重新安装恢复。两个 DSH 目录只读。这些兼容场景按需在目标系统和版本上运行，不再由 CI 安装多个宿主版本重复执行。
 
