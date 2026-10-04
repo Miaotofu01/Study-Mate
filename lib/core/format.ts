@@ -626,6 +626,8 @@ export function parseBlocks(
       continue;
     }
 
+    // 注意：这里的 `---` 是**正文里**的分隔线（Python 的 `stripped in ('---','***','___')`）。
+    // front matter 的首尾 `---` 由 `parseFrontMatter` 消费掉，不会走到这儿。
     if (stripped === '---' || stripped === '***' || stripped === '___') {
       problems.add(file, lineNo, '内容格式没有分隔线：要分节就写 ## 标题', 'unknown-block');
       index += 1;
@@ -1211,7 +1213,7 @@ export function renderInline(text: string, line: number, ctx: LessonCtx, checkHt
       index += 1;
       continue;
     } else if (char === '[') {
-      const link = /\[([^\]]*)\]\(([^)\s]*)\)/.exec(text.slice(index));
+      const link = LINK_RE.exec(text.slice(index));
       if (link && link.index === 0) {
         const href = escAttr(link[2]);
         out.push(`<a href="${href}">${renderInline(link[1], line, ctx, false)}</a>`);
