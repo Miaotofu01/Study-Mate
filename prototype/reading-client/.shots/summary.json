@@ -1,0 +1,279 @@
+{
+  "base": "http://127.0.0.1:4173",
+  "ranAt": "2026-10-04T07:38:11.518Z",
+  "scenes": [
+    {
+      "variant": "A",
+      "scene": "home",
+      "file": "A-home.png",
+      "metrics": {
+        "title": "单栏阅读器 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "学\nStudyMate\n今天学什么\n计算机网络\n线性代数\n\n2026-09-24 · 星期四\n\n今天学什么\n\n没有待复习队列，也没有今天该刷多少题的汇总——接着上次的那个节点往下读就行。\n\n计算机网络\n学习中\n0002\n链路层与以太网帧\n\n能读出一个以太网帧的字段，并说清 MAC 地址与交换机的作用\n\n9-24 读完课件、页内题做完；\n\n已学完 1 / 5 · 共 5 层\n继续读\n线性代数\n学习中\n0002\n矩阵与线性变换\n\n能把矩阵读成对空间的变换，并说出秩与零空间的含义\n\n2026-09-24 学完。\n\n已学完",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "A",
+      "scene": "subject",
+      "file": "A-subject.png",
+      "metrics": {
+        "title": "单栏阅读器 · 阅读端原型",
+        "scrollHeight": 4758,
+        "bodyText": "学\nStudyMate\n今天学什么\n计算机网络\n线性代数\n\n进行中 · 自 2026-09-20\n\n计算机网络\n\n从零弄清一次网页请求在网线里到底经过了什么：能用抓包逐层指出每层加了什么头，能手算子网并判断两台机器是否同网段，能读懂一次 TCP 会话的建立、传输与关闭。零基础起步，每周 3~4 次、每次 40 分钟，一个知识点一节课。\n\n未开始 2\n学习中 2\n已学完 1\n在做的项目\n用抓包解释一次自己的网页请求——把浏览器打开 example.com 的全过程抓下来，逐层标出每层加了什么头、这个包走了哪几跳。\n路",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "A",
+      "scene": "lesson",
+      "file": "A-lesson.png",
+      "metrics": {
+        "title": "单栏阅读器 · 阅读端原型",
+        "scrollHeight": 5713,
+        "bodyText": "学\nStudyMate\n今天学什么\n计算机网络\n线性代数\n计算机网络\n0001\n分层模型与封装\n概念\n能独立应用\n作答 0 / 5\n\n计算机网络 · 第 0001 课\n\n分层模型与封装\n\n本节目标：能画出一次网页请求经过的各层，并说清每层加了什么头\n\n地址栏敲下回车之后\n\n21:47，你在地址栏敲下 example.com 回车，大约 100 毫秒后页面出现。这 100 毫秒里，笔记本做的事可以粗分成四类：\n\n把 example.com 问成一台服务器的 IP 地址\n和一个从没打过交道的服务器确认「两边现在都能收发",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "A",
+      "scene": "lesson-answered",
+      "file": "A-lesson-answered.png",
+      "metrics": {
+        "title": "单栏阅读器 · 阅读端原型",
+        "scrollHeight": 5820,
+        "bodyText": "学\nStudyMate\n今天学什么\n计算机网络\n线性代数\n计算机网络\n0001\n分层模型与封装\n概念\n能独立应用\n作答 0 / 5\n\n计算机网络 · 第 0001 课\n\n分层模型与封装\n\n本节目标：能画出一次网页请求经过的各层，并说清每层加了什么头\n\n地址栏敲下回车之后\n\n21:47，你在地址栏敲下 example.com 回车，大约 100 毫秒后页面出现。这 100 毫秒里，笔记本做的事可以粗分成四类：\n\n把 example.com 问成一台服务器的 IP 地址\n和一个从没打过交道的服务器确认「两边现在都能收发",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "A",
+      "scene": "search",
+      "file": "A-search.png",
+      "metrics": {
+        "title": "单栏阅读器 · 阅读端原型",
+        "scrollHeight": 993,
+        "bodyText": "学\nStudyMate\n今天学什么\n计算机网络\n线性代数\n搜索\n\n跨科目搜五类内容：课件正文、题库、术语表、学习记录与误解记录、大纲节点的目标与坑。\n\n关键词：子网\n\n正文 · 4\n计算机网络\n…收到。局域网越大，广播占的带宽越多，所以大网络要划分子网——那正是下一课要算的东西。…\n链路的三个边界\n计算机网络\nIP 地址、子网与路由\nIP 地址、子网与路由\n计算机网络\n…子网掩码是同一件事的另一种写法：网络位写 1、主机位写 0。26 个 1 后面接 6 个 0，写成点分十进制就是…\n前缀长度从哪来\n计算机网络\n…",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "A",
+      "scene": "qa",
+      "file": "A-qa.png",
+      "metrics": {
+        "title": "单栏阅读器 · 阅读端原型",
+        "scrollHeight": 5713,
+        "bodyText": "学\nStudyMate\n今天学什么\n计算机网络\n线性代数\n计算机网络\n0001\n分层模型与封装\n概念\n能独立应用\n作答 0 / 5\n\n计算机网络 · 第 0001 课\n\n分层模型与封装\n\n本节目标：能画出一次网页请求经过的各层，并说清每层加了什么头\n\n地址栏敲下回车之后\n\n21:47，你在地址栏敲下 example.com 回车，大约 100 毫秒后页面出现。这 100 毫秒里，笔记本做的事可以粗分成四类：\n\n把 example.com 问成一台服务器的 IP 地址\n和一个从没打过交道的服务器确认「两边现在都能收发",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "A",
+      "scene": "anchor-stale",
+      "file": "A-anchor-stale.png",
+      "metrics": {
+        "title": "单栏阅读器 · 阅读端原型",
+        "scrollHeight": 4448,
+        "bodyText": "学\nStudyMate\n今天学什么\n计算机网络\n线性代数\n计算机网络\n0001\n分层模型与封装\n概念\n能独立应用\n作答 0 / 5\n\n计算机网络 · 第 0001 课\n\n分层模型与封装\n\n本节目标：能画出一次网页请求经过的各层，并说清每层加了什么头\n\n地址栏敲下回车之后\n\n21:47，你在地址栏敲下 example.com 回车，大约 100 毫秒后页面出现。这 100 毫秒里，笔记本做的事可以粗分成四类：\n\n把 example.com 问成一台服务器的 IP 地址\n和一个从没打过交道的服务器确认「两边现在都能收发",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "B",
+      "scene": "home",
+      "file": "B-home.png",
+      "metrics": {
+        "title": "三栏工作台 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "学\nStudyMate\n阅读端 · 工作台\n搜索\n⌘K\n今天\n2026-09-24 · 星期四\n计算机网络\n0002\n链路层与以太网帧\n线性代数\n0002\n矩阵与线性变换\n计算机网络\n1/5 已学完\n线性代数\n1/5 已学完\n节点\n↑↓ 选 · 回车打开\n第 1 层\n1 个节点\n0001\n分层模型与封装\n概念\n第 2 层\n1 个节点\n0002\n链路层与以太网帧\n概念\n第 3 层\n1 个节点\n0003\nIP 地址、子网与路由\n实操\n第 4 层\n1 个节点\n——\nTCP 与可靠传输\n无课件\n概念\n第 5 层\n1 个节点",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "B",
+      "scene": "subject",
+      "file": "B-subject.png",
+      "metrics": {
+        "title": "三栏工作台 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "学\nStudyMate\n阅读端 · 工作台\n搜索\n⌘K\n今天\n2026-09-24 · 星期四\n计算机网络\n0002\n链路层与以太网帧\n线性代数\n0002\n矩阵与线性变换\n计算机网络\n1/5 已学完\n线性代数\n1/5 已学完\n节点\n↑↓ 选 · 回车打开\n第 1 层\n1 个节点\n0001\n分层模型与封装\n概念\n第 2 层\n1 个节点\n0002\n链路层与以太网帧\n概念\n第 3 层\n1 个节点\n0003\nIP 地址、子网与路由\n实操\n第 4 层\n1 个节点\n——\nTCP 与可靠传输\n无课件\n概念\n第 5 层\n1 个节点",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "B",
+      "scene": "lesson",
+      "file": "B-lesson.png",
+      "metrics": {
+        "title": "三栏工作台 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "学\nStudyMate\n阅读端 · 工作台\n搜索\n⌘K\n今天\n2026-09-24 · 星期四\n计算机网络\n0002\n链路层与以太网帧\n线性代数\n0002\n矩阵与线性变换\n计算机网络\n1/5 已学完\n线性代数\n1/5 已学完\n节点\n↑↓ 选 · 回车打开\n第 1 层\n1 个节点\n0001\n分层模型与封装\n概念\n第 2 层\n1 个节点\n0002\n链路层与以太网帧\n概念\n第 3 层\n1 个节点\n0003\nIP 地址、子网与路由\n实操\n第 4 层\n1 个节点\n——\nTCP 与可靠传输\n无课件\n概念\n第 5 层\n1 个节点",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "B",
+      "scene": "lesson-answered",
+      "file": "B-lesson-answered.png",
+      "metrics": {
+        "title": "三栏工作台 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "学\nStudyMate\n阅读端 · 工作台\n搜索\n⌘K\n今天\n2026-09-24 · 星期四\n计算机网络\n0002\n链路层与以太网帧\n线性代数\n0002\n矩阵与线性变换\n计算机网络\n1/5 已学完\n线性代数\n1/5 已学完\n节点\n↑↓ 选 · 回车打开\n第 1 层\n1 个节点\n0001\n分层模型与封装\n概念\n第 2 层\n1 个节点\n0002\n链路层与以太网帧\n概念\n第 3 层\n1 个节点\n0003\nIP 地址、子网与路由\n实操\n第 4 层\n1 个节点\n——\nTCP 与可靠传输\n无课件\n概念\n第 5 层\n1 个节点",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "B",
+      "scene": "search",
+      "file": "B-search.png",
+      "metrics": {
+        "title": "三栏工作台 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "学\nStudyMate\n阅读端 · 工作台\n搜索\n⌘K\n今天\n2026-09-24 · 星期四\n计算机网络\n0002\n链路层与以太网帧\n线性代数\n0002\n矩阵与线性变换\n计算机网络\n1/5 已学完\n线性代数\n1/5 已学完\n节点\n↑↓ 选 · 回车打开\n第 1 层\n1 个节点\n0001\n分层模型与封装\n概念\n第 2 层\n1 个节点\n0002\n链路层与以太网帧\n概念\n第 3 层\n1 个节点\n0003\nIP 地址、子网与路由\n实操\n第 4 层\n1 个节点\n——\nTCP 与可靠传输\n无课件\n概念\n第 5 层\n1 个节点",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "B",
+      "scene": "qa",
+      "file": "B-qa.png",
+      "metrics": {
+        "title": "三栏工作台 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "学\nStudyMate\n阅读端 · 工作台\n搜索\n⌘K\n今天\n2026-09-24 · 星期四\n计算机网络\n0002\n链路层与以太网帧\n线性代数\n0002\n矩阵与线性变换\n计算机网络\n1/5 已学完\n线性代数\n1/5 已学完\n节点\n↑↓ 选 · 回车打开\n第 1 层\n1 个节点\n0001\n分层模型与封装\n概念\n第 2 层\n1 个节点\n0002\n链路层与以太网帧\n概念\n第 3 层\n1 个节点\n0003\nIP 地址、子网与路由\n实操\n第 4 层\n1 个节点\n——\nTCP 与可靠传输\n无课件\n概念\n第 5 层\n1 个节点",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "B",
+      "scene": "anchor-stale",
+      "file": "B-anchor-stale.png",
+      "metrics": {
+        "title": "三栏工作台 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "学\nStudyMate\n阅读端 · 工作台\n搜索\n⌘K\n今天\n2026-09-24 · 星期四\n计算机网络\n0002\n链路层与以太网帧\n线性代数\n0002\n矩阵与线性变换\n计算机网络\n1/5 已学完\n线性代数\n1/5 已学完\n节点\n↑↓ 选 · 回车打开\n第 1 层\n1 个节点\n0001\n分层模型与封装\n概念\n第 2 层\n1 个节点\n0002\n链路层与以太网帧\n概念\n第 3 层\n1 个节点\n0003\nIP 地址、子网与路由\n实操\n第 4 层\n1 个节点\n——\nTCP 与可靠传输\n无课件\n概念\n第 5 层\n1 个节点",
+        "appChildren": 1
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "C",
+      "scene": "home",
+      "file": "C-home.png",
+      "metrics": {
+        "title": "卡片流与专注模式 · 阅读端原型",
+        "scrollHeight": 1157,
+        "bodyText": "学\nStudyMate\n搜索\n⌘K\n今天学什么\n\n2026-09-24 · 没有待复习队列。在下面挑一件事，进专注模式做完再回来。\n\n继续学\n计算机网络\n学习中\n0002\n链路层与以太网帧\n\n能读出一个以太网帧的字段，并说清 MAC 地址与交换机的作用\n\n上次：9-24 读完课件、页内题做完\n\n已学完 1 / 5 · 共 5 层\n进课件 · 专注模式\n看大纲\n线性代数 · 矩阵与线性变换\n计算机网络\n当前科目\n未开始 2\n学习中 2\n已学完 1\n共 5 个节点 · 5 层\n继续：0002 链路层与以太网帧\n线性代数",
+        "appChildren": 3
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "C",
+      "scene": "subject",
+      "file": "C-subject.png",
+      "metrics": {
+        "title": "卡片流与专注模式 · 阅读端原型",
+        "scrollHeight": 1798,
+        "bodyText": "今天学什么\n计算机网络\n进行中\n自 2026-09-20 · 5 个节点 · 5 层\n\n从零弄清一次网页请求在网线里到底经过了什么：能用抓包逐层指出每层加了什么头，能手算子网并判断两台机器是否同网段，能读懂一次 TCP 会话的建立、传输与关闭。零基础起步，每周 3~4 次、每次 40 分钟，一个知识点一节课。\n\n在做的项目：用抓包解释一次自己的网页请求——把浏览器打开 example.com 的全过程抓下来，逐层标出每层加了什么头、这个包走了哪几跳。\n\n未开始 2\n学习中 2\n已学完 1\n共 5 个节点 · 5 层",
+        "appChildren": 3
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "C",
+      "scene": "lesson",
+      "file": "C-lesson.png",
+      "metrics": {
+        "title": "卡片流与专注模式 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "计算机网络\n学习中\n作答数据 0 / 5\n搜索\n⌘K\n节 3 / 7\n·\n计算机网络 · 0002 链路层与以太网帧\n一帧的字段\n\n一个以太网帧由下面几段拼成，长度都是固定的，只有载荷是可变的：\n\n字段\t长度\t作用\n前导码与帧起始定界符\t8 字节\t让收方网卡的时钟对齐，并标记帧从这里开始\n目的 MAC\t6 字节\t这一帧交给哪块网卡\n源 MAC\t6 字节\t这一帧由哪块网卡发出\n类型\t2 字节\t载荷是什么，0x0800 表示里面是一个 IP 包\n载荷\t46 ~ 1500 字节\t网络层交下来的整份内容；不足 46 字节要",
+        "appChildren": 3
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "C",
+      "scene": "lesson-answered",
+      "file": "C-lesson-answered.png",
+      "metrics": {
+        "title": "卡片流与专注模式 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "计算机网络\n学习中\n作答数据 1 / 5\n搜索\n⌘K\n节 3 / 7\n·\n计算机网络 · 0002 链路层与以太网帧\n一帧的字段\n\n一个以太网帧由下面几段拼成，长度都是固定的，只有载荷是可变的：\n\n字段\t长度\t作用\n前导码与帧起始定界符\t8 字节\t让收方网卡的时钟对齐，并标记帧从这里开始\n目的 MAC\t6 字节\t这一帧交给哪块网卡\n源 MAC\t6 字节\t这一帧由哪块网卡发出\n类型\t2 字节\t载荷是什么，0x0800 表示里面是一个 IP 包\n载荷\t46 ~ 1500 字节\t网络层交下来的整份内容；不足 46 字节要",
+        "appChildren": 3
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "C",
+      "scene": "search",
+      "file": "C-search.png",
+      "metrics": {
+        "title": "卡片流与专注模式 · 阅读端原型",
+        "scrollHeight": 1157,
+        "bodyText": "学\nStudyMate\n搜索\n⌘K\n今天学什么\n\n2026-09-24 · 没有待复习队列。在下面挑一件事，进专注模式做完再回来。\n\n继续学\n计算机网络\n学习中\n0002\n链路层与以太网帧\n\n能读出一个以太网帧的字段，并说清 MAC 地址与交换机的作用\n\n上次：9-24 读完课件、页内题做完\n\n已学完 1 / 5 · 共 5 层\n进课件 · 专注模式\n看大纲\n线性代数 · 矩阵与线性变换\n计算机网络\n当前科目\n未开始 2\n学习中 2\n已学完 1\n共 5 个节点 · 5 层\n继续：0002 链路层与以太网帧\n线性代数",
+        "appChildren": 3
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "C",
+      "scene": "qa",
+      "file": "C-qa.png",
+      "metrics": {
+        "title": "卡片流与专注模式 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "计算机网络\n学习中\n作答数据 0 / 5\n搜索\n⌘K\n节 3 / 7\n·\n计算机网络 · 0002 链路层与以太网帧\n一帧的字段\n\n一个以太网帧由下面几段拼成，长度都是固定的，只有载荷是可变的：\n\n字段\t长度\t作用\n前导码与帧起始定界符\t8 字节\t让收方网卡的时钟对齐，并标记帧从这里开始\n目的 MAC\t6 字节\t这一帧交给哪块网卡\n源 MAC\t6 字节\t这一帧由哪块网卡发出\n类型\t2 字节\t载荷是什么，0x0800 表示里面是一个 IP 包\n载荷\t46 ~ 1500 字节\t网络层交下来的整份内容；不足 46 字节要",
+        "appChildren": 3
+      },
+      "problems": [],
+      "warnings": []
+    },
+    {
+      "variant": "C",
+      "scene": "anchor-stale",
+      "file": "C-anchor-stale.png",
+      "metrics": {
+        "title": "卡片流与专注模式 · 阅读端原型",
+        "scrollHeight": 960,
+        "bodyText": "计算机网络\n学习中\n作答数据 0 / 5\n搜索\n⌘K\n节 3 / 7\n·\n计算机网络 · 0002 链路层与以太网帧\n一帧的字段\n\n一个以太网帧由下面几段拼成，长度都是固定的，只有载荷是可变的：\n\n字段\t长度\t作用\n前导码与帧起始定界符\t8 字节\t让收方网卡的时钟对齐，并标记帧从这里开始\n目的 MAC\t6 字节\t这一帧交给哪块网卡\n源 MAC\t6 字节\t这一帧由哪块网卡发出\n类型\t2 字节\t载荷是什么，0x0800 表示里面是一个 IP 包\n载荷\t46 ~ 1500 字节\t网络层交下来的整份内容；不足 46 字节要",
+        "appChildren": 3
+      },
+      "problems": [],
+      "warnings": []
+    }
+  ]
+}
