@@ -244,6 +244,8 @@ export const ERROR_CODES = [
   'links-item', 'links-empty', 'stray-empty-reason',
   'anchor-missing', 'anchor-duplicate', 'anchor-ambiguous', 'anchor-stale',
   'pool-orphan', 'pool-shape', 'pool-json', 'pool-missing', 'pool-unused',
+  // 题库里每道题的题型结论（词表与字段要求在 lib/core/rules.ts）；行号指向那道题在 JSON 里的位置
+  'pool-unknown-kind', 'pool-ambiguous', 'pool-missing-field',
 ] as const;
 export type FormatErrorCode = (typeof ERROR_CODES)[number];
 

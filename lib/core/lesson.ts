@@ -27,6 +27,7 @@ import {
   declaredFromBlocks, poolKeyLines, reconcileAnchors,
   type AnchorReconciliation, type DeclaredAnchor,
 } from './anchors.ts';
+import { checkPoolKinds } from './questions.ts';
 
 export type {
   Block, FormatError, FormatErrorCode, FormatNote, FrontMatter, QuizBlock,
@@ -238,6 +239,11 @@ function reconcile(
 
   const pool = options.pool as Record<string, unknown>;
   const fixtureOnly = quizzes.length === 0;   // 反方向只留一条「题库文件没人用」，不逐键刷屏
+  // 题型与字段：未知题型要带**题库文件与行号**报出来（行号取那道题在 JSON 原文里的位置）。
+  // 放在形状检查之前：形状坏（值不是数组）的键不在这里报，由下面那条 `pool-shape` 说。
+  for (const issue of checkPoolKinds(pool, { poolFile, poolRaw: options.poolRaw })) {
+    ctx.problems.add(issue.file, issue.line, issue.message, `pool-${issue.code}`);
+  }
   // 形状：顶层必须是对象、每个值必须是**非空数组**（Python `load_quiz` 的两条）。
   // 形状坏了**不影响**后面的对账——Python 的 `load_quiz` 收了这条错照样 `return data`，
   // 于是渲染器拿 `.get(anchor)` 得到非 list、再报一次「没有题」。两条都要出。
