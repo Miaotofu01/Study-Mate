@@ -465,7 +465,11 @@ export function renderLabRun(value: LabRunOutcome): { type: 'text'; text: string
 
 /* ── 工具定义 ──────────────────────────────────────────────────────────── */
 
-/** 工具域 `define.ts` 的 `StudyToolSpec` 里我们用到的部分（结构化对齐，不 import：域图不成环）。 */
+/** 工具域 `define.ts` 的 `StudyToolSpec` 里我们用到的部分（结构化对齐，不 import：域图不成环）。
+ *
+ *  **它是手抄的，所以有一条测试钉着**（`test_lab_runner.mjs` 的「结构对齐」）：两份接口的
+ *  顶层键与可选性逐条对账，`labRunTool()` 真造出来的对象也拿来数键。别只改一边——
+ *  `registerLabTools` 里那句 `as unknown as` 会把类型不符一起咽下去，靠 tsc 拦不住。 */
 export interface LabToolSpec {
   name: string;
   description: string;
