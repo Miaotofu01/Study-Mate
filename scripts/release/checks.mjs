@@ -142,6 +142,14 @@ const groups = {
       'scripts/tests/test_watch_tree.mjs',
       'scripts/tests/test_watch_push.mjs',
       'scripts/tests/test_watch_client.mjs',
+      // 导出域 lib/export/**（#82）：产物形状与取消语义、泄漏守卫（含反证：注入 Node 专用依赖
+      // 必须让构建失败）、工具面与任务模型（DSH 侧不主动导出、取消回执说清保留什么）、
+      // 无头侧的 CLI（没有参数也能跑 = 「课完默认导一份」）。
+      // 浏览器那一半（file:// 下真渲染）在 --browser 组。
+      'scripts/tests/test_export_static_page.mjs',
+      'scripts/tests/test_export_leak_guard.mjs',
+      'scripts/tests/test_export_tool_task.mjs',
+      'scripts/tests/test_export_cli.mjs',
     ],
   },
   '--static': {
@@ -164,6 +172,9 @@ const groups = {
       // #74：真浏览器里「改文件 → 监听 → SSE → 页面自己更新（不刷新）」的端到端。
       // 其余几套测的是阅读端的静态面；这一套要的是**真的 EventSource**接我们那条流式 Response。
       'browser/watch_push_test.mjs',
+      // #82：**导出的产物本身**在 file:// 下打开（真 Chrome + 真 React）：样式、公式、图片、
+      // 题目全部可用，且控制台/页面/失败请求干净。不搭夹具页——测的就是学生拿到的那份东西。
+      'browser/export_file_test.mjs',
     ],
   },
 };

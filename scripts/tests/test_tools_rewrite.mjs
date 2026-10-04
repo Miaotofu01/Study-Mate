@@ -284,16 +284,8 @@ test('节点不在大纲里 / 内容文件还没产出 → 阻断并说清位次
   assert.match(value.problems[0].message, /0002/);
 });
 
-/* ── 三、studymate_export 占位 ────────────────────────────────────────── */
+/* ── 三、导出 ────────────────────────────────────────────────────────────
 
-test('导出是占位：明确说「还没实现 + 什么时候会有」，不假装成功', async (t) => {
-  const f = withTools(t);
-  const ctx = fakeContext();
-  tools.registerExportTools(ctx.ctx);
-  const value = await call(ctx, 'studymate_export', {});
-  assert.equal(value.implemented, false);
-  assert.equal(value.plannedIn, '#82');
-  assert.deepEqual(value.files, []);
-  assert.match(value.reason, /#82/);
-  assert.equal(fs.existsSync(path.join(f.workspace, 'export')), false, '占位不产出任何文件');
-});
+   `studymate_export` 的占位在 #82 落地时撤掉了（原来这里断言「返回 implemented:false + #82」）。
+   现在它是一个**起后台任务**的工具：产物形状、泄漏守卫、任务与取消、无头 CLI 四条验收
+   都在 `test_export_{static_page,leak_guard,tool_task,cli}.mjs` 里，别在这里再写一遍。 */

@@ -18,6 +18,7 @@ Codex / ChatGPT Work：下载并导入最新插件 ZIP：
 https://github.com/Miaotofu01/Study-Mate/releases/latest/download/studymate-openai.zip
 
 用法：studymate [install] [--workspace <目录>] [--profile <名称>] [--mode standalone|native] [--dsh <dsh 路径>]
+      studymate export [--workspace <目录>] [--out <目录>] [--subject <slug>] [--json] [--quiet]
       studymate build-plugin [--output <目录>]（开发者构建）
       studymate build-antigravity [--output <目录>] [--install]（Antigravity 插件构建）
       studymate build-examples [工作区]（重建 examples/ 的示例页面，默认 examples）
@@ -34,6 +35,9 @@ https://github.com/Miaotofu01/Study-Mate/releases/latest/download/studymate-open
 安装器不会安装或升级 dsh，也不会重启正在运行的会话。
 
 更新使用相同的 install 命令，沿用已有学习工作区。
+export 把学习工作区导成能离线打开的自包含页面：Antigravity / Codex 侧课完默认导一份，
+DSH 侧按需（学生说“导出一份能离线看的”才跑）。落点默认 <工作区>/export/，不需要 DSH；
+它要一份 React（npm i -g react react-dom，或设 STUDYMATE_REACT_DIR 指过去）。
 build-plugin 供开发者导出 Codex / ChatGPT Work 技能插件目录及 ZIP（默认 ./dist）。
 导出只需要 Node.js、Python 3.9+ 和 PyYAML，不需要 DSH，也不会更改客户端配置。`;
 
@@ -502,10 +506,41 @@ function install(workspaceArg, profile, mode, dshArg) {
   console.log(`StudyMate ${metadata.version} 安装完成。\n引擎：${engine}\n学习预设：${preset}${registered}\n学习工作区：${workspace}\n配置：${configFile}\n${next}\n启动会话时把工作目录设为 ${workspace}，并把会话权限选成 workspace-write 或 danger-full-access：学习数据都写在那个目录里，会话目录不在它里面时，每次落盘都会要求你授权。`);
 }
 
-export function main(args = process.argv.slice(2)) {
+/**
+ * `studymate export` 的参数。刻意只有这几个：无头侧要的是「**没有参数也能跑**」（课完跑一次
+ * 就导一份），参数一多，技能里就会开始写死路径——那正是目标态要清掉的东西。
+ * 具体怎么导在 `lib/export/cli.ts`（这里只解析）。
+ */
+export function parseExportArgs(args) {
+  const usage = '用法：studymate export [--workspace <目录>] [--out <目录>] [--subject <slug>] [--json] [--quiet]';
+  const options = { subjects: [] };
+  for (let i = 0; i < args.length; i++) {
+    const flag = args[i];
+    if (flag === '--json') { options.json = true; continue; }
+    if (flag === '--quiet') { options.quiet = true; continue; }
+    const value = args[i + 1];
+    if (!['--workspace', '--out', '--subject'].includes(flag) || !value || value.startsWith('--')) {
+      throw new Error(`不支持的参数：${args.join(' ')}\n${usage}`);
+    }
+    i += 1;
+    if (flag === '--workspace') options.workspace = value;
+    else if (flag === '--out') options.out = value;
+    else options.subjects.push(value);
+  }
+  return options;
+}
+
+export async function main(args = process.argv.slice(2)) {
   try {
     if (args.length === 1 && ['--help', '-h'].includes(args[0])) console.log(help);
     else if (args.length === 1 && ['--version', '-v'].includes(args[0])) console.log(metadata.version);
+    else if (args[0] === 'export') {
+      const options = parseExportArgs(args.slice(1));
+      // 动态 import：其余子命令（安装 / 构建）不该被导出域那套东西拖进来，
+      // 也保证「没装 React 的机器上跑 install」不会因为解析 React 而失败。
+      const { exportCommand } = await import('../lib/export/cli.ts');
+      process.exitCode = await exportCommand(options);
+    }
     else if (args[0] === 'build-plugin') {
       if (args.length !== 1 && !(args.length === 3 && args[1] === '--output' && args[2] && !args[2].startsWith('--'))) {
         throw new Error(`用法：studymate build-plugin [--output <目录>]`);
@@ -562,5 +597,5 @@ export function main(args = process.argv.slice(2)) {
 
 if (process.argv[1] && fs.existsSync(process.argv[1]) &&
     fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
-  main();
+  await main();
 }

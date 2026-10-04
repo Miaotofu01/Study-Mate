@@ -14,6 +14,7 @@ import test from 'node:test';
 // 夹具：造一份最小科目（#68 的原生工具探针要一个真工作区）。那是夹具不是套件，
 // 所以住在 scripts/tests/fixtures/ 下——放根下会被 checks.mjs 的套件覆盖断言当成漏登记。
 import { writeSubject } from './fixtures/tools.mjs';
+import { fakeReactRoot } from './fixtures/export_workspace.mjs';
 
 const self = fileURLToPath(import.meta.url);
 const project = path.resolve(path.dirname(self), '../..');
@@ -155,13 +156,24 @@ async function probeNativeTools(app, home) {
       lesson: lesson.value.reports[0].summary,
     };
 
-    // ②′ 占位工具也走真 dispatch：`const: false` 的输出契约由宿主盖章（不是我们自说自话）
+    // ②′ 导出（#82）也走真 dispatch：起一个 durable 任务、有上限地等、拿回文件清单。
+    //     React 用夹具（这台机器上不一定装了 React，探针不该依赖它；真渲染由 --browser 那一套
+    //     用真 React + 真 Chrome 在 file:// 下验）。探针的 DSH_HOME 是隔离的，所以解析顺序里
+    //     的 profile 那一跳指不到东西，这里显式给一个候选根。
+    process.env.STUDYMATE_REACT_DIR = fakeReactRoot(root);
     const exported = await dispatch(app, 'studymate_export', {});
     assert.equal(exported.isError, false, textOf(exported));
-    assert.equal(exported.value.implemented, false);
-    assert.equal(exported.value.plannedIn, '#82');
-    assert.deepEqual(exported.value.files, []);
-    outcome.exportPlaceholder = { implemented: exported.value.implemented, plannedIn: exported.value.plannedIn };
+    assert.equal(exported.value.settled, true, textOf(exported));
+    assert.equal(exported.value.status, '完成', textOf(exported));
+    assert.ok(exported.value.files.includes('index.html'), JSON.stringify(exported.value.files));
+    assert.deepEqual(exported.value.problems, [], '泄漏守卫不该在真宿主里报出问题');
+    assert.ok(fs.existsSync(path.join(probeWorkspace, 'export', 'index.html')));
+    outcome.exportRun = {
+      taskId: exported.value.taskId,
+      status: exported.value.status,
+      files: exported.value.count,
+      subjects: exported.value.subjects.map((subject) => subject.slug),
+    };
 
     // ③ 反证：越权读 / 越权写 —— 注册两个**故意越权**的探针工具，走真 dispatch
     const toolsModule = await import(pathToFileURL(path.join(project, 'lib/tools/index.ts')).href);
@@ -659,7 +671,14 @@ if (process.argv.includes('--probe')) {
       assert.equal(fs.realpathSync(config.root), fs.realpathSync(project),
         `原生加载的 <root> 指向了 ${config.root}，不是包自身`);
       assert.deepEqual(config.installModes, { web: 'native' });
-      assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate')), false,
+      // 判据是「没有 engine/ 这份**源码树副本**」，不是「这个目录不存在」：探针这次跑了一次
+      // 导出（#82），任务台账 `studymate/tasks/export-*.json` 是 #73 明文规定的落点
+      // （store.ts 的文件头：只在真起了 durable 任务时才创建）。源码树副本才是 #70 要拦的东西。
+      assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate', 'engine')), false,
+        '原生加载不许往 ~/.dsh/studymate/engine 写源码树副本');
+      assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate', 'scripts')), false,
+        '原生加载不许往 ~/.dsh/studymate/ 写源码树副本');
+      assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate', 'lib')), false,
         '原生加载不许往 ~/.dsh/studymate/ 写源码树副本');
       // 迁移窗口：技能仍按 <root>/scripts/*.py 调脚本，包里有 scripts/
       assert.equal(fs.existsSync(path.join(config.root, 'scripts', 'gen_home.py')), true);

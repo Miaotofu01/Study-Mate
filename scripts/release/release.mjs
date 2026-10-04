@@ -397,6 +397,19 @@ async function publish() {
   if (state.source !== process.env.GITHUB_SHA || git(['rev-parse', 'HEAD']) !== state.commit || git(['rev-parse', `${state.tag}^{commit}`]) !== state.commit) {
     throw new Error('Release state, checkout and tag do not agree.');
   }
+  // 导出泄漏守卫（#82 / F11）：现造一份工作区跑一遍真导出，产物里漏进 Node 专用东西就不发布。
+  // 用夹具 React（scripts/tests/fixtures/export_workspace.mjs），所以发布机上不需要装 React。
+  // 放在插件构建与 npm 发布**之前**：一条泄漏就该拦住整次发布。
+  const { exportGuardRun } = await import('./export_guard.mjs');
+  const guard = await exportGuardRun({});
+  if (!guard.ok) {
+    const problems = [
+      ...guard.violations.map(violation => `${violation.path}:${violation.line} [${violation.rule}] ${violation.what}`),
+      ...guard.problems,
+    ];
+    throw new Error(`导出泄漏守卫失败（${problems.length} 条）：${problems.join('；')}。`
+      + '修掉导出器再发布；本地用 `npm run guard:export` 复现。');
+  }
   // A plugin build failure must happen before the immutable npm publication.
   const plugin = buildReleasePlugin(state.version);
   const pack = packPackage();
