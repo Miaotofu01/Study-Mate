@@ -65,58 +65,44 @@ test('两个无头宿主适配层都为点名的工具留了等价落点', () =>
     for (const tool of allReferenced) {
       const landing = fallback[tool];
       assert.ok(landing, `${host} 适配层没有 ${tool} 的落点（源技能点名了它）`);
-      // 有 1:1 脚本的落点必须是「脚本路径不带引号」的 `python3 -B <root>/scripts/x.py`：
-      // 两个适配器的通用规整只认这种写法，带引号就静默跳过、导出件里留下跑不动的命令。
-      // 没有 1:1 脚本的工具（如 workspace_context 这种「读几份文件」的）如实写成本宿主
-      // 的做法——不假装有一条命令，但也不能是空话、更不能把工具名抄一遍。
-      if (landing.startsWith('python3 ')) {
-        assert.match(landing, /^python3 -B <root>\/scripts\/[\w-]+\.py/,
-          `${host} 的 ${tool} 落点不是适配器认得的写法：${landing}`);
+      // 无头宿主**没有引擎脚本**（Python 引擎随 #83 退役）：落点只能是一句**本宿主做得到的
+      // 做法**——不能是空话、不能把工具名抄一遍、也不能假装有一条命令。唯一例外是导出那条
+      // Node CLI（`npx -y @yunmiao/studymate@latest export`），它真的能跑。
+      if (landing.startsWith('npx ')) {
+        assert.match(landing, /^npx -y @yunmiao\/studymate@latest export/,
+          `${host} 的 ${tool} 落点写的不是那条导出命令：${landing}`);
       } else {
-        assert.ok(landing.length >= 8 && !/studymate_/.test(landing),
-          `${host} 的 ${tool} 落点既不是命令、也不是一句可照做的做法：${landing}`);
+        assert.ok(landing.length >= 8 && !/studymate_/.test(landing) && !/python3/.test(landing),
+          `${host} 的 ${tool} 落点既不是那条导出命令、也不是一句可照做的做法：${landing}`);
       }
     }
   }
 });
 
-test('导出件里不留原生工具名，落点是宿主跑得动的命令', () => {
+test('导出件里不留原生工具名，也不留引擎脚本命令', () => {
   for (const [name, text] of sources) {
     const tools = referencedTools(text);
     if (tools.length === 0) continue;
-    for (const [host, adapt, fallback] of [
-      ['OpenAI/Codex', adaptOpenAiSkill, OPENAI_FALLBACK],
-      ['Antigravity', adaptAntigravitySkill, AGY_FALLBACK],
-    ]) {
+    for (const [host, adapt] of [['OpenAI/Codex', adaptOpenAiSkill], ['Antigravity', adaptAntigravitySkill]]) {
       const exported = adapt(text, name);
       assert.doesNotMatch(exported, /studymate_[a-z_]+/,
         `${host} 导出件里还留着原生工具名（${name}）`);
-      for (const tool of tools) {
-        // 判据取自**落点自己**，不从工具名猜脚本名：落点是命令时，它点到的每个脚本都要在
-        // 导出件里出现。落点不是命令的（`workspace_context` 这种「读几份文件」的）由上面那条
-        // 形状断言管——它的正文位置可能整段被宿主开场替换掉（那正是最彻底的降级），
-        // 所以这里只要求导出件里不留工具名，不再要求那段做法原文出现。
-        const scripts = [...fallback[tool].matchAll(/scripts\/([\w-]+\.py)/g)].map(m => m[1]);
-        for (const scriptName of scripts) {
-          assert.ok(exported.includes(scriptName),
-            `${host} 导出件里找不到 ${tool} 的等价脚本 ${scriptName}（${name}）`);
-        }
-      }
+      assert.doesNotMatch(exported, /python3/,
+        `${host} 导出件里还留着 Python 调用（${name}）`);
+      assert.doesNotMatch(exported, /scripts\/[\w-]+\.py/,
+        `${host} 导出件里还留着引擎脚本路径（${name}）`);
     }
   }
 });
 
-test('#81 管的七份技能不写引擎脚本命令（调用面统一成原生工具名）', () => {
+test('12 份技能里都没有引擎脚本命令（调用面统一成原生工具名）', () => {
   const offenders = [];
-  for (const name of OWNED) {
-    const text = sources.get(name);
-    assert.ok(text, `技能目录里没有 ${name}`);
-    for (const match of text.matchAll(/python3[^\n]*?scripts\/[\w-]+\.py/g)) {
-      offenders.push(`${name}: ${match[0].trim()}`);
-    }
+  for (const [name, text] of sources) {
+    for (const match of text.matchAll(/python3[^\n]*/g)) offenders.push(`${name}: ${match[0].trim()}`);
+    for (const match of text.matchAll(/<root>\/scripts\/[\w-]+/g)) offenders.push(`${name}: ${match[0]}`);
   }
   assert.deepEqual(offenders, [],
-    `技能里还写着引擎脚本命令，应改成原生工具名（脚本落点归无头宿主适配层）：\n${offenders.join('\n')}`);
+    `技能里还写着引擎脚本命令/路径，应改成原生工具名（脚本落点归无头宿主适配层）：\n${offenders.join('\n')}`);
 });
 
 test('#81 管的七份技能不再出现旧档位与旧层级词', () => {

@@ -55,10 +55,19 @@ test('every host placeholder used in the export is defined in the host guide', (
   }
 });
 
-test('engine scripts are always invoked as python3 -B', () => {
+test('导出件里没有引擎脚本：只剩宿主做得到的做法与 Node CLI', () => {
+  // Python 引擎随 #83 退役。这条以前守「python3 一定带 -B」；现在守的是更强的那个性质：
+  // 导出件里**一处脚本调用都不该有**。需要跑命令的地方只有导出这一条 Node CLI。
   for (const [name, content] of [...adapted, ...agents]) {
-    assert.doesNotMatch(content, /python3\s+(?!-B)/, `${name}: python3 invoked without -B`);
+    assert.doesNotMatch(content, /python3/, `${name}: 导出件里不该再有 python3`);
+    assert.doesNotMatch(content, /scripts\/[\w-]+\.py/, `${name}: 导出件里不该再有引擎脚本路径`);
+    for (const stale of ['check_curriculum', 'check_pool', 'check_lesson', 'check_handoff',
+      'render_lesson', 'renumber_lessons', 'apply_empty_reasons', 'build_examples']) {
+      assert.ok(!content.includes(stale), `${name}: 导出件里还留着引擎脚本名 ${stale}`);
+    }
   }
+  // 导出是唯一要跑的命令，且必须是**没有参数也能跑**的那一条。
+  assert.match(AGY_HOST_GUIDE, /npx -y @yunmiao\/studymate@latest export/);
 });
 
 test('generated agents declare the host frontmatter and stay complete', () => {

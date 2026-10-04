@@ -32,7 +32,7 @@ test('all bundled skills export only portable metadata and no DSH tool requireme
     assert.match(content, /<root>\/skills\/<技能名>\/SKILL\.md/, name);
     assert.match(content, /没有委派工具时.*串行执行/, name);
     assert.match(content, /ChatGPT Work.*临时沙箱/, name);
-    assert.match(content, /环境变量、工作目录与 shell 状态不保证跨工具调用保留/, name);
+    assert.match(content, /宿主有命令执行工具时按它的字面值引用与转义规则拼路径/, name);
   }
 });
 
@@ -47,27 +47,26 @@ test('bootstrap initializes a separate workspace without requiring legacy config
   assert.doesNotMatch(adapted.get('record-keeping'), /开场从.*config\.yaml/);
 });
 
-test('无头侧的引擎命令都走探测到的解释器、路径带引号，gen_home 始终显式传工作区', () => {
+test('无头侧不留引擎脚本命令：正文里的原生工具名换成可照做的做法', () => {
   for (const [name, content] of adapted) {
-    // 源技能正文已经不调引擎脚本（DSH 走原生工具）；脚本只活在导出时按
-    // `NATIVE_TOOL_FALLBACK` 换进来的等价做法里，所以命令形状由这一层守：
-    // 解释器要经探测（`<python>`）、路径与占位符一律带引号。
-    // （每个工具都有落点这件事由 test_skill_contracts.mjs 逐条对账。）
-    assert.doesNotMatch(content, /python3 -B/, `${name}: Codex 侧不许留裸 python3（要走探测到的解释器）`);
-    for (const match of content.matchAll(/`(<python> -X utf8(?: -[A-Za-z]+)* '[^`]+)`/g)) {
-      // `<python>` 是宿主约定的解释器占位，先摘掉再看剩下的占位符有没有裸着进命令。
-      const command = match[1].replace('<python>', 'PY');
-      assert.doesNotMatch(command, /(?<!')<[^>]+>/,
-        `${name}: 降级落点里的占位符没加引号 —— ${match[1]}`);
+    // 引擎脚本随 #83 退役：导出稿里**一处命令都不该有**——落点要么是本宿主做得到的
+    // 具体做法，要么是 Node CLI（`npx -y @yunmiao/studymate@latest export`）。
+    // 「每个点名的工具都有落点」由 test_skill_contracts.mjs 逐条对账。
+    assert.doesNotMatch(content, /python3/, `${name}: 导出稿里不该再有 python3`);
+    assert.doesNotMatch(content, /scripts\/[\w-]+\.py/, `${name}: 导出稿里不该再有引擎脚本文件名`);
+    // 插件自己带一件 Node 脚本（Codex 的交互断点），所以只禁**退役的引擎脚本名**，不禁目录。
+    for (const retired of ['check_curriculum', 'check_pool', 'check_lesson', 'check_handoff',
+      'render_lesson', 'renumber_lessons', 'apply_empty_reasons', 'build_examples',
+      'gen_home', 'preview_templates', 'install_preset']) {
+      assert.ok(!content.includes(retired), `${name}: 导出稿里还留着引擎脚本名 ${retired}`);
     }
   }
-  assert.match(adapted.get('learning-system'), /调用主页生成器始终传/,
-    '主页生成器必须显式传工作区这条规矩要写在宿主约定里');
-  // 合成正文反证：技能里真的出现裸的 gen_home 调用时，导出必须补上显式工作区
-  // （源技能里已经一处都没有了，所以只能拿合成样本来证明这条改写还活着）。
-  const sample = '---\nname: lesson-design\ndescription: 合成样本\n---\n\n刷新主页：python3 -B <root>/scripts/gen_home.py\n';
-  assert.match(adaptOpenAiSkill(sample, 'lesson-design'),
-    /<python> -X utf8 -B '<root>\/scripts\/gen_home\.py' '<LEARN_WORKSPACE>'/, 'gen_home 必须显式传工作区');
+  // 校验器那一档如实写成「按 schema 与格式要求逐项自查」，并且**不假称跑过工具**。
+  assert.match(adapted.get('image-scout'), /按图片库规范逐项自查/);
+  assert.match(adapted.get('curriculum-designer'), /按 `<root>\/schemas\/curriculum\.schema\.json` 与 `progress\.schema\.json` 逐项自查/);
+  assert.match(adapted.get('learning-system'), /按「OpenAI 宿主约定」逐项自查并把结论如实报出/);
+  // 阅读体验全靠导出：这条命令必须写在宿主约定里，且是**没有参数也能跑**的那一条。
+  assert.match(adapted.get('learning-system'), /npx -y @yunmiao\/studymate@latest export/);
 });
 
 test('DSH 侧技能正文不再自己跑引擎脚本（脚本只留给无头降级表）', () => {

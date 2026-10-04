@@ -104,8 +104,9 @@ try {
   assert.equal(canonical(config.root), canonical(project));
   assert.equal(fs.existsSync(path.join(dshHome, 'studymate', 'engine')), false);
   assert.equal(canonical(config.workspace), canonical(process.env.LEARN_WORKSPACE));
-  // 迁移窗口：技能仍按 <root>/scripts/*.py 调脚本，包里有 scripts/
-  for (const file of ['scripts/gen_home.py', '.dsh/skills/learning-system/SKILL.md']) {
+  // 引擎就是包自身：技能、预设、schema 与数据骨架都在包里（#83 之后没有可执行脚本）
+  for (const file of ['preset/learning/agent.cordis.yml', 'schemas/curriculum.schema.json',
+    '.dsh/skills/learning-system/SKILL.md']) {
     assert.ok(fs.statSync(path.join(config.root, file)).isFile());
   }
   assert.ok(fs.statSync(path.join(config.workspace, '.learning', 'subjects')).isDirectory());

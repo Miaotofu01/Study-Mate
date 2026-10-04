@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 import { adaptOpenAiSkill } from './openai-skill-compat.mjs';
 import { getOpenAiSkillUi } from './openai-skill-ui.mjs';
 import { writeDocsPayload } from './docs-payload.mjs';
+import { writeZip } from './zip.mjs';
 
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const marker = '.studymate-build.json';
@@ -41,8 +41,7 @@ function assertReplaceable(directory) {
 }
 
 /** Export a complete skills-only plugin, independent of the DSH installer. */
-export function buildOpenAiPlugin({ output = path.resolve('dist'), python } = {}) {
-  if (!python?.command) throw new Error('构建插件需要 Python 3.9+。');
+export function buildOpenAiPlugin({ output = path.resolve('dist') } = {}) {
   const outputDir = path.resolve(output);
   // Resolve symlinks before deciding whether output could overwrite build inputs.
   let existing = outputDir;
@@ -89,29 +88,15 @@ export function buildOpenAiPlugin({ output = path.resolve('dist'), python } = {}
       fs.writeFileSync(path.join(destination, 'agents', 'openai.yaml'), getOpenAiSkillUi(name));
     }
     for (const name of ['templates', 'schemas']) copyTree(path.join(source, name), path.join(plugin, name));
-    for (const name of fs.readdirSync(path.join(source, 'scripts')).filter(name => name.endsWith('.py') && name !== 'install_preset.py')) {
-      copyTree(path.join(source, 'scripts', name), path.join(plugin, 'scripts', name));
-    }
     writeDocsPayload(source, plugin);
     copyTree(path.join(source, 'docs', 'images', 'logo.png'), path.join(plugin, 'assets', 'logo.png'));
     copyTree(path.join(source, 'LICENSE'), path.join(plugin, 'LICENSE'));
     fs.writeFileSync(path.join(plugin, 'README.md'), '# StudyMate\n\nCodex / ChatGPT Work 学习插件。\n\n首次安装时导入 studymate-openai.zip；更新时下载最新 ZIP，在浏览器中打开已有插件的链接并上传新版本，随后新建任务。\n\n安装与使用见 [使用指南](docs/使用/Codex与ChatGPT.md)。\n\n本目录是已构建的完整插件，无需运行安装脚本或构建命令。学习数据应放在插件目录外。\n');
     fs.writeFileSync(path.join(plugin, marker), `${JSON.stringify({ generator: packageInfo.name, version: packageInfo.version })}\n`);
-    const zipFile = path.join(staging, 'studymate-openai.zip');
-    const zipCode = `import pathlib,sys,zipfile
-root=pathlib.Path(sys.argv[1])
-with zipfile.ZipFile(sys.argv[2], 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-    for file in sorted(root.rglob('*')):
-        if file.is_file():
-            info=zipfile.ZipInfo(file.relative_to(root.parent).as_posix(), date_time=(2020,1,1,0,0,0))
-            info.compress_type=zipfile.ZIP_DEFLATED
-            info.external_attr=0o100644 << 16
-            archive.writestr(info, file.read_bytes())
-`;
-    const result = spawnSync(python.command, [...(python.prefix || []), '-X', 'utf8', '-c', zipCode, plugin, zipFile], {
-      encoding: 'utf8', windowsHide: true, timeout: 120000,
-    });
-    if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr || 'ZIP 构建失败。');
+    const zipFile = path.join(staging, path.basename(archive));
+    // 确定性归档：固定时间戳、固定条目顺序、固定压缩档（见 bin/zip.mjs）。
+    writeZip(plugin, zipFile);
+
     // Swap only our own generated output; preserve previous artifacts on failure.
     const replacements = [];
     try {
