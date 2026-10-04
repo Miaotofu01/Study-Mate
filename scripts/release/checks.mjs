@@ -97,6 +97,8 @@ const groups = {
       // 纯函数域的判据：写入栅栏（幂等台账 + 版本比较）、题库题型与字段、误解字段定型
       'scripts/tests/test_core_fence_questions.mjs',
       'scripts/tests/test_core_coverage_floor.mjs',
+      // #69：架构边界与依赖无环断言（扫真实 import 图，域规则表默认拒绝）
+      'scripts/tests/test_architecture_boundaries.mjs',
       // 工具域 lib/tools/**（#68）：域声明与越权即抛、工作区摘要、四个校验器、两个改写工具。
       // 夹具在 scripts/tests/fixtures/tools.mjs —— `fixtures/` 目录被上面的遍历显式跳过。
       'scripts/tests/test_tools_guard.mjs',
@@ -107,6 +109,11 @@ const groups = {
       // 五个 studymate_task_* 工具、阅读端的 GET /api/studymate/tasks。
       // 跨进程那一半的「进程 A」是夹具 scripts/tests/fixtures/tasks_producer.mjs。
       'scripts/tests/test_tasks_model.mjs',
+      // 阅读端（lib/client.js 是零构建的浏览器插件，没有 export）：跨科目搜索的索引覆盖与
+      // 四个附件折叠块的空态。套件在 Node 里伪造 window.__ModuleLoader__ + react 桩把头文件
+      // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
+      'scripts/tests/test_client_search_index.mjs',
+      'scripts/tests/test_client_fold_empty_state.mjs',
     ],
   },
   '--static': {
