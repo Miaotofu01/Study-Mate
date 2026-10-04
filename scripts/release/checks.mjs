@@ -134,8 +134,12 @@ const groups = {
     tests: ['scripts/tests/test_openai_skills.mjs', 'scripts/tests/test_openai_skill_ui.mjs', 'scripts/tests/test_antigravity_skills.mjs'],
   },
   '--browser': {
-    // 前三个测旧静态模板（file:// 夹具），reading_test.mjs 测阅读端本体（真 lib/client.js）
-    node: ['browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs', 'browser/reading_test.mjs'],
+    // 前三个测旧静态模板（file:// 夹具）；reading_test.mjs 测阅读端本体（真 lib/client.js）；
+    // attempts_test.mjs 把阅读端打进一个说 HTTP 的迷你宿主，真的落盘到工作区文件（#72 的作答路径）。
+    node: [
+      'browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs',
+      'browser/reading_test.mjs', 'browser/attempts_test.mjs',
+    ],
   },
 };
 const mode = process.argv[2] || 'core';
