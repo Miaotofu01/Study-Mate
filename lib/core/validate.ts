@@ -602,7 +602,7 @@ function trimTrailingSlash(text: string): string {
   return text.replace(/\/+$/, '');
 }
 
-/** `outputs[].path` 的安全判据，逐条对齐 `check_handoff.py` 的 `safe_relative`。 */
+/** `outputs[].path` 的安全判据，逐条对齐迁移前的 Python 交接校验器的 `safe_relative`。 */
 function safeRelative(value: string): string | null {
   if (value.includes('\\')) return 'output.path 必须用 /，不能含反斜杠';
   if (value.startsWith('/') || DRIVE_RE.test(value)) return 'output.path 必须是 deliver/ 下的相对路径（不能是绝对路径或 Windows 盘符路径）';

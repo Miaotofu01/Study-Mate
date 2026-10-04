@@ -51,18 +51,18 @@ const ROLE_TOOL_NOTES = {
   'curriculum-designer': [
     { tools: ['view_file'], note: '读取资源清单 `RESOURCES.md`、输入背景、科目使命 `MISSION.md` 与 schema 规范。' },
     { tools: ['write_to_file'], note: '编写课程大纲暂存文件 `<subject_path>/.stage/curriculum-designer-<slug>/deliver/curriculum.yaml`。' },
-    { tools: ['run_command'], note: '执行大纲拓扑校验器 `python3 -B \'<root>/scripts/check_curriculum.py\'`。' },
+    { tools: ['run_command'], note: '跑宿主命令做本机的机械活（如 `npx -y @yunmiao/studymate@latest export`）；大纲本身按 `<root>/schemas/curriculum.schema.json` 逐项自查。' },
     { tools: ['invoke_subagent'], note: '规格写明本角色不派子 agent——要别的角色（补收集、出题、采图）写进报告由总控派。' },
   ],
   'learning-coach': [
     { tools: ['view_file'], note: '读取课程大纲 `curriculum.yaml`、前置节点摘要、术语表 `GLOSSARY.md`、图片库索引 `pool.md` 与模版。' },
     { tools: ['write_to_file'], note: '编写课件 Markdown 内容文件 `<subject_path>/.stage/learning-coach-<node_id>/deliver/lessons/<NNNN>-<node_id>.md`。' },
-    { tools: ['run_command'], note: '执行课件静态预检 `python3 -B \'<root>/scripts/render_lesson.py\' \'<subject_path>\' \'<node_id>\' --check`。' },
+    { tools: ['run_command'], note: '跑宿主命令做本机的机械活；课件内容按内容格式逐项自查（`:::` 指令成对、锚点与题库键逐字一致、图片路径存在）。' },
     { tools: ['invoke_subagent'], note: '角色默认不派子 agent；来源读不到写进报告由总控补收集，自己不派。' },
     { tools: ['read_url_content'], note: '来源没在本地落盘时打开原址读原文（`reference/` 与 `sources/` 里已落盘的直接 view_file 读，不用联网）。' },
   ],
   'practice-evaluator': [
-    { tools: ['view_file'], note: '读取课程大纲 `curriculum.yaml`、课件内容 Markdown、`quiz.js` 规范与 `assessment.schema.json`。' },
+    { tools: ['view_file'], note: '读取课程大纲 `curriculum.yaml`、课件内容 Markdown、题目 schema 与 `layered-practice` 规范。' },
     { tools: ['write_to_file'], note: '编写练习题库 `<subject_path>/.stage/practice-evaluator-<node_id>/deliver/lessons/<NNNN>-<node_id>.quiz.json`、Lab 任务文件及评估记录。' },
     { tools: ['run_command'], note: '在沙箱中执行单元测试断言、代码运行与验证脚本。' },
     { tools: ['invoke_subagent'], note: '角色默认不派子 agent；规格写明要派的才派，一次派完、不占自己的上下文。' },
@@ -138,7 +138,7 @@ const ROLE_PROMPTS = {
 4. **七列表头索引（\`pool.md\`）**：
    - \`| 文件 | 主题标签 | 一句话说明 | 来源 URL | 许可 | 尺寸 | 抓取日期 |\`
 5. **交付前自检**：
-   - 运行 \`python3 -B '<root>/scripts/check_pool.py' '<subject_path>'\`，确保退出码为 0，无任何报错后方可交付。`,
+   - 按图片库规范逐项核对：图片都在 \`assets/img/pool/\`、索引七列表头逐字一致、命名可检索、体积合规；自查结论随报告交回。`,
 
   'curriculum-designer': `## 角色定位与核心职责
 你是 StudyMate 的专业课程架构子代理（Curriculum Designer）。由学习总控通过 \`invoke_subagent\` 派发。
@@ -167,7 +167,7 @@ const ROLE_PROMPTS = {
    - 项目线索：主线项目贯穿全程，从早期节点就开始提供实践素材。
    - 工具/对照线索：手写底层逻辑与标准现成库的对照实验。
 5. **交付前自检**：
-   - 运行 \`python3 -B '<root>/scripts/check_curriculum.py' '<curriculum.yaml>'\`。
+   - 按 \`<root>/schemas/curriculum.schema.json\` 逐项核对字段。
    - 确保无环、无孤儿节点、实验课前置依赖全部存在且通过验证。`,
 
   'learning-coach': `## 角色定位与核心职责
@@ -191,7 +191,7 @@ const ROLE_PROMPTS = {
    - 在需要测验处写：\`::: quiz <层级> 锚点：<锚点文本>\`（层级写 读懂／改对／查错／造出）。
    - 在动手练习段落写：\`::: practice <阶段> | <标题>\`。每个块必须以独立的 \`:::\` 收尾。
 5. **交付前自检**：
-   - 运行 \`python3 -B '<root>/scripts/render_lesson.py' '<subject_path>' '<node_id>' --check\`。
+   - 按内容格式逐项核对：\`::: \` 指令成对、公式标记成对、图片路径真实存在、锚点逐字留在正文里。
    - 此时题库相关报错为预期（因尚未出题），其余语法、标签、结构必须 100% PASS。`,
 
   'practice-evaluator': `## 角色定位与核心职责
@@ -208,7 +208,7 @@ const ROLE_PROMPTS = {
    - 造出：端到端项目任务或完整模块开发，交付物要能跑通并说清取舍。
 2. **课件练习题库规范（\`quiz.json\`）**：
    - 顶层 Key 必须与课件 Markdown 中的 \`::: quiz\` 锚点文本**完全逐字一致**。
-   - 题目数据结构符合 \`quiz.js\` 契约；若某个锚点经过权衡无需出题，必须交回 \`empty_reason: <理由>\`。
+   - 题目字段以 \`<root>/schemas/question.schema.json\` 与 \`layered-practice\` 为准；若某个锚点经过权衡无需出题，必须交回 \`empty_reason: <理由>\`。
 3. **实操与实验课 Lab 配套**：
    - \`kind: 实操\`：提供完整 \`lab/\` 目录结构（\`README.md\`、初始留白代码、自动化单元测试/断言入口、\`solutions/\` 参考答案）。
    - \`kind: 实验\`：编写实验说明页正文（\`lessons/<NNNN>-<node_id>.md\`）与综合验收任务，说明页包含“做出什么、怎么算过、自查清单、踩坑预警”。
@@ -228,31 +228,27 @@ function replaceRequired(text, pattern, replacement, name) {
   return text.replace(pattern, replacement);
 }
 
-// 源技能里的 `studymate_*` 是本插件在 DSH 里的原生工具（#68），Antigravity 没有它们：
-// 导出时逐名翻译成等价的引擎命令，调用面不留悬空引用。命令故意写成
-// `python3 -B <root>/scripts/x.py`（脚本路径不带引号），下面那段通用的 python 规整
-// 才认得出来、会把它变成 `python3 -B '<root>/scripts/x.py' …`。
-// 新增原生工具时这里加一行——scripts/tests/test_skill_contracts.mjs 会检查覆盖率。
+// 源技能里的 `studymate_*` 是本插件在 DSH 里的原生工具（#68），Antigravity 没有它们，
+// 这个插件也没有引擎脚本：导出时逐名换成**本宿主做得到的那件事**（按 schema 与格式要求
+// 逐项自查）。新增原生工具时这里加一行——scripts/tests/test_skill_contracts.mjs 会检查覆盖率。
 export const NATIVE_TOOL_FALLBACK = {
   studymate_workspace_context: '读工作区配置、.learning/MEMORY.md、当前科目的 progress.yaml 与最近的学习记录',
-  studymate_validate_pool: "python3 -B <root>/scripts/check_pool.py '<subject_path>'",
-  studymate_validate_curriculum: "python3 -B <root>/scripts/check_curriculum.py '<curriculum.yaml>'",
-  studymate_validate_lesson: "python3 -B <root>/scripts/render_lesson.py '<subject_path>' '<节点id>' --check",
-  studymate_validate_handoff: "python3 -B <root>/scripts/check_handoff.py '<stage_dir>' --role '<角色>'",
-  studymate_renumber_lessons: "python3 -B <root>/scripts/renumber_lessons.py '<subject_path>'",
-  studymate_apply_empty_reasons: "python3 -B <root>/scripts/apply_empty_reasons.py '<subject_path>' '<节点id>' '<tsv>'",
+  studymate_validate_pool: '按图片库规范逐项自查：图片落在 `assets/img/pool/`、索引七列表头逐字一致、命名可检索、体积合规',
+  studymate_validate_curriculum: '按 `<root>/schemas/curriculum.schema.json` 与 `progress.schema.json` 逐项自查：字段齐全、`prerequisites` 指向存在的节点 id、无环、实验课前置非空',
+  studymate_validate_lesson: '按内容格式逐项自查：`:::` 指令成对、`::: quiz` 锚点与题库键逐字一致、图片路径真实存在、公式标记成对',
+  studymate_validate_handoff: '按 `deliver/` 清单逐项自查：manifest 与交付文件一一对应、角色与节点对得上、路径不越界、没有符号链接',
+  studymate_renumber_lessons: '按 `curriculum.yaml` 的节点顺序重排 `lessons/` 的文件名序号（`NNNN-<节点id>.<后缀>`），先列出要改的清单再动手',
+  studymate_apply_empty_reasons: '把每个无题锚点的 `empty_reason:` 写进内容文件对应的 `::: quiz` 块（锚点逐字匹配，别动正文其余部分）',
 };
 
 // Host-neutral rewrites shared by adapted skills and generated agents: the same DSH text
 // must not be normalized in one place and left raw in the other.
 function applyCommonRewrites(text) {
-  // 原生工具名先落到本宿主的等价命令，再走下面的 python 规整（顺序不能反：规整只认
-  // 脚本路径不带引号的写法）。两个适配器各存一份，源技能不写引擎命令。
   let result = text;
   for (const [tool, fallback] of Object.entries(NATIVE_TOOL_FALLBACK)) {
     result = result.replaceAll(tool, fallback);
   }
-  result = result
+  return result
     .replaceAll('/tmp', '<STUDYMATE_SCRATCH>')
     .replaceAll('`ask_user_question`', '`ask_question`')
     .replaceAll('（`read` 那个文件）', '（用 `view_file` 查看那个文件）')
@@ -264,19 +260,6 @@ function applyCommonRewrites(text) {
     .replaceAll('(offset/limit/grep)', '（分段读取/文本搜索）')
     .replaceAll('（offset/limit/grep）', '（分段读取/文本搜索）')
     .replaceAll('`./run_tests.sh`', '当前系统可运行的测试入口');
-
-  // Python command normalization: ensure python3 -B with quoted paths
-  result = result.replace(
-    /python3 ((?:-[A-Za-z]+\s+)*)(<root>\/scripts\/[\w-]+\.py)([^`\n]*)/g,
-    (_, flags, script, args) => {
-      const explicitArgs = script.endsWith('/gen_home.py') && !args.trim() ? " '<LEARN_WORKSPACE>'" : args;
-      const cleanFlags = flags.includes('-B') ? flags : `-B ${flags}`;
-      return `python3 ${cleanFlags}'${script}'${explicitArgs.replace(/<[^>]+>/g, value => `'${value}'`)}`;
-    }
-  );
-
-  // Normalize duplicate quotes
-  return result.replaceAll("''<", "'<").replaceAll(">''", ">'");
 }
 
 function adaptAntigravityController(body) {
@@ -306,7 +289,7 @@ function adaptAntigravityController(body) {
   result = replaceRequired(
     result,
     /^- \*\*机械步骤归工具\*\*[^\n]+/m,
-    '- **机械步骤归宿主命令**：本宿主没有原生工具，按「Antigravity 宿主约定」的降级表用文件读写与 `<root>/scripts/` 下的脚本完成校验与改写；拿到的是逐条问题与结论，不看退出码、不比对摘要。',
+    '- **机械步骤归宿主做法**：本宿主没有原生工具，也没有引擎脚本；按「Antigravity 宿主约定」逐项自查并把结论如实报出（不假装调用过工具、不凭空说“已通过校验”），导出用 `npx -y @yunmiao/studymate@latest export`。',
     'controller mechanics bullet'
   );
 
@@ -397,7 +380,7 @@ function adaptAntigravityController(body) {
   result = replaceRequired(
     result,
     /- \*\*验收不过就退回[^\n]+/,
-    '- **验收不通过退回重试**：校验未通过时，将校验器原始报错信息作为 Prompt 重新派发原角色修复；总控不擅自代改专业角色的内部产物。',
+    '- **验收不通过退回重试**：自查未通过时，把具体问题（文件、行号、缺什么）作为 Prompt 重新派发原角色修复；总控不擅自代改专业角色的内部产物。',
     'role error retry'
   );
 
@@ -506,11 +489,11 @@ export function adaptAntigravityAgent(skillContent, name) {
 ${rolePrompt}
 
 ## 宿主执行规范
-- **插件根目录定位与只读原则**：根目录记为 \`<root>\`，包含 \`skills/\`、\`agents/\`、\`scripts/\`、\`templates/\`、\`schemas/\`。插件目录属于只读静态资产，严禁在 \`<root>\` 下写临时脚本、数据、测试文件或编译缓存。
+- **插件根目录定位与只读原则**：根目录记为 \`<root>\`，包含 \`skills/\`、\`agents/\`、\`templates/\`、\`schemas/\`。插件目录属于只读静态资产，严禁在 \`<root>\` 下写临时脚本、数据、测试文件或编译缓存。
 - **规范与 Schema 查阅**：查阅规范协议使用 \`view_file\` 查阅 \`<root>/skills/<规范名>/SKILL.md\`；查验数据结构查阅 \`<root>/schemas/<名称>.schema.json\`。
-- **脚本执行与命令规范**：运行 Python 脚本必须执行 \`python3 -B '<root>/scripts/<脚本名>.py' ...\`（带 \`-B\` 阻止生成 \`__pycache__\`）。所有路径参数必须使用绝对路径并正确加单引号。
+- **命令规范**：本插件不含引擎脚本；需要跑宿主命令（如导出 \`npx -y @yunmiao/studymate@latest export\`）时，所有路径参数使用绝对路径并正确加单引号，严禁未转义拼接学生输入。
 - **隔离暂存与交付路径**：产物必须写入 \`<subject_path>/.stage/${name}-<节点id>/deliver/<相对路径>\`，内部层级与正式科目目录一一对应，严禁直接向正式科目目录写文件。
-- **质量防线与交稿自检**：交付前必须在沙箱中完成对应机器自检（如 \`check_pool.py\`、\`check_curriculum.py\`、\`render_lesson.py --check\`、代码单元测试），确保退出码为 0、报错清零后方可交付。
+- **质量防线与交稿自检**：交付前必须逐项自查（按 \`<root>/schemas/*.schema.json\`、内容格式与图片库规范），并把自查结论（逐条问题与放行判断）写进报告；说不清的一律不算通过。
 - **交互边界与汇报清单**：作为专业子代理在后台独立运行，无面向用户的交互通道，不向用户提问，不调用 \`ask_question\`。任务完成后直接向父智能体汇报交付清单（相对路径 + 一句话内容）、关键决策判断与自检结论，由总控负责校验与合并搬移。
 
 ---

@@ -9,7 +9,7 @@
 | 宿主 | 怎么执行 |
 |---|---|
 | **DSH** | 有原生工具：直接调下面这八个 `studymate_*`（以及任务域五个、实验域一个），拿结构化返回 |
-| **Antigravity / Codex / ChatGPT Work** | **没有原生工具**——下面这些名字在那些宿主里一个都不存在。按 §8 的旧命令对照表用文件读写 + `scripts/*.py` 降级执行；导出的技能由各自的「宿主约定」写明这一点 |
+| **Antigravity / Codex / ChatGPT Work** | **没有原生工具，也没有引擎脚本**——下面这些名字在那些宿主里一个都不存在。正文里点名它们的地方，导出时已换成**本宿主的做法**：按 `<root>/schemas/*.schema.json` 与技能里的格式要求逐项自查，并把自查结论如实报出；导出走 `npx -y @yunmiao/studymate@latest export`。映射表在两个适配器的 `NATIVE_TOOL_FALLBACK`，导出稿由各自的「宿主约定」写明这一点 |
 
 无头侧**不要把工具名当成能调用的东西**，也不要假装调用过；缺的能力按宿主约定如实说明。
 
@@ -157,24 +157,24 @@ apply_empty_reasons → { subject, node, file, dryRun, ok,
 | 无题锚点要写理由 | `studymate_apply_empty_reasons` | 手工开内容文件改 |
 | 要一份能离线看的 | `studymate_export`（#82 前是占位） | 自己跑渲染脚本 |
 
-## 八、旧命令对照表（无头宿主按它降级）
+## 八、无头宿主侧怎么办（没有脚本可跑）
 
-DSH 侧**不再调这些脚本**；Antigravity / Codex 侧没有原生工具，按这张表降级（脚本与它们的参数形态的唯一出处是 `docs/规范/工程约束.md` §四）。**可执行的那份映射表是两个宿主适配器里的 `NATIVE_TOOL_FALLBACK`**（`bin/openai-skill-compat.mjs`、`bin/antigravity-skill-compat.mjs`）：导出时逐名替换，无头侧的技能正文因此不会留下调不到的工具名。本表是同一件事的人类可读版本；两边不一致时以适配器为准，并回来改这一份。
+Antigravity / Codex / ChatGPT Work 上没有原生工具，也**没有引擎脚本**（Python 引擎随 #83 退役，
+无头插件里只有技能、schema、工作区数据骨架与文档）。所以那两侧的做法是：
 
-| 旧命令 | 今天的工具（DSH） | 无头侧怎么做 |
-|---|---|---|
-| 总控开场自己读一堆文件 | `studymate_workspace_context` | 读工作区配置、`.learning/MEMORY.md`、当前科目的 `progress.yaml` 与最近学习记录 |
-| `check_curriculum.py <curriculum.yaml>` | `studymate_validate_curriculum` | 原命令（进度与科目档案没有对应脚本，按 `schemas/*.json` 自查） |
-| `check_lesson.py <页面路径> --subject … --node …` | `studymate_validate_lesson`（**只查内容层**；DOM 结构检查随静态渲染退役） | 先 `render_lesson.py … --check` 查内容与题库；页面出来后再用 `check_lesson.py` 查页面 |
-| `check_pool.py <subject_path>` | `studymate_validate_pool` | 原命令 |
-| `check_handoff.py '<stage_dir>' --role '<角色>'` | `studymate_validate_handoff` | 原命令 |
-| `renumber_lessons.py <subject_path> [--dry-run] [--render]` | `studymate_renumber_lessons` | 原命令（`--render` 那半在无头侧仍要出页面） |
-| `apply_empty_reasons.py <subject_path> <节点id> <tsv>` | `studymate_apply_empty_reasons`（理由给数组，不给 TSV） | 原命令 |
-| `render_lesson.py` + `gen_home.py` | `studymate_export`（#82 落地） | 原命令（无头侧默认导出静态页面） |
-| 在学生本机上代跑题目里声明的测试命令 | `studymate_lab_run` | **没有等价脚本**：无头宿主没有「学生本机」这条通道，如实说明这一轨在那里跑不了（别假装跑过、也别把输出编出来）。学生自己在终端里跑那条命令，再把输出贴回来 |
+| 你要做的事 | 在本宿主怎么做 |
+|---|---|
+| 读工作区现状 | 直接读工作区配置、`.learning/MEMORY.md`、当前科目的 `progress.yaml` 与最近的学习记录 |
+| 数据层校验 | 按 `<root>/schemas/{curriculum,progress,subject}.schema.json` 逐项自查：字段齐全、`prerequisites` 指向存在的节点 id、无环、实验课前置非空 |
+| 内容层校验 | 按内容格式逐项自查：`:::` 指令成对、`::: quiz` 锚点与题库键逐字一致、图片路径真实存在、公式标记成对 |
+| 图片库校验 | 按图片库规范逐项自查：图片落在 `assets/img/pool/`、索引七列表头逐字一致、命名可检索、体积合规 |
+| 交接门禁 | 按 `deliver/` 清单逐项自查：manifest 与交付文件一一对应、角色与节点对得上、路径不越界、没有符号链接 |
+| 位次重排 | 按 `curriculum.yaml` 的节点顺序改 `lessons/` 的文件名序号（`NNNN-<节点id>.<后缀>`），先列清单再动手 |
+| 无题理由 | 把 `empty_reason:` 写进内容文件对应的 `::: quiz` 块（锚点逐字匹配，别动正文其余部分） |
+| 在学生本机上代跑题目里声明的测试命令（`studymate_lab_run`） | **没有等价做法**：无头宿主没有「学生本机」这条通道，如实说明这一轨在那里跑不了（别假装跑过、也别把输出编出来）。学生自己在终端里跑那条命令，再把输出贴回来 |
+| **导出**（学生的阅读体验全靠它） | `npx -y @yunmiao/studymate@latest export`——没有参数也能跑，产物落 `<LEARN_WORKSPACE>/export/`，入口 `index.html` |
 
-无头侧的**流程与归属不变**：产物照样先落 `.stage/…/deliver/`、照样过交接门禁、照样原样搬入——换的只是"用哪个命令"。
+> 这里以前是一张「旧命令 → 新工具」的对照表。旧命令已经不存在了（Python 引擎随 #83 退役），
+> 表也一并退役：留着它只会让人以为还能照旧命令做事。
 
-## 九、`studymate_export` 是占位
-
-它今天就注册了，但**不产出任何文件、也不假装成功**：返回 `{ implemented: false, plannedIn: '#82', reason, files: [] }`。为什么现在就注册：技能侧要能引用这个名字，而"八个工具都注册了"是 #68 的验收面。要离线阅读就等 #82，或者在阅读端里看。
+**自查的结论要如实报出**：说不清的一律不算通过，也不要说"已通过校验"却没有逐条结论。

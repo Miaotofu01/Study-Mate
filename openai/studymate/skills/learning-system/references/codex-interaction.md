@@ -59,12 +59,12 @@
 
 ## 持久化与恢复
 
-总控用 `<root>/scripts/interaction_state.py` 管理工作区内 `.learning/interaction.json`。它只存流程断点，不代替已有 MEMORY、progress、assessments 或 sessions，也不保存凭据。脚本不用 PyYAML；工作区必须是显式绝对路径，且已有 `.learning/`，不能是插件缓存或插件源目录。
+总控用 `node '<root>/scripts/interaction_state.mjs'` 管理工作区内 `.learning/interaction.json`（Node 18+，零依赖）。它只存流程断点，不代替已有 MEMORY、progress、assessments 或 sessions，也不保存凭据。工作区必须是显式绝对路径，且已有 `.learning/`，不能是插件缓存或插件源目录。
 
 ```text
-<python> -X utf8 '<root>/scripts/interaction_state.py' --workspace '<LEARN_WORKSPACE>' read
-<python> -X utf8 '<root>/scripts/interaction_state.py' --workspace '<LEARN_WORKSPACE>' update --input '<STUDYMATE_SCRATCH>/interaction-next.json' --expected-revision 0
-<python> -X utf8 '<root>/scripts/interaction_state.py' --workspace '<LEARN_WORKSPACE>' answer --question-id 'python-project-1' --input '<STUDYMATE_SCRATCH>/reply.json' --expected-revision 1
+node '<root>/scripts/interaction_state.mjs' --workspace '<LEARN_WORKSPACE>' read
+node '<root>/scripts/interaction_state.mjs' --workspace '<LEARN_WORKSPACE>' update --input '<STUDYMATE_SCRATCH>/interaction-next.json' --expected-revision 0
+node '<root>/scripts/interaction_state.mjs' --workspace '<LEARN_WORKSPACE>' answer --question-id 'python-project-1' --input '<STUDYMATE_SCRATCH>/reply.json' --expected-revision 1
 ```
 
 先用文件工具把 JSON 写入暂存文件再传路径，不把学生原文拼入 shell。`reply.json` 是实际回答的 JSON 值，例如 `"我选表格数据分析"`；不能写工具的 accepted 回执。`read` 的 revision 为并发校验依据；示例的 0 和 1 仅表示首次创建与随后的回答，实际调用必须使用刚读到的值。

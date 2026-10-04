@@ -118,7 +118,7 @@ test('front matter 的边界：首行不是 ---、没有收尾、空值、缺字
   assert.equal(emptyValue.errors[0].message, 'front matter 的 title 不能为空');
   assert.equal(emptyValue.errors[0].line, 2);
 
-  // 缺字段报在**结束行**（Python `render_lesson.py:254` 的同一口径）
+  // 缺字段报在**结束行**（与迁移前的 Python 渲染器同一口径）
   const missingField = parseLesson(lesson(['## 一节'], ['title: x']), 'a.md');
   assert.equal(missingField.errors[0].message, 'front matter 缺 goal');
   assert.equal(missingField.errors[0].line, 3);
@@ -558,18 +558,16 @@ test('转义口径：文本节点不转单引号，属性值转双引号与单�
   assert.equal(escapeQuizAttr(`{'a': 1 < 2}`), '{&#39;a&#39;: 1 &lt; 2}');
 });
 
-/* ── 与 Python / 文档的三源一致 ────────────────────────────────────────── */
+/* ── 与文档的两源一致 ───────────────────────────────────────────────── */
 
-test('真标签名单：代码 = Python 的 HTML_TAG_NAMES = 格式文档 §2 的名单', async () => {
+test('真标签名单：代码 = 格式文档 §2 的名单（渲染器退役后只剩这两处）', async () => {
+  // Python 渲染器随 #83 退役，这条从「三源一致」收成「两源一致」：名单的唯一实现是
+  // lib/core/format.ts 的 HTML_TAG_NAMES，人读的那份在格式文档 §2——文档一改漏了，
+  // 或者实现里加了标签没写进文档，这里都会红。
   const { readFileSync } = await import('node:fs');
   const { fileURLToPath } = await import('node:url');
 
   const repo = fileURLToPath(new URL('../../', import.meta.url));
-  const py = readFileSync(`${repo}scripts/render_lesson.py`, 'utf8');
-  const block = /HTML_TAG_NAMES = frozenset\('''([\s\S]*?)'''\.split\(\)\)/.exec(py);
-  assert.ok(block, '没在 render_lesson.py 里找到 HTML_TAG_NAMES');
-  const pyNames = new Set(block[1].split(/\s+/).filter(Boolean));
-
   const doc = readFileSync(`${repo}docs/规范/课件内容格式.md`, 'utf8');
   const anchor = doc.indexOf('加上 SVG 元素名');
   assert.ok(anchor > 0, '没在格式文档里找到名单的引言');
@@ -578,14 +576,10 @@ test('真标签名单：代码 = Python 的 HTML_TAG_NAMES = 格式文档 §2 �
   assert.ok(open > 0 && close > open, '没在格式文档里找到名单的反引号块');
   const docNames = new Set(doc.slice(open + 1, close).split(/\s+/).filter(Boolean));
 
-  const missing = [...pyNames].filter((name) => !HTML_TAG_NAMES.has(name)).sort();
-  const extra = [...HTML_TAG_NAMES].filter((name) => !pyNames.has(name)).sort();
-  assert.deepEqual(missing, [], `TS 少了：${missing.join(' ')}`);
-  assert.deepEqual(extra, [], `TS 多了：${extra.join(' ')}`);
   assert.deepEqual([...docNames].filter((name) => !HTML_TAG_NAMES.has(name)).sort(), [],
-    '文档里的名字 TS 没有');
+    '文档里的名字代码没有');
   assert.deepEqual([...HTML_TAG_NAMES].filter((name) => !docNames.has(name)).sort(), [],
-    'TS 的名字文档里没有');
+    '代码的名字文档里没有');
 });
 
 test('解析层的 import 里没有 node:*（零宿主依赖）', async () => {

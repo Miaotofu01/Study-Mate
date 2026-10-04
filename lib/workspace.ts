@@ -25,8 +25,8 @@ export function configFile(): string {
   return path.join(dshHome(), 'studymate-config.yaml');
 }
 
-/** 先按 YAML 读；读不动再看它是不是「注释 + JSON」。 */
-function readConfigObject(file: string): Record<string, unknown> | null {
+/** 先按 YAML 读；读不动再看它是不是「注释 + JSON」。读不出来返回 null（调用方决定报不报错）。 */
+export function readConfigObject(file: string): Record<string, unknown> | null {
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');

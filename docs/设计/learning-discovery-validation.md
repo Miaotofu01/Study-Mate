@@ -1,5 +1,10 @@
 # 可选学习方向探索：验收记录
 
+> **验收记录**：下面是**当时那次**验收跑出来的结果，命令与产物口径按当时的仓库状态写（页面还是
+> 预生成的 HTML、校验还是 Python 脚本）。现行做法见 [工程约束](../规范/工程约束.md) 与
+> [课件内容格式](../规范/课件内容格式.md)；要复跑规则断言用
+> `node --test scripts/tests/test_skill_rules.mjs`。
+
 实现基于上游 `14c44f144738ba83850d6bfa98338dc431a12881`；本轮优化接续开发分支的 `a2cb264efbedb1f0c80a8878ced74d74859e8949`。规则归 [learning-discovery](../../.dsh/skills/learning-discovery/SKILL.md)，交接归 [learning-system](../../.dsh/skills/learning-system/SKILL.md)，操作见 [使用指南](learning-discovery-guide.md)。
 
 **工程检查通过，实际模型行为尚未全部通过。** 已完成 36 次首轮对话尝试、8 次定向复测及 1 次报告格式采样；两次真实建课至首课的角色与渲染链路完成。仍发现过度补问、信息推断和报告偏长，不能把此版本称为稳定通过全部验收。
@@ -10,13 +15,13 @@
 
 | 实际执行的检查 | 结果与范围 |
 |---|---|
-| `python scripts/check_skill.py .dsh/skills/learning-discovery --expect-model-invocable` | 通过：frontmatter 与协议调用面 |
-| `python scripts/check_skill.py .dsh/skills/learning-system --expect-model-invocable` | 通过：总控调用面保留 |
-| `python -X utf8 scripts/tests/test_skill_rules.py` | 483/483：原有 411 条断言全部保留，新增 65 条规则与 7 项结构／场景文件检查 |
+| `node --test scripts/tests/test_skill_frontmatter.mjs` | 通过：12 份技能的调用面与「谁是角色」对得上（协议与总控两个面都开） |
+| `node --test scripts/tests/test_skill_rules.mjs` | 通过：探索协议的规则片段、参考文件与七个可交叉入口 |
+| 技能规则套件（当时还是 Python 版，现已移植成 `scripts/tests/test_skill_rules.mjs`） | 483/483：原有 411 条断言全部保留，新增 65 条规则与 7 项结构／场景文件检查 |
 | `node scripts/release/checks.mjs` | 退出码 0：全部默认 Python 套件、两套 DOM 检查与 9 个发布逻辑单测；此命令不发布 |
 | `bash scripts/tests/run_tests.sh` | 退出码 0：全部默认套件；Git Bash 的 `python3` 指向同一测试环境，未启用 `--browser` |
 | `npm run test:installer` | 前次实现已通过 9/9；本轮不改安装或打包，未重复执行 |
-| skill-creator `quick_validate.py`（UTF-8） | 通过：新技能基础格式 |
+| skill-creator 自带的格式校验（UTF-8） | 通过：新技能基础格式 |
 | `git diff --check`、原契约比对 | 通过；原七步盘问、`frontier 空`、教学正文和五个角色规格未改变 |
 
 技能数从 11 变成 12（新增 `learning-discovery`），5 个角色不变；`scripts/tests/test_openai_plugin.mjs`、`test_openai_skills.mjs`、`test_openai_skill_ui.mjs` 里写死的数量断言与 `bin/openai-skill-ui.mjs` 的技能元数据表已同步。新增场景是测试数据，不引入网络测试依赖，不在默认快测或发布检查中调用付费模型。
@@ -75,10 +80,10 @@
 
 | 真实完整链路 | 初始优化稿 1 次 | 整改稿 1 次 |
 |---|---|---|
-| 原课程设计产物及检查 | 22 节点、26 边、4 实验，`check_curriculum.py` 通过 | 23 节点、30 边，原检查通过 |
+| 原课程设计产物及检查 | 22 节点、26 边、4 实验，大纲校验通过 | 23 节点、30 边，原检查通过 |
 | 回复“先不开始”之后 | lessons 空、进度节点为空，未派教学／出题角色 | 同左，另存拒绝开始后的状态快照 |
 | 回复“现在开始第一课”之后 | 原讲课 → 出题 → 渲染 → 检查链路完成 | 同左 |
-| 首课 HTML／原 `check_lesson.py` | 22,571 字节，通过 | 22,669 字节，通过 |
+| 首课 HTML／原课件检查 | 22,571 字节，通过 | 22,669 字节，通过 |
 | 共享 `MEMORY.md` | 按测试用户要求未创建 | 未创建 |
 
 两次首课检查仅有“下一课还未生成”的正常警告；确认前无伪造 subject／node 或知识测验。建课后仍由原 owner 写入目标、使命与大纲，正式教学题目由 `practice-evaluator` 生成。

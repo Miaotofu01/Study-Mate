@@ -182,7 +182,7 @@ function readTextIfPresent(file: string): string | null {
 
 /* ── front matter ──────────────────────────────────────────────────────── */
 
-/* 只认 `---` 包起来的 `key: value` 行——与 scripts/render_lesson.py 的 parse_front_matter
+/* 只认 `---` 包起来的 `key: value` 行——与迁移前的 Python 渲染器的 parse_front_matter
    同一个口径。**特意不走 parseYaml**：课件那份 front matter 就是这么读的（见
    docs/规范/课件内容格式.md §1），两处口径要一致，而且这几行不需要完整的 YAML。 */
 

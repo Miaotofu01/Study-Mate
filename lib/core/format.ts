@@ -2,8 +2,8 @@
    StudyMate · 纯函数域 core —— 课件内容格式的**判定**（issue #66）
 
    这份文件是 `docs/规范/课件内容格式.md` 在 JS 侧的唯一实现。它替掉的是
-   `scripts/render_lesson.py` 里 `parse_*` 一族 + `Renderer.inline` 那份判定，
-   以及 `scripts/lessonfmt.py`（围栏与语言标签）。两边是**同一份契约的两个实现**，
+  迁移前的 Python 渲染器里 `parse_*` 一族 + `Renderer.inline` 那份判定，
+   以及迁移前的 Python 内容格式解析器（围栏与语言标签）。两边是**同一份契约的两个实现**，
    所以这里的每条判定都逐字对着 Python 抄，包括它那些看起来多余的兜底。
 
    ## 这一域的两条硬规矩（decisions.md §2「目录即域」）
@@ -18,10 +18,10 @@
    ## 编号两处对不上，按实现来（issue #66 施工要点）
 
    - **`:::` 指令是 9 个，不是 8 个**：`practice quiz figure svg tip warn note
-     resources related`（`render_lesson.py:74`）。ticket 与 `docs/设计/实施路线.md:41`
+     resources related`（迁移前的 Python 渲染器:74）。ticket 与 `docs/设计/实施路线.md:41`
      都写「8 个」——那是计数错。这里按实现，`DIRECTIVES` 是唯一名单。
    - **文档 L178-179 与实现冲突**：文档说 `花了 $5 和 $10` 按字面量处理、不报错，
-     实现（`render_lesson.py:917-920`）**报错**。这里按实现（更严、更确定），
+     实现（迁移前的 Python 渲染器:917-920）**报错**。这里按实现（更严、更确定），
      文档已在本次一并改掉——两处现在一致了。
 
    ## 输出的形状
@@ -118,7 +118,7 @@ export function maskComments(text: string): string {
 
 /* ── 词汇表 ─────────────────────────────────────────────────────────────── */
 
-/** `:::` 指令名：**9 个**（`render_lesson.py:74`；ticket 与实施路线写的「8 个」是计数错）。 */
+/** `:::` 指令名：**9 个**（迁移前的 Python 渲染器:74；ticket 与实施路线写的「8 个」是计数错）。 */
 export const DIRECTIVES = [
   'practice', 'quiz', 'figure', 'svg', 'tip', 'warn', 'note', 'resources', 'related',
 ] as const;
@@ -153,7 +153,7 @@ export const TITLE_SOFT_LIMIT = 16;
  * 「什么算 HTML 标签」的唯一名单（小写）：**完整**标准 HTML 元素表 + SVG 元素名。
  *
  * 三份逐字一致，由 `scripts/tests/test_core_lesson.mjs` 断言：这里的集合 =
- * `scripts/render_lesson.py` 的 `HTML_TAG_NAMES` = `docs/规范/课件内容格式.md` §2 的名单。
+ *迁移前的 Python 渲染器（`HTML_TAG_NAMES`） = `docs/规范/课件内容格式.md` §2 的名单。
  * 改名单时三处同步。
  *
  * **加名字有硬边界**：两个形状正则捕获的名字都是 `[a-zA-Z][a-zA-Z0-9]*`，**不含连字符**，
@@ -205,7 +205,7 @@ const SVG_OPEN_RE = /<svg(?=[\s/>])/;
 const SVG_CLOSE_RE = /<\/svg\s*>/;
 const SVG_SELF_CLOSE_RE = /<svg(?=[\s/>])[^<>]*\/>/;
 
-/* ── 围栏（口径来自 scripts/lessonfmt.py，三个脚本共用的唯一判定） ─────────── */
+/* ── 围栏（口径来自迁移前的 Python 内容格式解析器，三个脚本共用的唯一判定） ─────────── */
 
 /** 这一行是围栏标记就回信息串（``` 之后那段，可能为空串），不是回 null。 */
 export function fenceMarker(line: string): string | null {
@@ -489,7 +489,7 @@ export interface FrontMatterResult {
 /**
  * 读 front matter（`---` 起止，title/goal 必填）。
  *
- * 行号口径照抄 Python：字段问题报**字段行**，缺字段报**结束行**（`render_lesson.py:254`），
+ * 行号口径照抄 Python：字段问题报**字段行**，缺字段报**结束行**（迁移前的 Python 渲染器:254），
  * 首行不是 `---` 或有 `---` 没收尾都报在第 1 行。
  */
 export function parseFrontMatter(lines: string[], ctx: LessonCtx): FrontMatterResult {

@@ -653,11 +653,14 @@ if (process.argv.includes('--probe')) {
       f.unchanged();
     }
     // #70 只改了**原生插件路径**：standalone 安装照旧把引擎副本落在 <dshHome>/studymate/engine，
-    // <root> 也照旧指向它——这段窗口里技能仍按 <root>/scripts/*.py 调脚本。
+    // <root> 也照旧指向它。那份副本是**只读材料**：技能、预设、schema、工作区数据骨架与文档
+    // （#83 之后引擎没有可执行脚本，Python 引擎整体退役）。
     const config = f.settings();
     const engine = path.join(f.dshHome, 'studymate', 'engine');
     assert.equal(fs.realpathSync(config.root), fs.realpathSync(engine));
-    assert.equal(fs.existsSync(path.join(config.root, 'scripts', 'gen_home.py')), true);
+    assert.equal(fs.existsSync(path.join(config.root, 'preset', 'learning', 'agent.cordis.yml')), true);
+    assert.equal(fs.existsSync(path.join(config.root, 'schemas', 'curriculum.schema.json')), true);
+    assert.equal(fs.existsSync(path.join(config.root, 'templates', 'MEMORY.md')), true);
     assert.equal(fs.existsSync(path.join(config.root, '.dsh', 'skills', 'learning-system', 'SKILL.md')), true);
     assert.equal(fs.realpathSync(config.workspace), fs.realpathSync(f.workspace));
   });
@@ -680,8 +683,8 @@ if (process.argv.includes('--probe')) {
         '原生加载不许往 ~/.dsh/studymate/ 写源码树副本');
       assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate', 'lib')), false,
         '原生加载不许往 ~/.dsh/studymate/ 写源码树副本');
-      // 迁移窗口：技能仍按 <root>/scripts/*.py 调脚本，包里有 scripts/
-      assert.equal(fs.existsSync(path.join(config.root, 'scripts', 'gen_home.py')), true);
+      // 原生加载的引擎就是包自身：技能、预设、schema 与数据骨架都在包里
+      assert.equal(fs.existsSync(path.join(config.root, 'preset', 'learning', 'agent.cordis.yml')), true);
       assert.equal(fs.existsSync(path.join(config.root, '.dsh', 'skills', 'learning-system', 'SKILL.md')), true);
       // ① #68：插件在真 DSH 里加载后，八个原生工具注册得上、body 调得动、越权会抛
       const tools = outcome.nativeTools;
@@ -769,9 +772,8 @@ if (process.argv.includes('--probe')) {
     assert.equal(fs.realpathSync(switched.root), fs.realpathSync(project),
       `native 启动后 <root> 还是 ${switched.root}`);
     assert.deepEqual(switched.installModes, { web: 'native' });
-    // 迁移窗口没断：换完之后 <root>/scripts/*.py 照样解析得到（只是换成了包里的那一份），
-    // 而且换过去的目录里确实有技能——预设的 customSkillDirs 指的就是它
-    assert.equal(fs.existsSync(path.join(switched.root, 'scripts', 'gen_home.py')), true);
+    // 换完之后 <root> 是包自身：技能、预设与数据骨架都在里面——预设的 customSkillDirs 指的就是它
+    assert.equal(fs.existsSync(path.join(switched.root, 'preset', 'learning', 'agent.cordis.yml')), true);
     assert.equal(fs.existsSync(path.join(switched.root, '.dsh', 'skills', 'learning-system', 'SKILL.md')), true);
     assert.equal(fs.realpathSync(switched.workspace), fs.realpathSync(f.workspace));
   });

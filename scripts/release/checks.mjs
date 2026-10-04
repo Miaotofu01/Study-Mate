@@ -1,18 +1,16 @@
-// Script-style Python suites must run directly; unittest discovery misses them.
 // Keep CI's functional suites explicit so optional audits do not grow the gate.
 // 「显式」的代价是新增套件会静默地永远不跑——所以下面有一条覆盖断言兜着。
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { findPython } from '../../bin/studymate.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
 // 支持文件与「按需手动跑」的脚本：新增套件要么接进某个组或 package.json 的按需入口，
 // 要么明确登记到这里——不登记就会在下面报出来，不再有第三种「谁也不跑」的状态。
 // browser/harness.mjs 是浏览器套件共用的骨架（探测二进制 + CDP + summary.json），自己不是套件。
-const SUPPORT_FILES = new Set(['README.md', 'run_tests.sh', 'fixtures.py', 'browser/harness.mjs']);
+const SUPPORT_FILES = new Set(['README.md', 'run_tests.sh', 'browser/harness.mjs']);
 const MANUAL_ONLY = new Set([
   'browser/measure.mjs', 'browser/hovers.mjs', 'browser/shot.mjs',  // 手动看的浏览器脚本
   'probe_bundle.mjs',                                               // 排障用
@@ -27,7 +25,7 @@ function suiteFiles() {
         if (entry.name !== '__pycache__' && entry.name !== 'fixtures') walk(path.join(dir, entry.name), relative);
         continue;
       }
-      if (/\.[cm]?js$|\.py$/.test(entry.name)) found.push(relative);
+      if (/\.[cm]?js$/.test(entry.name)) found.push(relative);
     }
   };
   walk(path.join(root, 'scripts', 'tests'));
@@ -37,7 +35,7 @@ function suiteFiles() {
 function declaredSuites() {
   const declared = new Set();
   for (const group of Object.values(groups)) {
-    for (const name of [...(group.python || []), ...(group.node || [])]) declared.add(name);
+    for (const name of group.node || []) declared.add(name);
     for (const name of group.tests || []) declared.add(name.replace(/^scripts\/tests\//, ''));
   }
   const packageInfo = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -58,24 +56,19 @@ function checkSuiteCoverage() {
     return false;
   }
   console.log(`套件覆盖：${suiteFiles().length} 个文件全部有归属`
-    + `（当前组 ${mode}：${(groups[mode].python || []).length} 个 Python + `
-    + `${(groups[mode].node || []).length} 个 Node + ${(groups[mode].tests || []).length} 个 --test）`);
+    + `（当前组 ${mode}：${(groups[mode].node || []).length} 个 Node + `
+    + `${(groups[mode].tests || []).length} 个 --test）`);
   return true;
 }
 
 const groups = {
   core: {
-    python: [
-      'test_attachment_render.py', 'test_curriculum.py', 'test_dsh_presets.py',
-      'test_interaction_state.py', 'test_handoff.py', 'test_lesson_figure.py', 'test_lesson_links.py',
-      'test_lesson_scripts.py', 'test_lessonfile.py', 'test_lessonfmt.py',
-      'test_naming_nav.py', 'test_pool.py',
-      'test_quiz_attr.py', 'test_quiz_code.py', 'test_render_lesson.py',
-      'test_statuses.py', 'test_templates.py', 'test_workspace_config.py',
-    ],
-    node: ['quiz_dom_test.cjs', 'toc_dom_test.cjs'],
     tests: [
       'scripts/release/release.test.mjs',
+      // #83 拆除：预设注册的 TS 替代（形状逐字段一致）与 Codex 交互断点的 Node 移植。
+      // 两条都是「原 Python 套件的验收面」，不是新功能——见脚本自己的文件头。
+      'scripts/tests/test_preset_install.mjs',
+      'scripts/tests/test_interaction_state.mjs',
       // Host 半数据层的特征化测试（lib/{workspace,library,assets,yaml,reference,attempts}.mjs）
       'scripts/tests/test_host_library_payload.mjs',
       'scripts/tests/test_host_reference_fence.mjs',
@@ -162,19 +155,29 @@ const groups = {
     ],
   },
   '--static': {
-    python: ['test_python_syntax.py', 'test_release_metadata.py', 'test_skill_frontmatter.py', 'test_skill_rules.py', 'test_templates.py'],
     tests: ['scripts/tests/test_openai_skills.mjs', 'scripts/tests/test_openai_skill_ui.mjs', 'scripts/tests/test_antigravity_skills.mjs',
       // #81：技能调用面 ↔ lib/tools 注册表对账（点名的工具必须存在；无头宿主导出件里
       // 不许留原生工具名，也不许留宿主跑不动的调用）。
-      'scripts/tests/test_skill_contracts.mjs'],
+      'scripts/tests/test_skill_contracts.mjs',
+      // #83：原四份 Python 套件的**行为移植**（技能规则、技能调用面、词表、发布元数据）——它们守的东西一件都没退役（提示词规则仍在
+      // 那些技能里、调用面仍分角色、三档词表仍在 schema 里、发布元数据仍要与 tag 对齐）。
+      'scripts/tests/test_skill_rules.mjs',
+      'scripts/tests/test_skill_frontmatter.mjs',
+      'scripts/tests/test_statuses.mjs',
+      'scripts/tests/test_release_metadata.mjs',
+      // #83：文档悬空引用（README 与 docs/** 的相对链接、行内代码里的仓库路径）。
+      // 拆除之后最容易留下的就是"文档还指着已删文件"，人眼扫不可靠。
+      'scripts/tests/test_docs_references.mjs'],
   },
   '--browser': {
-    // 前三个测旧静态模板（file:// 夹具），reading_test.mjs 测阅读端本体（真 lib/client.js）。
+    // 三个旧静态模板夹具（hl / quiz_code / math）随 `templates/assets/` 一起退役：
+    // 它们测的是「生成出来的页面 + 模板资源」，而页面已经不再预生成。它们守的渲染面
+    // 由这三条接住——reading_test 测阅读端本体（真 lib/client.js），export_file_test
+    // 测**导出的产物本身**在 file:// 下真渲染（样式、公式、图片、代码块、题目）。
     // 后面两条各测阅读端的一块，夹具同一套（harness.mjs + mini-react）：
     //   · #76 阅读位置三级恢复 + 锚点四态复核；
     //   · #72 作答落盘（把阅读端打进一个说 HTTP 的迷你宿主，真的落盘到工作区文件）。
     node: [
-      'browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs',
       'browser/reading_test.mjs',
       'browser/reading_position_test.mjs',
       'browser/attempts_test.mjs',
@@ -203,7 +206,7 @@ function run(command, args) {
   console.log(`\n${command} ${args.join(' ')}`);
   const result = spawnSync(command, args, {
     stdio: 'inherit', windowsHide: true,
-    env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+    env: { ...process.env },
   });
   if (result.error) console.error(result.error.message);
   failed ||= result.status !== 0;
@@ -211,14 +214,6 @@ function run(command, args) {
 if (!checkSuiteCoverage()) process.exit(2);
 
 const group = groups[mode];
-if (group.python?.length) {
-  let python;
-  try { python = findPython(); } catch (error) {
-    console.error(error.message);
-    process.exit(1);
-  }
-  for (const file of group.python) run(python.command, [...python.prefix, `scripts/tests/${file}`]);
-}
 for (const file of group.node || []) run(process.execPath, [`scripts/tests/${file}`]);
 if (group.tests?.length) run(process.execPath, ['--test', ...group.tests]);
 process.exitCode = failed ? 1 : 0;

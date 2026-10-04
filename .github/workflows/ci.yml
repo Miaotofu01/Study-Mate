@@ -14,24 +14,17 @@ jobs:
     name: Core regression tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      PYTHONUTF8: '1'
-      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          # 版本 tag 要能被 test_release_metadata.py 读到：它比对 package.json 与最新可达的
+          # 版本 tag 要能被 test_release_metadata.mjs 读到：它比对 package.json 与最新可达的
           # v* tag，拦住「stale 分支合并把 release 元数据冲回去」（2026-09-30 的 53f33d3）。
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
           package-manager-cache: false
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.13'
-      - run: python -m pip install PyYAML
       # 类型门禁（npm run test:types）要 tsc，tsc 在 devDependencies 里。npm ci 按
       # package-lock.json 装：lockfile 与 package.json 对不上时直接失败，门禁不会因为
       # 「依赖没装上」而少跑一环。Release 的 checks job 复用本文件，所以两处一起覆盖。

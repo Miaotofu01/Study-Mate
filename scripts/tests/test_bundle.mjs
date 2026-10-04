@@ -6,10 +6,9 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { findPython } from '../../bin/studymate.mjs';
+import { parseYaml } from '../../lib/yaml.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const python = findPython();
 const plugin = pathToFileURL(path.join(root, 'bin/dsh-plugin.ts')).href;
 // 原生加载下引擎就是**已安装的包自身**——package.json 与 package.json 里 files 带的
 // scripts/、templates/、schemas/、docs/、.dsh/skills 都在这个目录里。
@@ -47,10 +46,8 @@ function fixture(t) {
       console.log(JSON.stringify(state));`, overrides);
   }
   function yaml(file) {
-    const result = spawnSync(python.command, [...python.prefix, '-c',
-      'import json,sys,yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1],encoding="utf-8"))))', file], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-    return JSON.parse(result.stdout);
+    return parseYaml(fs.readFileSync(file, 'utf8'),
+      { file, tags: 'scalar', blockScalars: true, documentMarkers: true });
   }
   // 原生加载下引擎 = 已安装的包自身，所以这份夹具里没有 <dshHome>/studymate/engine
   return { dir, env, dshHome, workspace, patch, config, run, boot, yaml };
@@ -198,59 +195,20 @@ test('registry failures are reported without stopping the host or deleting learn
   assert.equal(fs.readFileSync(data, 'utf8'), 'my learning data');
 });
 
-test('missing Python is reported without stopping the host or creating installation files', t => {
+test('an install-boundary failure is reported without stopping the host or creating installation files', t => {
   const f = fixture(t);
   const copied = path.join(f.dir, 'dsh-plugin.ts');
   fs.copyFileSync(path.join(root, 'bin/dsh-plugin.ts'), copied);
-  // Simulate dependency failure at the installer boundary; Windows launchers
-  // may find Python even with an empty PATH.
+  // 把插件入口单独拷到一个没有 lib/ 的目录里：顶层静态 import 会让这条用例在解析期就崩，
+  // 这里的桩模拟的是**安装器边界失败**（老宿主 / 缺依赖），插件该只警告、不建安装文件。
   fs.writeFileSync(path.join(f.dir, 'studymate.mjs'),
-    'export function installPayload() { throw new Error("需要 Python 3.9+ 和 PyYAML"); }');
+    'export function installPayload() { throw new Error("安装器边界失败：宿主不支持原生加载"); }');
   const result = f.boot({}, 'normal', pathToFileURL(copied).href);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const state = JSON.parse(result.stdout);
   assert.equal(state.registered, 0);
-  assert.match(state.warnings.join('\n'), /Python 3\.9\+ 和 PyYAML/);
+  assert.match(state.warnings.join('\n'), /安装器边界失败/);
   assert.equal(fs.existsSync(f.dshHome), false);
-});
-
-test('unavailable Python reports the prerequisite on every supported platform', () => {
-  for (const platform of ['darwin', 'linux', 'win32']) {
-    assert.throws(() => findPython(platform, () => ({ status: 1 })), /没有找到可用的 Python 3\.9\+/);
-  }
-});
-
-test('Python discovery prefers an interpreter that already has PyYAML', () => {
-  const result = findPython('linux', command => {
-    if (command === 'python3' || command === 'python') {
-      return { status: 0, stdout: JSON.stringify({ executable: `/opt/${command}`, version: [3, 14, 5] }) };
-    }
-    return { status: command === '/opt/python' ? 0 : 1 };
-  });
-  assert.deepEqual(result, { command: '/opt/python', prefix: ['-X', 'utf8'] });
-});
-
-test('missing PyYAML reports the detected Windows interpreter and its pip command', () => {
-  const executable = 'C:\\Python 3.14\\python.exe';
-  for (const launcher of ['python3', 'python', 'py']) {
-    const invocation = launcher === 'py' ? 'py -3' : launcher;
-    assert.throws(() => findPython('win32', command => command === launcher
-      ? { status: 0, stdout: JSON.stringify({ executable, version: [3, 14, 5] }) }
-      : { status: 1 }), error => {
-      assert.match(error.message, /已找到 Python 3\.14\.5/);
-      assert.match(error.message, /缺少 PyYAML/);
-      assert.ok(error.message.includes(executable));
-      assert.ok(error.message.includes(`${invocation} -m pip install PyYAML`));
-      assert.ok(error.message.includes(`${invocation} -m ensurepip --upgrade`));
-      return true;
-    });
-  }
-});
-
-test('an unsupported Python version is distinguished from a missing interpreter', () => {
-  assert.throws(() => findPython('linux', command => command === 'python3'
-    ? { status: 0, stdout: JSON.stringify({ executable: '/opt/python3', version: [3, 8, 20] }) }
-    : { status: 1 }), /检测到 Python 3\.8\.20，需要 Python 3\.9\+/);
 });
 
 test('an old host skips unsupported native loading without blocking startup', async () => {

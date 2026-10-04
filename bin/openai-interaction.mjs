@@ -26,7 +26,7 @@ export const DIALOGUE = `## Codex 对话衔接
 
 export const RECORD_CONTINUITY = `## Codex 交互断点（总控独占）
 
-在工作区 \`.learning/interaction.json\` 记录活跃科目、节点、阶段、已收到的选择、待问项与下一步；它只用于衔接，不替代 progress.yaml、评估证据或共享记忆。通过 \`<root>/scripts/interaction_state.py\` 读写，具体字段与命令见 \`<root>/skills/learning-system/references/codex-interaction.md\`。
+在工作区 \`.learning/interaction.json\` 记录活跃科目、节点、阶段、已收到的选择、待问项与下一步；它只用于衔接，不替代 progress.yaml、评估证据或共享记忆。通过 \`node '<root>/scripts/interaction_state.mjs'\` 读写（需要 Node 18+），具体字段与命令见 \`<root>/skills/learning-system/references/codex-interaction.md\`。
 
 - 首次读不到文件是正常情况，从已有档案恢复；不要迁移或清空 DSH 数据。恢复时按学习进度、共享记忆与最近的学习记录核对真实产物——**没有"会话摘要"这份文件了**（已退役），阶段与下一步就记在这份断点里。
 - 在发问前、接受答案后、材料通过检查后、切换科目和暂停前保存断点，不能只在正常结束时写摘要。先更新对应正式档案、核对产物，再保存指向这些事实的阶段；失败停留在未完成步骤。

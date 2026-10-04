@@ -6,11 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { buildAntigravityPlugin } from '../../bin/antigravity-plugin.mjs';
-import { findPython } from '../../bin/studymate.mjs';
 import { AGENT_ROLES, AGENT_TOOLS, adaptAntigravitySkill, adaptAntigravityAgent } from '../../bin/antigravity-skill-compat.mjs';
+import { extractZip } from './fixtures/zip.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const python = findPython();
 const cli = path.join(root, 'bin/studymate.mjs');
 
 function fixture(t) {
@@ -19,18 +18,13 @@ function fixture(t) {
   return directory;
 }
 
-function runPython(args, env = process.env) {
-  const result = spawnSync(python.command, [...python.prefix, '-X', 'utf8', ...args], { encoding: 'utf8', env, windowsHide: true });
-  assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout);
-  return result.stdout;
-}
-
-test('exported Antigravity ZIP contains complete agents, skills, and templates', t => {
+test('导出的 Antigravity ZIP 是一份完整的插件：角色、技能、schema、文档与数据骨架', t => {
   const directory = fixture(t);
   const output = path.join(directory, "输出 Antigravity #1");
-  const result = buildAntigravityPlugin({ output, python });
+  const result = buildAntigravityPlugin({ output });
   const extracted = path.join(directory, 'unpacked');
-  runPython(['-m', 'zipfile', '-e', result.archive, extracted]);
+  // 解包用**独立于写入端**的读取器（fixtures/zip.mjs）：自己解自己不算验证。
+  extractZip(result.archive, extracted);
   const plugin = path.join(extracted, 'studymate');
 
   // 1. Manifest
@@ -73,11 +67,9 @@ test('exported Antigravity ZIP contains complete agents, skills, and templates',
   assert.ok(controller.includes('invoke_subagent'), 'Controller should mention invoke_subagent');
   assert.ok(controller.includes('ask_question'), 'Controller should use ask_question');
   assert.ok(controller.includes('Antigravity 宿主约定'), 'Controller should include Antigravity host guide');
-  assert.ok(controller.includes("python3 -B '<root>/scripts/check_handoff.py' '<stage_dir>' --role '<角色>'"));
-  // 这里刻意不再断言「不带引号的写法不存在」。Antigravity 适配器的正则同样只认不带引号的脚本
-  // 路径，所以源码带不带引号导出的这一行逐字节相同（实测），产物层面没有可观测差异——那条断言
-  // 永远成立，只会给人虚假的安全感。带引号的写法改由 test_skill_rules.py 在源码层拦下，
-  // 那一条对两个宿主同时成立。
+  // Python 引擎随 #83 退役：导出件里没有脚本命令，只有「按 schema 自查」与那条导出 CLI。
+  assert.ok(controller.includes('npx -y @yunmiao/studymate@latest export'), 'Controller should say how to export');
+  assert.ok(!controller.includes('python3'), 'Controller must not invoke Python any more');
 
   // 3b. Nothing may ship empty: a referenced-but-empty file is a broken plugin.
   const empty = [];
@@ -94,20 +86,17 @@ test('exported Antigravity ZIP contains complete agents, skills, and templates',
   // 4. Rules
   assert.ok(fs.existsSync(path.join(plugin, 'rules/AGENTS.md')), 'rules/AGENTS.md must exist');
 
-  // 5. Assets, templates, schemas, scripts, docs
+  // 5. 静态材料：schema、工作区数据骨架、文档、logo
   for (const asset of [
     'assets/logo.png',
-    'templates/lesson.html',
-    'templates/home-index.html',
-    'templates/subject-index.html',
-    'templates/assets/katex/katex.min.js',
+    'templates/MEMORY.md',
+    'templates/MISSION.md',
+    'templates/GLOSSARY.md',
+    'templates/RESOURCES.md',
+    'templates/subject.yaml',
     'schemas/curriculum.schema.json',
     'schemas/progress.schema.json',
     'schemas/agent-handoff.schema.json',
-    'scripts/check_handoff.py',
-    'scripts/render_lesson.py',
-    'scripts/gen_home.py',
-    'scripts/check_lesson.py',
     'docs/规范/文件归属.md',
     'README.md',
     'LICENSE',
@@ -115,35 +104,36 @@ test('exported Antigravity ZIP contains complete agents, skills, and templates',
     assert.ok(fs.existsSync(path.join(plugin, asset)), `Asset must exist: ${asset}`);
   }
 
-  // 6. Exclude unwanted files
-  for (const unwanted of ['node_modules', '.git', 'workspace', '.dsh', 'preset', 'scripts/tests', 'scripts/install_preset.py']) {
+  // 6. 不该进产物的东西：源码、模板页、前端资源、Python、以及任何引擎脚本
+  for (const unwanted of ['node_modules', '.git', 'workspace', '.dsh', 'preset', 'scripts',
+    'templates/lesson.html', 'templates/home-index.html', 'templates/assets']) {
     assert.equal(fs.existsSync(path.join(plugin, unwanted)), false, `Unwanted asset present: ${unwanted}`);
   }
-
-  // 7. Verify lesson rendering works standalone using the plugin scripts & templates
-  const checkResult = spawnSync(python.command, [
-    ...python.prefix,
-    path.join(plugin, 'scripts/render_lesson.py'),
-    path.join(root, 'examples/.learning/subjects/linear-algebra'),
-    'vector.space',
-    '--check',
-  ], { encoding: 'utf8', windowsHide: true });
-  assert.equal(checkResult.status, 0, checkResult.stderr);
+  const shipped = [];
+  const walk = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) walk(full); else shipped.push(path.relative(plugin, full));
+    }
+  };
+  walk(plugin);
+  const offenders = shipped.filter(name => /\.py$/.test(name));
+  assert.deepEqual(offenders, [], `插件里不该再有 Python 文件：${offenders.join('、')}`);
 });
 
 test('rebuild produces identical Antigravity ZIP bytes', t => {
   const directory = fixture(t);
   const output = path.join(directory, 'output');
-  const first = buildAntigravityPlugin({ output, python });
+  const first = buildAntigravityPlugin({ output });
   const firstBytes = fs.readFileSync(first.archive);
-  const second = buildAntigravityPlugin({ output, python });
+  const second = buildAntigravityPlugin({ output });
   const secondBytes = fs.readFileSync(second.archive);
   assert.ok(firstBytes.equals(secondBytes), 'ZIP bytes should be deterministic');
 });
 
 test('buildAntigravityPlugin refuses output inside source directories', () => {
-  assert.throws(() => buildAntigravityPlugin({ output: path.join(root, '.dsh'), python }), /输出目录不能位于构建源文件内/);
-  assert.throws(() => buildAntigravityPlugin({ output: path.join(root, 'scripts'), python }), /输出目录不能位于构建源文件内/);
+  assert.throws(() => buildAntigravityPlugin({ output: path.join(root, '.dsh') }), /输出目录不能位于构建源文件内/);
+  assert.throws(() => buildAntigravityPlugin({ output: path.join(root, 'scripts') }), /输出目录不能位于构建源文件内/);
 });
 
 test('已被占用的输出目录不会被静默清空', t => {
@@ -152,16 +142,16 @@ test('已被占用的输出目录不会被静默清空', t => {
   const occupied = path.join(managed, 'studymate');
   fs.mkdirSync(occupied, { recursive: true });
   fs.writeFileSync(path.join(occupied, 'important.txt'), 'user data\n');
-  assert.throws(() => buildAntigravityPlugin({ output: managed, python }), /输出目录已有非构建文件/);
+  assert.throws(() => buildAntigravityPlugin({ output: managed }), /输出目录已有非构建文件/);
   assert.equal(fs.readFileSync(path.join(occupied, 'important.txt'), 'utf8'), 'user data\n');
 
   // 宿主预建的空插件目录（--install 的落点）可以接管
   const empty = path.join(directory, 'empty-install', 'studymate');
   fs.mkdirSync(empty, { recursive: true });
-  const result = buildAntigravityPlugin({ output: empty, python });
+  const result = buildAntigravityPlugin({ output: empty });
   assert.equal(result.plugin, empty);
   // 自己上一次的产物可以覆盖
-  const again = buildAntigravityPlugin({ output: empty, python });
+  const again = buildAntigravityPlugin({ output: empty });
   assert.equal(again.plugin, empty);
 });
 
