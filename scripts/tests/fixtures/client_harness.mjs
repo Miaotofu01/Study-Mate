@@ -163,5 +163,24 @@ export function viewText(node) {
   return '';
 }
 
+/**
+ * 元素树里按 props 找节点（套件要拿某个按钮的 onClick 时用）。
+ *
+ * 遍历口径必须与 `viewText` 一致：桩造的节点把子元素放在 `props.children`（不是 `node.children`），
+ * 只走 `node.children` 会漏掉深层节点——找出来「一颗按钮都没有」，看起来像面板没渲染，
+ * 其实是走错了树。
+ */
+export function findByProp(node, key, value, found = []) {
+  if (node === null || node === undefined || typeof node !== 'object') return found;
+  if (Array.isArray(node)) {
+    for (const item of node) findByProp(item, key, value, found);
+    return found;
+  }
+  if (node.props && node.props[key] === value) found.push(node);
+  if ('children' in node) findByProp(node.children, key, value, found);
+  if (node.props && node.props.children !== undefined) findByProp(node.props.children, key, value, found);
+  return found;
+}
+
 export const CLIENT_PATH = CLIENT_FILE;
 export { ROOT as REPO_ROOT };

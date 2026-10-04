@@ -43,6 +43,10 @@ export const ASSETS_DIR = 'assets';
 export const LIBRARY_ENDPOINT = '/api/studymate/library';
 export const REFERENCE_ENDPOINT = '/api/studymate/reference';
 export const ASSET_ENDPOINT = '/api/studymate/asset';
+/** 作答数据的写入口（#72）：离线页面明确回 403，不假装落盘。 */
+export const ATTEMPTS_ENDPOINT = '/api/studymate/attempts';
+/** 变更推送（#74）：离线页面用静默替身，不连这条流。 */
+export const EVENTS_ENDPOINT = '/api/studymate/events';
 
 /** 冻结模块表里的键名：与宿主给阅读端的名字逐字相同（client.js 只 require 'react'）。 */
 export const VENDOR_MODULES = {
@@ -112,13 +116,15 @@ window.__STUDYMATE_EXPORT__ = ${json};
 /**
  * `host.js`：最小宿主。
  *
- * 与 DSH 的差别只有四处，**每一处都只在这一个文件里**（`lib/client.js` 一个字都不用改）：
+ * 与 DSH 的差别只有五处，**每一处都只在这一个文件里**（`lib/client.js` 一个字都不用改）：
  *   ① 冻结模块表：宿主给阅读端 9 个键，这里只备它真正 require 的 react（其余键一次都没要过，
  *      要了就会在 `__smRequire` 上抛出来——这是刻意的，别悄悄补一堆空对象）；
  *   ② 插件注册口 `window.__ModuleLoader__`：阅读端按插件规范往它登记工厂；
- *   ③ `fetch`：阅读端读的三条接口（library / reference）就地作答——离线页面没有 Host 半；
- *      写资料那条（POST）明确回 403 并说清去哪写，不假装成功；
- *   ④ 取图地址：阅读端按宿主路由写 `/api/studymate/asset?…`，离线页面里图与页面同处一个目录
+ *   ③ `fetch`：阅读端读的接口（library / reference）就地作答——离线页面没有 Host 半；
+ *      **写请求一律回 403 并说清去哪写**（作答与资料都要回 DSH 里写），不假装成功；
+ *   ④ 变更推送（#74）：离线页面是快照，没有 Host 半可推——用一个**静默的 EventSource 替身**，
+ *      不让真 EventSource 去连 `/api/studymate/events`（`file://` 下必然失败，控制台会脏）；
+ *   ⑤ 取图地址：阅读端按宿主路由写 `/api/studymate/asset?…`，离线页面里图与页面同处一个目录
  *      树（`assets/<科目>/<相对路径>`）。改写在 **`src` 的 setter** 上——晚一步（比如渲染完再
  *      扫 DOM）浏览器已经按旧地址发过请求了，控制台会多一条失败请求。
  */
@@ -131,6 +137,14 @@ export function hostScript(): string {
   var LIBRARY_ENDPOINT = ${JSON.stringify(LIBRARY_ENDPOINT)};
   var REFERENCE_ENDPOINT = ${JSON.stringify(REFERENCE_ENDPOINT)};
   var ASSET_ENDPOINT = ${JSON.stringify(ASSET_ENDPOINT)};
+  var ATTEMPTS_ENDPOINT = ${JSON.stringify(ATTEMPTS_ENDPOINT)};
+
+  /* 离线页面是**只读**的：这条话说一次，两处写入口（作答、资料）都照它回。 */
+  var READ_ONLY = {
+    error: 'read-only',
+    message: '这是导出的离线页面，只能读：作答与资料都要回 DSH 的阅读端里写'
+      + '（那里才会落进 attempts/ 与 reference/）。这次作答只留在当前这一屏。',
+  };
 
   /* ① 冻结模块表（宿主的懒 CJS 模型）：vendor/ 下的第三方构建按名字登记，第一次取用才跑。
      执行时把 CommonJS 那四样（module / exports / require / process）递进去——**不是可选的**：
@@ -188,12 +202,7 @@ export function hostScript(): string {
       return Promise.resolve(json(DATA.library));
     }
     if (target === REFERENCE_ENDPOINT) {
-      if (method !== 'GET') {
-        return Promise.resolve(json({
-          error: 'read-only',
-          message: '这是导出的离线页面，只能读：资料与作答都要回 DSH 的阅读端里写（那里才会落进 reference/ 与作答数据）。',
-        }, 403));
-      }
+      if (method !== 'GET') return Promise.resolve(json(READ_ONLY, 403));
       var query = queryOf(url);
       var slug = query.get('subject') || '';
       var rel = query.get('path') || '';
@@ -204,13 +213,35 @@ export function hostScript(): string {
       }
       return Promise.resolve(json({ text: text, entry: { path: rel } }));
     }
+    if (target === ATTEMPTS_ENDPOINT) {
+      // 作答是**写**：离线页面不落盘（也不假装落了）。这一屏照常判分，只是回不去。
+      return Promise.resolve(json(READ_ONLY, 403));
+    }
     return Promise.resolve(json({
       error: 'not-found',
       message: '离线页面只应答 library 与 reference 两条接口，收到的是：' + target,
     }, 404));
   };
 
-  /* ④ 取图地址改写：/api/studymate/asset?subject=X&path=Y → assets/X/Y。
+  /* ④ 变更推送：离线页面是**导出那一刻的快照**，没有 Host 半可以推。
+     真 EventSource 会去连 /api/studymate/events，在 file:// 下必然失败（控制台一条 CORS、
+     一条失败请求，浏览器套件按问题计）。所以给一个「永远静默」的替身：不连、不重连、不报错。 */
+  function SilentEventSource(url) {
+    this.url = String(url);
+    this.readyState = 0;
+    this.onopen = null;
+    this.onmessage = null;
+    this.onerror = null;
+  }
+  SilentEventSource.prototype.close = function () { this.readyState = 2; };
+  SilentEventSource.prototype.addEventListener = function () {};
+  SilentEventSource.prototype.removeEventListener = function () {};
+  SilentEventSource.CONNECTING = 0;
+  SilentEventSource.OPEN = 1;
+  SilentEventSource.CLOSED = 2;
+  window.EventSource = SilentEventSource;
+
+  /* ⑤ 取图地址改写：/api/studymate/asset?subject=X&path=Y → assets/X/Y。
      path 是阅读端 encodeURIComponent 过的整段相对路径，这里按段编回去（保留 '/' 分段）。 */
   function localAssetUrl(value) {
     if (typeof value !== 'string' || value.slice(0, ASSET_ENDPOINT.length + 1) !== ASSET_ENDPOINT + '?') return value;

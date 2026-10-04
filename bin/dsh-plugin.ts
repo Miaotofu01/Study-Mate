@@ -210,5 +210,17 @@ export async function apply(ctx: PluginContext): Promise<void> {
         }
       },
     }), 'studymate: 参考资料路由');
+
+    // 作答数据（#72）：路径、方法、请求体、状态码映射都在 lib/attempts-route.ts 里，这里只挂一行
+    import('../lib/attempts-route.ts').then((module) => module.registerAttemptRoutes(connectionCtx), (error) => { console.warn(`StudyMate：作答数据路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
+
+    // 问答面板（#79）：POST /api/studymate/ask —— 阅读端就地调模型，不经过总控。
+    // 具体实现在 lib/ask/**，这个文件不认识它的形状（与上面三条同一种姿势）。
+    void import('../lib/ask/index.ts').then(({ registerAskRoute }) => registerAskRoute(connectionCtx as Parameters<typeof registerAskRoute>[0])).catch((error) => { console.warn(`StudyMate：问答路由挂不上。${error instanceof Error ? error.message : String(error)}`); });
+
+    // 文件监听与变更推送（#74）：监听在学习工作区那一侧（lib/watch，由 lib/tools 的
+    // registerStudyMate 起），这里只挂推送路由——它要的 connection 只有这个注入点拿得到。
+    // 动态 import 与上面同一姿势（这个文件会被 test_bundle 拷到没有 lib/ 的临时目录里跑）。
+    void import('../lib/watch/index.ts').then((watch) => watch.registerWatchChannel(connectionCtx), (error) => console.warn(`StudyMate：变更推送通道没挂上。${error instanceof Error ? error.message : String(error)}`));
   });
 }

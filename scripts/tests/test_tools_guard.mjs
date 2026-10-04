@@ -111,13 +111,14 @@ test('注册走 ctx.effect：每个工具都挂在可回收的副作用上', () 
   const toolEffects = ctx.effects.filter((label) => label.startsWith('studymate: studymate_'));
   assert.equal(toolEffects.length, ALL_TOOL_NAMES.length, '每个工具各挂一个 effect');
   for (const label of toolEffects) assert.match(label, /^studymate: studymate_/);
-  // 任务域另外挂一条**服务级** effect：卸载时给销毁回执（请求取消活任务 + 落盘刷一遍）。
-  // 夹具没有 inject，所以阅读端那条路由不在这份清单里（它在 test_tasks_model.mjs 里验）。
-  // 任务域另外挂一条**服务级** effect：卸载时给销毁回执（请求取消活任务 + 落盘刷一遍）。
-  // #82 又加了一条：导出任务类型在**加载时**登记（重开 DSH 之后 resume 要靠它按名字找回跑法），
-  // 卸载时注销。夹具没有 inject，所以阅读端那条路由不在这份清单里（它在 test_tasks_model.mjs 里验）。
+  // 工具之外的三条**子系统级** effect（按注册清单的顺序）：
+  //   · #82 导出：任务类型在**加载时**登记（重开 DSH 之后 resume 要靠它按名字找回跑法），卸载时注销；
+  //   · #73 任务服务：卸载时给销毁回执（请求取消活任务 + 落盘刷一遍）；
+  //   · #74 文件监听：学习工作区一变就往通知总线上发一条。
+  // 夹具没有 inject，所以各家的**路由**都不在这份清单里（任务那条在 test_tasks_model.mjs 里验，
+  // 监听那条在 test_watch_push.mjs / 真 DSH 探针里验，导出那条在 test_export_tool_task.mjs 里验）。
   assert.deepEqual(ctx.effects.filter((label) => !label.startsWith('studymate: studymate_')),
-    ['studymate: 导出任务类型（卸载时注销）', 'studymate: 任务服务（销毁回执）']);
+    ['studymate: 导出任务类型（卸载时注销）', 'studymate: 任务服务（销毁回执）', 'studymate: 学习工作区文件监听']);
 });
 
 /* ── 二、反证：越权读 / 越权写必须抛 ──────────────────────────────────── */

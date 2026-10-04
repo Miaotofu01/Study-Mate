@@ -19,6 +19,7 @@
 export {
   OUT_DIR_NAME, ENTRY_FILE, DATA_FILE, HOST_FILE, BOOT_FILE, CLIENT_FILE, MANIFEST_FILE,
   ASSETS_DIR, VENDOR_DIR, ASSET_ENDPOINT, LIBRARY_ENDPOINT, REFERENCE_ENDPOINT,
+  ATTEMPTS_ENDPOINT, EVENTS_ENDPOINT,
   assetProductPath, splitVendor, vendorFile,
 } from './page.ts';
 export type { VendorKey } from './page.ts';

@@ -148,6 +148,31 @@ try {
     return { ...seen, answered };
   });
 
+  /* 写请求与推送：离线页面只读，且不去连那条不存在的推送流 */
+  await session.scene('export-readonly', async (ctx) => {
+    await ctx.navigate(entry, { settle: 1500 });
+    const seen = await ctx.evaluate(`(async () => {
+      const attempts = await fetch('/api/studymate/attempts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ subject: 'demo', node: 'var', stateKey: 'var|x|0', patch: { chosen: 0 } }),
+      });
+      const attemptsBody = await attempts.json();
+      return {
+        attemptsStatus: attempts.status,
+        attemptsMessage: attemptsBody.message,
+        eventSource: typeof window.EventSource === 'function' ? window.EventSource.name : null,
+        readyState: (new window.EventSource('/api/studymate/events')).readyState,
+      };
+    })()`);
+    check('作答写请求明确回 403 并说清去哪写（离线页面不假装落盘）',
+      seen.attemptsStatus === 403 && /回 DSH 的阅读端里写/.test(String(seen.attemptsMessage)),
+      JSON.stringify(seen));
+    check('推送流用静默替身：不连 /api/studymate/events（file:// 下连不上，控制台会脏）',
+      seen.eventSource === 'SilentEventSource' && seen.readyState === 0, JSON.stringify(seen));
+    return seen;
+  });
+
   /* 参考资料：离线页面里读得到（写要明确拒绝） */
   await session.scene('export-reference', async (ctx) => {
     await ctx.navigate(entry, { settle: 1500 });
