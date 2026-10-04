@@ -18,6 +18,8 @@ import type { SchemaProblem, SchemaPath } from './schema.ts';
 import { indexYaml, hasOuterWhitespace } from './yamlpos.ts';
 import type { PositionHit } from './yamlpos.ts';
 import { indexJson, JsonSyntaxError } from './jsonpos.ts';
+// 进度词表（三档 + 旧六档映射）的唯一实现在规则层；这里只读它的判据，不另写一份
+import { LEGACY_TIERS, LEGACY_TIER_MAP, isTier } from './rules.ts';
 
 /* ── 统一的回报形状 ───────────────────────────────────────────────────── */
 
@@ -344,15 +346,43 @@ export function validateCurriculum(input: YamlDocumentInput): ValidationReport {
    二、进度校验（schema 与取值）
    ══════════════════════════════════════════════════════════════════════ */
 
-/** 旧六档 → 三档（目标态规格 §5.2）。这里是读侧的判据，写侧在 `lib/core/rules.ts`。 */
-const LEGACY_STATUS_TO_TIER = new Map<string, string>([
-  ['未开始', '未开始'],
-  ['学习中', '学习中'],
-  ['初步理解', '学习中'],
-  ['能独立应用', '已学完'],
-  ['需要复习', '已学完'],
-  ['已通过项目验证', '已学完'],
-]);
+/*
+ * 旧六档 → 三档（目标态规格 §5.2）的**唯一实现**在 `lib/core/rules.ts`：这里 import 它，
+ * 不再抄第二份映射表——曾经两份并存，改一次词表要动两处，漂了也没有测试拦得住。
+ * 域边方向是 lib → core，没问题（`decisions.md` §2）。
+ */
+
+/**
+ * schema 里的 `status` 枚举**就地展开**成「三档 + 旧六档」。
+ *
+ * 为什么不在 `progress.schema.json` 的 enum 里直接写上九个值：那份 schema 是**写侧**的合同，
+ * 它说「新写的必须是这三档」；旧值只在读侧被容忍，写侧不该在词表里给它们留位置。
+ * 展开只加枚举项、不动其它关键字，所以可以放心就地改这一条路径。
+ */
+function expandStatusEnum(schema: unknown): unknown {
+  if (typeof schema !== 'object' || schema === null) return schema;
+  const root = schema as Record<string, unknown>;
+  const nodes = root.properties as Record<string, unknown> | undefined;
+  const nodeEntry = nodes?.nodes as Record<string, unknown> | undefined;
+  const extra = nodeEntry?.additionalProperties as Record<string, unknown> | undefined;
+  const props = extra?.properties as Record<string, unknown> | undefined;
+  const status = props?.status as Record<string, unknown> | undefined;
+  if (status === undefined || !Array.isArray(status.enum)) return schema;
+  const values = new Set<unknown>([...status.enum, ...LEGACY_TIERS]);
+  return {
+    ...root,
+    properties: {
+      ...nodes,
+      nodes: {
+        ...nodeEntry,
+        additionalProperties: {
+          ...extra,
+          properties: { ...props, status: { ...status, enum: [...values] } },
+        },
+      },
+    },
+  };
+}
 
 export interface ProgressInput extends YamlDocumentInput {
   /**
@@ -366,10 +396,12 @@ export interface ProgressInput extends YamlDocumentInput {
 export function validateProgress(input: ProgressInput): ValidationReport {
   const problems: StudyProblem[] = [];
   const lookup = yamlLookup(input.text);
-  pushSchemaProblems(problems, input.file, lookup, input.schema, input.value);
+  // 旧六档是**读得进**的：先把 schema 的 enum 展开，再拿展开后的那份校验，
+  // 于是旧文件不会报「不在允许值」，而真正的野词（连旧词表都不是）照样被拦下。
+  pushSchemaProblems(problems, input.file, lookup, expandStatusEnum(input.schema), input.value);
 
   if (!isPlainObject(input.value)) {
-    problems.push({ file: input.file, line: 1, message: '顶层不是 mapping：进度必须是含 updated_at / nodes / misconceptions / project 的对象', blocking: true });
+    problems.push({ file: input.file, line: 1, message: '顶层不是 mapping：进度必须是含 updated_at / nodes / project 的对象', blocking: true });
     return summarize(input.file, problems);
   }
 
@@ -378,6 +410,18 @@ export function validateProgress(input: ProgressInput): ValidationReport {
       file: input.file,
       ...place(lookup, ['updated_at']),
       message: 'updated_at 两端有空白：日期时间写成了带空白的字符串，比较时会不等',
+      blocking: false,
+    });
+  }
+
+  // 旧字段的迁移提示（**不阻断**）：字段名变了、落点搬了，学生与维护者看到的却是结果——
+  // 不说一声，下一次写盘时旧字段静默消失，没人知道为什么。
+  if (hasOwn(input.value, 'misconceptions')) {
+    problems.push({
+      file: input.file,
+      ...place(lookup, ['misconceptions']),
+      message: 'progress.yaml 里的 misconceptions 是旧的双落点：误解记录现在只落在 misconceptions.yaml'
+        + '（目标态规格 §5.4），这份副本读得进但不再被读，写回时删掉它',
       blocking: false,
     });
   }
@@ -397,25 +441,35 @@ export function validateProgress(input: ProgressInput): ValidationReport {
       const entry = rawNodes[key];
       if (!isPlainObject(entry)) continue;
       const status = entry.status;
-      if (typeof status !== 'string') continue;
-      // 新词表就是三档；旧词表读到就映射，但要说出来——否则「写回时状态会变」这件事
-      // 只会发生在下一次保存时，没人知道为什么。
-      const tier = LEGACY_STATUS_TO_TIER.get(status);
-      if (tier !== undefined && tier !== status) {
-        problems.push({
-          file: input.file,
-          ...place(lookup, ['nodes', key, 'status']),
-          message: `节点 ${key} 的状态「${status}」属旧六档词表，写回时映射为「${tier}」（规格 §5.2）`,
-          blocking: false,
-        });
+      if (typeof status === 'string') {
+        // 新词表就是三档；旧词表读到就映射，但要说出来——否则「写回时状态会变」这件事
+        // 只会发生在下一次保存时，没人知道为什么。
+        const tier = LEGACY_TIER_MAP.get(status);
+        if (tier !== undefined && tier !== status) {
+          problems.push({
+            file: input.file,
+            ...place(lookup, ['nodes', key, 'status']),
+            message: `节点 ${key} 的状态「${status}」属旧六档词表，写回时映射为「${tier}」（规格 §5.2）`,
+            blocking: false,
+          });
+        }
+        if (!isTier(status) && tier === undefined) {
+          // schema 的 enum 已经会报一次；这里只补一句「它连旧词表也不是」，说明为什么会被
+          // 静默当成「未开始」。
+          problems.push({
+            file: input.file,
+            ...place(lookup, ['nodes', key, 'status']),
+            message: `节点 ${key} 的状态「${status}」不在任何一版词表里：读侧会保守地当成「未开始」`,
+            blocking: false,
+          });
+        }
       }
-      if (hasOwn(entry, 'status') && typeof status === 'string' && !LEGACY_STATUS_TO_TIER.has(status)) {
-        // schema 的 enum 已经会报一次；这里只补一句「它连旧词表也不是」，说明为什么会被
-        // 静默当成「未开始」。
+      // mastery 已从词表里删掉（目标态规格 §5.2）：读到就说一声，别让它静默留着
+      if (hasOwn(entry, 'mastery')) {
         problems.push({
           file: input.file,
-          ...place(lookup, ['nodes', key, 'status']),
-          message: `节点 ${key} 的状态「${status}」不在任何一版词表里：读侧会保守地当成「未开始」`,
+          ...place(lookup, ['nodes', key, 'mastery']),
+          message: `节点 ${key} 还带着 mastery：掌握度字段已取消（规格 §5.2），读得进、写回时删掉它`,
           blocking: false,
         });
       }

@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Attempts",
+  "description": "一个课件的作答数据（目标态规格 §5.3 + ADR-0007）：`<科目>/attempts/<NNNN>-<节点id>.json`，与课件一一对应。作答历史、错因与上次结果只落在这里，**绝不写回 .quiz.json**（题库是模型写的课件内容文件，锚点与正文逐字对应）。状态只服务「当场回顾」，不做汇总视图、不排期。**版本号不在文件里**：它是读写两侧各自按文件内容算出来的（`lib/attempts.ts` 的 `attemptsVersion`），写之前先报自己看到的那个值当 `expectedVersion`，对不上就拒绝并重读。",
+  "type": "object",
+  "required": ["节点", "课件", "最后写入", "题"],
+  "properties": {
+    "节点": { "type": "string", "description": "节点 id（curriculum.yaml 的 nodes[].id），与课件一一对应" },
+    "课件": { "type": "string", "description": "对应的课件文件名（<NNNN>-<节点id>.md），页面上按它回查" },
+    "幂等键": {
+      "type": "string",
+      "description": "最近一次写入的 operationId。同一个 id 重放只回放上次回执、不写第二遍；落盘是为了跨进程对账（内存台账重启即失）"
+    },
+    "最后写入": { "type": "string", "description": "最近一次写入的时刻（ISO 8601）" },
+    "题": {
+      "type": "object",
+      "description": "题 id → 这道题的作答记录。题 id 是「<锚点文本>#<题号>」，与题库里那道题一一对应。",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["id", "作答历史", "上次结果"],
+        "properties": {
+          "id": { "type": "string", "description": "题 id（与所属键相同，便于整条记录独立搬运）" },
+          "作答历史": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["时", "对"],
+              "properties": {
+                "时": { "type": "string", "description": "这次作答的时刻（ISO 8601）" },
+                "选": { "type": ["integer", "null"], "minimum": 0, "description": "客观题选了第几项（从 0 起）；主观题与自评是 null" },
+                "对": { "type": "boolean", "description": "这次算不算对：客观题页内判、主观题取学生自评的第一档" },
+                "自评": { "type": "string", "description": "主观题的自评档（答对了 / 答了一半 / 没答上）" },
+                "错因": { "type": "string", "description": "错因：学生自己写的、或客观题判错时记下的一句——下次回顾看的就是它" }
+              }
+            }
+          },
+          "上次结果": {
+            "type": "object",
+            "required": ["时", "对"],
+            "description": "最近一次作答，与「作答历史」的最后一项同源。单独留一份是为了课件页里就地显示「上次你选了 B」时不必解整条历史。",
+            "properties": {
+              "时": { "type": "string" },
+              "选": { "type": ["integer", "null"], "minimum": 0 },
+              "对": { "type": "boolean" },
+              "自评": { "type": "string" },
+              "错因": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -23,9 +23,15 @@ r"""课件质量检查：只阻断工程/结构缺项；内容风格类问题只
     4 题目（结构，题型不同要求不同；字段契约见 templates/assets/quiz.js 顶部注释）：
        每个 .quiz[data-quiz] 块是合法 JSON 非空数组；每题：
          · 都有非空 `q`（题面）；
-         · 选择题（写了 opts/ans）：`opts` 是 ≥2 项的非空字符串数组、`ans` 是范围内的整数、`why` 非空；
-         · 开放题（写了 answer/criteria）：`answer`（参考答案）与 `criteria`（判分要点）都非空；
-         · 两组字段不能同时出现在一题里；都没有则题型不明。
+         · 题型词表读 schemas/question.schema.json（四种：客观题 / 预测验证 / 开放题 / 交付物），
+           词表的唯一口径在 scripts/statuses.py；`kind` 不在词表里 = 报错；
+         · 客观题（`kind: 客观题`，或旧写法写了 opts/ans）：`opts` 是 ≥2 项的非空字符串数组、
+           `ans` 是范围内的整数、`why` 非空；
+         · 开放题（`kind: 开放题`，或旧写法写了 answer/criteria）：`answer`（参考答案）与
+           `criteria`（判分要点）都非空；
+         · 预测验证（`kind: 预测验证`）：`预测`（先写下的预测）与 `比对`（跑完之后的比对）都非空；
+         · 交付物（`kind: 交付物`）：`交付物`（要造出什么）与 `证据`（可运行证据）都非空；
+         · 没写 `kind` 时按字段推断（旧题库照旧读得进）；两组旧字段同时出现、或推断不出来，则题型不明。
          · `q`/`answer`/`criteria`/`why` 里的 ``` 围栏必须成对（不成对后半段会被渲染成代码块）。
        普通课件至少要有一道题；`kind: 实验` 的说明页是任务书，没有题目块不算缺项。
        三条**属性值写法**的检查（浏览器口径与取值正则不一致，必须单独拦）：
@@ -98,6 +104,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import curriculum    # noqa: E402  课程大纲的唯一口径（位次/课型/邻居）
 import lessonfile    # noqa: E402  文件名与引用清单的唯一口径
 import lessonfmt     # noqa: E402  围栏判定的唯一口径（与渲染器同一份）
+import statuses      # noqa: E402  题型词表的唯一口径（读 schemas/question.schema.json）
 
 try:
     import yaml
@@ -792,12 +799,13 @@ def check_quiz(text, required=True):
 
             is_choice = 'opts' in item or 'ans' in item
             is_open = 'answer' in item or 'criteria' in item
-            if is_choice and is_open:
-                problems.append(f'{label}题型冲突：选择题字段（opts/ans）与开放题字段（answer/criteria）'
-                                '只能二选一')
+            kind = item.get('kind')
+            if kind is not None and kind not in statuses.QUESTION_KINDS:
+                problems.append(f'{label}题型「{kind}」不在词表里'
+                                f'（认得的：{"、".join(statuses.QUESTION_KINDS)}）——'
+                                f'写这四种之一，或者按旧词表删掉 kind 字段')
                 continue
-
-            if is_choice:
+            if kind == '客观题' or (kind is None and is_choice and not is_open):
                 opts = item.get('opts')
                 if not isinstance(opts, list) or len(opts) < 2:
                     problems.append(f'{label}选择题选项结构错误（缺 opts 或选项数 < 2）')
@@ -817,15 +825,33 @@ def check_quiz(text, required=True):
                 if gap > MAX_OPT_LEN_GAP:
                     notes.append(f'{label}选项长度差 {gap} > {MAX_OPT_LEN_GAP}'
                                  f'（最长 {max(lengths)} / 最短 {min(lengths)} 字符）')
-            elif is_open:
+            elif kind == '开放题' or (kind is None and is_open):
                 answer = item.get('answer')
                 criteria = item.get('criteria')
                 if not isinstance(answer, str) or not answer.strip():
                     problems.append(f'{label}开放题缺参考答案（answer）')
                 if not isinstance(criteria, str) or not criteria.strip():
                     problems.append(f'{label}开放题缺判分要点（criteria，学生据此自评）')
+            elif kind == '预测验证':
+                # 先写下预测，再跑起来对照（目标态规格 §7.2）：两个字段都要非空
+                for field, why_text in (('预测', '先写下的预测'), ('比对', '跑完之后的比对')):
+                    value = item.get(field)
+                    if not isinstance(value, str) or not value.strip():
+                        problems.append(f'{label}预测验证缺 {field}（{why_text}）')
+            elif kind == '交付物':
+                # 交付物能跑通 + 能解释取舍（规格 §7.1 的「造出」）：证据由 Host 半代跑
+                for field, why_text in (('交付物', '要造出什么'), ('证据', '可运行证据（测试 / 断言 / 期望输出）')):
+                    value = item.get(field)
+                    if not isinstance(value, str) or not value.strip():
+                        problems.append(f'{label}交付物缺 {field}（{why_text}）')
+            elif kind is not None:
+                problems.append(f'{label}题型「{kind}」的字段不全')
+            elif is_choice and is_open:
+                problems.append(f'{label}题型冲突：选择题字段（opts/ans）与开放题字段（answer/criteria）'
+                                '只能二选一')
             else:
-                problems.append(f'{label}题型不明：选择题要 opts/ans/why，开放题要 answer/criteria')
+                problems.append(f'{label}题型不明：选择题要 opts/ans/why，开放题要 answer/criteria，'
+                                f'或显式写一个 kind（{"、".join(statuses.QUESTION_KINDS)}）')
     return problems, notes
 
 
