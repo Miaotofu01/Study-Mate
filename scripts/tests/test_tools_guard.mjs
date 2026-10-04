@@ -5,9 +5,10 @@
      · 故意让某个工具越权**读**一个未声明的域 → 必须抛（不是日志、不是文档约定）
      · 故意让某个工具**写**一个未声明的字段 → 必须抛
 
-   反证之外还钉三件事：八个工具的**声明表**（谁读谁写，放宽一行就红）、
+   反证之外还钉三件事：注册点上全部工具的**声明表**（谁读谁写，放宽一行就红）、
    `requires:['model']` 在无模型时返回 `{available:false, reason}` 且 **body 不跑**、
-   以及「唯一注册点」`registerStudyMate` 真的注册了八个。
+   以及「唯一注册点」`registerStudyMate` 真的把每个子系统都挂上了。
+   #73 之后注册点上有两个子系统（学习数据八个 + 任务域五个），断言按两份名字表拼起来算。
 
    夹具（临时 HOME/工作区、假 ctx）在 `fixtures/tools.mjs`：那是夹具不是套件，
    所以放在 `fixtures/` 下——放 `scripts/tests/` 根下会被套件覆盖断言当成「没登记的套件」。 */
@@ -18,8 +19,12 @@ import { createAccess, DomainViolationError, matchesPattern } from '../../lib/to
 import { assertOutput, execute, fakeContext, loadTools, useHome } from './fixtures/tools.mjs';
 
 const tools = await loadTools();
+// #73 之后注册点上有两个子系统：学习数据的八个工具 + 任务域的五个。两个名字表各自是自己
+// 目录里导出的那一份（不在这里手写第二遍），所以「谁注册了什么」只有一处真相。
+const tasks = await import('../../lib/tasks/index.ts');
+const ALL_TOOL_NAMES = [...tools.STUDY_TOOL_NAMES, ...tasks.TASK_TOOL_NAMES];
 
-/* ── 一、八个工具的声明表（放宽一行就红） ──────────────────────────────── */
+/* ── 一、注册点上全部工具的声明表（放宽一行就红） ─────────────────────── */
 
 // 这张表是**唯一**一份「谁读谁写」的清单：改工具声明就必须改这里，评审看得见差异。
 const DECLARATIONS = {
@@ -55,14 +60,22 @@ const DECLARATIONS = {
     reads: [],
     writes: { export: ['**'] },
   },
+  // #73 任务域：任务状态不是学习数据域（`lib/tools/domains.ts` 里没有它），
+  // 所以五个工具一个域都不读、一个字段都不写——它们碰的是插件自己的台账。
+  studymate_task_status: { reads: [], writes: {} },
+  studymate_task_wait: { reads: [], writes: {} },
+  studymate_task_cancel: { reads: [], writes: {} },
+  studymate_task_destroy: { reads: [], writes: {} },
+  studymate_task_resume: { reads: [], writes: {} },
 };
 
-test('八个工具都注册了，名字与 decisions §3 的下划线形态逐字一致', () => {
+test('注册点上的工具一个不多一个不少：八个学习数据工具 + 五个任务工具', () => {
   const ctx = fakeContext();
   tools.registerStudyMate(ctx.ctx);
-  assert.deepEqual([...ctx.definitions.keys()], [...tools.STUDY_TOOL_NAMES]);
+  assert.deepEqual([...ctx.definitions.keys()], ALL_TOOL_NAMES);
   assert.equal(tools.STUDY_TOOL_NAMES.length, 8);
-  for (const name of tools.STUDY_TOOL_NAMES) {
+  assert.equal(tasks.TASK_TOOL_NAMES.length, 5);
+  for (const name of ALL_TOOL_NAMES) {
     // 模型 API 的 tools[].name 只接受 ^[a-zA-Z0-9_-]+$（含 DeepSeek 的兼容接口）
     assert.match(name, /^[a-z0-9_]+$/, `${name} 的名字会进模型 API 的 tools[].name`);
   }
@@ -92,8 +105,13 @@ test('description 只有一句话：无换行、不超过常驻上下文的长�
 test('注册走 ctx.effect：每个工具都挂在可回收的副作用上', () => {
   const ctx = fakeContext();
   tools.registerStudyMate(ctx.ctx);
-  assert.equal(ctx.effects.length, 8, '八个工具各挂一个 effect');
-  for (const label of ctx.effects) assert.match(label, /^studymate: studymate_/);
+  const toolEffects = ctx.effects.filter((label) => label.startsWith('studymate: studymate_'));
+  assert.equal(toolEffects.length, ALL_TOOL_NAMES.length, '每个工具各挂一个 effect');
+  for (const label of toolEffects) assert.match(label, /^studymate: studymate_/);
+  // 任务域另外挂一条**服务级** effect：卸载时给销毁回执（请求取消活任务 + 落盘刷一遍）。
+  // 夹具没有 inject，所以阅读端那条路由不在这份清单里（它在 test_tasks_model.mjs 里验）。
+  assert.deepEqual(ctx.effects.filter((label) => !label.startsWith('studymate: studymate_')),
+    ['studymate: 任务服务（销毁回执）']);
 });
 
 /* ── 二、反证：越权读 / 越权写必须抛 ──────────────────────────────────── */
