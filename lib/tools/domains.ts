@@ -26,6 +26,8 @@ export const DOMAINS = [
   'records',        // subjects/<slug>/learning-records/*.md —— 学习记录
   'reference',      // subjects/<slug>/reference/** —— 学生自加的资料（ADR-0010）
   'misconceptions', // subjects/<slug>/misconceptions.yaml —— 误解记录（#71 落数据模型）
+  'lab',            // subjects/<slug>/lab/<NNNN>-<短名>/ —— 实验材料与命令的落脚点；读法要 { number }
+  'attempts',       // subjects/<slug>/attempts/<NNNN>-<节点id>.json —— 作答数据（#71 读写、#77 回填）
   'handoff',        // 角色交接暂存区（.studymate-stage/<角色>-<节点>/）—— 只读盘上快照
   'export',         // 导出产物落点 —— **只写**，读法不存在（#82 落地）
 ] as const;

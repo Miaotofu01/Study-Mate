@@ -19,10 +19,11 @@ import { createAccess, DomainViolationError, matchesPattern } from '../../lib/to
 import { assertOutput, execute, fakeContext, loadTools, useHome } from './fixtures/tools.mjs';
 
 const tools = await loadTools();
-// #73 之后注册点上有两个子系统：学习数据的八个工具 + 任务域的五个。两个名字表各自是自己
-// 目录里导出的那一份（不在这里手写第二遍），所以「谁注册了什么」只有一处真相。
+// #73 之后注册点上有三个子系统：学习数据的八个工具 + 任务域的五个 + 实验域的一个（#77）。
+// 名字表各自是自己目录里导出的那一份（不在这里手写第二遍），所以「谁注册了什么」只有一处真相。
 const tasks = await import('../../lib/tasks/index.ts');
-const ALL_TOOL_NAMES = [...tools.STUDY_TOOL_NAMES, ...tasks.TASK_TOOL_NAMES];
+const lab = await import('../../lib/lab/index.ts');
+const ALL_TOOL_NAMES = [...tools.STUDY_TOOL_NAMES, ...tasks.TASK_TOOL_NAMES, ...lab.LAB_TOOL_NAMES];
 
 /* ── 一、注册点上全部工具的声明表（放宽一行就红） ─────────────────────── */
 
@@ -67,14 +68,22 @@ const DECLARATIONS = {
   studymate_task_cancel: { reads: [], writes: {} },
   studymate_task_destroy: { reads: [], writes: {} },
   studymate_task_resume: { reads: [], writes: {} },
+  // #77 实验域：命令从题库里那道交付物题来（读 pool），落脚点是 lab 目录（读 lab），
+  // 事实写作答数据（写 attempts 的 `跑` 字段）。**不做判定**——所以这一个工具只写事实，
+  // 不写任何「通过与否」的字段（表里那一行就是这条边界）。
+  studymate_lab_run: {
+    reads: ['pool', 'lab', 'attempts', 'workspace'],
+    writes: { attempts: ['**'] },
+  },
 };
 
-test('注册点上的工具一个不多一个不少：八个学习数据工具 + 五个任务工具', () => {
+test('注册点上的工具一个不多一个不少：八个学习数据工具 + 五个任务工具 + 一个实验工具', () => {
   const ctx = fakeContext();
   tools.registerStudyMate(ctx.ctx);
   assert.deepEqual([...ctx.definitions.keys()], ALL_TOOL_NAMES);
   assert.equal(tools.STUDY_TOOL_NAMES.length, 8);
   assert.equal(tasks.TASK_TOOL_NAMES.length, 5);
+  assert.equal(lab.LAB_TOOL_NAMES.length, 1);
   for (const name of ALL_TOOL_NAMES) {
     // 模型 API 的 tools[].name 只接受 ^[a-zA-Z0-9_-]+$（含 DeepSeek 的兼容接口）
     assert.match(name, /^[a-z0-9_]+$/, `${name} 的名字会进模型 API 的 tools[].name`);
@@ -108,10 +117,11 @@ test('注册走 ctx.effect：每个工具都挂在可回收的副作用上', () 
   const toolEffects = ctx.effects.filter((label) => label.startsWith('studymate: studymate_'));
   assert.equal(toolEffects.length, ALL_TOOL_NAMES.length, '每个工具各挂一个 effect');
   for (const label of toolEffects) assert.match(label, /^studymate: studymate_/);
-  // 任务域另外挂一条**服务级** effect：卸载时给销毁回执（请求取消活任务 + 落盘刷一遍）。
-  // 夹具没有 inject，所以阅读端那条路由不在这份清单里（它在 test_tasks_model.mjs 里验）。
+  // 两个子系统各自另外挂一条**服务级** effect：任务域的销毁回执（请求取消活任务 + 落盘刷一遍）
+  // 与实验域的台账收尾（#77）。夹具没有 inject，所以阅读端那两条路由不在这份清单里
+  // （任务域那条在 test_tasks_model.mjs 里验）。
   assert.deepEqual(ctx.effects.filter((label) => !label.startsWith('studymate: studymate_')),
-    ['studymate: 任务服务（销毁回执）']);
+    ['studymate: 任务服务（销毁回执）', 'studymate: 实验代跑台账（收尾落盘）']);
 });
 
 /* ── 二、反证：越权读 / 越权写必须抛 ──────────────────────────────────── */

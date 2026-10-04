@@ -36,6 +36,7 @@ import {
 } from './validate.ts';
 import { applyEmptyReasonsTool, renumberLessonsTool } from './rewrite.ts';
 import { exportTool } from './export.ts';
+import { registerLabTools } from '../lab/index.ts';
 
 /** `ctx.inject(['tools'], …)` 给的那层上下文：只用得到这几个成员。 */
 export interface StudyPluginContext extends ServiceReader {
@@ -106,5 +107,8 @@ export function registerStudyMate(ctx: StudyPluginContext): void {
   // 任务域不 import 工具域，所以把「造工具」这件事当参数递进去——域图上只有 tools → tasks
   // 一条边。别的子系统照这个姿势加：自己的目录里导出 registerXxx(ctx)。
   registerTaskTools(ctx, { registerStudyTool });
+  // #77 判分三轨的第三轨：studymate_lab_run 把交付物题里声明的命令在 lab 目录里代跑一遍，
+  // 真实输出原样进作答数据（长命令走上面那套任务模型）。同一个姿势：注册点注入造工具能力。
+  registerLabTools(ctx, { registerStudyTool });
   // ↑↑↑ 加完为止：不要动 bin/dsh-plugin.ts，也不要在这里写具体工具 ↑↑↑
 }

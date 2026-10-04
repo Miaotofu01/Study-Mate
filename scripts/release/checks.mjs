@@ -116,6 +116,11 @@ const groups = {
       // 五个 studymate_task_* 工具、阅读端的 GET /api/studymate/tasks。
       // 跨进程那一半的「进程 A」是夹具 scripts/tests/fixtures/tasks_producer.mjs。
       'scripts/tests/test_tasks_model.mjs',
+      // 实验域 lib/lab/**（#77）：判分三轨的第三轨。真跑一条会失败的命令、真实输出原样进
+      // 作答数据（attempts/*.json 的 `跑` 字段）、长命令的进度与取消回执、以及四组越界反证
+      // （cwd / 可写范围 / 参数里的路径 / 软链）。命令从哪来也是断言的一部分：只有题库里那道
+      // 交付物题的「证据」字段能提供命令，模型与学生都没有第二个入口。
+      'scripts/tests/test_lab_runner.mjs',
       // 阅读端（lib/client.js 是零构建的浏览器插件，没有 export）：跨科目搜索的索引覆盖与
       // 四个附件折叠块的空态。套件在 Node 里伪造 window.__ModuleLoader__ + react 桩把头文件
       // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。

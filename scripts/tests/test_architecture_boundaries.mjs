@@ -48,11 +48,14 @@ const DOMAIN_RULES = {
   // 子系统一律不许 import tools（任务域就是把 `registerStudyTool` 当参数接过去的，正是为了
   // 不出现反向边，见 lib/tasks/tools.ts 文件头）。往后每落地一个注册进注册点的子系统
   // （#74 的 watch、#82 的导出），这里加一个域名，别改成通配。
-  tools:  { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },  // 原生工具（#68）+ 任务模型（#73）
+  tools:  { allow: ['core', 'lib', 'tasks', 'lab'], builtin: true, package: false },  // 原生工具（#68）+ 任务模型（#73）+ 实验域（#77）
   tasks:  { allow: ['core', 'lib'], builtin: true, package: false },  // 任务模型（#73）
+  // 实验域（#77）：判分三轨的第三轨。要 rules（题型与必备字段）、attempts（作答数据的落点）、
+  // tasks（长命令走任务模型、可查可取消）。`node:child_process` 是它存在的理由。
+  lab:    { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },
   watch:  { allow: ['core', 'lib'], builtin: true, package: false },  // 预留：#74 文件监听
   export: { allow: ['core', 'lib', 'tools', 'tasks'], builtin: true, package: false },  // 预留
-  bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'watch', 'export'], builtin: true, package: false },
+  bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'lab', 'watch', 'export'], builtin: true, package: false },
   client: { allow: [], builtin: false, package: false },  // 浏览器侧单文件：只与模块加载器打交道
 };
 

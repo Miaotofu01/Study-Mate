@@ -121,14 +121,20 @@ export function assertDeclaration(tool: string, declaration: Declaration): void 
   }
 }
 
-/** 数据装载器：真正读盘的那一层，由 `vault.ts` 提供。 */
-export type DomainLoader = (domain: Domain, target?: string) => unknown;
+/**
+ * 数据装载器：真正读盘的那一层，由 `vault.ts` 提供。
+ *
+ * `options` 是给「同一个 target 要按不同维度去看」的域用的（#77 起）：`lab` 域的
+ * `target` 是科目 slug，要定位到**哪个节点**的实验目录得再给一个 `{ number }`。
+ * 绝大多数域不看它——不看就忽略，参数是可选的一路加在最后。
+ */
+export type DomainLoader = (domain: Domain, target?: string, options?: unknown) => unknown;
 
 export interface DomainAccess {
   readonly reads: readonly Domain[];
   readonly writes: Readonly<Partial<Record<Domain, readonly string[]>>>;
   /** 读一个域；没声明就抛。`target` 给了就是读该域里的那一份具体文件。 */
-  read<T = unknown>(domain: Domain, target?: string): T;
+  read<T = unknown>(domain: Domain, target?: string, options?: unknown): T;
   /** 写一个字段；没声明域、或路径不匹配任何模式就抛。回调只在放行后执行。 */
   write<T>(domain: Domain, path: string, mutate: () => T): T;
 }
@@ -147,7 +153,7 @@ export function createAccess(
   return {
     reads,
     writes,
-    read<T>(domain: Domain, target?: string): T {
+    read<T>(domain: Domain, target?: string, options?: unknown): T {
       if (!reads.includes(domain)) {
         throw new DomainViolationError({
           tool, action: 'read', domain, declared: reads,
@@ -162,7 +168,7 @@ export function createAccess(
           why: '这个域是只写的（导出落点没有读法）',
         });
       }
-      return load(domain, target) as T;
+      return load(domain, target, options) as T;
     },
     write<T>(domain: Domain, path: string, mutate: () => T): T {
       const patterns = writes[domain];

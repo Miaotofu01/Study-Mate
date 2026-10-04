@@ -28,6 +28,7 @@ import { readLibrary } from '../library.ts';
 import { configFile, resolveWorkspace } from '../workspace.ts';
 import { parseYaml, YamlParseError } from '../yaml.ts';
 import { cmpCodePoints } from '../core/format.ts';
+import { readAttempts, attemptsVersion } from '../attempts.ts';
 import type { Domain } from './domains.ts';
 
 type LibraryPayload = ReturnType<typeof readLibrary>;
@@ -213,7 +214,7 @@ export interface Vault {
   /** 工作区事实：**永不抛**（没工作区就是 `ready:false`）。 */
   facts(): WorkspaceFacts;
   /** 域的装载器，交给 `createAccess`。 */
-  load(domain: Domain, target?: string): unknown;
+  load(domain: Domain, target?: string, options?: unknown): unknown;
 }
 
 /** 工作区里一个路径是什么：校验器与改写工具靠它展开目录、定位科目目录。 */
@@ -258,6 +259,82 @@ function pathFacts(target: string): PathFacts {
     ? fs.readdirSync(target, { withFileTypes: true }).map((entry) => entry.name).sort(cmpCodePoints)
     : [];
   return { path: target, kind, lexists: kind !== 'missing' || lexists(target), subjectDir, entries };
+}
+
+/* ── #77 的两个域：实验目录与作答数据 ────────────────────────────────────
+   这两个读法的共同点是「一个 slug 加一个节点」才定位得到东西，所以 `target` 之外还要一个
+   `options`。路径边界的判据与 `lib/lab/sandbox.ts` 用的是**同一条**（求解完判包含），
+   但这里多一层：slug 必须在盘上真的是一个目录名，不能是 `..` 或带分隔符的字符串——
+   在工作区里定位科目不该有第二种写法。 */
+
+/** `options` 里的一个字符串字段；不是字符串就当没给。 */
+function optionString(options: unknown, key: string): string {
+  if (typeof options !== 'object' || options === null) return '';
+  const value = (options as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/** 科目 slug → 科目目录的绝对路径。slug 不合法/不存在就抛一句能照着改的话。 */
+function requireSubjectDir(subject: string): string {
+  const workspace = resolveWorkspace();
+  if (workspace === '') {
+    throw new Error('读不了这个域：没找到学习工作区——`~/.dsh/studymate-config.yaml` 里没有 '
+      + 'workspace。先跑一次 npx @yunmiao/studymate install。');
+  }
+  if (subject === '' || subject.includes('/') || subject.includes('\\') || subject.includes('..')) {
+    throw new Error(`科目名「${subject}」不合法：它就是 subjects/ 下那个目录名，不能为空、不能带分隔符或 ..`);
+  }
+  const dir = path.join(workspace, '.learning', SUBJECT_DIR, subject);
+  if (!isDirectory(dir)) throw new Error(`没有这个科目：${dir} 不是一个目录`);
+  return dir;
+}
+
+/**
+ * 给科目 slug、给科目目录、给它的 `lessons/` 目录，都给回 `lessons/` 目录
+ * （课件与题库都在这一层）。定位不到返回 null——**不猜**，猜错就是把别的科目的题库读出来。
+ */
+function lessonDirOf(target: string): string | null {
+  if (isDirectory(target) && isDirectory(path.join(target, 'lessons'))) return path.join(target, 'lessons');
+  if (isDirectory(target)) return target;
+  const dir = requireSubjectDir(target);
+  if (isDirectory(path.join(dir, 'lessons'))) return path.join(dir, 'lessons');
+  return isDirectory(dir) ? dir : null;
+}
+
+/** 课件编号：`lessons/` 里 `<NNNN>-<节点id>.md` 前缀的那四位数字。找不到返回 `0000`。 */
+function lessonNumberOf(lessonsDir: string, node: string): string {
+  let names: string[];
+  try {
+    names = fs.readdirSync(lessonsDir);
+  } catch {
+    return '0000';
+  }
+  const hit = names
+    .filter((name) => name.endsWith('.md') && name.slice(0, -3).endsWith(`-${node}`))
+    .sort(cmpCodePoints)
+    .map((name) => /^(\d{4})/.exec(name)?.[1] ?? '')
+    .find((value) => value !== '');
+  return hit ?? '0000';
+}
+
+/** `lab` 域的一份读法：定到「这个节点的实验目录」，没有就 null（不是抛）。 */
+function labRead(subjectDir: string, slug: string, options: unknown):
+{ slug: string; node: string; dir: string; run: string | null; runDir: string | null; entries: string[] } | null {
+  const labRoot = path.join(subjectDir, 'lab');
+  const node = optionString(options, 'node');
+  if (node === '') return null;
+  if (!isDirectory(labRoot)) return null;
+  const entries = fs.readdirSync(labRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name !== 'solutions')
+    .map((entry) => entry.name)
+    .sort(cmpCodePoints);
+  // 节点 id → 课件编号：与 `attempts.ts`、`library.ts` 走同一条（节点 id 里没有编号，
+  // 凭空造一个就会错位）。
+  const number = lessonNumberOf(path.join(subjectDir, 'lessons'), node);
+  if (number === '0000') return null;
+  const run = entries.find((name) => name.startsWith(`${number}-`)) ?? null;
+  const runDir = run === null ? null : path.join(labRoot, run);
+  return { slug, node, dir: labRoot, run, runDir, entries };
 }
 
 export function createWorkspaceVault(): Vault {
@@ -318,8 +395,8 @@ export function createWorkspaceVault(): Vault {
     return workspace === '' ? path.resolve(target) : path.resolve(workspace, target);
   };
 
-  /** 域的读法总入口：`target` 的含义见文件头。 */
-  const load = (domain: Domain, target?: string): unknown => {
+  /** 域的读法总入口：`target` 的含义见文件头，`options` 的含义见 `access.ts` 的 `DomainLoader`。 */
+  const load = (domain: Domain, target?: string, options?: unknown): unknown => {
     switch (domain) {
       case 'workspace':
         // 没给 target = 工作区事实；给了 target = 「工作区里这个路径是什么」。
@@ -407,6 +484,23 @@ export function createWorkspaceVault(): Vault {
             pool: node.pool,
           })));
         }
+        // #77 起多一种给法：`subject` 定位到科目目录（或它下面的 lessons/），再给 `options.node`。
+        // 为什么不把「拼题库文件路径」交给调用方：文件名是 `<NNNN>-<节点id>.quiz.json`，那个
+        // 编号只能从课件文件名上取（`lib/attempts.ts` 的 lessonNumberOf 是同一套）——
+        // 让每个调用方各拼一次，迟早有一处拼错。
+        const wantsNode = optionString(options, 'node');
+        if (wantsNode !== '') {
+          const dir = lessonDirOf(target);
+          if (dir === null) throw new Error(`定位不到科目「${target}」的 lessons/ 目录：题库与课件都在那一层`);
+          const file = path.join(dir, `${lessonNumberOf(dir, wantsNode)}-${wantsNode}.quiz.json`);
+          const view = readFileView(file);
+          if (!view.present) return { ...view, value: null, error: null };
+          try {
+            return { ...view, value: JSON.parse(view.text), error: null };
+          } catch (error) {
+            return { ...view, value: null, error: error instanceof Error ? error : new Error(String(error)) };
+          }
+        }
         const file = resolveTarget(target);
         const view = readFileView(file);
         if (!view.present) return { ...view, value: null, error: null };
@@ -459,6 +553,29 @@ export function createWorkspaceVault(): Vault {
           }));
         }
         return readYamlView(resolveTarget(target));
+      }
+
+      case 'lab': {
+        // #77：命令的落脚点。`target` 是科目 slug，`options.node` 是节点 id——
+        // 实验目录按 `<NNNN>-<短名>` 命名、编号与课件位次对齐（`lib/library.ts` 的 readLab
+        // 是同一套命名），所以不给出节点就定位不到「这一课的实验目录」。
+        // 返回 null 而不是抛：**「这一课没有实验材料」是正常结果**（概念课就没有），
+        // 拒绝的话由工具那边说（它有更完整的一句话，见 lib/lab/tools.ts）。
+        if (target === undefined) throw new Error('「lab」域要指定科目 slug：实验目录属于某个科目');
+        return labRead(requireSubjectDir(target), target, options);
+      }
+
+      case 'attempts': {
+        // #77：作答数据的读法。`target` 是科目 slug，`options.node` 是节点 id。
+        // 与 `library.ts` 挂进 payload 的 `node.attempts` **同一份数据、同一套函数**
+        // （lib/attempts.ts），不是第二份真相。
+        if (target === undefined) throw new Error('「attempts」域要指定科目 slug：作答数据属于某个科目的某个节点');
+        const node = optionString(options, 'node');
+        if (node === '') return { present: false, version: '', questions: {} };
+        const read = readAttempts({ workspace: facts().path, subject: target, node });
+        return read === null
+          ? { present: false, version: attemptsVersion({ workspace: facts().path, subject: target, node }), questions: {} }
+          : { present: true, version: read.version, file: read.file, questions: read.data.题 };
       }
 
       case 'handoff':
