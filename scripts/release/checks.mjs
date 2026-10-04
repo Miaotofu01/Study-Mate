@@ -97,6 +97,8 @@ const groups = {
       // 纯函数域的判据：写入栅栏（幂等台账 + 版本比较）、题库题型与字段、误解字段定型
       'scripts/tests/test_core_fence_questions.mjs',
       'scripts/tests/test_core_coverage_floor.mjs',
+      // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
+      'scripts/tests/test_client_reading_position.mjs',
     ],
   },
   '--static': {
@@ -104,7 +106,11 @@ const groups = {
     tests: ['scripts/tests/test_openai_skills.mjs', 'scripts/tests/test_openai_skill_ui.mjs', 'scripts/tests/test_antigravity_skills.mjs'],
   },
   '--browser': {
-    node: ['browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs'],
+    node: [
+      'browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs',
+      // #76：真 Chrome 里跑真 lib/client.js（阅读位置三级恢复 + 锚点四态复核）
+      'browser/reading_position_test.mjs',
+    ],
   },
 };
 const mode = process.argv[2] || 'core';
