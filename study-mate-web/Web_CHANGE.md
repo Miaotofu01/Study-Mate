@@ -560,3 +560,301 @@ FastAPI 后端（LLM 配置 + SSE 流式聊天 + 文件型会话存储 + Provide
 - 正式端口端到端跑 `start-web.bat restart`：停掉旧前后端 → 检出 STALE（点名 `CourseGraphView.tsx`）→ 自动构建（新 BUILD_ID）→ 启动 → 等就绪 → 开浏览器 → **窗口自动关闭、退出码 0**；随后 `/chat` HTML 带当前 BUILD_ID、13:12 那次改动的 chunk 可正常取到。
 - 编码验收：GBK + CRLF、无 BOM，中文经 GBK 回读正确。
 - 附带修正：`CourseGraphView.tsx` 的 `WHEEL_SENSITIVITY` 注释与取值不一致（注释写 0.6、代码是 1），按"取最灵敏档"改注（该取值由上一条目的 0.6 于本轮被外部改动为 1）；README 启动段重写，并修掉 `start-studymate.bat` 这个从未存在过的错名。
+
+---
+
+## 2026-10-04 · 第三轮（消息操作、中间过程折叠、上下文窗口）
+
+### 决策（维护者拍板，含确认轮逐条答复）
+
+维护者提 5+1 条（含会话态输入栏上方细线要移除），先只做确认、不动代码；代理逐条核对现状后给出改法与待拍板项，维护者答复：
+
+1. 头像：**是**——用户头像改 `rounded-full`；**空态大图标改品牌图标并放大**。
+2. 助手名称栏：显示 **「提供商 / 模型」**，方案 **甲（落库）**。
+3. 上下文窗口：确认口径 = **最近一轮 prompt_tokens**；**模型未填上下文按默认值兜底**；顺带修设置页设计歧义——**最大输出 Token 与上下文长度不再预填进输入框**，改为"留空即兜底默认"。
+4. 去掉「思考 · 」前缀：**E2E 也改，设置页也去掉**。
+5. a：**允许编辑任意一条并截断其后内容**；助手侧**删整轮**；编辑**保留原附件但允许增删**；**沿用内联二次确认**；认可把截断能力并入 `chat/stream` 参数（不单开端点）。
+   b：**先做一次真机抓取**确认思维链字段名；**落库**（思维链与工具都落）；**是**（notice 提示也收进折叠区）；**做一层**（不做整轮过程汇总控件）。
+
+### 真机探针（拍板要求的前置验证）
+
+临时探针直连 `my-api`（`http://localhost:4000/v1`）抓原始 SSE chunk（用完即删）。结论：
+
+- **`delta.reasoning_content` 确实逐段到达**（`u2-flash` + `reasoning_effort=medium`；30 段思维链 + 8 段正文），字段名确认为 `reasoning_content`。
+- **末块自带 `usage`**：`{'prompt_tokens': 35, 'completion_tokens': 112, 'total_tokens': 147}`——**无需主动发 `stream_options`**（部分上游不认该参数），改为"见到就收"。
+- 顺带发现一枚**用户数据问题**：`Deepseek-v4-flash` 的档位名是 `disabled/enabled`，网关只接受 `none/minimal/low/medium/high/xhigh/max` → 选它会 400（记入 backlog #21，未改用户数据）。
+
+### 后端
+
+- `llm.py`：新增 `_delta_field`（openai SDK 的扩展字段走 `model_extra`，两处都查）与 `_usage_payload`（三种协议的用量字段统一成一份，支持 SDK 对象与裸 dict）。三处 turn 实现透传：Chat Completions 取 `delta.reasoning_content`（个别网关 `reasoning`）+ 末块 `usage`；Responses 取 `response.reasoning_summary_text.delta` / `response.reasoning_text.delta` + `response.completed` 的 usage；Anthropic 取 `thinking_delta` + `message_start`/`message_delta` 的用量。**不主动发 `stream_options`**。
+- `agent.py`：`AgentOutcome` 增 `reasoning` / `usage` / `tools`；循环里转发 `reasoning` 事件、累计用量、按 id 维护工具卡状态（`done`/`error` + `isError`，字段名与前端 `ToolActivity` 对齐）；**重试判据加 `reasoning_parts`**（思维链也算"已可见"，否则重试会让它重复吐）；fixture 脚本加 `process` 场景（思维链 + 两次工具调用 + 结论）与 `FIXTURE_USAGE` 假用量。
+- `storage.py`：新增 `drop_messages` / `truncate_messages`（消息级操作的存储原语，返回被删消息供清理附件）。
+- `chat.py`：SSE 事件表补 `reasoning` / `usage`；助手消息落 `reasoning` / `tools` / `model`（「提供商 / 模型」标签，新增 `_model_label`），会话落 `usage`；附件解析支持**复用会话目录里已有的附件**（编辑保留原附件时文件不重复搬运，新增 `_find_in_session`）；新增 `_cleanup_attachments`（截断时清理被顶掉消息的附件，仍要重发的除外）；`ChatRequest.replace_from` → 编辑重发先截断再追加；新增 `DELETE /api/sessions/{id}/messages/{index}` 删整轮（助手配前一条 user，user 配后一条 assistant）。
+- `models.py`：`ChatRequest.replace_from`。
+- **踩坑**：`event_names` 漏登记 `usage` → 落到 `"notice"` 默认值，用量事件被当成提示事件发出（新写的 pytest 直接抓到，补上映射即修）。
+
+### 前端
+
+- `lib/contextWindow.ts`（新）：`DEFAULT_CONTEXT_WINDOW`（兜底默认值，设置页占位提示与右栏分母共用）、`contextWindowOf`、`formatTokens`（11500 → `11.5k`、1000000 → `1M`）、`contextUsagePercent`。
+- `ChatView`：头像 28px → **56px**（用户 `rounded-full`、助手 `rounded-2xl`）；空态大图标换 `public/icon-192.png`（80px）；**助手名称栏**（`msg.model ?? 当前生效模型`）；**消息操作条**（用户：复制 / 编辑小图标；助手：复制 / 记入概念本 / 删除本轮 + `turn-delete-confirm` 内联二次确认）；**`ProcessPanel`**（`<details>` 默认收起，承载思维链 + 工具卡 + 本轮提示，流式时表头切"正在思考…/正在调用工具…"）；**`UserMessageEditor`**（就地编辑 + 附件增删，Enter 提交 / Esc 取消）；`IconAction` 小图标按钮；消息区加 `data-testid="chat-messages"`（会话标题与正文撞词时给断言一个作用域）；SSE 提示改挂到当前消息（`notices`）而非单挂横幅（`chat-notice` 横幅只留给"落盘到工作区"这类会话级反馈）。
+- `Composer`：模型与档位下拉**移到右端紧邻发送按钮**；档位按钮去掉「思考 · 」前缀（只显示档位名，无档位显示"默认"）；**会话态去掉输入栏上方的 `border-t` 细线**。
+- `RightSidebar`：顶部新增**上下文窗口栏**（`context-window` / `-model` / `-usage` / `-bar`），无用量时显示"— / 长度"。
+- `settings/ProvidersView`：模型行档位徽标去掉「思考 · 」前缀（`data-testid="model-variant-badge"`）。
+- `settings/ModelEditDialog`：最大输出 Token / 上下文长度**不再预填默认值**（留空即 null），占位提示改为"留空用默认 N"，上下文长度文案改为"用于右栏上下文窗口占用比与列表徽标"；兜底默认值从 `lib/contextWindow.ts` 引入（单一来源）。
+- `lib/api.ts`：`onReasoning` / `onUsage` / `replaceFrom` / `deleteTurn`；`lib/types.ts`：`Usage`、`ChatMessage.model/reasoning/tools/notices`、`Session/SessionMeta.usage`；`lib/workspace`：打开会话时回填 `usage`。
+
+### 测试与门禁
+
+- 后端新增 `tests/test_message_actions.py` 6 条（存储原语 / 编辑截断重发 / 附件复用与移除清理 / 删整轮配对与 404 / 思维链·工具·用量落库）；**pytest 81 条通过 + 1 skip**。
+- E2E 新增 `message-actions.spec.ts` 5 条；`tool-cards.spec.ts` 改为先展开 `process-summary` 再断言（工具卡不再裸挂在消息下）；`settings-models.spec.ts` 档位文案与徽标断言同步。**58 条通过 + 3 条 skip，0 失败**；`tsc --noEmit` 零错误；`npm run build` 通过。
+- **踩坑**：`toBeHidden()` 要求单一匹配，对"多个 tool-card"会触发 strict violation → 折叠断言改用 `toHaveAttribute("open", "")` + 单元素可见性；`panel.locator("summary")` 会同时命中内嵌工具卡的 summary → 改用 `process-summary` testid。
+- 根 `npm test`：17 通过 + **1 条已知 Windows CRLF 假红**（`test_antigravity_skills.mjs`，与本轮无关）。
+- **组件测试层现状（本轮核对）**：`tests/component/` 13 条里 **9 条陈旧红**（断言已移除的"工作区引导块"与 ProvidersView「保存」「测试连接」按钮），自前两轮 UI 改动起即红、**不进根门禁**，本轮未动，记入 backlog #20。
+
+### 文档
+
+- PRD：状态总览 #1/#2/#5/#14 更新，新增 §2.3（思维链与用量透传）、§5.5（消息操作与中间过程折叠），§1.3 补「兜底默认」语义，§2.1/§5.1/§5.3/§5.4 同步。
+- 开发与计划：模块表、组件清单、对外契约（新 SSE 事件 / 新端点 / 新字段 / 下标口径）、不变约束 #15、backlog #19/#20/#21。
+- E2E 流程升 v2.0（§4.25 新增、§4.22 改写、映射表加行、计数）。
+- README：能力与"消息操作与中间过程"一节、计数、模型弹窗默认值语义。
+
+---
+
+## 2026-10-04 · 第四轮（会话级模型、档位语义兼容、K 系列与开课流程排查）
+
+### 维护者追加要求与拍板
+
+1. `disabled/enabled` 有歧义——**严格说是思考模式的开关值，不是算 low/max 的推理档位，要做兼容**。
+2. 头像再改成 **46px**（欢迎页的品牌大图标不动）。
+3. **每个会话要持久化当前选择的模型与思考档位**。
+4. 旧组件测试（9 条陈旧红）要修。
+5. K 系列变更后**开课流程似乎没对齐**，且上手测试时**还有卡住的 bug** → **派代理排查并修复，但分歧要由维护者拍板**。
+
+### 已实施（无分歧部分）
+
+- **档位取值两类语义**：`llm` 新增 `ReasoningRequest` + `_reasoning_request()` + `_openai_reasoning_effort()`；开关值（`disabled/enabled`、`off/on`、`关闭/开启` 等，中英文与 0/1 都收）归一化为「关 → 不发思考参数；开 → 默认档 medium」，自由档位名照发；Anthropic 认不出就不发思考参数（不 400）。同时修掉 `config._model_reasoning_variant()` 把显式「关」抹成空串的旧 bug（抹空会回落模型默认档 = 用户选了关却开了思考）。新增 `tests/test_reasoning_variants.py` 21 条，含"回归：`enabled` 曾被原样当 reasoning_effort 发出去 → 网关 400"。
+- **会话级模型与档位**：会话 JSON 与 meta 增 `active` 三元组；`PATCH /api/sessions/{id}` 支持 `active`（传三元组绑定、显式 null 解绑；绑定前校验提供商与模型存在，否则 422）；`config.get_session_provider()` 是解析口，`common.require_provider(session_id)` 与会话绑定的 chat/评估/小结/记忆建议都走它，解析不出回落全局并在 chat 流里给 notice；前端 `ModelSelector` / `ReasoningVariantSelector` 接受 `sessionActive`，会话内切换只 PATCH 会话、新对话态仍写全局；`hasKey` 与右栏「上下文窗口」分母、助手名称栏回退值一并改为按「生效三元组」算（否则会"绑了没 key 的提供商、输入框还可用"）。新增 `test_session_model.py` 10 条 + `session-model.spec.ts` 2 条。
+- **头像 46px**（`h-[46px] w-[46px]` + `h-6 w-6` 图标），空态品牌图标保持 80px 不动。
+- **旧组件测试重写**（`tests/component/`：ChatView 3 条 + ProvidersView 6 条，此前断言的是已移除的"工作区引导块"与「保存」「测试连接」按钮）：改为按现行 UI 断言——新对话态关联行（科目/工作区候选、已有会话下消失）、实时生效的防抖落盘（含"清空 Key 回落到已存 Key"）、模型行「测试」的载荷与 base_url 守卫。**14 条全绿**（原 13 条 9 红）。
+- **「卡住」排查后的防御性修复**（证据来自 `data/audit/*.jsonl`，详见下节）：
+  - `llm.build_client(max_retries=0)`：SDK 默认还会整请求重试 2 次，叠上本层与 agent 层重试会把单轮最坏耗时放大成 3×3×per-read 超时；
+  - `agent.py`：**非瞬时错误直接降级不再空转重试**（400 之类重试不会成功），并把「什么都没产出」时的提示文案由"带着已有内容收尾"改成"本轮未能产出内容"；
+  - `chat.py`：SSE 迭代任务的 `finally` 改为 **cancel runner**（此前 `await task` 在客户端断开时不取消孤儿任务，会继续烧 token 并可能往已截断的会话写幽灵消息，`production.py` 本来就是对的写法）；
+  - `chat.py`：附件文本提取（含 20MB PDF 解析）挪到 `asyncio.to_thread`；`generate.py` 的门禁子进程同样改 `to_thread`（此前同步 `subprocess.run(timeout=120)` 会堵住事件循环，让同进程其它 SSE/上传一起卡）；
+  - `replace_from` 负数改 422（此前被 `storage` 夹到 0 = 清空整个会话）；附件清理跳过「仍被其它消息引用」的 id（同一附件可被多条消息引用，按"被截断"就删文件会让后面那条的图片 404）；
+  - 前端 `api.streamChat`：流自然结束却没等到 `done`/`error` 时补一条错误（`consuming SSE` 结束时若不合成，前端的 streaming 态没有任何复位入口）。
+
+### 排查结论（两个只读代理；证据与待拍板项）
+
+**A. 「卡住」的根因（最可能就是维护者遇到的那个）**：**没有任何机制给一轮对话设定总时长上限**。`REQUEST_TIMEOUT=900` 是 **per-read** 超时（网关只要在窗口内吐过 ≥1 字节就永不触发），SDK 再自己重试 2 次、agent 层又重试 3 次 → 单轮最坏 ~2.25 小时。证据：`data/audit/chat-e3be804258b3.jsonl` 里 `13:43:32 agent_start` 之后 **9507s（2 小时 38 分）无任何事件**、也没有任何终止事件；`build-subject-68e696.jsonl` 的建课编排 13 分钟无进展。**待拍板**：chat 与编排各给多少秒（真实产课单次派工实测 694s 是合法的，两者不能同一个上限）、超时是降级收尾还是直接报错。
+
+**B. 开课流程与 K 系列的三处错配**（详见 backlog #23–#27）：
+1. **建课会话在真实 provider 下也走工具循环**（`use_tools` 没有排除 `mode=interview`），而 `CHAT_TOOLS` 只有只读工具、收口标记 `<!--INTERVIEW_RESULT-->` 的解析是**非贪婪 `\{.*?\}` 且对"多轮拼接"零容忍** ⇒ 可能不建草稿、不出「确认建课」卡（fixture E2E 只覆盖纯文本路径，所以一直全绿）。
+2. **「门禁」「检查」stage 双发**（工具循环内一次 + 外层复核一次），前端渲染两条"✅ 完成"。
+3. **工单重试链 `run_ticket_retry` 没走工具循环**，与实时产课能力不一致。
+4. **门禁 problems 解析可能放行**（`returncode != 0` 但解析为空时 `if not problems: return data`）——K 系列"不信任模型自查"的不变量在解析层被绕开。
+5. 附带：M4 `generate` 链仍是单次派工（与 build 的大纲派工同角色不同路径）。
+6. 附带的次要项：`run_agent` 之外没有墙钟预算；`storage` 无锁 read-modify-write；`build_client` 每次新建 client 不复用。
+
+### 门禁
+
+- 后端 **112 条通过 + 1 skip**；E2E **60 条通过 + 3 条 skip，0 失败**；组件测试 **14 条全绿**（原 9 红）；`tsc --noEmit` 零错误；`npm run build` 通过；根 `npm test` 仍是 1 条已知 Windows CRLF 假红（与本轮无关）。
+- 真机探针（拍板要求的前置验证）在本轮之前的同日条目里：确认网关逐段发 `delta.reasoning_content`、末块自带 `usage`。
+
+---
+
+## 2026-10-04 · 第五轮（收口标记清理 + 建课卡点定位）
+
+### 起因（维护者反馈）
+
+维护者看了会话记录后指出：代理没抓到重点或根因——「直接定位到最新的会话记录里，可以看见开始建课到采图时已经不工作了，同时消息里也遗留 xml 内容（体验问题，顺手优化），即需要搞清楚为什么到这里停了，是逻辑问题还是上游自己断的，如果确实过程较长是不是要像消息流那样『可见』以确认『确实在工作』？」并要求下一步用 deepseek 模型新建会话跑通建课流程。
+
+### 定位过程与结论（有证据）
+
+现场（`data/sessions/e3be804258b3.json` + `data/audit/build-subject-68e696.jsonl`）：
+
+- 会话是建课会话（mode=interview），盘问正常收口、落了 `build_confirm` 卡；随后唯一可见的就是 `✅ 采图（0 张，Gaps 0 条）`。
+- 建课审计**只有两行**：`dispatch(generate, loop=tools)` + `agent_start(model=Deepseek-v4-flash)`，之后没有任何事件——**没有 `tool_call`、没有 `agent_done`、也没有 `agent_transport_error`**。
+- 草稿目录里 `curriculum.yaml` 是 `nodes: []` / `edges: []`（空），MISSION/RESOURCES/GLOSSARY 是采图阶段写的脚手架 ⇒ **大纲一个字都没产出**。
+
+结论：
+
+1. **采图不是卡点**——`image_scout` 是纯后端（不调 LLM），几秒跑完并发出 stage 卡；`run_build` 里 `curriculum_task` 与 `scout_task` 并发，`await curriculum_task` 才是真正的等待点。「采图完成后再无反应」是**必然的呈现效果**，不代表采图有问题。
+2. **卡在大纲派工的第一次 LLM 调用**（K2 工具循环 `_curriculum_tool_loop` → `run_agent` → `stream_turn`）。
+3. **不是 build 的逻辑 bug**；也**无法证明是「上游断了」**——上游若明确断开会走异常路径并落 `agent_transport_error`，而审计里**连一条错误都没有**。真实情况是：这段时间系统没有任何信号，因此「一直在思考」与「上游沉默／进程被杀」在体验与日志上都不可区分——**这本身就是要修的东西**。
+4. **为什么审计一行都没有**：`agent.py` 只在 `tool_call` / `agent_done` / `agent_transport_error` / `agent_exhausted` 处落审计，**思维链与正文增量都不落审计**；`build.py` 的 `on_event` 也只把 `submit_curriculum` 映射成 stage 事件 ⇒ 模型长时间思考期间，日志与 UI 全静默。
+5. **实测单轮有多慢**（临时探针复现同一派工，用完即删）：`Deepseek-v4-flash` + 档位 `high`（维护者当时的实际设置）⇒ **126.6 秒 / 3396 个事件 / 34644 字思维链 / 11227 输出 token，才发起第一次工具调用**；`u2-flash`（medium）⇒ 69 秒 / 3703 输出 token；同一模型不开思考（variant 为空）⇒ **3.8 秒**直接调用工具。工具循环上限 12 轮 ⇒ 整条建课 10 分钟量级。
+6. 顺带确认：`supports_tools()` 恒真使 chat 与编排一律走工具循环；`Deepseek-v4-flash` 的档位名维护者已自行改成 `high`（旧的 `disabled/enabled` 会 400，本轮的归一化修复已兜住这一类）。
+
+### 本轮改动
+
+- **收口标记不再露出**（维护者明确要求「顺手优化」）：
+  - 后端 `chat.py` 新增 `_strip_interview_markers()`：落库前剥掉 `<!--INTERVIEW_RESULT-->…<!--/INTERVIEW_RESULT-->`，**未闭合的半截标记也切掉**（流式期间经常只吐一半），并去掉首尾空白；解析仍用原始回复（先解析、后清洗）。
+  - 前端 `lib/format.ts` 新增 `cleanAssistantText()`，渲染 / 复制 / 记入概念本统一用它 ⇒ **已经落库的历史消息（如维护者当前那个会话）也立刻不再显示 XML**。
+  - 测试：pytest 2 条（含半截标记与空行）、vitest 4 条、`course-build.spec` 加一条「可见正文不含标记」断言。
+- backlog 新增 #28「建课/产课编排的过程可见性」，与 #22（墙钟预算）并列，并附实测数字与三个候选方案。
+
+### 门禁
+
+后端 pytest **114 条通过 + 1 skip**、E2E **60 条通过 + 3 条 skip（0 失败）**、组件测试 **19 条全绿**、`tsc --noEmit` 零错误、`npm run build` 通过、根 `npm test` 仅 1 条已知 CRLF 假红。
+
+---
+
+## 2026-10-04 · 第六轮（编排可见性 + 墙钟上限）
+
+维护者拍板「先 1+3 再跑探索」（① 过程可见性、③ 墙钟上限），同时让代理梳理整条建课链路。
+
+### ③ 墙钟上限（防"永久卡住"）
+
+- `agent.run_agent(..., max_seconds=…)`：到点用**现有内容收尾**（`stopped_reason="wallclock"`），发一条「（单轮超过 Ns 上限，用现有内容收尾。）」提示，已产出的文本与思维链照常落库；审计新增 `agent_wallclock`（轮间检查）与 `agent_wallclock_turn`（单轮超时）。
+- 两档口径分开（env 可覆盖）：聊天 `STUDYMATE_CHAT_MAX_SECONDS` 默认 **300s**；建课/产课 `STUDYMATE_ORCH_MAX_SECONDS` 默认 **1800s**（实测真实产课单次派工可达 694s，不能和聊天同一个上限）。
+- 实现要点：轮间检查 deadline + 每轮把 `consume()` 包进 `asyncio.wait_for(deadline - now)`——**后者才是关键**，因为"卡住"的形态是**单轮本身不返回**。`consume` 里对 `calls`/`usage` 必须 `nonlocal`（否则外层拿不到工具调用与用量）。
+- **真机验证**（把上限压到 8s，对 `Deepseek-v4-flash` + high 跑那条实测 126.6s 的大纲派工）：8.0s 干净收尾、`stopped_reason='wallclock'`、已产出的 1310 字思维链保留、提示按预期发出。
+
+### ① 过程可见性（让"在干活"看得见）
+
+- `agent.ProgressReporter`：事件驱动记数（轮次/思考字数/工具次数）+ 每 **≥0.5s** 发一份快照；`run_agent` 用外壳函数托管它（`run_agent` → `_run_agent_loop`，避免给原有循环重新缩进）。
+- 后端：`build.py` / `produce.py` 各自把快照映射成 `progress` 事件（带 `stage` = 大纲 / 派工归属名）；`production.py` 的 SSE 是通用转发，`progress` 自动过河；`_persist_event` 不认识它 ⇒ **不落库**（高频事件不该进会话）。
+- 前端：`OrchestrationHandlers.onProgress`；`ChatView` 新增进度卡（`build-progress` / `build-progress-text`：「大纲 · 第 N 轮 · 已等待 Ns · 已调用 M 次工具（最近 xxx）· 已思考 Kk 字」），收到真 `stage` 事件或编排结束即让位；`NodeDetail` 把同一行顶成产课进度行（`⏳ …`）。
+- **刻意不逐条转发思维链**：实测单轮 3396 个事件，转发会把 SSE 打爆；快照"没有变化也照发"，因为"已经等了 128 秒"本身就是用户需要的信息。
+
+### 测试
+
+- 后端新增 3 条（`test_tooling.py`）：墙钟砍断一个无限挂住的 turn（0.4s 上限、断言 <3s 返回且 `stopped_reason="wallclock"`）、进度快照上报、退出后停心跳。**117 条通过 + 1 skip**。
+- 组件测试新增 1 条（`ChatView.test.tsx` 建课进度卡：喂一份假快照断言文案）。**20 条全绿**。
+- **进度卡不进 E2E**：fixture 模式下编排是瞬时的，快照一闪而过、断言不可靠——按项目既有约定下沉组件测试。E2E **60 条通过 + 3 条 skip（0 失败）**，确认新事件不破坏既有编排流。
+
+### 门禁
+
+pytest **117 + 1 skip**、E2E **60 + 3 skip**、组件 **20 全绿**、`tsc --noEmit` 零错误、`npm run build` 通过、根 `npm test` 仅 1 条已知 CRLF 假红。
+
+### 补充（同轮）：链路档案落盘 + 代理捎带发现的两处实锤
+
+- **新档案 `StudyMate-Web_建课链路.md`**：维护者要求"梳理整条建课链路"。总览流程图（建课会话 / M4 向导两条分支）+ 五个入口 + 盘问收口 + 建课编排（并发结构、K2 工具循环、采图、门禁、落盘）+ promote + 产课链 + **产物速查「看到什么 = 走到哪」** + **卡点排查索引** + 8 条待拍板/已知不一致。已登记进 `AGENTS.md` 的权威文档表与 HANDOFF 文档地图。
+- **修 `build.py` 建课打回卡的 owners**：原为硬编码 `["出题"]`，而大纲 problems 的 owner 是 `roles.owner_of("curriculum.yaml")` = 「课设」——打回卡会显示"第 N 轮打回（出题）"，与实际归属矛盾（疑似从产课链复制残留）。改为取 problems 的真实归属，并补 pytest 一条（`test_build_gate_retry_reports_real_owners`）。
+- **修 `image_scout._run_pool_check` 同步阻塞事件循环**：自检子进程最长 60s，而采图与大纲派工**并发跑在同一事件循环**里 ⇒ 同步 `subprocess.run` 会把 SSE（含新加的进度心跳）一起冻住。改为 `asyncio.to_thread`（build/produce/generate 早已是这么做的，这是漏网的一处）。
+- 计数更新：后端 pytest **118 条 + 1 skip**；E2E 复跑 **60 条通过 + 3 条 skip（0 失败）**。
+
+---
+
+## 第七轮：建课链路真机探索（2026-10-04）
+
+维护者拍板"拍板先放着，先跑探索"：**用真机（真实后端 + 真实网关 `my-api` / `Deepseek-v4-flash` + high）把整条建课链从零跑通**，看它到底会不会卡、卡在哪、可见性够不够。结论：**全程跑通，无永久卡死**。
+
+### 实跑记录（一次到底，含数字）
+
+| 阶段 | 结果 |
+| --- | --- |
+| 盘问（`mode=interview`） | 7 轮收口，单轮 **69.5 / 12.0 / 14.3 / 10.8 / 46.9 / 15.2 / 14.5 s**；收口标记解析 → 草稿 `python` + 「确认建课」卡 |
+| 建课编排 | **685 s**（11.4 min）完成：采图 → 大纲 → 门禁 → 落盘 |
+| 大纲工具循环 | **12 轮、20 次工具调用**：8 轮探索预算全被 `list_workspace` / `read_course_file` 吃掉，第 8 轮才第一次 `submit_curriculum`；门禁**打回 3 次**（报「13 处 / 20 处 / 20 处」逐条问题）后第 4 次通过 |
+| 落点确认 | `POST /drafts/python/promote` → `C:\Users\21621\StudyMate\.learning\subjects\python`，侧边栏科目区出现「Python 报表自动化」，`curriculum.yaml` 带完整 nodes/edges（含每条边 reason） |
+
+### 关键澄清与实锤
+
+- **"卡在采图"是误读**：`image_scout` 不调 LLM、也不联网抓图——它读草稿的 `RESOURCES.md` 抽 URL。**从零建的草稿没有参考资料 ⇒ 0.1 s 返回、0 张图、0 Gaps**。真正耗时的并发的 `curriculum_task`（大纲）。所以用户看到的"采图卡住"＝采图卡秒完、随后大纲静默十分钟。
+- **可见性按契约生效**：编排期间收到 **69 份 `progress` 快照**（5 s 一拍，`round` 从 0 走到 12、`elapsed_s` 一路涨、`reasoning_chars` 从 0 到 10 万），新加的进度卡确实在走动。
+- **`progress` 的 `tool_calls` 一路报 0 —— 已修**：`ProgressReporter.note()` 只认单数 `tool_call`，而 `turn_source` 吐的是整批 `tool_calls`（复数），真机 20 次调用全被漏计。补复数字段并沿用单数兜底，后端 pytest 补一条（`test_progress_counts_tool_calls_batch`）。
+- **编排 SSE 刻意不转发思维链/正文/工具明细**：`build._curriculum_tool_loop` 的 `on_event` 只把 `submit_curriculum` 映射成「门禁」stage，其余（含 17 次 `list_workspace`）都不出流。会话里因此只有「采图 / 门禁 / 落盘」卡片，看不到工具活动——卡片层是清楚的，细节层是空白的。
+- **门禁卡噪声**：3 次打回在会话里就是 3 张 `⚠ 门禁`，**且不显示任何原因**（problems 只喂回给模型）。用户看到连续三个失败却不知道差在哪。
+- **盘问会话确实带工具**（#23 前提被实测确认）：收口那一轮 8 轮循环、**17 次工具调用**（`list_workspace` / `read_course_file` / `read_skill`），工具活动与思维链都随消息落库，「中间过程 · 思考 · 17 次工具调用」在 UI 上可折叠回放。
+- **墙钟上限未成为瓶颈**：本次把 `STUDYMATE_ORCH_MAX_SECONDS` 临时抬到 3600 以求稳，实跑 685 s ⇒ **出厂默认 1800 s 对这一规模够用**（已恢复默认，未改代码常量）。盘问单轮最长 69.5 s ⇒ 出厂聊天 300 s 也不会砍到。
+- **文档陈旧**：HANDOFF 第四轮记的"`Deepseek-v4-flash` 档位名与网关不匹配（会 400，backlog #21）"**本次未复现**——带 `reasoning_effort=high` 的请求正常流式返回思维链并完成，两次真机调用（编排 + 独立探针）都对。
+- **产品正确性抽样**：`<!--INTERVIEW_RESULT-->` 标记在落库消息与 UI 文本里都不出现（第五轮的修复端到端有效）；助手名称栏显示「my-api / Deepseek-v4-flash」；右栏「上下文窗口」显示 `13k / 2.6M (1%)`。
+
+### 顺带（非产品问题，供后续驱动脚本参考）
+
+- **`mode` 只在建会话时生效**：先 `POST /api/sessions` 建普通会话、再带 `mode=interview` 发消息，会话仍是 chat 模式（技能注入为 `local-qa`），模型会自己 `read_skill` 去补规范、甚至**内联"建课"并声称"已落盘，主页已刷新"**（实际什么都没写）。探索驱动脚本必须像 UI 一样**首轮不带 `session_id`** 才能拿到 interview 会话。
+
+### 门禁
+
+后端 pytest **119 + 1 skip**（本轮 +1：进度计数）；E2E 与组件测试本轮未触发改动，维持 **60 + 3 skip（0 失败）** / **20 全绿**。
+
+---
+
+## 第八轮：建课链正确性 + chat 动作工具 + 「我的课程」（2026-10-04）
+
+维护者点名的两件事：**把"建完课接不下去"的最小通路补上**（产课/评估改由会话 agent 工具触发 + 建课完成自动关联 + 聊天右栏图谱），以及修掉真机探索暴露的建课链正确性问题。同时留了两份调查结论（主动检索议程、chat 工具面差距）挂 K4。
+
+### 后端 — 建课链正确性
+
+1. **大纲派工值内联 `schemas/curriculum.schema.json` 全文**（`build.py::curriculum_values` + 新增 `_curriculum_schema_text()`）。原因：工具循环沙箱的读根只有草稿目录，模型读不到仓库根的 schema，此前派工值只说"以该文件为准"⇒ 只能盲猜，**实测门禁连打回 3 次**（节点 id `nE1` 大写非法、edge 缺 `reason`、`realworld` 类型错）。内联全文 + 一句硬约束速览（id 只小写字母/数字与 `.`/`-`；节点必填 `id/title/objective/prerequisites/status/kind`；edge 必填 `from/to/reason`；`concepts`/`pitfalls` 是字符串数组、`realworld` 是**字符串**）；schema 文件缺失时安全回落一句提示、不炸。
+2. **门禁解析为空即判失败**（`build.py::run_curriculum_gate`）：`returncode != 0` 但 `_gate_problems` 提取为空时，把原始输出（截断 800 字）塞进 problems 返回，**不再当通过**——原先这种情形会放行带病大纲，绕开"不信任模型自查"的不变量。
+3. **采图空转明示「跳过」**（`image_scout.py`）：`RESOURCES.md` 抽不到 URL 时 stage 名变 `采图 · 跳过（无参考资料）`，done 事件增 `skipped/reason`。从零建的草稿没有参考资料 ⇒ 采图必然 0.1s 空转，原文案 `✅ 采图（0 张）` 会让人以为它做了事。
+4. **草稿同名去重**（`draft.py::find_draft_by_name` + `create_draft`）：同名（strip + casefold）返回既有草稿，不再产生逐字重复的两份（真实数据里出现过 `subject-5563f3` / `subject-579bd2` 两份同名同目标草稿）。
+5. **工单重试走工具循环**（`produce.py::run_ticket_retry`）：产课路径改走 `dispatch()`（内部即 `_role_tool_loop`），与实时产课同能力；`kind=build` 的 retry 仍走单次派工。
+
+### 后端 — chat 工具面与会话关联
+
+6. **新工具 `produce_lesson` 与 `assess_node`**（`tools.py`，`CHAT_ACTION_TOOLS`）：`produce_lesson` 按大纲顺序产一节课、`node_id` 可省略（= 取大纲顺序里第一个还没有课件的节点）；`assess_node` 接 `node_id` + `evidence`，复用评估服务。**只在科目关联会话**提供给模型（未关联会话的工具面照旧是三个只读工具 `list_workspace` / `read_course_file` / `read_skill`）。
+7. **`ToolContext` 传会话状态**（`routers/chat.py`）：`state={session_id, slug, node_id, workspace, emit}`；两个工具把产课链的 stage/retry/done/progress 转成中文 `notice` 回吐（**progress 节流 ~10s**）。
+8. **墙钟口径**：含产课/评估工具的聊天回合用 `ORCH_MAX_SECONDS`（1800s）而不是 `CHAT_MAX_SECONDS`（300s）——工具执行在每轮 `asyncio.wait_for` 之外，单节点产课实测可达 ~700s，否则下一轮会顶到 deadline 把回合判成降级收尾。
+9. **科目关联会话提示词加一行**：产课调 `produce_lesson`、评估调 `assess_node`，规范按需 `read_skill`（不整篇注入）。
+10. **`promote` 请求新增 `session_id`**（`models.py::PromoteRequest` + `production.py::promote_draft`）：落点确认成功后把**触发建课的会话自动绑定到新科目**（草稿 slug 即科目 slug）。原先 `_session_for` 在传入会话时直接 return、不写绑定，所以"建完课会话没关联"。
+11. **`production.py::_provider` 改按会话绑定取模型**（`common.require_provider(session_id)`）：建课/产课/工单重试都跟随会话模型，不再恒用全局默认。
+12. **新增 `GET /api/home` 与 `GET /api/home/{file_path:path}`**（`routers/home.py`）：服务工作区 `index.html` 及其相对引用（`.learning/assets/**`、`.learning/subjects/**`），沿用 lessons 的 `..` 词法拒绝 + resolve 包含校验 + 媒体类型表。
+13. **门禁/打回卡带原因**：`🔁 第 N 轮打回（归属）（自检|派工）· 问题 M 条：前 3 条…`；stage 卡带问题条数。
+14. **收口标记解析**（`chat.py::_handle_interview_result`）：取**最后一个**完整匹配（模型可能先吐半成品结论再修正）；JSON 解析失败把原文（截断 300 字）回显成 error 卡；这一轮没吐标记时，只在"回复里不再有问号"（形态上已收尾）且每会话至多一次的情况下追加一条可行动提示（`INTERVIEW_CLOSE_HINT`），避免盘问轮刷屏。
+
+### 前端
+
+15. **工具卡移出「中间过程」折叠区、常显在消息体**（`ChatView.tsx`）：诊断结论是工具数据本来就没丢——`onToolCall` / `onToolResult` 实时 patch、也随消息落库，只是折在默认收起的面板里。`ProcessPanel` 只留思维链与本轮提示，两者皆空则不渲染（`tools` 场景整块 `process-panel` count 0）。
+16. **流式不再强制回弹**：只有已经贴底（32px 阈值）才跟随滚动，用户上滑后不打断。
+17. **聊天右栏新增科目「图谱 / 大纲」区**（`RightSidebar.tsx` + `SubjectGraphPanel`，仅科目关联会话）：默认大纲视图，点节点跳 `/courses?subject=<slug>&node=<id>`。
+18. **`/courses` 不带 `?subject=` 变「我的课程」**（`CourseGraphView.tsx` + `HomeEmbed.tsx`）：内嵌工作区主页 `iframe`（`/api/home/index.html?theme=<主题>`）+ **不显示右侧边栏**；带 `?subject=` 仍是原课程页。侧栏导航「课程图谱」改名**「我的课程」**（`Sidebar.tsx`）。暗夜同步：iframe 走 `?theme=`（生成页 `learn-theme.js` 支持该参数且不写学生偏好），`MutationObserver` 观察 `<html data-theme>` 跟随 web 主题。
+19. **节点详情页删除三个悬空按钮**（`NodeDetail.tsx`）：「产出此课」「申请评估」「问 Study Mate」；**保留工单角标 `node-ticket-entry`**。产课与评估改由 agent 工具 + 用户在聊天里提（评估若不做成工具就等于删功能，故一并工具化）。
+20. **建课完成卡新增次要按钮「开始第一课」**（`produce-first-lesson`）：发一条聊天消息（`FIRST_LESSON_PROMPT`）让 agent 调工具产课，不再直接打产课端点。
+21. **抽出共享组件 `SubjectGraphPanel`**：课程页右栏与聊天右栏共用；新增 `onClearSelection` / `refreshKey`，后者让节点进度保存后右栏图谱重拉（`CourseGraphView` 的 `graphRefreshKey`）。
+
+### 调查结论（维护者点名要写进「开发与计划」）
+
+- **插件「学习模式」预设 `preset/learning/agent.cordis.yml` 给总控的工具面**：bash/pwsh、fs 读写、fs-search、jobs、skill 目录+按需加载、goal、plan-mode、compaction、**subagent(spawn, maxDepth=2)** + workflow-ptc + ralph、ask_user、todo、**web(fetch+search)**、**present**。即插件总控自己写盘、自己跑渲染器与检查、自己派角色、能联网检索、能 present 产物（`learning-system` 明说"其余一切你自己做——答疑、盘问、元数据、全部档案记录、写盘、跑渲染器与检查"）。**Web chat 目前只有 3 个只读工具**（+ 本轮新增 2 个动作工具）——这是"建完课接不下去"的根因，不只是少一个按钮。本轮先补最小通路（产课/评估工具 + 自动关联 + 右栏图谱），**chat 角色工具面的整体扩容挂到 K4 分期**（见《开发与计划》§5.3 差距表）。
+- **主动检索议程**（维护者要求提上议程、本轮不实现）：插件里 `resource-scout` 默认全网检索、`tool-web` 提供 fetch+search，`image-scout` 再沿它给出的链接清单抓图；Web 早前拍板"资料收集只做落盘结构化、不做主动检索"，导致**从零建课的资源清单为空 ⇒ 采图结构性空转**。现状 / 影响 / 三条可选路线（恢复最小检索 / 保留只读并去掉采图阶段 / 用 web 工具让 agent 自己检索）与"本轮不实现"已写入《开发与计划》§5.3。
+
+### 门禁
+
+后端 pytest **145 passed + 1 skipped**（新增 `test_build_chain_fixes.py` / `test_chat_tools.py` / `test_promote_home.py` / `test_fixture_tool_journeys.py` 等）；E2E **62 passed + 3 skipped（0 failed）**（删 `produce-chain.spec.ts` / `assessment.spec.ts`，新增 `produce-tool.spec.ts` / `assess-tool.spec.ts` / `courses-home-embed.spec.ts` / `chat-subject-graph.spec.ts` 等）；组件测试 **20 passed**；`tsc --noEmit` 干净；`npm run build` 通过；根 `npm test` **17 passed + 1 failed**（该红是既有的 Windows CRLF 假红：`.dsh/skills/curriculum-designer/SKILL.md` 整篇 CRLF，导出断言误报，Linux CI 不受影响）。
+
+### 第八轮补充：切会话丢回复（真机 bug 修复，2026-10-04）
+
+**现象（维护者反馈）**：重发一条建课消息，流式里看得见回复，**切一下会话就没了**。
+
+**根因**：两条 chat 路径都把"落库"放在**整条流跑完之后**——
+- 工具路径（`_tool_event_source` + runner）：切会话/关页会让 Starlette 取消 SSE 迭代任务，进而 `task.cancel()` 掉 runner（第四轮为避免孤儿任务刻意加的），那段落库代码**执行不到**；
+- 纯流路径（`stream_chat`，模型声明 `tool_call: false` 时走它）：落库在 `while` 循环之后，而断开表现为取消 / `GeneratorExit`，`CancelledError` 继承自 `BaseException`，原来的 `except Exception` **抓不住**（它其实已有"异常时抢救 collected"的写法，只漏了这一类）。
+
+第八轮把科目关联会话的聊天墙钟抬到 1800s，单轮动辄几分钟，用户在这段时间切走极常见 ⇒ 问题从"偶尔丢最后一句"变成"整轮白做"。事后取证：`data/sessions/6854237fc5c3.json`、`5bd05f6262d7.json` 都以**用户消息结尾、没有助手回复**，对应审计里最后一轮只有 `agent_start`（或若干 `tool_call`）而**没有 `agent_done`** —— 那次回复**从未落库，无法找回**，只能重发。
+
+**修复**：边发边攒 + 断开兜底落库。
+- 工具路径：`emit` 顺手把 text/reasoning/notice/tool_call/tool_result/usage 攒进 `partial` 桶（`_accumulate_partial`）；runner 里 `except asyncio.CancelledError` 时调 `_persist_partial` 把已产出的内容落库（附「本轮输出过程中连接中断，这里只保存了已经产出的部分。」提示），`except Exception` 同样兜底（用 `persisted` 标志避免与正常路径重复落库）。
+- 纯流路径：`persisted` 标志 + `finally` 兜底，把 `collected` 的正文按同一格式落库。
+
+**验证**：新增 `backend/tests/test_chat_disconnect.py` 4 条（桶累积与落库、空桶不落库、**手工喂 ASGI 后在首个 delta 处取消 app 任务**覆盖工具路径与纯流路径各一条——这两条正是"uvicorn 在客户端断开时会做的事"）。后端 pytest **149 + 1 skip**。**真机复现**：科目关联会话发真实请求，第 15 个 delta 处断开（t=23.6s），会话里保住了 **126 字半截正文 + 5537 字思维链 + 中断提示**；再以 6 秒断开复现时保住的是 3 字思维链 + 中断提示（断开点太早，如实记录）。
+
+### 第八轮补充二：会话存储并发安全 + 两处界面要求（2026-10-04）
+
+**① 独立子代理排查"切会话还是丢回复"的结论**（维护者要求换人查）：
+- **基本场景已经不再丢**：真机浏览器里"发消息 → 切走 → 切回"，服务端 `GET /api/sessions/<id>` 与会话 JSON 都有那条**带「连接中断」提示的部分回复**，界面也如实显示；上一轮的断开兜底确实生效。六条候选里有四条被实验排除（前端状态覆盖、前端未中止/覆盖、写错会话、Next 代理缓冲），并确认工具路径的兜底经代理与直连两条路都会落库。
+- **但查出一个更严重的既有缺陷（已修）**：`storage._write` 是 `open("w")` **先截断再逐段写**的整文件重写，且 `add_message`/`update_session` 等是**无锁的"读—改—写"**。子代理用多线程压测复现：读侧抛 `json.decoder.JSONDecodeError: Extra data`，走 HTTP 时 **2973/3156 次并发 GET 返回 500**，最坏留下一个**永久损坏的会话文件**，连带 `/api/sessions` 整个列表报错、界面显示"暂无会话"——这正是"回复看起来凭空消失"的一种形态。并发写还会互相覆盖（丢消息）。
+- **另发现一个会被误读为"丢"的形态**：断开点太早（正文还没吐）时，兜底会落一条 **content 为空、只有「连接中断」提示**的助手消息。
+
+**修法**（`backend/app/storage.py`）：① `_write` 改**临时文件 + `os.replace` 原子替换**（读侧永远看到完整快照），并在 Windows 上对 `PermissionError`（目标正被读侧打开/被杀软扫描）做有限退避重试；② 读写**共用一把可重入锁**，把"读—改—写"整体串行化——并发追加不再互相覆盖（实测 8 写者 × 12 条一条不丢）；③ `list_sessions` 单个文件坏掉时**跳过而不 500**；④ `get_session` 对文件消失/不可读返回 `None`。新增 `tests/test_storage_atomic.py` 3 条（并发追不丢消息、边写边读不抛解析错、"不留临时文件"），**后端 pytest 152 + 1 skip**。
+
+**② 两个按钮成功后不可点**（维护者要求）：`build-confirm-button` 在该草稿已建课（会话里有同 slug 的 `done` 卡）后禁用并显示「已建课」；`promote-button` 在该科目已进工作区（`subjectReady`）后禁用并显示「已进入工作区」——两者都由已落库数据推导，**刷新后仍然禁用**，且与原来的"进行中禁用"叠加。真机核验：已落盘的 python 会话里两个按钮均 disabled。
+
+**③ 聊天右栏改选项卡**（维护者要求）：「图谱与大纲」/「上下文窗口」/「会话与附件」三页，各自的区块**保持挂载**用 `hidden` 切换（同图谱/大纲的做法，避免重建画布与重复拉附件）；关联科目时默认落在图谱页，未关联时不显示图谱页签；页签条 `chat-rail-tabs`，按钮 `rail-tab-graph` / `rail-tab-context` / `rail-tab-session`。页签字号与内边距按右栏默认 256px 收窄，真机量测三个标签 77px 完整不截断。E2E 相应调整 `attachments-area.spec.ts`（先切「会话与附件」页签再断言），全量 **62 + 3 skip（0 失败）**。
+
+## 第九轮：交付（版本升级 + 一次性提交 + PR 转正式）
+
+- **版本号 0.5.0-beta → 0.6.0-beta**：`frontend/package.json`、`frontend/package-lock.json`（两处）、
+  `backend/app/main.py`（FastAPI `version`）、`README.md`「版本」节、`StudyMate-Web_开发与计划.md` §1 标题、
+  `HANDOFF.md`（3 处）。侧边栏读 `package.json` 自动跟随（build 期打包，故首次需重新构建）。
+  PRD 正文按约定不写版本号。
+- **交付形态**：本轮按维护者指示把第三～九轮的累计改动**一次性提交**（不再按里程碑拆分），推送 fork
+  分支 `feat/study-mate-web`；PR #43（→ 上游 `main`）由占位 draft 转为**正式待 review**。
+- **交付前的验收记录（同一次运行）**：后端 pytest **152 通过 + 1 skip**；E2E **62 通过 + 3 skip（0 失败）**；
+  组件测试 **20 通过**；`tsc --noEmit` 干净；`npm run build` 通过；根 `npm test` **75 通过 + 1 条既有
+  Windows CRLF 假红**（`.dsh/skills/curriculum-designer` 技能导出断言，Linux CI 不受影响）。
+- **真机核验（同一构建）**：`/api/home` 服务主页与其相对资源、越界被拒；「我的课程」内嵌主页且无右栏、
+  带 `?subject=` 仍是原课程页；聊天右栏三个页签可切、标签 77px 不截断；已落盘会话里「确认建课」/「落点确认」
+  两个按钮均为禁用；建课链真机 685s 跑通、产课/评估工具旅程由 E2E 覆盖。

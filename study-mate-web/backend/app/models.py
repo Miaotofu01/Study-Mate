@@ -126,7 +126,8 @@ class ProviderTestRequest(BaseModel):
 class ChatRequest(BaseModel):
     """发送一条消息。session_id 为空时新建会话；attachment_ids 引用
     POST /api/uploads 返回的附件标识。mode 只在新建会话时生效（建课会话=interview）。
-    workspace 只在新建会话时生效：本次会话的工作区（绝对路径字符串）。"""
+    workspace 只在新建会话时生效：本次会话的工作区（绝对路径字符串）。
+    replace_from 用于「编辑重发」：先截断该下标的用户消息及其后全部消息，再追加新消息。"""
 
     message: str
     session_id: str | None = None
@@ -137,6 +138,8 @@ class ChatRequest(BaseModel):
     workspace: str | None = None
     """仅 fixture 模式生效：E2E 按请求选固定流场景（interview），免改后端 env。"""
     fixture_scenario: str | None = None
+    """编辑重发：被取代的旧用户消息下标（含，其后全部消息一并截断）。"""
+    replace_from: int | None = None
 
 
 class NewSessionRequest(BaseModel):
@@ -144,15 +147,25 @@ class NewSessionRequest(BaseModel):
     workspace: str | None = None
 
 
-class SessionPatchRequest(BaseModel):
-    """PATCH /api/sessions/{id}：title 与 workspace 均可选。
+class SessionActiveRequest(BaseModel):
+    """会话绑定的模型三元组（与 settings.active 同形，2026-10-04）。"""
 
-    两者的「缺省」与「显式 null」靠 model_fields_set 区分：只传 title 维持旧行为；
-    传 workspace=null 表示显式清空会话级工作区（回到全局发现）。
+    provider_id: str
+    model: str
+    reasoning_variant: str | None = None
+
+
+class SessionPatchRequest(BaseModel):
+    """PATCH /api/sessions/{id}：title / workspace / active 均可选。
+
+    三者的「缺省」与「显式 null」靠 model_fields_set 区分：只传 title 维持旧行为；
+    传 workspace=null 表示显式清空会话级工作区（回到全局发现）；active=null 表示
+    解绑模型（回到当前默认模型），传三元组则绑定到该会话。
     """
 
     title: str | None = None
     workspace: str | None = None
+    active: SessionActiveRequest | None = None
 
 
 class SessionMeta(BaseModel):
@@ -233,9 +246,14 @@ class MaterialRequest(BaseModel):
 
 
 class PromoteRequest(BaseModel):
-    """落点确认：target 为空时用发现链给出的工作区。"""
+    """落点确认：target 为空时用发现链给出的工作区。
+
+    session_id 为触发本次建课的会话：落点成功后把该会话关联到新科目
+    （此前建完课不自动关联，学习者得手动再选一次科目）。
+    """
 
     target: str | None = None
+    session_id: str | None = None
 
 
 class RetryTicketRequest(BaseModel):

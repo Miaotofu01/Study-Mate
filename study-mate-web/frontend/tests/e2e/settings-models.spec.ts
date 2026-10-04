@@ -82,10 +82,10 @@ test("model rows expose four actions, the edit dialog and the chat-side reasonin
   await expect(keyInput).toHaveAttribute("type", "password");
   await expect(page.getByPlaceholder("已保存，留空则不修改")).toHaveCount(0);
 
-  // 只读摘要行：上下文徽标 / 模态徽标 / 推理档位徽标 + 显示名回退
+  // 只读摘要行：上下文徽标 / 模态徽标 / 推理档位徽标（2026-10-04：去掉「思考 · 」前缀，只留档位名）
   await expect(page.getByText("1M")).toBeVisible();
   await expect(page.getByText("视觉", { exact: true })).toBeVisible();
-  await expect(page.getByText("思考 · high")).toBeVisible();
+  await expect(page.getByTestId("model-variant-badge")).toHaveText("high");
 
   // 模型行 4 个操作：测试 / 编辑 / 删除 / 启用开关
   await expect(page.getByTitle("测试 lab-vision")).toBeVisible();
@@ -134,9 +134,9 @@ test("model rows expose four actions, the edit dialog and the chat-side reasonin
   await page.mouse.click(4, 4);
   await expect(page.getByRole("button", { name: /视觉实验室/ })).toHaveCount(0);
 
-  // 档位下拉：当前档位（模型默认 high）显示在触发按钮上，展开后当前项打勾高亮
+  // 档位下拉：当前档位（模型默认 high）显示在触发按钮上（2026-10-04：去掉「思考 · 」前缀）
   const tierTrigger = page.getByTitle("切换推理档位");
-  await expect(tierTrigger).toContainText("思考 · high");
+  await expect(tierTrigger).toContainText("high");
   await tierTrigger.click();
   const tierMenu = page.getByTestId("reasoning-variant-menu");
   await expect(tierMenu.getByRole("button", { name: "high", exact: true })).toHaveAttribute(
@@ -146,9 +146,9 @@ test("model rows expose four actions, the edit dialog and the chat-side reasonin
 
   // 选 low 落盘：触发按钮文案即时更新，刷新后仍保持（settings 已写回服务端）
   await tierMenu.getByRole("button", { name: "low", exact: true }).click();
-  await expect(tierTrigger).toContainText("思考 · low");
+  await expect(tierTrigger).toContainText("low");
   await page.reload();
-  await expect(page.getByTitle("切换推理档位")).toContainText("思考 · low");
+  await expect(page.getByTitle("切换推理档位")).toContainText("low");
 
   // 自清理：删掉本轮创建的提供商，当前使用回落到 DeepSeek
   await page.goto("/settings/providers");

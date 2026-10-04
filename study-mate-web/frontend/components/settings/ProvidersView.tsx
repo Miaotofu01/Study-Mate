@@ -174,9 +174,18 @@ function FormatBadge({ format }: { format: ApiFormat }) {
   );
 }
 
-function ModelBadge({ children, title }: { children: React.ReactNode; title?: string }) {
+function ModelBadge({
+  children,
+  title,
+  testId,
+}: {
+  children: React.ReactNode;
+  title?: string;
+  testId?: string;
+}) {
   return (
     <span
+      data-testid={testId}
       className="rounded bg-[var(--muted)] px-1.5 py-0.5 text-[10px] opacity-70"
       title={title}
     >
@@ -924,9 +933,10 @@ export function ProvidersView() {
                                 )}
                                 {variant ? (
                                   <ModelBadge
+                                    testId="model-variant-badge"
                                     title={`思考档位：${variant}（可选档位 ${m.reasoning?.variants.join(" / ") || "无"}）`}
                                   >
-                                    {`思考 · ${variant}`}
+                                    {variant}
                                   </ModelBadge>
                                 ) : (
                                   m.reasoning?.enabled && <ModelBadge title="推理已启用，未设默认档位">思考</ModelBadge>

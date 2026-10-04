@@ -1,9 +1,19 @@
 # StudyMate Web E2E 测试流程
 
-> 版本：v1.9（2026-10-04，第二轮 UI 杂项轮）
+> 版本：v2.4（2026-10-04，产课/评估工具化 + 「我的课程」首页 + 聊天右栏图谱轮）
 > 性质：测试流程文档——描述 E2E 用例如何映射上游插件的用户使用旅程（docs/使用/使用说明.md、docs/设计/设计方案.md），以及每条用例的步骤、断言与数据准备；不含测试代码。
 > 运行方式：`cd frontend && npm run test:e2e`（Playwright 自动拉起后端 8290 [fixture 模式] + 前端 dev 3810）。
 > 维护约定：新增/修改用户可见功能时，对照第 3 节的映射表补充或调整用例；本文与 `tests/e2e/` 同步演进。
+>
+> v2.4 修订（2026-10-04，第八轮）：**产课与评估改由会话 agent 工具发起**，节点详情页「产出此课」「申请评估」按钮删除——删除 `produce-chain.spec.ts`、`assessment.spec.ts`（各 1 / 2 条），新增 `produce-tool.spec.ts`（1 条，`FIXTURE_TOOL_SCRIPTS["produce"]`）、`assess-tool.spec.ts`（1 条，`["assess"]`）；**`/courses` 不带 `?subject=` 变「我的课程」**（内嵌 `home-embed`、无右栏），新增 `courses-home-embed.spec.ts`（2 条）；**聊天右栏新增科目图谱区**，新增 `chat-subject-graph.spec.ts`（1 条）。断言改动：`tool-cards`（工具卡常显、无 process-panel）、`message-actions`（工具卡移出折叠区）、`subject-switch` / `theme-visual-inspection`（`/courses?subject=` 显式带科目）、`course-build`（promote 后会话自动关联 + 右栏图谱区 + 「开始第一课」按钮）。E2E **62 条通过 + 3 条 skip（0 失败）**；后端 pytest **145 条 + 1 skip**。
+>
+> v2.3 修订（2026-10-04）：建课/产课新发 `progress` 进度快照（第 N 轮 / 已等待 Ns / 工具次数），配合墙钟上限（聊天 300s / 编排 1800s）。**进度卡不进 E2E**——fixture 模式下编排是瞬时完成的，快照一闪而过，断言不可靠；改由组件测试覆盖（`tests/component/ChatView.test.tsx` 的「建课进度卡」用例喂一份假快照）与后端 pytest 3 条（墙钟砍断 / 快照上报 / 退出后停心跳）。E2E 侧只确认新事件不破坏既有编排流（60 条仍全绿）；后端 pytest **117 条 + 1 skip**、组件测试 **20 条**。
+>
+> v2.2 修订（2026-10-04）：`course-build.spec` 加一条断言——建课会话可见正文里**不含收口标记**（`<!--INTERVIEW_RESULT-->`），对应本轮「标记不再露出」的改动；后端 pytest 新增 2 条同向用例（含半截标记与首尾空行）。E2E **60 条通过 + 3 条 skip**、后端 pytest **114 条 + 1 skip**。
+>
+> v2.1 修订（会话级模型 + 档位语义兼容轮，2026-10-04）：新增 `session-model.spec.ts` 2 条——**会话内切换模型只写该会话的绑定**（PATCH `/api/sessions/{id}`，全局默认不动；刷新后重开会话仍是该模型；后端确实用绑定模型跑该轮，落库的 `model` 标识可证）、**新对话态切换仍写全局默认**（PUT `/api/settings`）。`message-actions.spec` 的助手名称栏/上下文窗口断言保持（现按"生效三元组"取值）。E2E **60 条通过 + 3 条 skip**（新增 2 条）、后端 pytest **112 条 + 1 skip**（新增 `test_session_model.py` 10 条、`test_reasoning_variants.py` 21 条）。
+>
+> v2.0 修订（消息操作与中间过程折叠轮，2026-10-04）：新增 `message-actions.spec.ts` 5 条——助手名称栏（`assistant-name`，显示「提供商 / 模型」）、右栏「上下文窗口」栏（`context-window` / `context-window-model` / `context-window-usage`）、**思维链与工具调用收进 `process-panel` 折叠区**（默认收起、`process-reasoning` / `process-notices` / 内嵌工具卡）、用户消息「复制 / 编辑」（编辑=从该条截断并重新生成，含附件可增删）、助手「删除本轮」（内联二次确认 `turn-delete-confirm`）。`tool-cards.spec` 同步为"先展开 `process-summary` 再断言工具卡"（工具不再裸挂在消息下）；`settings-models.spec` 档位文案与设置页徽标断言改「去掉『思考 · 』前缀、只留档位名」（`model-variant-badge`）。E2E **58 条通过 + 3 条 skip**（新增 5 条）、后端 pytest **81 条 + 1 skip**（新增 `test_message_actions.py` 6 条）。
 >
 > v1.9 修订（第二轮 UI 杂项轮，2026-10-04）：**新对话态新增「科目 + 工作区」关联行**（只在新对话态出现，见 §4.23 + `new-session-association.spec.ts`）；右栏「会话关联」整段移除、**小结与沉淀记忆入口悬空**（`memory-flow` 2 条 / `session-summary` 1 条改 `test.skip(true, …)` 挂起，见 §4.8 / §4.19）；`helpers.associateSubject` 改为直连关联行（不再展开右栏）、`openNodeDetail` 改为先切「大纲」段再点节点行（`theme-visual-inspection` 同步）；`workspace-onboarding` 改写为"关联行反映当前工作区"；`courses.spec` 补「科目总览状态可就地改」与「侧边栏科目选中态」两条、原第二条改为分段切换 + 画布不销毁（用标记验证）。E2E **53 条通过 + 3 条 skip**、后端 pytest **75 条 + 1 skip**（新增 `test_session_workspace.py` 11 条）。
 >
@@ -84,18 +94,18 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 | 选方向（learning-discovery） | chat 欢迎区「不知道学什么」→ 建课会话（learning-discovery 全文注入，探索期不写盘） | `course-build.spec.ts` | 已覆盖（2026-10-03） |
 | 建科目（盘问五项 + 大纲门禁） | `/generate` 五项向导 → `check_curriculum.py` 当门；chat 内盘问（interview 会话收口标记 → 草稿 → 建课编排 → 落点确认） | `generate.spec.ts`、`course-build.spec.ts` | 已覆盖（2026-10-02 / 2026-10-03） |
 | 开场恢复状态 | Chat **新对话关联行**指定科目（发出首条消息后入口消失）→ 课程上下文注入（节点聚焦由后端自动推断）+ **开场状态切片**（MEMORY 分节 / 最近误解 / 学习记录 / 评估记录） | `chat-course-context.spec.ts`、`new-session-association.spec.ts`、pytest `test_binding_focus.py` | 已覆盖（2026-10-02；切片注入在 system 层由 TestClient 覆盖；绑定/推断 2026-10-04；关联行 + 会话级工作区 2026-10-04 第二轮） |
-| 产课（三件套） | 节点详情「产出此课」→ 讲解/出题角色派工 → render/check 收口（打回归属 + 质检工单） | `produce-chain.spec.ts`、`inspection-ticket.spec.ts` | 已覆盖（2026-10-03） |
+| 产课（三件套） | 会话 agent 工具 `produce_lesson`（按大纲顺序；节点详情页原「产出此课」按钮已删）→ 讲解/出题角色派工 → render/check 收口（打回归属 + 质检工单） | `produce-tool.spec.ts`、`inspection-ticket.spec.ts` | 已覆盖（2026-10-03；2026-10-04 第八轮改由 agent 工具发起） |
 | 读课件 + 页内做题 | `/lesson` iframe + `quiz.js` 页内判分 | `lesson-quiz.spec.ts` | 已覆盖（2026-10-02） |
 | 开放题自评 → Web 增强为判分 lite | 判分面板（criteria + 强制证据） | `grading-panel.spec.ts` | 已覆盖（2026-10-02） |
 | 提问答疑记误解 | Chat 消息 hover"记入概念本"预填跳转（含无科目 adverse） | `misconception-entry.spec.ts` | 已覆盖（2026-10-02） |
-| 评估点（证据>口头） | 节点详情"申请评估" → 落盘 + **权威置位**（实验课通过连 `prerequisites` 一起置"已通过项目验证"并写学习记录） | `assessment.spec.ts` | 已覆盖（2026-10-02） |
+| 评估点（证据>口头） | 会话 agent 工具 `assess_node`（`node_id` + 作答原文）→ 落盘 + **权威置位**（实验课通过连 `prerequisites` 一起置"已通过项目验证"并写学习记录）；节点页原「申请评估」块已删 | `assess-tool.spec.ts` | 已覆盖（2026-10-02；2026-10-04 第八轮改由 agent 工具发起） |
 | 状态流转（保守推进） | 节点详情状态按钮 + 图谱着色 | `progress-transition.spec.ts` | 已覆盖（2026-10-02） |
 | 会话收尾摘要 | ~~Chat"生成小结" → sessions 落盘（同日按段追加）~~ **已悬空**（2026-10-04 拍板：入口随右栏会话关联移除；后端端点与用例保留、`test.skip` 挂起） | `session-summary.spec.ts`（skip） | 悬空待接回 |
 | 误解双落点 | `/misconceptions` CRUD + 筛选 | `misconceptions.spec.ts` 扩展 | 已覆盖（2026-10-02） |
 | 多科目管理 | 全局侧边栏科目切换（课程页第二列科目列表已删除） | `subject-switch.spec.ts` | 已覆盖（2026-10-02；2026-10-04 收敛为侧边栏单入口） |
-| （Web 特有）节点详情与大纲 | 课程图谱页**主区 = 科目头部（含科目状态/进度总览）+ 节点详情卡**；**右侧栏顶部「图谱（默认）/ 大纲」分段切换**（切换不销毁画布，右下角有重置视口）；概念本条目可定位节点（`?node=`） | `courses.spec.ts`、`misconceptions.spec.ts` | 已覆盖（2026-10-02；2026-10-04 布局对调 + 定位链路；同日第二轮二次对调 + 科目总览 + 分段切换） |
+| （Web 特有）节点详情与大纲 / 我的课程 | **`/courses` 不带 `?subject=` = 「我的课程」**（只内嵌工作区主页 `iframe`、无右栏）；带 `?subject=` = 科目头部（含科目状态/进度总览）+ 节点详情卡 + 右栏「图谱（默认）/ 大纲」分段切换（切换不销毁画布，右下角有重置视口）；概念本条目可定位节点（`?node=`）。聊天右栏亦有科目图谱区（默认大纲，点节点跳课程页） | `courses.spec.ts`、`courses-home-embed.spec.ts`、`chat-subject-graph.spec.ts`、`misconceptions.spec.ts` | 已覆盖（2026-10-02；2026-10-04 布局对调 + 定位链路；同日第二轮二次对调 + 科目总览 + 分段切换；**第八轮「我的课程」首页 + 聊天右栏图谱**） |
 | 静态产物互通 | "导出静态工作区"（gen_home 真跑） | `export.spec.ts` | 已覆盖（2026-10-02） |
-| 长期记忆 MEMORY.md 写侧 | **只剩一个入口**：评估通过后的「沉淀记忆」（右栏手动 / 小结结果区建议两个入口 2026-10-04 随会话关联区移除而悬空）→ 建议条目逐条确认 → 增量写 `.learning/MEMORY.md` | `assessment.spec.ts`、pytest `test_memory*.py`；`memory-flow.spec.ts`（skip） | 部分覆盖（2026-10-02；触发入口 2026-10-03；2026-10-04 两入口悬空） |
+| 长期记忆 MEMORY.md 写侧 | **只剩一个入口**：评估通过后的「沉淀记忆」（右栏手动 / 小结结果区建议两个入口 2026-10-04 随会话关联区移除而悬空）→ 建议条目逐条确认 → 增量写 `.learning/MEMORY.md` | `assess-tool.spec.ts`、pytest `test_memory*.py`；`memory-flow.spec.ts`（skip） | 部分覆盖（2026-10-02；触发入口 2026-10-03；2026-10-04 两入口悬空） |
 | 换机器迁移 | —— 属运维操作 | —— | 不适用 |
 | （Web 特有）工作区设置与会话级绑定 | 设置页查看/改选工作区（PUT 写 `studymate-config.yaml`）+ **新对话关联行的「工作区」下拉**（与科目并排，空选 = 默认工作区）+ 会话绑定写进会话元数据（`workspace`） | `settings-workspace.spec.ts`、`new-session-association.spec.ts`、`workspace-onboarding.spec.ts` | 已覆盖（2026-10-02 / 2026-10-03；2026-10-04 第二轮改为关联行 + 会话级绑定，原欢迎区引导块用例改写） |
 | （Web 特有）附件区 | 聊天页右栏列出术语表 / 本地资料 / 学习记录 / 会话摘要，原文新标签页可读 | `attachments-area.spec.ts` | 已覆盖（2026-10-02） |
@@ -106,7 +116,9 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 | （Web 特有）输入框草稿 | 按会话缓存（切会话保留、刷新归空、发送后清空） | `chat-draft.spec.ts` | 已覆盖（2026-10-02） |
 | （Web 特有）侧边栏宽度与折叠 | 拖拽调宽 + 上下限 + 刷新保留；**折叠成 60px 图标轨**（状态持久化） | `sidebar-resize.spec.ts`、`sidebar-collapse.spec.ts` | 已覆盖（2026-10-02 / 2026-10-04） |
 | （Web 特有）基础对话 | 流式回复 / 停止 / 附件 / 用户气泡靠右 | `chat-basic.spec.ts`、`chat-attachment.spec.ts` | 已覆盖 |
-| （Web 特有）工具化调用 | 声明工具调用能力的模型走 agent 循环：会话流内渲染可展开工具卡（调用 + 结果，兼审计 UI），工具轮之后给最终答复；chat 只读工具、建课/产课工具循环 | `tool-cards.spec.ts`（工具卡呈现）；建课/产课工具循环由 pytest `test_tooling.py` 覆盖（fixture 模式走单次派工，不进旅程级） | 已覆盖（2026-10-04） |
+| （Web 特有）会话级模型与档位 | 会话内切换模型/档位只写该会话的绑定（`PATCH /api/sessions/{id}` 的 `active` 三元组），全局默认不动；新对话态切换仍写全局默认；该会话的聊天与小结/评估都跑在绑定模型上，绑定失效则回落默认并给提示 | `session-model.spec.ts`；绑定解析与回落由 pytest `test_session_model.py` 覆盖 | 已覆盖（2026-10-04） |
+| （Web 特有）工具化调用 | 声明工具调用能力的模型走 agent 循环：会话流内渲染**常显工具卡**（调用 + 结果，兼审计 UI），工具轮之后给最终答复；chat 只读工具、**科目关联会话额外开放 `produce_lesson` / `assess_node`**、建课/产课工具循环 | `tool-cards.spec.ts`（工具卡常显）、`produce-tool.spec.ts` / `assess-tool.spec.ts`（动作工具）；工具循环由 pytest `test_tooling.py` / `test_chat_tools.py` 覆盖（真实门禁/评估服务仍真跑） | 已覆盖（2026-10-04） |
+| （Web 特有）消息操作与中间过程折叠 | 助手消息名称栏（提供商 / 模型）；用户消息「复制 / 编辑」（编辑=从该条截断并重新生成，原附件可增删）；助手消息「删除本轮」（内联二次确认）；思维链 + 工具调用 + 本轮提示收进「中间过程」折叠区（默认收起，落库后刷新仍可回放）；右栏「上下文窗口」栏显示最近一轮 prompt tokens 占模型上下文长度的比例 | `message-actions.spec.ts`；截断/删除落库与用量落盘由 pytest `test_message_actions.py` 覆盖 | 已覆盖（2026-10-04） |
 
 覆盖原则：**旅程中每个"用户做什么"在 Web 有等价功能的，必须有至少一条旅程级用例**（从入口点到最终可见结果连续走完，不拆成孤立的字段级测试）。
 
@@ -190,11 +202,9 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 5. **侧边栏科目选中态**：`/courses?subject=…` 下左侧边栏对应科目行带 `aria-current="page"`，点子边栏另一科目后选中态随之迁移。
 （大纲行断言前先点 `rail-view-outline`；详情用 `data-testid="course-node-detail"`。）
 
-### 4.6 assessment.spec.ts —— 评估点（对应"证据>口头"）
-1. `/courses?subject=…` 经 `openNodeDetail`（先切「大纲」段再点节点行，见 §4.13 备注）选 net.layers → 详情展开"申请评估"面板 → 选最近会话 → 提交。
-2. fixture canned 评估通过真实链路：front matter 解析 → schema 校验 → `assessments/` 落盘 → 状态机更新。
-3. 断言：结果区 verdict 徽标"通过"、掌握度与 next 建议、"进度已更新"提示出现；节点状态徽标从"学习中"变为"能独立应用"；图谱节点颜色更新（重建后样式正确）。
-4. 断言（数据层）：`assessments/` 目录出现新记录文件；该会话上传目录之外无脏文件。
+### 4.6 assessment.spec.ts —— 已删除（评估改由 agent 工具，见 §4.28）
+
+2026-10-04 第八轮：节点详情页「申请评估」块删除，评估改为会话 agent 工具 `assess_node`。原 `assessment.spec.ts` 删除，评估链路由新用例 `assess-tool.spec.ts`（§4.28）承接；实验课联升与学习记录落盘仍由后端 pytest（评估服务）覆盖。
 
 ### 4.7 progress-transition.spec.ts —— 状态流转（对应"保守推进"）
 1. 选一个"未开始"节点 → 详情状态区只显示合法流转项"学习中"（不显示"已通过项目验证"等）。
@@ -236,7 +246,7 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 ### 4.19 memory-flow.spec.ts —— 共享记忆写侧（**已悬空**）
 1. 2026-10-04 拍板：聊天侧「沉淀记忆」入口随「会话关联」区移除，本文件两条用例改 `test.skip(true, …)` **挂起**（后端 `suggest`/`confirm`、`MemoryDialog.tsx` 都保留）。
 2. 原流程（保留供接回后恢复）：无消息时入口禁用 → 发一轮消息后启用 → 模态列 fixture 2 条建议 → 取消勾选一条 → 写入 MEMORY.md 并逐条核对 → 幂等去重；adverse 变体（mock 空建议）断言空态与禁用。
-3. 仍被覆盖的部分：评估结果面板的「沉淀记忆」入口在 `assessment.spec.ts` 里断言（打开 `memory-dialog`）。
+3. 仍被覆盖的部分：**评估通过后的「沉淀记忆」入口**原先在评估结果面板（`assessment.spec.ts`）；第八轮评估改由 agent 工具、结果落在聊天里，该面板随之删除，这条入口暂**无 E2E 覆盖**（后端 `suggest`/`confirm` 仍在，`memory-flow.spec.ts` 挂起）。
 
 ### 4.20 attachments-area.spec.ts —— 附件区（对应"附件区入口"）
 1. 未关联科目时右栏无附件区；关联 computer-networks 后**先展开右栏**（新对话默认折叠）→ 出现「术语表」组（e2e 科目目录带 `GLOSSARY.md`）。
@@ -249,13 +259,14 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 3. `finally` 无条件 PUT 恢复原工作区（避免污染同轮其他用例）。
 （原「欢迎区引导块」已随 2026-10-04 拍板移除，本文件随之改写；`WorkspaceOnboarding.tsx` 目前无引用。）
 
-### 4.22 tool-cards.spec.ts —— 工具化 chat 的工具卡（对应"工具化调用"）
+### 4.22 tool-cards.spec.ts —— 工具化 chat 的工具卡（对应"工具化调用"，2026-10-04 v2.4 改写）
 1. `page.route` 拦截 `/api/chat/stream`，把请求体补上 `fixture_scenario: "tools"`（fixture 模式下 chat 由此走 canned 工具脚本，不在生产 UI 上开入口）。
 2. 关联 computer-networks → 发送一条消息 → 等流式结束。
-3. 断言两张工具卡（`tool-card`：`list_workspace` + `read_course_file`）；展开首卡的 `summary` → `tool-result` 可见。
-4. 断言工具轮之后的最终答复文本出现（fixture 脚本末段）。
+3. **工具卡常显在消息体**（v2.4 起移出「中间过程」折叠区，无需展开任何折叠区）：断言两张工具卡（`tool-card`：`list_workspace` + `read_course_file`）且首张可见；展开首卡的 `summary` → `tool-result` 可见。
+4. 因 `tools` 场景既无思维链也无提示，**`process-panel` 整块不渲染**（`toHaveCount(0)`，不留空面板）。
+5. 断言工具轮之后的最终答复文本出现（fixture 脚本末段）。
 
-> 建课/产课的工具循环（`submit_curriculum` / `write_deliver_file` / `run_check`）在 fixture 模式下走单次派工，不在旅程级覆盖；其行为由后端 `test_tooling.py` 以 monkeypatch 的假 turn source 覆盖（真实门禁/渲染器仍真跑）。
+> 产课/评估动作工具（`produce_lesson` / `assess_node`）的旅程级用例见 §4.27 / §4.28；建课工具循环 `submit_curriculum`、产课链内 `write_deliver_file` / `run_check` 仍在 fixture 模式下走单次派工，行为由后端 `test_tooling.py` / `test_chat_tools.py` 以 monkeypatch 的假 turn source 覆盖（真实门禁/渲染器/评估服务仍真跑）。
 
 ### 4.23 new-session-association.spec.ts —— 新对话关联行与会话级工作区（对应"工作区"节，2026-10-04 新增）
 1. `/chat` 新对话态：`new-session-association` 可见；`new-session-workspace` 默认值为空（首项「默认工作区」）、候选里含 fixture 工作区绝对路径；科目下拉含 `计算机网络`。
@@ -268,11 +279,49 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 2. `reload` 后仍是 60px（折叠态持久化在 localStorage）。
 3. 点「展开侧边栏」→ 回到默认宽度。
 
+### 4.25 message-actions.spec.ts —— 助手名称栏 / 上下文窗口 / 中间过程折叠 / 消息操作（2026-10-04 新增）
+1. **名称栏 + 上下文窗口**：发一条消息后，`assistant-name` 显示「DeepSeek / deepseek-chat」（fixture settings 的当前使用项）；右栏 `context-window-model` 同值，`context-window-usage` 含 `11.5k` 与 `%`（用量来自 SSE `usage` 事件，分母取模型上下文长度、未声明时用兜底默认值），`context-window-bar` 可见。
+2. **中间过程折叠**：路由改写 `fixture_scenario=process`（`FIXTURE_TOOL_SCRIPTS["process"]`：思维链 + list_workspace + read_course_file + 结论）。断言 `process-panel` 存在且**默认收起**（无 `open` 属性、`process-reasoning` 隐藏）；**工具卡常显在消息体外**（不用展开折叠区就能看到两张 `tool-card`）；点 `process-summary` 后 `open` 属性出现、思维链正文可见（工具卡不受影响）。
+3. **编辑用户消息**：两轮对话（4 条）→ 悬停首条用户消息点 `user-message-edit` → `message-edit-box` 就地出现 → 改文后 `message-edit-submit` → 新文本可见、消息数回到 2 条、被顶掉的整轮文本归 0（服务端 `replace_from` 真的截断）。
+4. **编辑保留原附件**：带 `note.txt` 发送 → 编辑时 `message-edit-attachment` 含 `note.txt` → 点其「移除」后 chip 归 0 → 取消编辑回到读数态。
+5. **删除整轮**：`turn-delete` → `turn-delete-confirm` 内联确认 → 点确认后消息数 0、正文归 0（用户提问与助手回复成对删）。
+
+> 说明：`<details>` 的"收起"断言不用 `toBeHidden()` 直接打整组（多个匹配会触发 strict violation），改用 `toHaveAttribute("open", "")` 与单元素可见性断言；正文文本断言一律限定在 `chat-messages` 内（会话标题会与消息正文撞词）。
+
+### 4.26 session-model.spec.ts —— 会话级模型与档位（对应"模型快捷切换"节，2026-10-04 新增）
+1. **会话内切换只绑本会话**：发一条消息成为正式会话 → 切到 `SiliconFlow / deepseek-ai/DeepSeek-V3` → 计数断言 `PATCH /api/sessions/<id>` ≥1 且 `PUT /api/settings` = 0；`GET /api/settings` 的 active 保持原值；`GET /api/sessions/<id>` 的 `active` 三元组等于所选。
+2. **后端确实用绑定模型跑这一轮**：直接 `POST /api/chat/stream`（fixture 模式不外呼，因此"绑到没 key 的提供商"也能验）→ 该会话最后一条助手消息的 `model` 是 `SiliconFlow / deepseek-ai/DeepSeek-V3`。
+3. **持久化**：`reload` 后从左侧边栏重开该会话 → 模型选择器仍显示硅基流动；绑到没配 key 的提供商时输入框如实禁用（`hasKey` 也按生效三元组算）。
+4. **新对话态仍写全局默认**：新对话态切到 `DashScope / qwen-plus` → `PUT /api/settings` ≥1 且无会话可 PATCH；用例收尾把全局默认改回 DeepSeek，避免影响后续 settings-* 用例。
+
+### 4.27 produce-tool.spec.ts —— 会话 agent 工具产课（对应"产课（三件套）"，2026-10-04 第八轮新增）
+1. `page.route` 改写 `fixture_scenario=produce`（`FIXTURE_TOOL_SCRIPTS["produce"]`：`produce_lesson(net.layers)` → 收尾文本）。
+2. `/chat` 关联 `computer-networks` → 发「产出第一课」。
+3. 断言：**工具卡常显在消息体**（`tool-card` 含 `produce_lesson`，非折在 panel 里）；收尾答复「已产出这一课」可见。
+4. 数据层：会话列表里该会话 `subject_slug=computer-networks`；拉会话 JSON，助手消息 `tools[]` 里有 `produce_lesson` 且 `isError=false`（工具真跑通）。
+
+### 4.28 assess-tool.spec.ts —— 会话 agent 工具评估（对应"评估点（证据>口头）"，2026-10-04 第八轮新增）
+1. `page.route` 改写 `fixture_scenario=assess`（`FIXTURE_TOOL_SCRIPTS["assess"]`：`assess_node(net.layers, evidence)` → 收尾文本）。
+2. `/chat` 关联 `computer-networks` → 发「帮我评估一下这一节」。
+3. 断言：`tool-card` 含 `assess_node`、收尾文本「评估完成」可见。
+4. 数据层：会话消息 `tools[]` 的 `assess_node` 非错误且结果含「判定」；`GET /api/courses/<slug>/records` 的 `assessments` 含 `net.layers`（评估记录真落盘）。
+
+### 4.29 courses-home-embed.spec.ts —— 「我的课程」首页（对应"节点详情与大纲 / 我的课程"，2026-10-04 第八轮新增）
+1. `/courses`（不带参数）→ `home-embed` iframe 可见、`title="我的课程"`；`course-graph-rail` / `course-outline` / `course-node-detail` 数量均为 0（不渲染经营视图）。
+2. `/courses?subject=computer-networks` → `course-graph-rail` 可见、`graph-node-net.layers` 已挂载、`home-embed` 数量 0（带科目仍是原课程页）。
+（空工作区优先显示「还没有科目…」提示，fixture 有种子科目故覆盖不到。）
+
+### 4.30 chat-subject-graph.spec.ts —— 聊天右栏科目图谱区（2026-10-04 第八轮新增）
+1. `/chat` 展开右栏 → 关联 `computer-networks` → 发一条消息。
+2. 从会话列表重新打开该会话（验证关联从**落库的会话元数据**恢复，非新对话态的本地选择）→ 展开右栏。
+3. 断言 `subject-graph-section` 可见、右栏默认**大纲**视图（`course-outline` 可见、`outline-node-net.layers` 可见）。
+4. 点 `outline-node-net.layers` → URL 变 `/courses?subject=computer-networks&node=net.layers`（跳课程页定位）。
+
 ---
 
 ## 5. 运行与维护约定
 
-- 顺序敏感：`workers: 1` + 文件名字母序（chat 用例先于 settings-providers，后者会把 active 切到无 key 的"我的中转"；`sidebar-resize` 排在 settings-* 之后）；globalSetup 每轮重建工作区与 settings，保证幂等。本轮 **53 条通过 + 3 条 skip**（`memory-flow` 2 + `session-summary` 1，悬空占位）**0 失败**；K 系列轮起两轮连跑均全绿。
+- 顺序敏感：`workers: 1` + 文件名字母序（chat 用例先于 settings-providers，后者会把 active 切到无 key 的"我的中转"；`sidebar-resize` 排在 settings-* 之后）；globalSetup 每轮重建工作区与 settings，保证幂等。本轮 **62 条通过 + 3 条 skip**（`memory-flow` 2 + `session-summary` 1，悬空占位）**0 失败**（新增与改写的用例先单独跑绿，再跑单轮全量）。
 - 新增用例命名沿用旅程语义（`<旅程>.spec.ts`），归入第 3 节映射表并保持表格与文件一致。
 - 逆向前置状态：新入口用例除 happy path 外，须为关键入口补 adverse 前置变体（无科目对话、已填 key 的测试连接、空模型列表等）；组合爆炸的分支下沉组件测试（第 2 节 P4），不堆在旅程级。
 - 入口载荷断言：凡"用户输入 → 请求"的入口（测试连接、模型切换、概念本 prefill），必须有一条 `page.route` 载荷断言，防止字段被前端静默丢弃（第 2 节 P1）。
@@ -285,7 +334,7 @@ v1.0 的旅程用例两轮全绿且幂等，但维护者人工试用（`反馈�
 
 ### 5.1 实现偏差备注（以实际代码为准，2026-10-02 落地时修正）
 
-1. §4.6 状态机路径：`TRANSITIONS["学习中"]` 只到 初步理解/需要复习，用例实际经 需要复习→学习中→初步理解，再由评估推进到"能独立应用"。
+1. §4.28 状态机路径：`TRANSITIONS["学习中"]` 只到 初步理解/需要复习，评估推进到"能独立应用"（原 `assessment.spec` 实测，改用例后行为不变）。
 2. fixture assess 的整体 verdict 取"通过"（部分通过会让 progress_updated 恒为 false，状态机链路不可测）；逐题 verdict 不变，schema 各自独立。
 3. globalSetup 往 e2e 副本的 0001-net.layers.html 注入一个双选择题题组（quiz.js 仅在组内选择题 >1 时渲染"本题组：答对 N/M"；examples 源未动）。
 4. §4.3 "下一节"断言的是 iframe URL 变为 0002 + iframe 内 h1 变化（LessonView 顶栏标题跟随查询参数，不随 iframe 内导航变）。

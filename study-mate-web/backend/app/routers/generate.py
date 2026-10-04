@@ -6,6 +6,7 @@ SKILL.md 全文注入 + 派工值内联；输出 JSON 图契约不变（data 键
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -121,7 +122,11 @@ async def generate_course(payload: GenerateCourseRequest):
             yaml.safe_dump(data, tmp, allow_unicode=True, sort_keys=False)
             tmp_name = tmp.name
         try:
-            proc = subprocess.run(
+            # 门禁子进程最多 120s：用 to_thread 跑，别同步堵住事件循环
+            # （build.py / produce.py 都已经是这么做的，这里是漏网的那个；堵住会让同进程
+            #   其它 SSE 流、附件上传一起"卡住"数秒到 2 分钟）
+            proc = await asyncio.to_thread(
+                subprocess.run,
                 [sys.executable, str(gate), tmp_name],
                 capture_output=True,
                 text=True,

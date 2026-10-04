@@ -275,14 +275,72 @@ def _model_reasoning_variant(
     reasoning: Any,
     active_variant: str,
 ) -> str:
-    """当前生效推理档位：active.reasoning_variant 优先，回落模型默认档位。"""
+    """当前生效推理档位：active.reasoning_variant 优先，未指定时回落模型默认档位。
+
+    **不在这里把 `off` 类取值抹成空串**：显式选的"关"与"没选"是两回事——抹空会让下游
+    回落成模型默认档（默认可能是 high），等于用户选了关却开了思考。开关语义统一由
+    `llm._reasoning_request()` 归一化（2026-10-04）。
+    """
     if not isinstance(reasoning, dict) or not reasoning.get("enabled"):
         return ""
     variants = reasoning.get("variants")
     if not isinstance(variants, list) or not variants:
         return ""
-    variant = active_variant or str(reasoning.get("default_variant") or "")
-    return "" if variant == "off" else str(variant)
+    return str(active_variant).strip() or str(reasoning.get("default_variant") or "")
+
+
+def _compose_provider(provider: dict[str, Any], model: str, variant: str) -> dict[str, Any]:
+    """把提供商条目 + 生效模型 + 档位组装成调用方使用的 provider 字典。"""
+    entries = provider.get("models") or []
+    modalities = _model_field(entries, model, "modalities", None)
+    return {
+        **provider,
+        "model": model,
+        "modalities": modalities,
+        "max_output_tokens": _model_field(entries, model, "max_output_tokens", None),
+        "reasoning": _model_field(entries, model, "reasoning", None),
+        "reasoning_variant": variant,
+        # 工具调用默认对所有模型开启（2026-10-04）；capabilities 保留落盘/展示
+        "capabilities": _model_field(entries, model, "capabilities", None),
+        # 兼容 chat.py 既有的 provider["vision"] 读取方式：由 modalities 派生三态
+        "vision": (
+            "on"
+            if isinstance(modalities, dict) and modalities.get("image")
+            else "off"
+            if isinstance(modalities, dict)
+            else "auto"
+        ),
+        "base_url": os.getenv("LLM_BASE_URL", str(provider.get("base_url") or "")),
+        "api_key": os.getenv("LLM_API_KEY", str(provider.get("api_key") or "")),
+    }
+
+
+def get_session_provider(active: dict[str, Any] | None) -> dict[str, Any] | None:
+    """会话绑定的模型三元组 → provider 字典（2026-10-04 拍板：模型/档位按会话持久化）。
+
+    只在绑定**完全可用**时生效：提供商存在且启用、该模型仍在该提供商的模型表里。
+    任何一处对不上（提供商被删 / 被停用 / 模型被移除）都返回 None，由调用方回落到当前
+    默认模型——不猜测、不"就近取一个"。
+    """
+    if not isinstance(active, dict):
+        return None
+    provider_id = str(active.get("provider_id") or "")
+    model = str(active.get("model") or "")
+    if not provider_id or not model:
+        return None
+    settings = load_settings()
+    provider = next(
+        (item for item in (settings.get("providers") or []) if item.get("id") == provider_id),
+        None,
+    )
+    if provider is None or not provider.get("enabled", True):
+        return None
+    entries = provider.get("models") or []
+    if not any(item.get("name") == model for item in entries):
+        return None
+    reasoning = _model_field(entries, model, "reasoning", None)
+    variant = _model_reasoning_variant(reasoning, str(active.get("reasoning_variant") or ""))
+    return _compose_provider(provider, model, variant)
 
 
 def get_active_provider() -> dict[str, Any] | None:
@@ -314,27 +372,6 @@ def get_active_provider() -> dict[str, Any] | None:
         # 当前模型被停用：回落到该提供商第一个可用模型
         model = str(usable[0].get("name") or "")
 
-    modalities = _model_field(entries, model, "modalities", None)
     reasoning = _model_field(entries, model, "reasoning", None)
     variant = _model_reasoning_variant(reasoning, str(active.get("reasoning_variant") or ""))
-
-    return {
-        **provider,
-        "model": model,
-        "modalities": modalities,
-        "max_output_tokens": _model_field(entries, model, "max_output_tokens", None),
-        "reasoning": reasoning,
-        "reasoning_variant": variant,
-        # 工具调用默认对所有模型开启（2026-10-04）；capabilities 保留落盘/展示
-        "capabilities": _model_field(entries, model, "capabilities", None),
-        # 兼容 chat.py 既有的 provider["vision"] 读取方式：由 modalities 派生三态
-        "vision": (
-            "on"
-            if isinstance(modalities, dict) and modalities.get("image")
-            else "off"
-            if isinstance(modalities, dict)
-            else "auto"
-        ),
-        "base_url": os.getenv("LLM_BASE_URL", str(provider.get("base_url") or "")),
-        "api_key": os.getenv("LLM_API_KEY", str(provider.get("api_key") or "")),
-    }
+    return _compose_provider(provider, model, variant)

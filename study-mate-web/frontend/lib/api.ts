@@ -3,6 +3,7 @@ import type {
   AssessPayload,
   AssessResponse,
   AttachmentsArea,
+  ChatMessage,
   CourseDetail,
   CourseRecords,
   DraftDetail,
@@ -24,6 +25,7 @@ import type {
   NodeStatus,
   QuizItem,
   Session,
+  SessionActive,
   SessionMeta,
   SubjectStatus,
   SubjectSummary,
@@ -34,6 +36,7 @@ import type {
   TicketProblem,
   ToolActivity,
   UploadedAttachment,
+  Usage,
   WorkspaceInfo,
 } from "./types";
 
@@ -145,8 +148,20 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ workspace }),
     }),
+  /** 绑定/解绑会话级模型与档位（null = 回到当前默认模型） */
+  setSessionActive: (id: string, active: SessionActive | null) =>
+    jsonFetch<Session>(`/api/sessions/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ active }),
+    }),
   deleteSession: (id: string) =>
     jsonFetch<{ ok: boolean }>(`/api/sessions/${id}`, { method: "DELETE" }),
+  /** 删除整轮（index 指向该轮的用户消息或助手回复，服务端成对删掉） */
+  deleteTurn: (id: string, index: number) =>
+    jsonFetch<{ ok: boolean; deleted: number[]; messages: ChatMessage[] }>(
+      `/api/sessions/${encodeURIComponent(id)}/messages/${index}`,
+      { method: "DELETE" },
+    ),
 
   listCourses: (workspace?: WorkspaceParam) =>
     jsonFetch<SubjectSummary[]>(withWorkspace("/api/courses", workspace)),
@@ -342,30 +357,51 @@ export const api = {
       .map((part) => encodeURIComponent(part))
       .join("/")}`,
 
-  promoteDraft: (slug: string, target?: string) =>
+  // 落点确认：带上会话 id，后端据此把 promote 出来的科目关联回该会话
+  promoteDraft: (slug: string, sessionId?: string | null, target?: string) =>
     jsonFetch<{ ok: boolean; subject_dir: string }>(
       `/api/drafts/${encodeURIComponent(slug)}/promote`,
-      { method: "POST", body: JSON.stringify({ target: target ?? null }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ target: target ?? null, session_id: sessionId ?? null }),
+      },
     ),
 };
 
 export interface StreamHandlers {
   onSession?: (sessionId: string) => void;
   onDelta?: (piece: string) => void;
+  /** 思维链增量（网关 reasoning_content / anthropic thinking_delta） */
+  onReasoning?: (piece: string) => void;
   onNotice?: (message: string) => void;
   onConfirm?: (payload: { slug: string; name: string }) => void;
   /** 工具化运行时（K0）：模型发起一次工具调用 */
   onToolCall?: (payload: { id: string; name: string; arguments: string }) => void;
   /** 工具执行结果回吐（is_error 表示工具以错误文本回填，循环不中断） */
   onToolResult?: (payload: { id: string; name: string; content: string; is_error: boolean }) => void;
+  /** 本轮 LLM 用量（右栏「上下文窗口」栏） */
+  onUsage?: (usage: Usage) => void;
   onDone?: (sessionId: string) => void;
   onError?: (message: string) => void;
 }
 
-/** 编排 SSE 的事件处理（production 路由：stage/retry/handoff/done/error）。 */
+/** 编排进度快照（后端 ProgressReporter 每几秒发一次）：用来证明"确实在工作" */
+export interface OrchestrationProgress {
+  stage: string;
+  round: number;
+  elapsed_s: number;
+  reasoning_chars: number;
+  text_chars?: number;
+  tool_calls: number;
+  last_tool?: string;
+}
+
+/** 编排 SSE 的事件处理（production 路由：stage/retry/progress/handoff/done/error）。 */
 export interface OrchestrationHandlers {
   onSession?: (sessionId: string) => void;
   onStage?: (payload: { stage: string; status: string; artifacts?: string[]; problems?: TicketProblem[] }) => void;
+  /** 周期性进度（第几轮 / 已等待多久 / 工具次数）：编排卡据此显示"在干活" */
+  onProgress?: (payload: OrchestrationProgress) => void;
   onRetry?: (payload: { round: number; owners: string[]; reason?: string }) => void;
   onHandoff?: (payload: { ticket: InspectionTicket }) => void;
   onDone?: (payload: { message?: string; slug?: string; stage?: string; artifacts?: string[] }) => void;
@@ -383,6 +419,11 @@ export interface StreamChatOptions {
   mode?: "chat" | "interview" | null;
   /** 仅 fixture 模式生效：按请求选固定流场景（E2E 专用） */
   fixtureScenario?: string | null;
+  /**
+   * 编辑重发：被取代的旧用户消息下标（含，其后全部消息在服务端一并截断）。
+   * 只有编辑已有会话的用户消息时才带；普通发送不带此键。
+   */
+  replaceFrom?: number;
   signal?: AbortSignal;
 }
 
@@ -396,7 +437,16 @@ export async function streamChat(
   handlers: StreamHandlers,
   options: StreamChatOptions = {},
 ): Promise<void> {
-  const { subjectSlug, nodeId, attachments, workspace, mode = null, fixtureScenario = null, signal } = options;
+  const {
+    subjectSlug,
+    nodeId,
+    attachments,
+    workspace,
+    mode = null,
+    fixtureScenario = null,
+    replaceFrom,
+    signal,
+  } = options;
   const res = await fetch("/api/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -409,6 +459,7 @@ export async function streamChat(
       attachment_ids: attachments ?? [],
       mode,
       fixture_scenario: fixtureScenario,
+      ...(replaceFrom === undefined ? {} : { replace_from: replaceFrom }),
     }),
     signal,
   });
@@ -418,9 +469,13 @@ export async function streamChat(
     return;
   }
 
+  // done / error 是前端复位 streaming 的唯一入口：流自然结束却没等到它们（后端任务被取消、
+  // 进程被杀、连接被中间层截断），必须补一条错误，否则界面会一直转圈。
+  let settled = false;
   await consumeSSE(res, (event, payload) => {
     if (event === "session") handlers.onSession?.(payload.session_id as string);
     else if (event === "delta") handlers.onDelta?.(payload.content as string);
+    else if (event === "reasoning") handlers.onReasoning?.(payload.content as string);
     else if (event === "notice") handlers.onNotice?.(payload.message as string);
     else if (event === "tool_call")
       handlers.onToolCall?.(payload as unknown as { id: string; name: string; arguments: string });
@@ -428,10 +483,17 @@ export async function streamChat(
       handlers.onToolResult?.(
         payload as unknown as { id: string; name: string; content: string; is_error: boolean },
       );
+    else if (event === "usage") handlers.onUsage?.(payload.usage as Usage);
     else if (event === "confirm") handlers.onConfirm?.(payload as never);
-    else if (event === "done") handlers.onDone?.(payload.session_id as string);
-    else if (event === "error") handlers.onError?.(payload.message as string);
+    else if (event === "done") {
+      settled = true;
+      handlers.onDone?.(payload.session_id as string);
+    } else if (event === "error") {
+      settled = true;
+      handlers.onError?.(payload.message as string);
+    }
   });
+  if (!settled) handlers.onError?.("连接中断：本轮未正常结束，请重试。");
 }
 
 /** 解析一条 SSE 事件流（fetch + ReadableStream）；事件名与载荷交给 sink。 */
@@ -482,11 +544,12 @@ export async function streamOrchestration(
   await consumeSSE(res, (event, payload) => {
     if (event === "session") handlers.onSession?.(payload.session_id as string);
     else if (event === "stage") handlers.onStage?.(payload as never);
+    else if (event === "progress") handlers.onProgress?.(payload as never);
     else if (event === "retry") handlers.onRetry?.(payload as never);
     else if (event === "handoff") handlers.onHandoff?.(payload as never);
     else if (event === "done") handlers.onDone?.(payload);
     else if (event === "error") handlers.onError?.(String(payload.message));
-    // finished / confirm 在编排流里忽略（confirm 仅 chat 流使用）
+    // finished / confirm 在编排流里忽略（confirm 仅 chat 流使用；progress 高频、不持久化）
   });
 }
 

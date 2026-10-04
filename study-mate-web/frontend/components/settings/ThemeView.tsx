@@ -279,7 +279,7 @@ export function ThemeView() {
                 <span>对话伴学</span>
               </div>
               <div className="rounded-lg px-2 py-1.5 text-[var(--foreground)]/70 hover:bg-[var(--muted)]">
-                课程图谱
+                我的课程
               </div>
               <div className="rounded-lg px-2 py-1.5 text-[var(--foreground)]/70 hover:bg-[var(--muted)]">
                 概念本

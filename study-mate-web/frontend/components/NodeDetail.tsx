@@ -1,29 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   BookOpen,
-  Brain,
   Check,
-  ClipboardCheck,
   ExternalLink,
-  FileText,
   Loader2,
-  MessageSquare,
   Save,
-  Sparkles,
-  Wand2,
 } from "lucide-react";
 import clsx from "clsx";
-import { api, produceNode } from "@/lib/api";
-import { useWorkspace } from "@/lib/workspace";
+import { api } from "@/lib/api";
 import { InspectionDialog } from "./InspectionDialog";
-import { MemoryDialog } from "./MemoryDialog";
-import { VerdictBadge } from "./VerdictBadge";
 import type {
-  AssessResponse,
-  AssessmentRecord,
   GraphNode,
   LabStatus,
   LessonInfo,
@@ -60,7 +49,6 @@ interface NodeDetailProps {
 
 export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailProps) {
   const router = useRouter();
-  const { sessions, setActiveSubject } = useWorkspace();
 
   const [mastery, setMastery] = useState(node.mastery);
   const [notes, setNotes] = useState(node.notes);
@@ -70,29 +58,9 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
 
   const [hasLesson, setHasLesson] = useState(false);
 
-  const [assessOpen, setAssessOpen] = useState(false);
-  const [selectedSessionId, setSelectedSessionId] = useState("");
-  const [extraContext, setExtraContext] = useState("");
-  const [assessing, setAssessing] = useState(false);
-  const [assessResult, setAssessResult] = useState<AssessResponse | null>(null);
-  const [assessError, setAssessError] = useState<string | null>(null);
-  const [records, setRecords] = useState<AssessmentRecord[] | null>(null);
-  // 本次评估实际使用的会话 id：评估通过后的「沉淀记忆」入口从该会话提炼
-  const [assessedSessionId, setAssessedSessionId] = useState<string | null>(null);
-  // 「沉淀记忆」确认面板（评估通过后开，不预填，走 suggest）
-  const [memoryOpen, setMemoryOpen] = useState(false);
-
-  // 产课链（§5.1 C 行）：讲解→出题→渲染→检查→打回；进度内联播报，失败开工单
-  const [producing, setProducing] = useState(false);
-  const [produceLines, setProduceLines] = useState<string[]>([]);
-  const [produceError, setProduceError] = useState<string | null>(null);
-  const [produced, setProduced] = useState(false);
+  // 质检工单角标入口（产课链按钮移除后，工单仍是独立的检查入口）
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
   const [nodeTicketId, setNodeTicketId] = useState<string | null>(null);
-  const nodeIdRef = useRef(node.id);
-  useEffect(() => {
-    nodeIdRef.current = node.id;
-  }, [node.id]);
 
   useEffect(() => {
     setMastery(node.mastery);
@@ -100,16 +68,6 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
     setSaving(false);
     setSaved(false);
     setError(null);
-    setAssessOpen(false);
-    setAssessResult(null);
-    setAssessError(null);
-    setExtraContext("");
-    setAssessedSessionId(null);
-    setMemoryOpen(false);
-    setProducing(false);
-    setProduceLines([]);
-    setProduceError(null);
-    setProduced(false);
     setOpenTicketId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在切换节点时重置；保存后的值由 save() 自己同步，避免抹掉"已保存"反馈
   }, [node.id]);
@@ -153,51 +111,6 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
     };
   }, [slug, node.id]);
 
-  const runProduce = () => {
-    if (producing) return;
-    const runningNodeId = node.id;
-    setProducing(true);
-    setProduceLines([]);
-    setProduceError(null);
-    setProduced(false);
-    const mark = (line: string) => setProduceLines((prev) => [...prev, line]);
-    void produceNode(slug, runningNodeId, {
-      onSession: () => undefined,
-      onStage: (payload) => {
-        if (payload.status === "done") mark(`✅ ${payload.stage}完成`);
-        else if (payload.status === "fail") mark(`⚠ ${payload.stage}未过`);
-      },
-      onRetry: (payload) =>
-        mark(
-            `🔁 第 ${payload.round} 轮打回（${payload.owners.join("、")}）${
-                payload.reason ? `：${payload.reason}` : "，附报错原文重派"
-            }`,
-        ),
-      onHandoff: (payload) => {
-        mark("⛔ 打回两轮仍未通过，已转人工");
-        setNodeTicketId(payload.ticket.id);
-      },
-      onDone: () => {
-        if (nodeIdRef.current !== runningNodeId) return; // 在途产课的结果不写进切走后的节点视图
-        setProduced(true);
-        setHasLesson(true);
-        lessonsCache.delete(slug); // 课件列表缓存失效：切走再切回不回退按钮标签
-      },
-      onError: (message) => {
-        if (nodeIdRef.current !== runningNodeId) return;
-        setProduceError(message);
-      },
-    })
-      .catch((err) => {
-        if (nodeIdRef.current === runningNodeId) {
-          setProduceError(err instanceof Error ? err.message : String(err));
-        }
-      })
-      .finally(() => {
-        if (nodeIdRef.current === runningNodeId) setProducing(false);
-      });
-  };
-
   const save = async (payload: {
     status?: NodeStatus;
     mastery?: number;
@@ -220,53 +133,8 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
     }
   };
 
-  const askStudyMate = () => {
-    setActiveSubject(slug, node.id);
-    router.push("/chat");
-  };
-
   const openLesson = () => {
     router.push(`/lesson?subject=${encodeURIComponent(slug)}&node=${encodeURIComponent(node.id)}`);
-  };
-
-  const subjectSessions = sessions
-    .filter((s) => s.subject_slug === slug)
-    .sort((a, b) => b.updated_at - a.updated_at);
-
-  const toggleAssess = () => {
-    const next = !assessOpen;
-    setAssessOpen(next);
-    if (next) {
-      setAssessResult(null);
-      setAssessError(null);
-      setSelectedSessionId(subjectSessions[0]?.id ?? "");
-      setRecords(null);
-      api
-        .listRecords(slug)
-        .then((res) => setRecords(res.assessments.filter((a) => a.node === node.id)))
-        .catch(() => setRecords([]));
-    }
-  };
-
-  const submitAssess = async () => {
-    if (!selectedSessionId) return;
-    setAssessing(true);
-    setAssessError(null);
-    try {
-      const trimmed = extraContext.trim();
-      const res = await api.assessNode(slug, node.id, {
-        session_id: selectedSessionId,
-        extra_context: trimmed ? trimmed : undefined,
-      });
-      setAssessResult(res);
-      // 记下本次评估用的会话：评估通过后的记忆入口按它提炼
-      setAssessedSessionId(selectedSessionId);
-      if (res.node) onUpdated(res.node);
-    } catch (err) {
-      setAssessError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setAssessing(false);
-    }
   };
 
   return (
@@ -300,46 +168,16 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
           </button>
         )}
 
-        {/* 产课链入口（§5.1 C 行）：讲解→出题→渲染→检查，打回耗尽转人工 */}
-        <div className="mb-4 flex flex-col gap-2 rounded-xl border p-3" style={{ borderColor: "var(--border)" }}>
+        {/* 质检工单角标入口（检查入口，独立于已移除的产课链按钮） */}
+        {nodeTicketId && (
           <button
-            data-testid="produce-button"
-            onClick={runProduce}
-            disabled={producing}
-            className="flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-[var(--muted)] disabled:opacity-50"
-            style={{ borderColor: "var(--border)" }}
-            title="为该节点产出课件：讲解与出题由角色子代理完成，渲染与质检由后端跑上游脚本"
+            data-testid="node-ticket-entry"
+            onClick={() => setOpenTicketId(nodeTicketId)}
+            className="mb-4 flex w-full items-center justify-center gap-1.5 rounded-lg border border-amber-400/50 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
           >
-            {producing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-            {producing ? "产课进行中…" : hasLesson ? "重新产出此课" : "产出此课"}
+            ⚠ 有待处理的质检工单，点击查看
           </button>
-          {nodeTicketId && (
-            <button
-              data-testid="node-ticket-entry"
-              onClick={() => setOpenTicketId(nodeTicketId)}
-              className="flex items-center justify-center gap-1.5 rounded-lg border border-amber-400/50 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
-            >
-              ⚠ 有待处理的质检工单，点击查看
-            </button>
-          )}
-          {produceLines.length > 0 && (
-            <div data-testid="produce-progress" className="flex flex-col gap-1 rounded-lg px-2 py-1.5 text-xs" style={{ background: "var(--muted)" }}>
-              {produceLines.map((line, i) => (
-                <span key={i}>{line}</span>
-              ))}
-            </div>
-          )}
-          {produced && !producing && (
-            <div data-testid="produce-done" className="flex items-center gap-1.5 text-xs text-emerald-600">
-              <Check className="h-3.5 w-3.5" /> 课件已产出并通过质检，可以打开学习了。
-            </div>
-          )}
-          {produceError && (
-            <div data-testid="produce-error" className="text-xs text-amber-600">
-              {produceError}
-            </div>
-          )}
-        </div>
+        )}
 
         <Section label="目标">
           <p className="text-sm leading-relaxed">{node.objective || "—"}</p>
@@ -537,142 +375,9 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
 
         {/* 本节点误解（概念本的节点维度入口，2026-10-04 连贯化拍板） */}
         <NodeMisconceptions slug={slug} nodeId={node.id} />
-
-        {/* 申请评估 */}
-        <div
-          className="mt-4 flex flex-col gap-3 rounded-xl border p-3"
-          style={{ borderColor: "var(--border)" }}
-        >
-          <button
-            onClick={toggleAssess}
-            className="flex items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
-            style={{ borderColor: "var(--border)" }}
-          >
-            <ClipboardCheck className="h-4 w-4" />
-            {assessOpen ? "收起评估" : "申请评估"}
-          </button>
-
-          {assessOpen && (
-            <div className="flex flex-col gap-3">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs opacity-60">评估会话</span>
-                {subjectSessions.length === 0 ? (
-                  <span className="text-xs opacity-40">
-                    没有关联「{slug}」的会话，先在聊天里关联本科目并对话
-                  </span>
-                ) : (
-                  <select
-                    value={selectedSessionId}
-                    onChange={(e) => setSelectedSessionId(e.target.value)}
-                    className="w-full truncate rounded-lg border bg-transparent px-2 py-1.5 text-sm outline-none"
-                    style={{ borderColor: "var(--border)" }}
-                  >
-                    {subjectSessions.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.title || "未命名会话"}（{s.message_count} 条）
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </label>
-
-              <label className="flex flex-col gap-1">
-                <span className="text-xs opacity-60">补充说明（可选）</span>
-                <textarea
-                  value={extraContext}
-                  onChange={(e) => setExtraContext(e.target.value)}
-                  rows={2}
-                  placeholder="例如：重点评估我对 XX 的理解，实验卡在了 YY"
-                  className="w-full resize-none rounded-lg border bg-transparent px-2 py-1.5 text-sm outline-none"
-                  style={{ borderColor: "var(--border)" }}
-                />
-              </label>
-
-              <button
-                onClick={() => void submitAssess()}
-                disabled={!selectedSessionId || assessing}
-                className="flex items-center justify-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm text-white hover:bg-brand-light disabled:opacity-50"
-              >
-                {assessing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="h-4 w-4" />
-                )}
-                {assessing ? "评估中…" : "提交评估"}
-              </button>
-
-              {assessError && <p className="break-all text-xs text-red-500">{assessError}</p>}
-
-              {assessResult && (
-                <div data-testid="assess-result" className="flex flex-col gap-2">
-                  <AssessResultPanel result={assessResult} />
-                  {/* 评估通过：把本次评估会话里值得长期记住的内容写进 MEMORY.md */}
-                  {assessResult.assessment.verdict === "通过" && assessedSessionId && (
-                    <button
-                      onClick={() => setMemoryOpen(true)}
-                      data-testid="memory-entry-assess"
-                      className="flex items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs hover:bg-[var(--muted)]"
-                      style={{ borderColor: "var(--border)" }}
-                      title="从本次评估会话提炼值得长期记住的内容，逐条确认后写入 MEMORY.md"
-                    >
-                      <Brain className="h-3.5 w-3.5" />
-                      沉淀记忆
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {records !== null && (
-                <div className="flex flex-col gap-1">
-                  <div className="text-xs font-medium opacity-60">历史评估</div>
-                  {records.length === 0 ? (
-                    <span className="text-xs opacity-40">本节点暂无评估记录</span>
-                  ) : (
-                    <ul className="flex flex-col gap-1">
-                      {records.map((r) => (
-                        <li
-                          key={r.file}
-                          className="flex items-center gap-2 rounded-lg px-1.5 py-1 text-xs"
-                          style={{ background: "var(--muted)" }}
-                        >
-                          <FileText className="h-3 w-3 shrink-0 opacity-50" />
-                          <span className="shrink-0 opacity-70">{r.date}</span>
-                          <VerdictBadge verdict={r.verdict} />
-                          <span className="min-w-0 flex-1 truncate break-all opacity-60" title={r.file}>
-                            {r.file}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
       </div>
 
-      <div className="border-t px-4 py-3" style={{ borderColor: "var(--border)" }}>
-        <button
-          onClick={askStudyMate}
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm hover:bg-[var(--muted)]"
-          style={{ borderColor: "var(--border)" }}
-        >
-          <MessageSquare className="h-4 w-4" />
-          问 StudyMate
-        </button>
-      </div>
-
-      {/* 记忆写侧确认面板：fixed 遮罩，挂在节点详情根上避免被滚动容器裁切 */}
-      {memoryOpen && assessedSessionId && (
-        <MemoryDialog
-          key={`${node.id}-${assessedSessionId}`}
-          sessionId={assessedSessionId}
-          onClose={() => setMemoryOpen(false)}
-        />
-      )}
-
-      {/* 质检工单模态（产课失败 / 节点角标入口） */}
+      {/* 质检工单模态（节点角标入口） */}
       {openTicketId && (
         <InspectionDialog
           ticketId={openTicketId}
@@ -752,59 +457,6 @@ function NodeMisconceptions({ slug, nodeId }: { slug: string; nodeId: string }) 
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-function AssessResultPanel({ result }: { result: AssessResponse }) {
-  const { assessment } = result;
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border p-2.5" style={{ borderColor: "var(--border)" }}>
-      <div className="flex items-center gap-2">
-        <VerdictBadge verdict={assessment.verdict} />
-        {assessment.mastery != null && (
-          <span className="text-xs opacity-70">掌握度 {Math.round(assessment.mastery * 100)}%</span>
-        )}
-      </div>
-
-      {assessment.next && (
-        <div className="text-xs">
-          <span className="font-medium opacity-60">下一步：</span>
-          <span className="opacity-80">{assessment.next}</span>
-        </div>
-      )}
-
-      <div className="text-xs">
-        <span className={result.progress_updated ? "text-green-600 dark:text-green-400" : "opacity-60"}>
-          {result.progress_updated
-            ? `进度已更新至 ${result.node?.status ?? assessment.verdict}`
-            : "状态未变（当前状态不可流转）"}
-        </span>
-      </div>
-
-      {assessment.questions.length > 0 && (
-        <div className="flex flex-col gap-1">
-          {assessment.questions.map((q, i) => (
-            <details key={i} className="rounded-lg px-2 py-1" style={{ background: "var(--muted)" }}>
-              <summary className="cursor-pointer text-xs leading-relaxed">
-                <VerdictBadge verdict={q.verdict} />
-                <span className="ml-1.5">{q.q}</span>
-              </summary>
-              <div className="mt-1.5 flex flex-col gap-1 pl-1">
-                {q.answer && (
-                  <p className="whitespace-pre-wrap text-xs opacity-80">答：{q.answer}</p>
-                )}
-                {q.note && <p className="whitespace-pre-wrap text-xs opacity-70">评语：{q.note}</p>}
-              </div>
-            </details>
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-center gap-1.5 break-all text-[11px] opacity-60">
-        <FileText className="h-3 w-3 shrink-0" />
-        {result.record_file}
-      </div>
     </div>
   );
 }

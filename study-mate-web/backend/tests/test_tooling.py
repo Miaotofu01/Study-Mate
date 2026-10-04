@@ -490,3 +490,145 @@ def test_produce_role_tool_loop_returns_files_envelope(monkeypatch, tmp_path):
     assert env is not None
     assert env["files"][0]["path"] == "lessons/0001-demo.intro.md"
 
+
+
+# ---------- 墙钟上限与进度快照（2026-10-04：防"永久卡住" + 让"在干活"看得见） ----------
+
+
+def test_agent_wallclock_stops_a_hanging_turn():
+    """单轮一直不返回时，必须被墙钟砍掉而不是无限等（实测曾有会话静默 9507s）。"""
+    import time
+
+    from app import agent
+
+    async def hanging_source(messages, tools):
+        while True:
+            await asyncio.sleep(0.2)
+            yield {"type": "reasoning", "content": "还在想"}
+
+    ctx = ToolContext(read_roots=[], write_roots=[], label="x")
+    events, emit = _collector()
+    started = time.monotonic()
+    outcome = _run(
+        agent.run_agent(
+            hanging_source,
+            [{"role": "user", "content": "问"}],
+            ctx,
+            emit,
+            [],
+            max_seconds=0.4,
+        )
+    )
+    elapsed = time.monotonic() - started
+
+    assert outcome.degraded is True
+    assert outcome.stopped_reason == "wallclock"
+    assert elapsed < 3, f"应该被 0.4s 的墙钟砍掉，实际等了 {elapsed:.1f}s"
+    notices = [e for e in events if e["type"] == "notice"]
+    assert any("上限" in str(e.get("message")) for e in notices), notices
+
+
+def test_agent_reports_progress_snapshots():
+    """进度快照：先发一帧（按钮按下马上有反馈），过程中按间隔续发。"""
+    from app import agent
+
+    async def source(messages, tools):
+        yield {"type": "reasoning", "content": "思考" * 5}
+        await asyncio.sleep(0.7)  # 心跳最小间隔 0.5s，得跨过一个周期才会有中途帧
+        yield {"type": "tool_calls", "tool_calls": []}
+        yield {"type": "text", "content": "答案"}
+
+    shots: list[dict] = []
+
+    async def on_progress(snapshot: dict) -> None:
+        shots.append(snapshot)
+
+    ctx = ToolContext(read_roots=[], write_roots=[], label="x")
+    events, emit = _collector()
+    outcome = _run(
+        agent.run_agent(
+            source,
+            [{"role": "user", "content": "问"}],
+            ctx,
+            emit,
+            [],
+            max_seconds=5,
+            on_progress=on_progress,
+            progress_interval=0.5,
+        )
+    )
+
+    assert shots, "至少要发一帧进度"
+    assert "elapsed_s" in shots[0] and "round" in shots[0]
+    # 过程中那一帧应当已经带上"第几轮 + 思考了多少字"
+    assert any(s["round"] >= 1 and s["reasoning_chars"] > 0 for s in shots), shots
+    assert outcome.text == "答案"
+
+
+def test_progress_counts_tool_calls_batch():
+    """进度快照要数得清整批 tool_calls（turn_source 吐的是复数事件）。
+
+    真机实测：建课大纲 20 次工具调用，进度卡一路报 0（note 只认单数 tool_call）。
+    """
+    from app import agent
+
+    rounds = {"n": 0}
+
+    async def source(messages, tools):
+        rounds["n"] += 1
+        if rounds["n"] == 1:
+            yield {
+                "type": "tool_calls",
+                "tool_calls": [
+                    {"id": "c1", "name": "list_workspace", "arguments": "{}"},
+                    {"id": "c2", "name": "list_workspace", "arguments": "{}"},
+                ],
+            }
+        else:
+            await asyncio.sleep(0.8)  # 跨过一个心跳周期才拿得到带计数的中途帧
+            yield {"type": "text", "content": "答案"}
+
+    shots: list[dict] = []
+
+    async def on_progress(snapshot: dict) -> None:
+        shots.append(snapshot)
+
+    ctx = ToolContext(read_roots=[], write_roots=[], label="x")
+    events, emit = _collector()
+    outcome = _run(
+        agent.run_agent(
+            source,
+            [{"role": "user", "content": "问"}],
+            ctx,
+            emit,
+            [],
+            max_seconds=5,
+            on_progress=on_progress,
+            progress_interval=0.5,
+        )
+    )
+
+    assert outcome.tool_calls == 2, outcome
+    assert any(s["tool_calls"] == 2 and s["last_tool"] == "list_workspace" for s in shots), shots
+
+
+def test_progress_reporter_stops_after_exit():
+    """外壳退出后不允许再有后台心跳（否则会在编排结束后继续往队列里塞事件）。"""
+    from app import agent
+
+    shots: list[dict] = []
+
+    async def on_progress(snapshot: dict) -> None:
+        shots.append(snapshot)
+
+    async def main() -> int:
+        reporter = agent.ProgressReporter(on_progress, interval=0.5)
+        async with reporter:
+            await asyncio.sleep(0.7)  # 跨过一个心跳周期
+        count = len(shots)
+        await asyncio.sleep(0.6)  # 退出后再等一会儿，不该有新帧
+        return count
+
+    count = _run(main())
+    assert count >= 2  # 进场一帧 + 至少一次定时帧
+    assert len(shots) == count, "退出后仍在发心跳"

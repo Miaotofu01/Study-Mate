@@ -11,6 +11,13 @@ export interface MessageAttachment {
 
 export type ChatMessageKind = "stage" | "handoff" | "done" | "error" | "build_confirm";
 
+/** 一次 LLM 调用的用量（网关在末块带 usage；无渠道时该轮没有） */
+export interface Usage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
 /** 工具调用卡（K0 工具化运行时）：id 由后端下发，用于把结果配回调用。 */
 export interface ToolActivity {
   id: string;
@@ -30,8 +37,14 @@ export interface ChatMessage {
   kind?: ChatMessageKind;
   ticket_id?: string;
   slug?: string;
-  /** 本轮工具调用与结果（仅流式期间在前端呈现，兼审计 UI；不落会话历史） */
+  /** 本轮工具调用与结果（落库：刷新后仍在「中间过程」折叠区里） */
   tools?: ToolActivity[];
+  /** 思维链原文（落库，供「中间过程」折叠区回放） */
+  reasoning?: string;
+  /** 产出这条回复的模型标识「提供商 / 模型」（落库，供消息名称栏） */
+  model?: string;
+  /** 本轮 SSE 提示（绑定/图片降级/重试）：只在前端会话内呈现，收进「中间过程」折叠区 */
+  notices?: string[];
 }
 
 export interface Session {
@@ -42,6 +55,10 @@ export interface Session {
   updated_at: number;
   /** 会话级工作区（绝对路径）；null = 用当前默认工作区 */
   workspace?: string | null;
+  /** 最近一轮的用量（右栏「上下文窗口」栏据此显示占用） */
+  usage?: Usage | null;
+  /** 会话绑定的模型/档位；null = 跟随当前默认模型 */
+  active?: SessionActive | null;
 }
 
 export interface SessionMeta {
@@ -56,6 +73,10 @@ export interface SessionMeta {
   mode: "chat" | "interview";
   /** 会话级工作区（绝对路径）；null = 用当前默认工作区 */
   workspace?: string | null;
+  /** 最近一轮的用量（打开历史会话时回填右栏用量栏） */
+  usage?: Usage | null;
+  /** 会话绑定的模型/档位；null = 跟随当前默认模型 */
+  active?: SessionActive | null;
 }
 
 export type NodeStatus =
@@ -185,6 +206,9 @@ export interface ActiveProvider {
   model: string;
   reasoning_variant?: string | null;
 }
+
+/** 会话绑定的模型三元组（与 settings.active 同形；null = 跟随当前默认模型） */
+export type SessionActive = ActiveProvider;
 
 export interface AppSettings {
   providers: ProviderEntry[];

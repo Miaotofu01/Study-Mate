@@ -85,7 +85,8 @@ async def assess_node(slug: str, node_id: str, payload: AssessRequest):
 async def _assess_node(slug: str, node_id: str, payload: AssessRequest):
     subject = require_subject(slug)
     node, index = require_node(slug, node_id)
-    provider = require_provider()
+    # 评估跑在该会话绑定的模型上（模型按会话持久化）
+    provider = require_provider(payload.session_id)
     skill_text, missing_skills = prompts.inject("assess")
     if missing_skills:
         raise HTTPException(503, f"技能规范缺失，无法保证评估口径：{'、'.join(missing_skills)}")
@@ -234,7 +235,7 @@ async def _summarize_session(
     messages = session.get("messages") or []
     if not messages:
         raise HTTPException(422, "会话没有消息，无法生成小结")
-    provider = require_provider()
+    provider = require_provider(session_id)
     skill_text, missing_skills = prompts.inject("summary")
     if missing_skills:
         raise HTTPException(503, f"技能规范缺失，无法保证小结口径：{'、'.join(missing_skills)}")

@@ -173,6 +173,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         node_id: data.node_id ?? known?.node_id ?? null,
         mode: (data as { mode?: "chat" | "interview" }).mode ?? "chat",
         workspace: data.workspace ?? known?.workspace ?? null,
+        usage: data.usage ?? null,
+        active: data.active ?? null,
       };
       setActiveSessionId(id);
       // 会话绑定了工作区就切过去（否则回到默认），科目列表随之重载

@@ -16,9 +16,10 @@
 | [README.md](README.md) | 启动、配置模型、附件、E2E 测试、版本语义 |
 | [StudyMate-Web_开发与计划.md](StudyMate-Web_开发与计划.md) | 架构现状、不变约束、领域模型、backlog + **§5.1 全功能复现实施队列（任务书）** |
 | [StudyMate-Web_PRD.md](StudyMate-Web_PRD.md) | 功能描述（随代码同步，含实施状态总览） |
-| [StudyMate-Web_前端美化设计.md](StudyMate-Web_前端美化设计.md) | 视觉审美、排版动效与组件布局设计规范（对标 DeepTutor） |
+| [docs/StudyMate-Web_前端美化设计.md](StudyMate-Web_前端美化设计.md) | 视觉审美、排版动效与组件布局设计规范（对标 DeepTutor） |
 | [StudyMate-Web_E2E测试流程.md](StudyMate-Web_E2E测试流程.md) | E2E 用例与旅程映射（与 `frontend/tests/e2e/` 同步维护） |
-| [StudyMate-Web_探索测试指南.md](StudyMate-Web_探索测试指南.md) | 探索 agent 工作流（按需触发，独立于 E2E 门禁） |
+| [docs/StudyMate-Web_建课链路.md](StudyMate-Web_建课链路.md) | **建课全链路档案**：入口→盘问收口→建课编排→落点确认→产课，含产物速查、卡点排查索引与待拍板清单 |
+| [docs/StudyMate-Web_探索测试指南.md](StudyMate-Web_探索测试指南.md) | 探索 agent 工作流（按需触发，独立于 E2E 门禁） |
 | [Web_CHANGE.md](Web_CHANGE.md) | 旧计划与变更史留痕（**只追加、不改写**） |
 
 ## 硬规矩

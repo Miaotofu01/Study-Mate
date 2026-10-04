@@ -299,16 +299,21 @@ async def scout_images(
             )
         return {"downloaded": 0, "gaps": ["fixture 模式：不联网采图"], "sites": []}
 
-    if emit is not None:
-        await emit({"event": "stage", "stage": "采图", "status": "start"})
-    pool_dir = base / POOL_DIR_REL
-    pool_dir.mkdir(parents=True, exist_ok=True)
-    index_path = base / POOL_INDEX_REL
-
     resources = base / "RESOURCES.md"
     urls = extract_resource_urls(
         resources.read_text(encoding="utf-8") if resources.is_file() else ""
     )
+    # RESOURCES.md 里没有可抓的 URL ⇒ 采图必然空转：明确标「跳过」，否则 UI 把
+    # downloaded:0 读成「✅ 采图 0 张」（像是采过但没找到图），实为无可采来源。
+    skipped = not urls
+    stage_name = "采图 · 跳过（无参考资料）" if skipped else "采图"
+
+    if emit is not None:
+        await emit({"event": "stage", "stage": stage_name, "status": "start"})
+    pool_dir = base / POOL_DIR_REL
+    pool_dir.mkdir(parents=True, exist_ok=True)
+    index_path = base / POOL_INDEX_REL
+
     allowed_hosts = {_site_of(url) for url in urls} | {
         _site_of(f"https://{host}") for host in (extra_sites or [])
     }
@@ -421,19 +426,27 @@ async def scout_images(
                             queue.append((candidate, depth + 1))
 
     _write_index(index_path, rows, gaps)
-    gaps.extend(_run_pool_check(base))
+    # 自检子进程最长 60s：本函数与大纲派工并发跑在同一事件循环里，同步调用会把
+    # SSE（含进度心跳）一起冻住——挪到线程池（build/produce/generate 都已是这么做的）
+    gaps.extend(await asyncio.to_thread(_run_pool_check, base))
 
     if emit is not None:
-        await emit(
-            {
-                "event": "stage",
-                "stage": "采图",
-                "status": "done",
-                "downloaded": downloaded,
-                "gaps": gaps[:20],
-            }
-        )
-    return {"downloaded": downloaded, "gaps": gaps[:20], "sites": sorted(site_pages)}
+        done: dict[str, Any] = {
+            "event": "stage",
+            "stage": stage_name,
+            "status": "done",
+            "downloaded": downloaded,
+            "gaps": gaps[:20],
+        }
+        if skipped:
+            done["skipped"] = True
+            done["reason"] = "无参考资料"
+        await emit(done)
+    result: dict[str, Any] = {"downloaded": downloaded, "gaps": gaps[:20], "sites": sorted(site_pages)}
+    if skipped:
+        result["skipped"] = True
+        result["reason"] = "无参考资料"
+    return result
 
 
 async def _download_image(

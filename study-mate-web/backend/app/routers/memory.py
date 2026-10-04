@@ -62,7 +62,7 @@ async def suggest_updates(payload: MemorySuggestRequest) -> dict[str, Any]:
 
 
 async def _suggest_updates(session: dict[str, Any]) -> dict[str, Any]:
-    provider = require_provider()
+    provider = require_provider(str(session.get("id") or ""))
     skill_text, missing_skills = prompts.inject("summary")
     if missing_skills:
         raise HTTPException(503, f"技能规范缺失，无法保证记忆口径：{'、'.join(missing_skills)}")

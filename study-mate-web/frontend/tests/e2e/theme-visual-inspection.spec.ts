@@ -57,8 +57,8 @@ test("capture visual screenshots of the new theme system and workbench ui", asyn
     fullPage: true,
   });
 
-  // 6. 查看课程图谱点阵背景与节点详情
-  await page.goto("/courses");
+  // 6. 查看课程图谱点阵背景与节点详情（不带 ?subject= 是首页嵌入，图谱需显式带科目）
+  await page.goto("/courses?subject=computer-networks");
   await expect(page.getByTestId("course-graph-rail")).toBeVisible();
   // 2026-10-04：大纲与图谱都收进右栏、默认显示图谱；先切到大纲选节点，再切回图谱截图
   await page.getByTestId("rail-view-outline").click();

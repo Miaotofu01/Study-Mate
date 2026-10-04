@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { formatFileSize } from "@/lib/format";
 import { useChatDraft } from "@/lib/workspace";
 import { activeModelOf, modelVariant, modelVariants, ModelSelector } from "./ModelSelector";
-import type { AppSettings, AttachmentKind, UploadedAttachment } from "@/lib/types";
+import type { AppSettings, AttachmentKind, SessionActive, UploadedAttachment } from "@/lib/types";
 
 const ACCEPT =
   "image/*,.svg,.md,.txt,.csv,.json,.xml,.py,.js,.ts,.html,.css,.pdf,.docx,.xlsx,.pptx,.epub";
@@ -36,19 +36,30 @@ interface PendingAttachment {
 interface ReasoningVariantSelectorProps {
   settings: AppSettings | null;
   onUpdated: (settings: AppSettings) => void;
+  sessionId?: string | null;
+  sessionActive?: SessionActive | null;
+  onSessionActiveChange?: (active: SessionActive) => void;
 }
 
-function ReasoningVariantSelector({ settings, onUpdated }: ReasoningVariantSelectorProps) {
+function ReasoningVariantSelector({
+  settings,
+  onUpdated,
+  sessionId = null,
+  sessionActive = null,
+  onSessionActiveChange,
+}: ReasoningVariantSelectorProps) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const activeModel = settings ? activeModelOf(settings) : null;
+  // 生效三元组：会话绑定优先，否则全局默认（与 ModelSelector 同一口径）
+  const effective = settings ? sessionActive ?? settings.active : null;
+  const activeModel = settings && effective ? activeModelOf(settings, effective) : null;
   const variants = modelVariants(activeModel);
-  const activeVariant = settings?.active.reasoning_variant || modelVariant(activeModel) || null;
+  const activeVariant = effective?.reasoning_variant || modelVariant(activeModel) || null;
 
   // 当前模型没有可选档位（reasoning 未启用 / variants 为空），或没配置提供商时不渲染
-  if (!settings || settings.providers.length === 0 || variants.length === 0) {
+  if (!settings || settings.providers.length === 0 || variants.length === 0 || !effective) {
     return null;
   }
 
@@ -60,15 +71,23 @@ function ReasoningVariantSelector({ settings, onUpdated }: ReasoningVariantSelec
     }
     setSaving(true);
     setError(null);
+    const nextActive: SessionActive = { ...effective, reasoning_variant: variant };
+    // 会话内切换档位：写会话绑定；否则写全局默认
+    if (sessionId && onSessionActiveChange) {
+      void api
+        .setSessionActive(sessionId, nextActive)
+        .then(() => onSessionActiveChange(nextActive))
+        .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+        .finally(() => setSaving(false));
+      return;
+    }
     void api
       .saveSettings({
         providers: settings.providers,
-        active: { ...settings.active, reasoning_variant: variant },
+        active: nextActive,
         system_prompt: settings.system_prompt,
       })
-      .then(() =>
-        onUpdated({ ...settings, active: { ...settings.active, reasoning_variant: variant } }),
-      )
+      .then(() => onUpdated({ ...settings, active: nextActive }))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setSaving(false));
   };
@@ -83,7 +102,9 @@ function ReasoningVariantSelector({ settings, onUpdated }: ReasoningVariantSelec
         title="切换推理档位"
       >
         <Brain className="h-3 w-3 shrink-0 opacity-60" />
-        <span className="min-w-0 truncate">{activeVariant ? `思考 · ${activeVariant}` : "思考"}</span>
+        <span className="min-w-0 truncate" data-testid="reasoning-variant-label">
+          {activeVariant ?? "默认"}
+        </span>
         {saving ? (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin opacity-60" />
         ) : (
@@ -141,6 +162,9 @@ interface ComposerProps {
   sessionId?: string | null;
   settings: AppSettings | null;
   onUpdated: (settings: AppSettings) => void;
+  /** 会话绑定的模型/档位（null = 跟随全局默认；会话内切换只改这个会话） */
+  sessionActive?: SessionActive | null;
+  onSessionActiveChange?: (active: SessionActive) => void;
   onSend: (text: string, attachments: UploadedAttachment[]) => void;
   onStop: () => void;
 }
@@ -152,6 +176,8 @@ export function Composer({
   sessionId = null,
   settings,
   onUpdated,
+  sessionActive = null,
+  onSessionActiveChange,
   onSend,
   onStop,
 }: ComposerProps) {
@@ -307,8 +333,7 @@ export function Composer({
   return (
     <div
       data-testid="composer"
-      className={clsx("px-4 pb-4", elevated ? "pt-2" : "pt-3 border-t")}
-      style={elevated ? undefined : { borderColor: "var(--border)" }}
+      className={clsx("px-4 pb-4", elevated ? "pt-2" : "pt-3")}
     >
       <div className={clsx("mx-auto w-full", elevated ? "max-w-[720px]" : "max-w-3xl")}>
         <div
@@ -394,7 +419,7 @@ export function Composer({
             />
           </div>
 
-          {/* 底部工具条 */}
+          {/* 底部工具条：左侧附件，右侧「模型 + 思考档位 + 发送」（2026-10-04 拍板：下拉靠右） */}
           <div className="mt-2 flex items-center justify-between border-t border-[var(--border)]/40 pt-2">
             <div className="flex items-center gap-1.5">
               <input
@@ -416,15 +441,27 @@ export function Composer({
               >
                 <Paperclip className="h-4 w-4" />
               </button>
-
-              {/* 模型快捷切换 + 推理档位下拉（都向上展开） */}
-              <div className={clsx("flex items-center gap-1", DROPDOWN_UPWARD)}>
-                <ModelSelector settings={settings} onUpdated={onUpdated} />
-                <ReasoningVariantSelector settings={settings} onUpdated={onUpdated} />
-              </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              {/* 模型快捷切换 + 推理档位下拉（都向上展开；会话内切换写会话绑定） */}
+              <div className={clsx("flex min-w-0 items-center gap-1", DROPDOWN_UPWARD)}>
+                <ModelSelector
+                  settings={settings}
+                  onUpdated={onUpdated}
+                  sessionId={sessionId}
+                  sessionActive={sessionActive}
+                  onSessionActiveChange={onSessionActiveChange}
+                />
+                <ReasoningVariantSelector
+                  settings={settings}
+                  onUpdated={onUpdated}
+                  sessionId={sessionId}
+                  sessionActive={sessionActive}
+                  onSessionActiveChange={onSessionActiveChange}
+                />
+              </div>
+
               {streaming ? (
                 <button
                   onClick={onStop}

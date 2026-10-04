@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import { Check, ChevronDown, ChevronRight, ChevronUp, Plus, X } from "lucide-react";
 
+import { DEFAULT_CONTEXT_WINDOW } from "@/lib/contextWindow";
 import type {
   InputModality,
   ProviderCapabilities,
@@ -26,9 +27,9 @@ const CAPABILITY_OPTIONS: { key: keyof ProviderCapabilities; label: string }[] =
   { key: "native_web_search", label: "原生联网搜索" },
 ];
 
-// 新建 / 未显式配置模态时的默认值：文本勾选
+// 新建 / 未显式配置时的兜底默认值：仅作占位提示与「留空=用默认」的语义说明，
+// 不再预填进输入框——预填会让「没声明」与「显式声明了默认值」在落盘后无法区分。
 const DEFAULT_MAX_OUTPUT_TOKENS = 32000;
-const DEFAULT_CONTEXT_WINDOW = 2560000;
 // 启用推理档位且尚无档位时的默认两档（低 → 高），默认档位取最高档
 const DEFAULT_REASONING_VARIANTS = ["disabled", "enabled"];
 
@@ -165,15 +166,12 @@ export function ModelEditDialog({ title, initial, onSave, onCancel }: ModelEditD
       ? { ...emptyModalities(), ...initial.modalities }
       : { ...emptyModalities(), text: true },
   );
+  // 未配置就留空（输入框只给占位提示），落盘为 null，由使用侧按兜底默认值处理
   const [maxOutputTokens, setMaxOutputTokens] = useState(
-    initial.max_output_tokens == null
-      ? String(DEFAULT_MAX_OUTPUT_TOKENS)
-      : String(initial.max_output_tokens),
+    initial.max_output_tokens == null ? "" : String(initial.max_output_tokens),
   );
   const [contextWindow, setContextWindow] = useState(
-    initial.context_window == null
-      ? String(DEFAULT_CONTEXT_WINDOW)
-      : String(initial.context_window),
+    initial.context_window == null ? "" : String(initial.context_window),
   );
   const [reasoningEnabled, setReasoningEnabled] = useState(initial.reasoning?.enabled ?? false);
   const [variants, setVariants] = useState<string[]>(initial.reasoning?.variants ?? []);
@@ -346,22 +344,22 @@ export function ModelEditDialog({ title, initial, onSave, onCancel }: ModelEditD
             </div>
           </Group>
 
-          <Field label="最大输出 Token" hint="该模型的输出上限，留空则用各协议的默认值">
+          <Field label="最大输出 Token" hint={`该模型的输出上限，留空则用兜底默认值（${DEFAULT_MAX_OUTPUT_TOKENS}），不发给 API`}>
             <input
               value={maxOutputTokens}
               onChange={(e) => setMaxOutputTokens(e.target.value)}
               inputMode="numeric"
-              placeholder="如 8192"
+              placeholder={`留空用默认 ${DEFAULT_MAX_OUTPUT_TOKENS}`}
               className="w-full rounded-lg border bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-light"
               style={{ borderColor: "var(--border)" }}
             />
           </Field>
-          <Field label="上下文长度" hint="token 数，仅用于列表徽标，不发送给 API">
+          <Field label="上下文长度" hint="token 数，留空则用兜底默认值；用于右栏「上下文窗口」占用比与列表徽标，不发送给 API">
             <input
               value={contextWindow}
               onChange={(e) => setContextWindow(e.target.value)}
               inputMode="numeric"
-              placeholder="如 128000"
+              placeholder={`留空用默认 ${DEFAULT_CONTEXT_WINDOW}`}
               className="w-full rounded-lg border bg-transparent px-3 py-2 text-sm outline-none focus:border-brand-light"
               style={{ borderColor: "var(--border)" }}
             />

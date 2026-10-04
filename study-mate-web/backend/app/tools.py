@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -229,6 +230,182 @@ async def _tool_run_check(args: dict[str, Any], ctx: ToolContext) -> dict[str, A
     return {"content": f"检查未过（{len(problems)} 处），请按报错修正后重新写入：\n{lines}", "is_error": True}
 
 
+# ---------- 工具处理器（会话内动作：产课 / 评估） ----------
+# 会话绑定的科目由 chat 路由塞进 `ctx.state`（slug / node_id / session_id / emit）。
+# emit 是 agent 循环的事件回吐通道，转成 {"type":"notice"} 让产课进度在对话里可见。
+
+
+def _state_slug(ctx: ToolContext) -> str:
+    """取会话科目 slug：优先 state，其次从读根目录名反推（subject_dir(slug) 的 name）。"""
+    slug = str((ctx.state or {}).get("slug") or "").strip()
+    if slug:
+        return slug
+    roots = ctx.read_roots or []
+    return roots[0].name if roots else ""
+
+
+def _first_unproduced_node(base: Path, nodes: list[dict[str, Any]]) -> str:
+    """按大纲顺序找第一个还没有课件（lessons/NNNN-<id>.md）的节点 id。"""
+    lessons = base / "lessons"
+    existing = {path.name for path in lessons.glob("*.md")} if lessons.is_dir() else set()
+    for node in nodes:
+        node_id = str(node.get("id") or "")
+        if node_id and not any(name.endswith(f"-{node_id}.md") for name in existing):
+            return node_id
+    return ""
+
+
+async def _tool_produce_lesson(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    """为会话科目产出一节课：真跑讲解→出题→渲染→检查（含自动打回重试）。"""
+    from . import common
+    from . import curriculum_store as cs
+    from . import produce as produce_svc
+
+    state = ctx.state or {}
+    slug = _state_slug(ctx)
+    if not slug:
+        return {"content": "无法确定科目：本会话未关联科目，请先在对话里选定科目。", "is_error": True}
+    base = cs.subject_dir(slug)
+    nodes = produce_svc._curriculum_of(base, slug)
+    if not nodes:
+        return {"content": f"科目 {slug} 还没有课程大纲，无法产课。", "is_error": True}
+    node_id = str(args.get("node_id") or state.get("node_id") or "").strip()
+    if not node_id:
+        node_id = _first_unproduced_node(base, nodes)
+    if not node_id:
+        return {"content": "该科目所有节点都已产出课件，没有待产节点。", "is_error": False}
+    node = next((n for n in nodes if n.get("id") == node_id), None)
+    if node is None:
+        return {"content": f"节点不存在：{node_id}", "is_error": True}
+    try:
+        provider = common.require_provider(state.get("session_id"))
+    except Exception as exc:  # noqa: BLE001 - HTTPException 等统一转 is_error 文本
+        return {"content": str(exc), "is_error": True}
+
+    emit = state.get("emit")
+    # 产课进度节流：progress 事件最多每 10s 转一条 notice（SSE 每条都会到 UI）
+    progress_gate = {"last": 0.0}
+    result = {"done": False, "artifacts": [], "error": None}
+
+    async def forward_emit(event: dict[str, Any]) -> None:
+        kind = str(event.get("event") or "")
+        if kind == "done":
+            result["done"] = True
+            result["artifacts"] = [str(a) for a in event.get("artifacts") or []]
+        elif kind == "error":
+            result["error"] = str(event.get("message") or "产课失败")
+        if emit is None:
+            return
+        if kind == "stage":
+            stage = str(event.get("stage") or "")
+            status = event.get("status")
+            if status == "start":
+                message = f"{stage}中…"
+            elif status == "done":
+                message = f"{stage}完成"
+            else:
+                message = f"{stage}未通过，进入打回修复。"
+        elif kind == "retry":
+            owners = "、".join(str(o) for o in event.get("owners") or []) or "总控"
+            problems = event.get("problems") or []
+            first = str((problems[0] if problems else {}).get("message") or "按报错修正")
+            message = f"第 {event.get('round')} 轮打回（{owners}）：{first}"
+        elif kind == "handoff":
+            ticket = event.get("ticket") or {}
+            message = f"质检未过，已转人工工单 {ticket.get('id')}。"
+        elif kind == "done":
+            message = f"产课完成：{'、'.join(result['artifacts']) or '（未给出产物）'}"
+        elif kind == "error":
+            message = f"产课失败：{result['error']}"
+        elif kind == "progress":
+            now = time.monotonic()
+            if now - progress_gate["last"] < 10:
+                return
+            progress_gate["last"] = now
+            message = (
+                f"仍在{event.get('stage')}（第 {event.get('round')} 轮，"
+                f"已等待 {event.get('elapsed_s')}s）。"
+            )
+        else:
+            return
+        await emit({"type": "notice", "message": message})
+
+    try:
+        await produce_svc.run_produce(base, slug, node_id, provider, forward_emit)
+    except Exception as exc:  # noqa: BLE001 - 产课链异常不炸对话
+        return {"content": f"产课执行失败：{type(exc).__name__}: {exc}", "is_error": True}
+    if result["error"]:
+        return {"content": result["error"], "is_error": True}
+    title = str(node.get("title") or node_id)
+    artifacts = "、".join(result["artifacts"]) or "（未收到产物清单）"
+    return {
+        "content": (
+            f"已产出节点「{title}」（{node_id}）：{artifacts}。"
+            "下一步：可调用 assess_node 评估学习者掌握情况，或继续产出后续节点。"
+        ),
+        "is_error": False,
+    }
+
+
+async def _tool_assess_node(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    """按会话记录评估学习者在某节点上的掌握（复用评估端点的服务函数）。"""
+    from . import common
+    from . import storage
+    from . import workspace_ctx
+    from .models import AssessRequest
+    from .routers.records import _assess_node
+
+    state = ctx.state or {}
+    slug = _state_slug(ctx)
+    if not slug:
+        return {"content": "无法确定科目：本会话未关联科目，请先在对话里选定科目。", "is_error": True}
+    node_id = str(args.get("node_id") or "").strip()
+    evidence = str(args.get("evidence") or "").strip()
+    if not node_id:
+        return {"content": "缺少参数 node_id（要评估的节点 id）。", "is_error": True}
+    if not evidence:
+        return {"content": "缺少参数 evidence（学习者的作答/理解原文）。", "is_error": True}
+    session_id = state.get("session_id")
+    try:
+        common.require_provider(session_id)
+    except Exception as exc:  # noqa: BLE001
+        return {"content": str(exc), "is_error": True}
+    payload = AssessRequest(session_id=session_id, extra_context=evidence)
+    try:
+        with workspace_ctx.bind(storage.session_workspace(session_id) if session_id else None):
+            result = await _assess_node(slug, node_id, payload)
+    except Exception as exc:  # noqa: BLE001 - HTTPException 等统一转 is_error 文本
+        return {"content": f"评估失败：{type(exc).__name__}: {exc}", "is_error": True}
+    if not isinstance(result, dict) or not result.get("ok"):
+        detail = "评估未通过校验，未落盘"
+        if not isinstance(result, dict):
+            import json
+
+            try:
+                body = json.loads(result.body.decode("utf-8"))
+                detail = str(body.get("detail") or detail)
+                problems = body.get("problems") or []
+                if problems:
+                    detail += "；" + "；".join(str(p) for p in problems[:5])
+            except Exception:  # noqa: BLE001 - 解析失败保留兜底文案
+                pass
+        return {"content": detail, "is_error": True}
+    meta = result.get("assessment") or {}
+    mastery = meta.get("mastery")
+    line = (
+        f"判定：{meta.get('verdict') or '未给出'}；"
+        f"掌握度：{mastery if mastery is not None else '未给出'}；"
+        f"{'已置位' if result.get('progress_updated') else '未置位'}"
+    )
+    promoted = result.get("promoted") or []
+    if promoted:
+        line += "；置位节点：" + "、".join(
+            str(item.get("title") or item.get("id")) for item in promoted
+        )
+    line += f"；评估记录：{result.get('record_file')}"
+    return {"content": line, "is_error": False}
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
@@ -297,7 +474,14 @@ TOOL_SPECS: dict[str, ToolSpec] = {
             {
                 "data": {
                     "type": _OBJECT,
-                    "description": '{"nodes": [...], "edges": [...]}，节点字段以 curriculum.schema.json 为准',
+                    "description": (
+                        '{"nodes": [...], "edges": [...]}。'
+                        "节点 id 只能用小写字母/数字，段间用 `.` 或 `-`（如 net.layers）；"
+                        "每个节点必填 id/title/objective/prerequisites/status/kind"
+                        "（kind 取 概念/实操/实验）；"
+                        "concepts、pitfalls 是字符串数组；realworld 是字符串（不是数组）；"
+                        "每条 edge 必填 from/to/reason（reason 写设这条边的理由）。"
+                    ),
                 }
             },
             ["data"],
@@ -322,9 +506,47 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         parameters=_params({}),
         handler=_tool_run_check,
     ),
+    "produce_lesson": ToolSpec(
+        name="produce_lesson",
+        description=(
+            "为本会话关联的科目产出一节课：真跑完整产课链（讲解 → 出题 → 渲染 → 检查，"
+            "检查不过会自动按归属打回重派，最多 2 轮）。产课可能要几分钟，期间会持续回吐进度。"
+            "按大纲顺序推进（跳跃节点会失败）；不传 node_id 时自动选大纲里第一个还没有课件的节点。"
+            "完成后在回复里告诉学习者产出了哪个节点、产物在哪、下一步做什么。"
+        ),
+        parameters=_params(
+            {
+                "node_id": {
+                    "type": "string",
+                    "description": "要产课的节点 id；省略则选大纲顺序里第一个还没课件的节点",
+                }
+            }
+        ),
+        handler=_tool_produce_lesson,
+    ),
+    "assess_node": ToolSpec(
+        name="assess_node",
+        description=(
+            "按本会话的记录评估学习者在某节点上的掌握：给出判定、掌握度与是否置位，"
+            "并落一份评估记录（通过时同时推进课程进度）。需要学习者已给出作答/理解原文。"
+        ),
+        parameters=_params(
+            {
+                "node_id": {"type": "string", "description": "要评估的节点 id"},
+                "evidence": {
+                    "type": "string",
+                    "description": "学习者的作答/理解原文（评估据此判分，越具体越好）",
+                },
+            },
+            ["node_id", "evidence"],
+        ),
+        handler=_tool_assess_node,
+    ),
 }
 
 CHAT_TOOLS = ("list_workspace", "read_course_file", "read_skill")
+# 会话绑定科目后额外开放的动作工具（产课 / 评估需要会话上下文与长墙钟）
+CHAT_ACTION_TOOLS = ("produce_lesson", "assess_node")
 BUILD_TOOLS = ("list_workspace", "read_course_file", "submit_curriculum")
 PRODUCE_TOOLS = ("list_workspace", "read_course_file", "write_deliver_file", "run_check")
 

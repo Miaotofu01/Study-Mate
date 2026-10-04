@@ -18,7 +18,6 @@ from .. import draft as draft_svc
 from .. import produce as produce_svc
 from .. import tickets as tickets_svc
 from ..common import require_provider
-from ..config import get_active_provider
 from ..llm import is_fixture_mode
 from ..models import (
     MaterialRequest,
@@ -37,13 +36,36 @@ def _sse(event: str, data: Event) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _provider() -> dict[str, Any]:
+def _provider(session_id: str | None = None) -> dict[str, Any]:
+    """本次编排要用的 provider：给了会话就随会话绑定的模型，否则回落到全局默认。
+
+    fixture 短路与「未配置」422 与旧实现逐字一致（require_provider 内同口径）。
+    """
     if is_fixture_mode():
         return {"model": "fixture", "api_format": "openai_chat"}
-    provider = get_active_provider()
-    if provider is None or not provider.get("api_key"):
-        raise HTTPException(422, "尚未配置模型 API Key，请先到 Settings 填写。")
-    return provider
+    return require_provider(session_id)
+
+
+def _provider_for(payload_session: str | None) -> dict[str, Any]:
+    """请求带会话就按会话绑定取 provider；未带则保持原零参调用。"""
+    return _provider(payload_session) if payload_session else _provider()
+
+
+def _problem_lines(problems: Any, limit: int = 3) -> list[str]:
+    """把 problems（dict 或 str 的混合列表）折成单行短文本，最多 limit 条。"""
+    lines: list[str] = []
+    for problem in problems or []:
+        if isinstance(problem, dict):
+            text = str(problem.get("message") or problem.get("path") or "")
+        else:
+            text = str(problem)
+        text = " ".join(text.split())
+        if not text:
+            continue
+        if len(text) > 40:
+            text = text[:40] + "…"
+        lines.append(text)
+    return lines[:limit]
 
 
 def _persist_event(session_id: str, event: Event) -> None:
@@ -58,6 +80,8 @@ def _persist_event(session_id: str, event: Event) -> None:
                 suffix = f"（{event['downloaded']} 张，Gaps {len(event.get('gaps') or [])} 条）"
             elif event.get("status") == "done" and event.get("nodes") is not None:
                 suffix = f"（{event['nodes']} 个节点）"
+            if event.get("problems"):
+                suffix += f"（问题 {len(event['problems'])} 条）"
             add_message(
                 session_id,
                 "assistant",
@@ -67,7 +91,17 @@ def _persist_event(session_id: str, event: Event) -> None:
         return
     if kind == "retry":
         owners = "、".join(event.get("owners") or [])
-        add_message(session_id, "assistant", f"🔁 第 {event.get('round')} 轮打回（{owners}），附报错原文重派", kind="stage")
+        # 事件可辨：派工层重派带 reason（envelope 不合规）；编排自检打回没有。
+        marker = "（派工）" if event.get("reason") else "（自检）"
+        raw_problems = event.get("problems") or []
+        problems = _problem_lines(raw_problems)
+        detail = f" · 问题 {len(raw_problems)} 条：{'；'.join(problems)}" if problems else ""
+        add_message(
+            session_id,
+            "assistant",
+            f"🔁 第 {event.get('round')} 轮打回（{owners}）{marker}{detail}",
+            kind="stage",
+        )
         return
     if kind == "handoff":
         ticket = event.get("ticket") or {}
@@ -150,8 +184,9 @@ def _session_for(payload_session: str | None, slug: str, node_id: str | None) ->
 @router.post("/courses/{slug}/nodes/{node_id}/produce")
 async def produce_node(slug: str, node_id: str, payload: dict[str, Any] | None = None) -> StreamingResponse:
     require_subject(slug)
-    session_id = _session_for((payload or {}).get("session_id"), slug, node_id)
-    provider = _provider()
+    requested_session = (payload or {}).get("session_id")
+    session_id = _session_for(requested_session, slug, node_id)
+    provider = _provider_for(requested_session)
 
     async def runner(emit: Any) -> None:
         await produce_svc.run_produce(cs.subject_dir(slug), slug, node_id, provider, emit)
@@ -227,8 +262,9 @@ def add_material(slug: str, payload: MaterialRequest) -> dict[str, Any]:
 async def build_draft(slug: str, payload: dict[str, Any] | None = None) -> StreamingResponse:
     if draft_svc.get_draft(slug) is None:
         raise HTTPException(404, f"草稿不存在：{slug}")
-    session_id = _session_for((payload or {}).get("session_id"), slug, None)
-    provider = _provider()
+    requested_session = (payload or {}).get("session_id")
+    session_id = _session_for(requested_session, slug, None)
+    provider = _provider_for(requested_session)
 
     async def runner(emit: Any) -> None:
         from .. import build as build_svc
@@ -250,6 +286,10 @@ def promote_draft(slug: str, payload: PromoteRequest) -> dict[str, Any]:
         raise HTTPException(409, str(exc)) from None
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from None
+    # 落点不改 slug：草稿 slug 就是未来科目 slug，据此把触发会话自动关联到新科目。
+    # 会话不存在（update_session 返回 None）时静默跳过，落点本身照常成功。
+    if payload.session_id:
+        update_session(payload.session_id, subject_slug=slug, node_id=None)
     return {"ok": True, "subject_dir": str(final)}
 
 
@@ -278,7 +318,7 @@ async def retry_ticket(ticket_id: str, payload: RetryTicketRequest) -> Streaming
     if ticket is None:
         raise HTTPException(404, f"工单不存在：{ticket_id}")
     session_id = _session_for(payload.session_id, str(ticket["slug"]), ticket.get("node_id"))
-    provider = require_provider()
+    provider = _provider_for(payload.session_id)
 
     async def runner(emit: Any) -> None:
         await produce_svc.run_ticket_retry(ticket_id, provider, emit, hint=payload.hint)

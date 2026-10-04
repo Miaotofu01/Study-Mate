@@ -18,6 +18,7 @@ from .routers import (
     courses,
     export,
     generate,
+    home,
     lessons,
     misconceptions,
     memory,
@@ -39,7 +40,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="StudyMate Web Runtime", version="0.5.0-beta", lifespan=lifespan)
+app = FastAPI(title="StudyMate Web Runtime", version="0.6.0-beta", lifespan=lifespan)
 
 # 开发阶段允许前端 dev server 跨域；生产由 Next.js 同源代理，CORS 不生效
 app.add_middleware(
@@ -58,6 +59,7 @@ app.include_router(courses.router)
 app.include_router(misconceptions.router)
 app.include_router(memory.router)
 app.include_router(lessons.router)
+app.include_router(home.router)
 app.include_router(practice.router)
 app.include_router(records.router)
 app.include_router(export.router)

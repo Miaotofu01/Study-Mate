@@ -25,7 +25,7 @@ import pkg from "../package.json";
 const navItems = [
   // 「新对话」既是导航入口也是新会话动作：点它回到一个干净的新对话界面
   { href: "/chat", label: "新对话", icon: MessagesSquare, startsNewSession: true },
-  { href: "/courses", label: "课程图谱", icon: GraduationCap, startsNewSession: false },
+  { href: "/courses", label: "我的课程", icon: GraduationCap, startsNewSession: false },
   { href: "/misconceptions", label: "概念本", icon: NotebookPen, startsNewSession: false },
 ];
 

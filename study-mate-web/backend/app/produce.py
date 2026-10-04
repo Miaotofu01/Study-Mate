@@ -460,6 +460,10 @@ async def _role_tool_loop(
     ]
     audit.record("dispatch", route=route, loop="tools", values=values)
 
+    async def on_progress(snapshot: dict[str, Any]) -> None:
+        """进度快照 → SSE progress：编排面板显示「第 N 轮 · 已等待 Ns」。"""
+        await emit({"event": "progress", "stage": owner, **snapshot})
+
     async def on_event(event: dict[str, Any]) -> None:
         if event["type"] == "tool_call" and event.get("name") == "run_check":
             await emit({"event": "stage", "stage": "检查", "status": "start"})
@@ -475,6 +479,8 @@ async def _role_tool_loop(
         on_event,
         tools_svc.schemas(tools_svc.PRODUCE_TOOLS),
         audit_meta={"kind": "produce", "route": route, "node_id": node_id},
+        max_seconds=agent_svc.ORCH_MAX_SECONDS,
+        on_progress=on_progress,
     )
     files = ctx.state.get("files") or []
     if not files:
@@ -919,10 +925,9 @@ async def run_ticket_retry(
                 evidence += "\n\n【上一稿渲染/检查报错（逐行原文，改到没有为止）】\n" + _evidence_block(
                     [p for p in ticket.get("problems") or [] if p.get("owner") == "讲解"]
                 )
-                env = (
-                    fixture_content_envelope(evidence)
-                    if is_fixture_mode()
-                    else await _safe_dispatch(provider, "produce_content", evidence, emit)
+                env = await dispatch(
+                    provider, "produce_content", evidence, fixture_content_envelope, emit,
+                    base=base, node_id=node_id, index=index, stage_dir=stage_root,
                 )
                 if env is None:
                     return
@@ -944,10 +949,9 @@ async def run_ticket_retry(
             evidence = base_values + hint_block + "\n\n【上一稿渲染/检查报错（逐行原文，改到没有为止）】\n" + _evidence_block(
                 [p for p in ticket.get("problems") or [] if p.get("owner") in ("出题", "总控")]
             )
-            env = (
-                factory(evidence)
-                if is_fixture_mode()
-                else await _safe_dispatch(provider, route, evidence, emit)
+            env = await dispatch(
+                provider, route, evidence, factory, emit,
+                base=base, node_id=node_id, index=index, stage_dir=stage_root,
             )
             if env is None:
                 return
@@ -963,17 +967,3 @@ async def run_ticket_retry(
         await emit({"event": "done", "stage": "retry", "message": "重试通过，工单已关闭。"})
     finally:
         roles.clear_stage(stage_root)
-
-
-async def _safe_dispatch(
-    provider: dict[str, Any], route: str, values: str, emit: Emit
-) -> dict[str, Any] | None:
-    from .llm import is_fixture_mode
-
-    if is_fixture_mode():
-        return None
-    try:
-        return await roles.dispatch_role(provider, route, values)
-    except ValueError as exc:
-        await emit({"event": "error", "message": str(exc)})
-        return None

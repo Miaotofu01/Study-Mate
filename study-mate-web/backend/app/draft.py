@@ -64,6 +64,26 @@ def list_drafts() -> list[dict[str, Any]]:
     return drafts
 
 
+def find_draft_by_name(name: str) -> str | None:
+    """按科目名找草稿（忽略首尾空白与大小写），返回其 slug；没有返回 None。
+
+    同名课程会生成字节级相同的 slug，重复盘问会建出「同名两草稿」（实测
+    subject-5563f3 / subject-579bd2 同名同目标）。建草稿前先认名去重。
+    """
+    if not DRAFTS_DIR.is_dir():
+        return None
+    wanted = (name or "").strip().casefold()
+    if not wanted:
+        return None
+    for child in sorted(DRAFTS_DIR.iterdir()):
+        if not child.is_dir():
+            continue
+        subject = _read_yaml(child / "subject.yaml")
+        if isinstance(subject, dict) and str(subject.get("name") or "").strip().casefold() == wanted:
+            return child.name
+    return None
+
+
 def create_draft(
     name: str,
     slug: str | None = None,
@@ -71,10 +91,17 @@ def create_draft(
     interview: dict[str, Any] | None = None,
 ) -> str:
     """建草稿科目：目录骨架 + subject.yaml（含盘问结果六键）+ 空大纲/进度 +
-    使命/术语表/资源清单骨架。返回 slug；slug 冲突抛 FileExistsError。"""
+    使命/术语表/资源清单骨架。返回 slug。
+
+    同名（忽略首尾空白与大小写）草稿已存在 → 直接返回既有 slug，不建重复草稿；
+    指定 slug 被别的科目占用（真冲突）仍抛 FileExistsError。
+    """
     resolved = slug or generate_slug(name)
     if not is_valid_slug(resolved):
         raise ValueError(f"slug 格式非法：{resolved}")
+    existing = find_draft_by_name(name)
+    if existing is not None:
+        return existing
     base = draft_dir(resolved)
     if base.exists():
         raise FileExistsError(f"草稿已存在：{resolved}")

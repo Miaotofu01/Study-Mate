@@ -19,6 +19,8 @@ test("the chat right rail exposes the attachments area for the associated subjec
   await associateSubject(page, "computer-networks");
   // 附件区在右栏里，而右栏在新对话态默认折叠：先展开再断言
   await expandRightRail(page);
+  // 附件与会话信息同属「会话与附件」选项卡（默认页是「图谱与大纲」）：先切页再断言可见
+  await page.getByTestId("rail-tab-session").click();
   const area = page.getByTestId("chat-right-sidebar").getByTestId("chat-attachments-area");
   await expect(area).toBeVisible();
 

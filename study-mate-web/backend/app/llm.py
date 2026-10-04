@@ -13,6 +13,7 @@ import logging
 import os
 import re
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
@@ -36,7 +37,18 @@ REQUEST_TIMEOUT = float(os.getenv("STUDYMATE_LLM_TIMEOUT", "900.0") or 900.0)
 LLM_RETRIES = max(1, int(os.getenv("STUDYMATE_LLM_RETRIES", "3") or 3))
 TEMPERATURE = 0.2
 _ERROR_TEXT_LIMIT = 2000
-REASONING_OFF_VARIANT = "off"
+# 档位表里有两类取值（2026-10-04 维护者指出）：`low/medium/high/max` 是**推理档位**，
+# 直接映射到协议的 effort 参数；`disabled/enabled`、`off/on` 是**思考开关**——"开"没有
+# 对应的档位名，映射成默认档（medium），"关"完全不发思考参数。把开关值原样当 effort
+# 发出去会被网关 400（实测 new-api 只认 none/minimal/low/medium/high/xhigh/max）。
+REASONING_OFF_VALUES = frozenset(
+    {"off", "disabled", "disable", "none", "false", "no", "0", "关闭", "禁用", "停用"}
+)
+REASONING_ON_VALUES = frozenset(
+    {"on", "enabled", "enable", "true", "yes", "1", "default", "auto", "开启", "启用", "默认"}
+)
+OPENAI_EFFORT_VALUES = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+DEFAULT_REASONING_EFFORT = "medium"
 ANTHROPIC_THINKING_BUDGETS = {"low": 2048, "medium": 8192, "high": 24576}
 # Anthropic 要求 budget_tokens < max_tokens
 ANTHROPIC_THINKING_HEADROOM = 4096
@@ -54,18 +66,58 @@ def _is_transient(exc: Exception) -> bool:
     return isinstance(exc, ProviderTransientError)
 
 
-def _reasoning_variant(provider: dict[str, Any]) -> str:
-    """当前生效推理档位；未启用 / variants 为空 / "off" 时返回 ""（不发思考参数）。"""
+@dataclass(frozen=True)
+class ReasoningRequest:
+    """归一化后的思考请求。
+
+    enabled=False 表示"本次不发任何思考参数"；effort 为要发的档位名（None = 用默认档）。
+    """
+
+    enabled: bool
+    effort: str | None = None
+
+
+def _reasoning_request(provider: dict[str, Any]) -> ReasoningRequest:
+    """把用户声明的档位名归一化成"开关 + 档位"。
+
+    - 未启用推理 / 档位表为空 / 档位为空 → 不思考。
+    - 开关类取值（`disabled` / `off` / `enabled` / `on` …）→ 关：不思考；开：用默认档（medium）。
+    - 其余值按**档位**原样透出（各协议自行决定收不收；Anthropic 只认自己的预算表，
+      认不出就不发思考参数，不会 400）。
+    """
     reasoning = provider.get("reasoning")
     if not isinstance(reasoning, dict) or not reasoning.get("enabled"):
-        return ""
+        return ReasoningRequest(False)
     variants = reasoning.get("variants")
     if not isinstance(variants, list) or not variants:
-        return ""
+        return ReasoningRequest(False)
     variant = str(provider.get("reasoning_variant") or "") or str(
         reasoning.get("default_variant") or ""
     )
-    return "" if variant == REASONING_OFF_VARIANT else variant
+    variant = variant.strip()
+    if not variant:
+        return ReasoningRequest(False)
+    lowered = variant.lower()
+    if lowered in REASONING_OFF_VALUES:
+        return ReasoningRequest(False)
+    if lowered in REASONING_ON_VALUES:
+        return ReasoningRequest(True, None)
+    return ReasoningRequest(True, lowered)
+
+
+def _openai_reasoning_effort(provider: dict[str, Any]) -> str | None:
+    """OpenAI 兼容格式要发的 reasoning_effort；不思考返回 None。
+
+    开关"开"与未识别的档位名都落到默认档（medium），保证"要求思考"真的生效；
+    `none` 是网关接受的显式关闭值，不主动发（关就用"不发参数"表达）。
+    """
+    request = _reasoning_request(provider)
+    if not request.enabled:
+        return None
+    effort = (request.effort or DEFAULT_REASONING_EFFORT).lower()
+    if effort == "none":
+        return None
+    return effort
 
 
 def _max_output_limit(provider: dict[str, Any]) -> int | None:
@@ -119,16 +171,21 @@ def _raw_client(provider: dict[str, Any]) -> httpx.AsyncClient:
 
 def build_client(provider: dict[str, Any]) -> AsyncOpenAI:
     mounts = _loopback_mounts(str(provider.get("base_url") or ""))
+    # max_retries=0：openai SDK 默认还会整请求重试 2 次，叠上本层与 agent 层的重试，
+    # 单轮最坏耗时会被放大成 3×3×(per-read 900s)——实测有会话因此挂了 2 小时 38 分。
+    # 重试统一由 chat_once / agent 控制，SDK 层不再自己重来。
     if mounts is None:
         return AsyncOpenAI(
             base_url=provider.get("base_url") or None,
             api_key=provider.get("api_key") or "missing",
             timeout=REQUEST_TIMEOUT,
+            max_retries=0,
         )
     return AsyncOpenAI(
         base_url=provider.get("base_url") or None,
         api_key=provider.get("api_key") or "missing",
         timeout=REQUEST_TIMEOUT,
+        max_retries=0,
         http_client=httpx.AsyncClient(timeout=REQUEST_TIMEOUT, mounts=mounts),
     )
 
@@ -209,6 +266,57 @@ class ToolCallAccumulator:
                 }
             )
         return calls
+
+
+def _delta_field(delta: Any, key: str) -> str:
+    """取 delta 上的字段：openai SDK 对网关扩展字段（如 reasoning_content）走
+    `model_extra`，直接 getattr 不一定拿得到，两处都查一次。"""
+    value = getattr(delta, key, None)
+    if value is None:
+        extra = getattr(delta, "model_extra", None) or {}
+        if isinstance(extra, dict):
+            value = extra.get(key)
+    return str(value) if value else ""
+
+
+def _usage_payload(usage: Any) -> dict[str, int] | None:
+    """把协议各异的 usage 统一成 {prompt_tokens, completion_tokens, total_tokens}。
+
+    openai_chat 走 prompt_/completion_tokens，anthropic 与 responses 走 input_/output_tokens；
+    三者都没有时返回 None（不产生空的用量事件）。
+    """
+    if usage is None:
+        return None
+
+    def _number(key: str) -> int | None:
+        if isinstance(usage, dict):
+            value = usage.get(key)
+        else:
+            value = getattr(usage, key, None)
+            if value is None:
+                extra = getattr(usage, "model_extra", None) or {}
+                if isinstance(extra, dict):
+                    value = extra.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return int(value)
+
+    prompt = _number("prompt_tokens")
+    if prompt is None:
+        prompt = _number("input_tokens")
+    completion = _number("completion_tokens")
+    if completion is None:
+        completion = _number("output_tokens")
+    total = _number("total_tokens")
+    if prompt is None and completion is None and total is None:
+        return None
+    prompt = prompt or 0
+    completion = completion or 0
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total if total is not None else prompt + completion,
+    }
 
 
 def _openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -351,9 +459,9 @@ async def _stream_openai_chat(
     limit = _max_output_limit(provider)
     if limit is not None:
         kwargs["max_tokens"] = limit
-    variant = _reasoning_variant(provider)
-    if variant:
-        kwargs["extra_body"] = {"reasoning_effort": variant}
+    effort = _openai_reasoning_effort(provider)
+    if effort:
+        kwargs["extra_body"] = {"reasoning_effort": effort}
     stream = await client.chat.completions.create(
         model=provider.get("model") or "",
         messages=_openai_wire_messages(messages),  # type: ignore[arg-type]
@@ -380,9 +488,9 @@ async def _chat_openai_chat(
     limit = _max_output_limit(provider)
     if limit is not None:
         kwargs["max_tokens"] = limit
-    variant = _reasoning_variant(provider)
-    if variant:
-        kwargs["extra_body"] = {"reasoning_effort": variant}
+    effort = _openai_reasoning_effort(provider)
+    if effort:
+        kwargs["extra_body"] = {"reasoning_effort": effort}
     # 走流式再聚合：部分中转网关对长非流式请求有 ~120s 硬超时（HTTP 524），
     # 流式增量不受该窗口限制；语义等价（仍拿到完整文本），长产出（课件/题库）必需。
     chunks: list[str] = []
@@ -472,9 +580,9 @@ def _responses_payload(
     limit = _max_output_limit(provider)
     if limit is not None:
         payload["max_output_tokens"] = limit
-    variant = _reasoning_variant(provider)
-    if variant:
-        payload["reasoning"] = {"effort": variant}
+    effort = _openai_reasoning_effort(provider)
+    if effort:
+        payload["reasoning"] = {"effort": effort}
     if tools:
         payload["tools"] = _responses_tools(tools)
         payload["tool_choice"] = tool_choice or "auto"
@@ -520,7 +628,7 @@ async def _chat_openai_responses(
     json_mode: bool,
 ) -> str:
     payload = _responses_payload(provider, messages, json_mode=json_mode, stream=False)
-    if not _reasoning_variant(provider):
+    if not _reasoning_request(provider).enabled:
         # 推理模型不接受自定义 temperature，开启思考时留给协议默认值
         payload["temperature"] = TEMPERATURE
     async with _raw_client(provider) as client:
@@ -625,8 +733,12 @@ def _anthropic_payload(
         "max_tokens": _max_output_limit(provider) or DEFAULT_MAX_TOKENS,
         "messages": payload_messages,
     }
-    variant = _reasoning_variant(provider)
-    budget = ANTHROPIC_THINKING_BUDGETS.get(variant) if variant else None
+    request = _reasoning_request(provider)
+    budget = (
+        ANTHROPIC_THINKING_BUDGETS.get(request.effort or DEFAULT_REASONING_EFFORT)
+        if request.enabled
+        else None
+    )
     if budget is not None:
         # 协议要求 budget_tokens < max_tokens：声明值不足时抬高到预算 + 余量
         payload["max_tokens"] = max(payload["max_tokens"], budget + ANTHROPIC_THINKING_HEADROOM)
@@ -671,7 +783,7 @@ async def _chat_anthropic(
     json_mode: bool,
 ) -> str:
     payload = _anthropic_payload(provider, messages, json_mode)
-    if not _reasoning_variant(provider):
+    if not _reasoning_request(provider).enabled:
         # 开启 extended thinking 时 Anthropic 只接受协议默认 temperature
         payload["temperature"] = TEMPERATURE
     async with _raw_client(provider) as client:
@@ -704,13 +816,14 @@ async def _openai_chat_turn(
     limit = _max_output_limit(provider)
     if limit is not None:
         kwargs["max_tokens"] = limit
-    variant = _reasoning_variant(provider)
-    if variant:
-        kwargs["extra_body"] = {"reasoning_effort": variant}
+    effort = _openai_reasoning_effort(provider)
+    if effort:
+        kwargs["extra_body"] = {"reasoning_effort": effort}
     if tools:
         kwargs["tools"] = _openai_tools(tools)
         kwargs["tool_choice"] = tool_choice or "auto"
     accumulator = ToolCallAccumulator()
+    usage: dict[str, int] | None = None
     stream = await client.chat.completions.create(
         model=provider.get("model") or "",
         messages=_openai_wire_messages(messages),  # type: ignore[arg-type]
@@ -719,10 +832,19 @@ async def _openai_chat_turn(
         **kwargs,
     )
     async for chunk in stream:
+        # 网关（new-api 一类）默认在末块带 usage：不主动发 stream_options，
+        # 免得某些上游不认这个参数；见到就收，见不到就没有用量事件。
+        chunk_usage = _usage_payload(getattr(chunk, "usage", None))
+        if chunk_usage is not None:
+            usage = chunk_usage
         for choice in chunk.choices or []:
             delta = getattr(choice, "delta", None)
             if delta is None:
                 continue
+            # 思维链与正文分开：DeepSeek 系网关用 reasoning_content，个别用 reasoning
+            reasoning = _delta_field(delta, "reasoning_content") or _delta_field(delta, "reasoning")
+            if reasoning:
+                yield {"type": "reasoning", "content": reasoning}
             text = getattr(delta, "content", None)
             if text:
                 yield {"type": "text", "content": str(text)}
@@ -739,6 +861,8 @@ async def _openai_chat_turn(
     calls = [call for call in accumulator.finalize() if call["name"]]
     if calls:
         yield {"type": "tool_calls", "tool_calls": calls}
+    if usage is not None:
+        yield {"type": "usage", "usage": usage}
 
 
 async def _openai_responses_turn(
@@ -753,6 +877,7 @@ async def _openai_responses_turn(
     accumulator = ToolCallAccumulator()
     by_item: dict[str, int] = {}
     next_index = 0
+    usage: dict[str, int] | None = None
     async with _raw_client(provider) as client:
         async with client.stream(
             "POST",
@@ -766,6 +891,10 @@ async def _openai_responses_turn(
                     piece = str(data.get("delta") or "")
                     if piece:
                         yield {"type": "text", "content": piece}
+                elif event_type in ("response.reasoning_summary_text.delta", "response.reasoning_text.delta"):
+                    piece = str(data.get("delta") or "")
+                    if piece:
+                        yield {"type": "reasoning", "content": piece}
                 elif event_type == "response.output_item.added":
                     item = data.get("item") or {}
                     if item.get("type") == "function_call":
@@ -793,11 +922,16 @@ async def _openai_responses_turn(
                                 name=item.get("name"),
                                 arguments_full=item.get("arguments"),
                             )
+                elif event_type == "response.completed":
+                    payload_obj = data.get("response") or {}
+                    usage = _usage_payload(payload_obj.get("usage")) or usage
                 elif event_type in ("error", "response.failed"):
                     raise ProviderError(json.dumps(data, ensure_ascii=False)[:_ERROR_TEXT_LIMIT])
     calls = [call for call in accumulator.finalize() if call["name"]]
     if calls:
         yield {"type": "tool_calls", "tool_calls": calls}
+    if usage is not None:
+        yield {"type": "usage", "usage": usage}
 
 
 async def _anthropic_turn(
@@ -811,6 +945,7 @@ async def _anthropic_turn(
     )
     payload["stream"] = True
     accumulator = ToolCallAccumulator()
+    usage: dict[str, int] = {}
     async with _raw_client(provider) as client:
         async with client.stream(
             "POST",
@@ -820,7 +955,11 @@ async def _anthropic_turn(
         ) as response:
             await _raise_for_status(response)
             async for event_type, data in _iter_sse(response):
-                if event_type == "content_block_start":
+                if event_type == "message_start":
+                    started = _usage_payload((data.get("message") or {}).get("usage"))
+                    if started is not None:
+                        usage["input_tokens"] = started["prompt_tokens"]
+                elif event_type == "content_block_start":
                     block = data.get("content_block") or {}
                     if block.get("type") == "tool_use":
                         accumulator.push(
@@ -833,8 +972,14 @@ async def _anthropic_turn(
                     delta = data.get("delta") or {}
                     if delta.get("type") == "text_delta" and delta.get("text"):
                         yield {"type": "text", "content": str(delta["text"])}
+                    elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
+                        yield {"type": "reasoning", "content": str(delta["thinking"])}
                     elif delta.get("type") == "input_json_delta":
                         accumulator.push(index, arguments_delta=str(delta.get("partial_json") or ""))
+                elif event_type == "message_delta":
+                    merged = _usage_payload(data.get("usage"))
+                    if merged is not None:
+                        usage["output_tokens"] = merged["completion_tokens"]
                 elif event_type == "error":
                     raise ProviderError(
                         json.dumps(data.get("error") or data, ensure_ascii=False)[:_ERROR_TEXT_LIMIT]
@@ -842,6 +987,9 @@ async def _anthropic_turn(
     calls = [call for call in accumulator.finalize() if call["name"]]
     if calls:
         yield {"type": "tool_calls", "tool_calls": calls}
+    final_usage = _usage_payload(usage) if usage else None
+    if final_usage is not None:
+        yield {"type": "usage", "usage": final_usage}
 
 
 TURN_IMPLEMENTATIONS = {

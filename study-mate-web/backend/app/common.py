@@ -8,8 +8,9 @@ from typing import Any
 from fastapi import HTTPException
 
 from . import curriculum_store as cs
+from . import storage
 from . import workspace_ctx
-from .config import get_active_provider
+from .config import get_active_provider, get_session_provider
 from .llm import is_fixture_mode
 
 
@@ -56,10 +57,20 @@ def node_ids(slug: str) -> set[str]:
     }
 
 
-def require_provider() -> dict[str, Any]:
+def require_provider(session_id: str | None = None) -> dict[str, Any]:
+    """当前调用要用的 provider。
+
+    给了 session_id 且该会话绑定了模型/档位就用它（2026-10-04：模型按会话持久化）；
+    绑定失效或无绑定则回落当前默认模型——与会话内聊天同一套口径，避免"聊天用一个模型、
+    小结/评估用另一个"。
+    """
     if is_fixture_mode():
         return {"model": "fixture", "api_format": "openai_chat"}
-    provider = get_active_provider()
+    session = storage.get_session(session_id) if session_id else None
+    bound = session.get("active") if session else None
+    provider = get_session_provider(bound) if bound else None
+    if provider is None:
+        provider = get_active_provider()
     if provider is None or not provider.get("api_key"):
         raise HTTPException(422, "尚未配置模型 API Key，请先到 Settings 填写。")
     return provider

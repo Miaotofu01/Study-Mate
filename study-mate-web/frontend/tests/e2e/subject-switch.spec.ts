@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 import { associateSubject } from "./helpers";
 
 test("switch subjects from the app sidebar and the chat association select", async ({ page }) => {
-  // /courses 不带参数时默认显示第一个科目
-  await page.goto("/courses");
+  // /courses 不带 ?subject= 时是「我的课程」首页嵌入（无图谱）；要图谱必须显式带科目
+  await page.goto("/courses?subject=computer-networks");
   await expect(page.getByTestId("graph-node-net.layers")).toBeVisible();
 
   // 应用侧边栏科目区切换（课程页第二列科目列表已移除，aside 是唯一科目入口）

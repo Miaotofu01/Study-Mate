@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
+  Brain,
   Check,
   CheckCircle2,
+  ChevronDown,
   Copy,
   FileText,
   FolderOpen,
@@ -14,8 +16,10 @@ import {
   NotebookPen,
   PanelRightClose,
   PanelRightOpen,
+  Paperclip,
   Pencil,
   Sparkles,
+  Trash2,
   User,
   Wrench,
   X,
@@ -26,17 +30,31 @@ import { Composer } from "./Composer";
 import { InspectionDialog } from "./InspectionDialog";
 import { RightRail } from "./RightRail";
 import { RightSidebar } from "./RightSidebar";
+import { activeModelOf } from "./ModelSelector";
 import { api, buildDraft, streamChat } from "@/lib/api";
-import { formatFileSize } from "@/lib/format";
+import type { OrchestrationProgress } from "@/lib/api";
+import { contextWindowOf } from "@/lib/contextWindow";
+import { cleanAssistantText, formatFileSize } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import type {
   AppSettings,
+  AttachmentKind,
   ChatMessage,
   GraphNode,
   MessageAttachment,
+  SessionActive,
   ToolActivity,
   UploadedAttachment,
+  Usage,
 } from "@/lib/types";
+
+/** 出站附件的最小形状：既有附件（MessageAttachment）与新上传（UploadedAttachment）都满足 */
+type OutgoingAttachment = {
+  id: string;
+  filename: string;
+  kind: AttachmentKind;
+  size: number;
+};
 
 const GREETINGS: Record<"morning" | "afternoon" | "evening", string[]> = {
   morning: ["早上好，今天想弄懂什么？", "早安，学习的好时光。"],
@@ -47,6 +65,8 @@ const GREETINGS: Record<"morning" | "afternoon" | "evening", string[]> = {
 const STARTERS = ["讲解一个概念", "出几道练习题", "按我的课程进度继续", "帮我制定学习计划"];
 // 建课会话入口（§5.1 F 行）：建课会话注入 learning-system + learning-discovery，探索与盘问同会话
 const DISCOVERY_STARTER = "不知道学什么，帮我选方向";
+// 建课完成后的一键开课：不发新端点，走普通聊天把「产出第一课」交给智能体的 produce_lesson 工具
+const FIRST_LESSON_PROMPT = "开始第一课：请按大纲顺序产出第一个节点，并告诉我产到哪了";
 
 // 右侧边栏宽度：默认 256px（原 w-64），可拖拽范围 200–480px，键与课程页互不干扰
 const RIGHT_SIDEBAR_WIDTH_KEY = "studymate-chat-right-sidebar-width";
@@ -72,6 +92,15 @@ function writeRightOpen(id: string, open: boolean): void {
   } catch {
     // localStorage 不可用时仅本次会话生效
   }
+}
+
+/**
+ * 该草稿是否已有建课产物：会话里存在 slug 相同的 done 卡即视为建过。
+ * done 卡由后端在建课收口时落库（production.py），所以刷新后判据仍在，
+ * 「确认建课」按钮据此永久禁用，不靠一次性本地状态。
+ */
+function hasBuilt(slug: string, messages: ChatMessage[]): boolean {
+  return messages.some((msg) => msg.kind === "done" && msg.slug === slug);
 }
 
 // 挂载时按时段随机定死一组成 state，避免水合抖动
@@ -124,6 +153,16 @@ export function ChatView() {
   const [renameValue, setRenameValue] = useState("");
   // 消息复制反馈
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  // 编辑中的用户消息下标（就地变成编辑框；提交=从该句截断并重新生成）
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  // 「删除整轮」的内联二次确认（对照 DeepTutor：不再弹模态）
+  const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null);
+  // 最近一轮的用量（右栏「上下文窗口」栏；历史会话从 meta.usage 回填）
+  const [usage, setUsage] = useState<Usage | null>(null);
+  // 会话绑定的模型/档位（null = 跟随全局默认；2026-10-04：模型按会话持久化）
+  const [sessionActive, setSessionActive] = useState<SessionActive | null>(null);
+  // 建课编排的实时进度（后端每几秒一份快照）：长时间派工时"在干活"要看得见
+  const [buildProgress, setBuildProgress] = useState<OrchestrationProgress | null>(null);
 
   const handleCopyMessage = useCallback((index: number, text: string) => {
     void navigator.clipboard.writeText(text);
@@ -143,6 +182,8 @@ export function ChatView() {
   const abortRef = useRef<AbortController | null>(null);
   const orchestrationAbortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 流式自动跟随：仅当用户本来就在底部附近时才贴底；一旦向上翻就停止跟随
+  const stickToBottomRef = useRef(true);
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = sessionId;
   const rightOpenRef = useRef(rightOpen);
@@ -151,8 +192,25 @@ export function ChatView() {
 
   const hasMessages = messages.length > 0;
 
+  // 名称栏与右栏用量栏共用：生效的「提供商 / 模型」与上下文长度。
+  // 会话绑定了模型就用会话的（2026-10-04：模型按会话持久化），否则用全局默认。
+  const effectiveActive = sessionActive ?? settings?.active ?? null;
+  const activeModelLabel = useMemo(() => {
+    if (!settings || !effectiveActive) return null;
+    const entry = settings.providers.find((p) => p.id === effectiveActive.provider_id);
+    if (!entry) return null;
+    return effectiveActive.model ? `${entry.name} / ${effectiveActive.model}` : entry.name;
+  }, [settings, effectiveActive]);
+  const activeContextWindow = useMemo(
+    () => contextWindowOf(settings && effectiveActive ? activeModelOf(settings, effectiveActive) : null),
+    [settings, effectiveActive],
+  );
+
+  // API Key 判据也按生效的三元组算：会话绑到没配 key 的提供商时输入框要如实禁用
   const hasKey: boolean | null = settings
-    ? (settings.providers.find((p) => p.id === settings.active.provider_id)?.has_key ?? false)
+    ? effectiveActive === null
+      ? false
+      : (settings.providers.find((p) => p.id === effectiveActive.provider_id)?.has_key ?? false)
     : settingsFailed
       ? false
       : null;
@@ -228,12 +286,19 @@ export function ChatView() {
     abortRef.current?.abort();
     orchestrationAbortRef.current?.abort();
     setBuilding(false);
+    // 首屏/切会话一律从底部开始（与「用户手动上翻」区分开）
+    stickToBottomRef.current = true;
     setActiveSessionId(loadedSession.meta.id);
     setSessionId(loadedSession.meta.id);
     setMessages(loadedSession.messages);
     setError(null);
     setNotice(null);
     setStreaming(false);
+    setEditingIndex(null);
+    setConfirmDeleteIndex(null);
+    setUsage(loadedSession.meta.usage ?? null);
+    // 恢复该会话绑定的模型/档位（新对话态下为 null = 跟随全局默认）
+    setSessionActive(loadedSession.meta.active ?? null);
     setActiveSubject(loadedSession.meta.subject_slug, loadedSession.meta.node_id);
     // 恢复该会话自己的右侧栏折叠状态（无记忆时默认展开）
     setRightOpen(readRightOpen(loadedSession.meta.id) ?? true);
@@ -246,22 +311,35 @@ export function ChatView() {
     abortRef.current?.abort();
     orchestrationAbortRef.current?.abort();
     setBuilding(false);
+    // 新对话回到贴底跟随
+    stickToBottomRef.current = true;
     setSessionId(null);
     setMessages([]);
     setError(null);
     setNotice(null);
     setStreaming(false);
+    setEditingIndex(null);
+    setConfirmDeleteIndex(null);
+    setUsage(null);
+    setSessionActive(null);
     // 新会话不继承上一会话的科目/节点（绑死语义：科目关联从干净状态开始）
     setActiveSubject(null, null);
     // 新对话默认折叠右侧边栏
     setRightOpen(false);
   }, [activeSessionId, setActiveSubject]);
 
-  // 自动滚动到底部
+  // 自动滚动到底部：只在用户本来就贴底时跟随，向上翻后不再被流式增量拉回
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, notice]);
+
+  // 记录是否贴底：距底部 32px 以内算"粘着"，用户上翻即停止跟随
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 32;
+  }, []);
 
   const appendKindMessage = useCallback((message: Partial<ChatMessage> & Pick<ChatMessage, "role" | "content">) => {
     setMessages((prev) => [...prev, message as ChatMessage]);
@@ -270,8 +348,8 @@ export function ChatView() {
   const handleSend = useCallback(
     (
       text: string,
-      attachments: UploadedAttachment[] = [],
-      opts: { mode?: "chat" | "interview"; fixtureScenario?: string } = {},
+      attachments: OutgoingAttachment[] = [],
+      opts: { mode?: "chat" | "interview"; fixtureScenario?: string; replaceFrom?: number } = {},
     ) => {
       setError(null);
       setNotice(null);
@@ -284,12 +362,16 @@ export function ChatView() {
         size: a.size,
       }));
 
-      // 乐观地先显示用户消息和一个空的 assistant 占位
-      setMessages((prev) => [
-        ...prev,
-        metas.length > 0 ? { role: "user", content: text, attachments: metas } : { role: "user", content: text },
-        { role: "assistant", content: "" },
-      ]);
+      // 乐观地先显示用户消息和一个空的 assistant 占位。
+      // 编辑重发（replaceFrom）时先截断该下标起的本地消息——与后端 truncate 对齐。
+      setMessages((prev) => {
+        const base = opts.replaceFrom === undefined ? prev : prev.slice(0, opts.replaceFrom);
+        return [
+          ...base,
+          metas.length > 0 ? { role: "user", content: text, attachments: metas } : { role: "user", content: text },
+          { role: "assistant", content: "" },
+        ];
+      });
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -319,6 +401,30 @@ export function ChatView() {
         });
       };
 
+      // 思维链增量与生效用量都挂在最后一条 assistant 占位上（与 tools 同处「中间过程」）
+      const patchReasoning = (piece: string) => {
+        setMessages((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last && last.role === "assistant" && !last.kind) {
+            next[next.length - 1] = { ...last, reasoning: (last.reasoning ?? "") + piece };
+          }
+          return next;
+        });
+      };
+
+      // SSE 提示（绑定/图片降级/重试）：收进当前消息的「中间过程」折叠区，不再单独挂横幅
+      const appendNoticeToMessage = (message: string) => {
+        setMessages((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last && last.role === "assistant" && !last.kind) {
+            next[next.length - 1] = { ...last, notices: [...(last.notices ?? []), message] };
+          }
+          return next;
+        });
+      };
+
       streamChat(
         text,
         sessionId,
@@ -333,7 +439,9 @@ export function ChatView() {
             assistantBuffer += piece;
             patchAssistant((c) => c + piece);
           },
-          onNotice: (message) => setNotice(message),
+          onReasoning: (piece) => patchReasoning(piece),
+          onNotice: (message) => appendNoticeToMessage(message),
+          onUsage: (next) => setUsage(next),
           onToolCall: ({ id, name, arguments: args }) => {
             patchTools((tools) => [
               ...tools,
@@ -396,6 +504,8 @@ export function ChatView() {
           mode: opts.mode ?? null,
           // E2E 专用：fixture 模式下按请求选固定流场景（建课会话用 interview 场景拿收口标记）
           fixtureScenario: opts.fixtureScenario ?? (opts.mode === "interview" ? "interview" : null),
+          // 编辑重发：服务端据此先截断旧消息再追加（普通发送不带该键）
+          replaceFrom: opts.replaceFrom,
           signal: controller.signal,
         },
       ).catch((err) => {
@@ -406,11 +516,17 @@ export function ChatView() {
     [sessionId, activeSubjectSlug, activeNodeId, activeWorkspace, setActiveSessionId, refreshSessions, appendKindMessage],
   );
 
+  // 建课 done 卡上的「开始第一课」：不发新端点，复用普通发送路径，让智能体用 produce_lesson 工具产出
+  const startFirstLesson = useCallback(() => {
+    handleSend(FIRST_LESSON_PROMPT);
+  }, [handleSend]);
+
   // 确认建课：草稿上跑建课编排（大纲+采图并行 → 门禁 → 落盘），进度播报进会话
   const startBuild = useCallback(
     (slug: string) => {
       if (building) return;
       setBuilding(true);
+      setBuildProgress(null);
       setError(null);
       const orchestrationController = new AbortController();
       orchestrationAbortRef.current = orchestrationController;
@@ -425,9 +541,11 @@ export function ChatView() {
           }
         },
         onStage: (payload) => {
+          setBuildProgress(null); // 有真事件了，进度快照让位给阶段卡
           if (payload.status === "done") mark(`✅ ${payload.stage}完成`, "stage");
           else if (payload.status === "fail") mark(`⚠ ${payload.stage}未过`, "stage");
         },
+        onProgress: (payload) => setBuildProgress(payload),
         onRetry: (payload) =>
             mark(
                 `🔁 第 ${payload.round} 轮打回（${payload.owners.join("、")}）${
@@ -457,34 +575,66 @@ export function ChatView() {
           mark(message, "error");
           void refreshSessions();
         },
-      }, sessionId, orchestrationController.signal).finally(() => setBuilding(false));
+      }, sessionId, orchestrationController.signal).finally(() => {
+        setBuilding(false);
+        setBuildProgress(null);
+      });
     },
     [building, sessionId, appendKindMessage, refreshSubjects, refreshSessions],
   );
 
-  // 落点确认：草稿整体搬进学习工作区
+  // 落点确认：草稿整体搬进学习工作区；带上会话 id（后端据此写 subject_slug）
   const promoteDraftToWorkspace = useCallback(
     async (slug: string) => {
       setPromoting(true);
       setError(null);
       try {
-        const res = await api.promoteDraft(slug);
+        const res = await api.promoteDraft(slug, sessionId);
         setNotice(`已落盘到工作区：${res.subject_dir}`);
         appendKindMessage({ role: "assistant", content: `✅ 落点确认完成，科目「${slug}」已进入工作区。`, kind: "done" });
         void refreshSubjects();
+        // 会话的科目关联由后端在 promote 时落库，这里刷新本地列表并选中新科目
+        void refreshSessions();
+        setActiveSubject(slug);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setPromoting(false);
       }
     },
-    [appendKindMessage, refreshSubjects],
+    [appendKindMessage, refreshSubjects, refreshSessions, sessionId, setActiveSubject],
   );
 
   const handleStop = () => {
     abortRef.current?.abort();
     setStreaming(false);
   };
+
+  // 编辑重发：从该下标截断（本地 + 服务端），用编辑后的文本与附件重新生成回复。
+  // 不做"改字不改答复"的原位编辑——语义就是"从这句话重新生成"。
+  const submitEdit = useCallback(
+    (index: number, text: string, attachments: OutgoingAttachment[]) => {
+      setEditingIndex(null);
+      handleSend(text, attachments, { replaceFrom: index });
+    },
+    [handleSend],
+  );
+
+  // 删除整轮：index 指向助手回复，服务端把该轮的用户消息与回复成对删掉（附件一并清理）
+  const deleteTurnAt = useCallback(
+    async (index: number) => {
+      if (!sessionId) return;
+      setConfirmDeleteIndex(null);
+      try {
+        const res = await api.deleteTurn(sessionId, index);
+        setMessages(res.messages);
+        void refreshSessions();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [sessionId, refreshSessions],
+  );
 
   const saveToMisconceptions = useCallback(
     (index: number, content: string) => {
@@ -580,6 +730,7 @@ export function ChatView() {
         <div className="flex min-h-0 flex-1 flex-col">
           <div
             ref={scrollRef}
+            onScroll={handleScroll}
             className="min-h-0 overflow-y-auto mask-edge-fade"
             style={{
               flexGrow: hasMessages ? 1 : 0,
@@ -590,9 +741,13 @@ export function ChatView() {
             <div className="mx-auto max-w-3xl px-5 py-6">
               {!hasMessages && (
                 <div className="flex flex-col items-center py-12 text-center">
-                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-brand/10 text-brand shadow-xs">
-                    <Sparkles className="h-6 w-6" />
-                  </div>
+                  {/* 空态大图标：品牌图标（public/icon-192.png），比原来的 48px 放大一档 */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/icon-192.png"
+                    alt="StudyMate"
+                    className="mb-5 h-20 w-20 rounded-2xl shadow-xs"
+                  />
                   <h1 className="mb-2.5 font-serif text-3xl sm:text-4xl font-medium tracking-tight text-[var(--foreground)]">
                     {greeting}
                   </h1>
@@ -623,7 +778,7 @@ export function ChatView() {
 
               {/* 工作区引导块已移除（2026-10-04 拍板）：工作区选择改到新对话态输入区上方的关联行 */}
 
-              <div className="flex flex-col gap-6">
+              <div data-testid="chat-messages" className="flex flex-col gap-6">
                 {messages.map((msg, i) => {
                   // 编排事件持久化成的消息卡（stage/handoff/done/error/build_confirm）
                   if (msg.kind) {
@@ -633,31 +788,45 @@ export function ChatView() {
                         message={msg}
                         building={building}
                         promoting={promoting}
+                        streaming={streaming}
+                        subjectReady={Boolean(msg.slug && subjects.some((s) => s.slug === msg.slug))}
+                        built={Boolean(msg.slug && hasBuilt(msg.slug, messages))}
                         onConfirmBuild={() => msg.slug && startBuild(msg.slug)}
                         onPromote={() => msg.slug && void promoteDraftToWorkspace(msg.slug)}
+                        onProduceFirstLesson={startFirstLesson}
                         onOpenTicket={() => msg.ticket_id && setInspectionTicketId(msg.ticket_id)}
                       />
                     );
                   }
                   const isUser = msg.role === "user";
                   const isLastAssistant = !isUser && i === messages.length - 1;
-                  const showCursor = !msg.content && streaming && isLastAssistant;
+                  const isStreamingHere = streaming && isLastAssistant;
+                  const showCursor = !msg.content && isStreamingHere && !msg.reasoning;
+                  const isEditing = editingIndex === i;
+                  const deleting = confirmDeleteIndex === i;
+                  // 展示/复制/记入概念本统一用清洗后的文本：剥掉盘问收口标记、去掉首尾空行
+                  const clean = isUser ? msg.content : cleanAssistantText(msg.content);
                   return (
                     <div
                       key={i}
                       className={clsx("group flex gap-3.5", isUser && "flex-row-reverse")}
                     >
+                      {/* 消息头像 46px（2026-10-04 定档）；用户圆形、助手圆角方形。
+                          空态欢迎区那个大图标是另一处（品牌图标），不随头像尺寸变动。 */}
                       <div
-                        className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl shadow-xs"
+                        className={clsx(
+                          "mt-0.5 flex h-[46px] w-[46px] shrink-0 items-center justify-center shadow-xs",
+                          isUser ? "rounded-full" : "rounded-2xl",
+                        )}
                         style={{
                           background: isUser ? "var(--muted)" : "rgb(var(--brand-rgb))",
                           color: isUser ? "var(--foreground)" : "#fff",
                         }}
                       >
                         {isUser ? (
-                          <User className="h-4 w-4" />
+                          <User className="h-6 w-6" />
                         ) : (
-                          <Sparkles className="h-4 w-4" />
+                          <Sparkles className="h-6 w-6" />
                         )}
                       </div>
                       {/* 用户消息靠右并加品牌色气泡；assistant 保持裸文本不加气泡 */}
@@ -667,25 +836,111 @@ export function ChatView() {
                           isUser && "flex flex-col items-end",
                         )}
                       >
-                        {!isUser && msg.tools && msg.tools.length > 0 && (
-                          <ToolCards tools={msg.tools} />
+                        {/* 助手名称栏：显示产出这条回复的模型（历史消息用落库值，实时用当前生效模型） */}
+                        {!isUser && (
+                          <div
+                            data-testid="assistant-name"
+                            className="mb-1 max-w-full truncate text-[11px] font-medium opacity-50"
+                          >
+                            {msg.model ?? activeModelLabel ?? "StudyMate"}
+                          </div>
                         )}
-                        {msg.content ? (
+                        {/* 中间过程折叠区：只留思维链 + 本轮提示，默认收起；工具卡已移出，常显 */}
+                        {!isUser && (
+                          <ProcessPanel
+                            reasoning={msg.reasoning}
+                            tools={msg.tools}
+                            notices={msg.notices}
+                            streaming={isStreamingHere}
+                          />
+                        )}
+                        {/* 工具调用卡：不再藏在折叠区里，流式期间与回放都直接可见 */}
+                        {!isUser && msg.tools && msg.tools.length > 0 && <ToolCards tools={msg.tools} />}
+                        {isEditing ? (
+                          <UserMessageEditor
+                            initialText={msg.content}
+                            initialAttachments={msg.attachments ?? []}
+                            sessionId={sessionId}
+                            onSubmit={(text, attachments) => submitEdit(i, text, attachments)}
+                            onCancel={() => setEditingIndex(null)}
+                          />
+                        ) : clean ? (
                           isUser ? (
                             <div className="max-w-[85%] rounded-2xl bg-brand px-4 py-2.5 text-sm text-white shadow-xs [&_a]:text-white [&_a]:underline [&_code]:bg-black/20 [&_pre]:bg-black/30">
-                              <Markdown content={msg.content} />
+                              <Markdown content={clean} />
                             </div>
                           ) : (
                             <div className="relative">
-                              <Markdown content={msg.content} />
-                              {streaming && isLastAssistant && (
+                              <Markdown content={clean} />
+                              {isStreamingHere && (
                                 <span className="ml-1 inline-block h-4 w-1.5 align-middle rounded-xs bg-brand animate-pulse" />
                               )}
-                              {/* 助手消息悬停操作条 */}
-                              <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                            </div>
+                          )
+                        ) : null}
+
+                        {/* 消息操作条：用户=复制/编辑（小图标），助手=复制/记入概念本/删除本轮 */}
+                        {!isEditing && (isUser || clean) && (
+                          <div
+                            className={clsx(
+                              "mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100",
+                              isUser && "justify-end",
+                              deleting && "opacity-100",
+                            )}
+                          >
+                            {isUser ? (
+                              <>
+                                <IconAction
+                                  title="复制"
+                                  testId="user-message-copy"
+                                  onClick={() => handleCopyMessage(i, clean)}
+                                >
+                                  {copiedIndex === i ? (
+                                    <Check className="h-3.5 w-3.5 text-brand" />
+                                  ) : (
+                                    <Copy className="h-3.5 w-3.5" />
+                                  )}
+                                </IconAction>
+                                <IconAction
+                                  title="编辑：从这条消息重新生成"
+                                  testId="user-message-edit"
+                                  disabled={streaming}
+                                  onClick={() => {
+                                    setConfirmDeleteIndex(null);
+                                    setEditingIndex(i);
+                                  }}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </IconAction>
+                              </>
+                            ) : deleting ? (
+                              <span
+                                data-testid="turn-delete-confirm"
+                                className="flex items-center gap-2 rounded-md bg-red-500/10 px-2 py-0.5 text-[11px] text-red-600 dark:text-red-400"
+                              >
+                                删除本轮（问答一起删）？
                                 <button
                                   type="button"
-                                  onClick={() => handleCopyMessage(i, msg.content)}
+                                  data-testid="turn-delete-confirm-yes"
+                                  onClick={() => void deleteTurnAt(i)}
+                                  className="font-medium underline"
+                                >
+                                  删除
+                                </button>
+                                <button
+                                  type="button"
+                                  data-testid="turn-delete-confirm-no"
+                                  onClick={() => setConfirmDeleteIndex(null)}
+                                  className="opacity-70 hover:opacity-100"
+                                >
+                                  取消
+                                </button>
+                              </span>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyMessage(i, clean)}
                                   className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--foreground)]/50 hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
                                   title="复制回答"
                                 >
@@ -703,17 +958,29 @@ export function ChatView() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => saveToMisconceptions(i, msg.content)}
+                                  onClick={() => saveToMisconceptions(i, clean)}
                                   className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--foreground)]/50 hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
                                   title="记入概念本"
                                 >
                                   <NotebookPen className="h-3 w-3" />
                                   <span>记入概念本</span>
                                 </button>
-                              </div>
-                            </div>
-                          )
-                        ) : null}
+                                <button
+                                  type="button"
+                                  data-testid="turn-delete"
+                                  disabled={!sessionId || streaming}
+                                  onClick={() => setConfirmDeleteIndex(i)}
+                                  className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--foreground)]/50 hover:bg-red-500/10 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-red-400"
+                                  title="删除本轮（用户提问与这条回复一起删）"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  <span>删除本轮</span>
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+
                         {showCursor && (
                           <div className="flex items-center gap-2 py-1 text-sm text-[var(--foreground)]/60">
                             <Loader2 className="h-4 w-4 animate-spin text-brand" />
@@ -728,6 +995,29 @@ export function ChatView() {
                   );
                 })}
               </div>
+
+              {/* 建课编排进行中的实时进度：长时间派工（实测单轮 126s）不再是"一片死寂" */}
+              {buildProgress && (
+                <div
+                  data-testid="build-progress"
+                  className="mt-5 flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs"
+                  style={{ background: "var(--muted)" }}
+                >
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-brand" />
+                  <span data-testid="build-progress-text" className="min-w-0 flex-1 truncate">
+                    {buildProgress.stage} · 第 {Math.max(1, buildProgress.round)} 轮 · 已等待{" "}
+                    {Math.round(buildProgress.elapsed_s)}s
+                    {buildProgress.tool_calls > 0
+                      ? ` · 已调用 ${buildProgress.tool_calls} 次工具${
+                          buildProgress.last_tool ? `（最近 ${buildProgress.last_tool}）` : ""
+                        }`
+                      : ""}
+                    {buildProgress.reasoning_chars > 0
+                      ? ` · 已思考 ${Math.max(1, Math.round(buildProgress.reasoning_chars / 1000))}k 字`
+                      : ""}
+                  </span>
+                </div>
+              )}
 
               {notice && (
                 <div
@@ -822,6 +1112,8 @@ export function ChatView() {
             sessionId={sessionId}
             settings={settings}
             onUpdated={setSettings}
+            sessionActive={sessionActive}
+            onSessionActiveChange={setSessionActive}
             onSend={handleSend}
             onStop={handleStop}
           />
@@ -862,7 +1154,13 @@ export function ChatView() {
         testId="chat-right-sidebar"
         contentClassName="border-l"
       >
-        <RightSidebar sessionId={sessionId} messageCount={messages.length} />
+        <RightSidebar
+          sessionId={sessionId}
+          messageCount={messages.length}
+          usage={usage}
+          modelLabel={activeModelLabel}
+          contextWindow={activeContextWindow}
+        />
       </RightRail>
 
       {/* 质检工单（handoff 卡入口） */}
@@ -882,15 +1180,25 @@ function KindMessageCard({
   message,
   building,
   promoting,
+  streaming,
+  subjectReady,
+  built,
   onConfirmBuild,
   onPromote,
+  onProduceFirstLesson,
   onOpenTicket,
 }: {
   message: ChatMessage;
   building: boolean;
   promoting: boolean;
+  streaming: boolean;
+  /** 该 done 卡的科目是否已落进工作区（落点确认完成后为 true） */
+  subjectReady: boolean;
+  /** 该 confirm 卡的草稿是否已有建课产物（done 卡落库，刷新后仍为 true） */
+  built: boolean;
   onConfirmBuild: () => void;
   onPromote: () => void;
+  onProduceFirstLesson: () => void;
   onOpenTicket: () => void;
 }) {
   const { kind, content } = message;
@@ -928,11 +1236,17 @@ function KindMessageCard({
           <button
             data-testid="build-confirm-button"
             onClick={onConfirmBuild}
-            disabled={building}
-            className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-light disabled:opacity-50"
+            disabled={building || built}
+            className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-light disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {building ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            {building ? "建课编排进行中…" : "确认建课"}
+            {built ? (
+              <Check className="h-3.5 w-3.5" />
+            ) : building ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            {built ? "已建课" : building ? "建课编排进行中…" : "确认建课"}
           </button>
         </div>
       </div>
@@ -949,15 +1263,26 @@ function KindMessageCard({
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           {content}
         </div>
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
           <button
             data-testid="promote-button"
             onClick={onPromote}
-            disabled={promoting}
-            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+            disabled={promoting || subjectReady}
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {promoting ? "落盘中…" : "落点确认：搬进学习工作区"}
+            {subjectReady ? "已进入工作区" : promoting ? "落盘中…" : "落点确认：搬进学习工作区"}
           </button>
+          {/* 科目已落进工作区后：一键让智能体走工具产出第一课（只是发一条普通聊天消息） */}
+          {subjectReady && (
+            <button
+              data-testid="produce-first-lesson"
+              onClick={onProduceFirstLesson}
+              disabled={streaming}
+              className="rounded-lg border border-emerald-500/60 px-3 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/10 disabled:opacity-50 dark:text-emerald-400"
+            >
+              开始第一课
+            </button>
+          )}
         </div>
       </div>
     );
@@ -973,6 +1298,271 @@ function KindMessageCard({
       style={isError ? undefined : { background: "var(--muted)" }}
     >
       {content}
+    </div>
+  );
+}
+
+/** 消息操作条上的小图标按钮（用户侧复制/编辑）：静默图标 + tooltip 文案。 */
+function IconAction({
+  title,
+  testId,
+  onClick,
+  disabled,
+  children,
+}: {
+  title: string;
+  testId: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--foreground)]/50 transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * 中间过程折叠区（单层）：思维链 + 本轮提示，默认收起；工具卡已移到消息体里常显。
+ * 落库后刷新仍可回放（reasoning / notices 存在会话消息里）；流式期间表头显示进行中状态。
+ * 若两者都没有则整块不渲染（不留空面板）。tools 仅用于表头文案（如「正在调用工具…」）。
+ */
+function ProcessPanel({
+  reasoning,
+  tools,
+  notices,
+  streaming,
+}: {
+  reasoning?: string;
+  tools?: ToolActivity[];
+  notices?: string[];
+  streaming: boolean;
+}) {
+  const hasReasoning = Boolean(reasoning && reasoning.trim());
+  const toolCount = tools?.length ?? 0;
+  const noticeCount = notices?.length ?? 0;
+  const running = Boolean(streaming && tools?.some((tool) => tool.status === "running"));
+  // 面板本体只承载思维链 + 提示：两者都没有就不渲染空面板
+  if (!hasReasoning && noticeCount === 0) return null;
+
+  const parts: string[] = [];
+  if (hasReasoning) parts.push("思考");
+  if (toolCount > 0) parts.push(`${toolCount} 次工具调用`);
+  if (parts.length === 0) parts.push("提示");
+  const label = running
+    ? "正在调用工具…"
+    : streaming && hasReasoning && toolCount === 0
+      ? "正在思考…"
+      : `中间过程 · ${parts.join(" · ")}`;
+
+  return (
+    <details
+      data-testid="process-panel"
+      className="group mb-2 rounded-xl border text-xs"
+      style={{ borderColor: "var(--border)", background: "var(--muted)" }}
+    >
+      <summary
+        data-testid="process-summary"
+        className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-1.5 opacity-70 transition-opacity hover:opacity-100"
+      >
+        <Brain className={clsx("h-3 w-3 shrink-0", streaming && "text-brand")} />
+        <span data-testid="process-label" className="min-w-0 truncate">
+          {label}
+        </span>
+        <ChevronDown className="ml-auto h-3 w-3 shrink-0 opacity-60 transition-transform group-open:rotate-180" />
+      </summary>
+      <div
+        className="flex flex-col gap-2 border-t px-3 py-2"
+        style={{ borderColor: "var(--border)" }}
+      >
+        {noticeCount > 0 && (
+          <ul data-testid="process-notices" className="flex flex-col gap-0.5 opacity-70">
+            {notices!.map((item, index) => (
+              <li key={index}>· {item}</li>
+            ))}
+          </ul>
+        )}
+        {hasReasoning && (
+          <div
+            data-testid="process-reasoning"
+            className="max-h-64 overflow-y-auto break-words opacity-60"
+          >
+            <Markdown content={reasoning!} />
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+/**
+ * 用户消息的就地编辑框（编辑=从这条消息重新生成）：
+ * 文本可改，附件可增删（原有附件默认保留、可移除，也能追加新上传）。
+ */
+function UserMessageEditor({
+  initialText,
+  initialAttachments,
+  sessionId,
+  onSubmit,
+  onCancel,
+}: {
+  initialText: string;
+  initialAttachments: MessageAttachment[];
+  sessionId: string | null;
+  onSubmit: (text: string, attachments: OutgoingAttachment[]) => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState(initialText);
+  const [attachments, setAttachments] = useState<OutgoingAttachment[]>(initialAttachments);
+  const [uploading, setUploading] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, []);
+
+  const addFiles = (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    setError(null);
+    setUploading((count) => count + list.length);
+    for (const file of list) {
+      void api
+        .uploadAttachment(file, sessionId)
+        .then((res) =>
+          setAttachments((prev) => [
+            ...prev,
+            { id: res.id, filename: res.filename, kind: res.kind, size: res.size },
+          ]),
+        )
+        .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+        .finally(() => setUploading((count) => count - 1));
+    }
+  };
+
+  const submit = () => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    onSubmit(trimmed, attachments);
+  };
+
+  return (
+    <div
+      data-testid="message-edit-box"
+      className="w-full max-w-[85%] rounded-2xl border bg-[var(--surface-card)] p-3 shadow-card"
+      style={{ borderColor: "var(--border)" }}
+    >
+      <textarea
+        ref={textareaRef}
+        data-testid="message-edit-input"
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          const el = e.target;
+          el.style.height = "auto";
+          el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            submit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
+        rows={2}
+        className="w-full resize-none bg-transparent text-sm outline-none"
+      />
+
+      {attachments.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {attachments.map((attachment) => (
+            <span
+              key={attachment.id}
+              data-testid="message-edit-attachment"
+              className="flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px]"
+              style={{ borderColor: "var(--border)" }}
+            >
+              <FileText className="h-3 w-3 shrink-0 opacity-60" />
+              <span className="max-w-[10rem] truncate">{attachment.filename}</span>
+              <button
+                type="button"
+                title={`移除 ${attachment.filename}`}
+                aria-label={`移除 ${attachment.filename}`}
+                onClick={() =>
+                  setAttachments((prev) => prev.filter((item) => item.id !== attachment.id))
+                }
+                className="flex h-4 w-4 items-center justify-center rounded opacity-50 hover:bg-[var(--muted)] hover:opacity-100"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {error && <p className="mt-1.5 text-[11px] text-red-500">{error}</p>}
+
+      <div className="mt-2 flex items-center justify-between gap-2 border-t pt-2" style={{ borderColor: "var(--border)" }}>
+        <div className="flex items-center gap-1.5">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            data-testid="message-edit-add-file"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--foreground)]/60 hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+            title="添加附件"
+          >
+            <Paperclip className="h-3.5 w-3.5" />
+          </button>
+          {uploading > 0 && <Loader2 className="h-3 w-3 animate-spin opacity-60" />}
+          <span className="text-[11px] opacity-50">编辑后发送＝从这条消息重新生成回复</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            data-testid="message-edit-cancel"
+            onClick={onCancel}
+            className="rounded-lg px-2.5 py-1 text-[11px] opacity-70 transition-colors hover:bg-[var(--muted)] hover:opacity-100"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            data-testid="message-edit-submit"
+            onClick={submit}
+            disabled={!text.trim() || uploading > 0}
+            className="rounded-lg bg-brand px-3 py-1 text-[11px] font-medium text-white transition-colors hover:bg-brand-light disabled:opacity-40"
+          >
+            发送
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

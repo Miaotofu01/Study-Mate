@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
-import type { ActiveProvider, AppSettings, ProviderModel } from "@/lib/types";
+import type { ActiveProvider, AppSettings, ProviderModel, SessionActive } from "@/lib/types";
 
 const isUsableProvider = (p: { enabled?: boolean }) => p.enabled !== false;
 const isUsableModel = (m: { enabled?: boolean }) => m.enabled !== false;
@@ -24,18 +24,33 @@ export function modelVariants(model: ProviderModel | null): string[] {
   return (reasoning.variants ?? []).filter((item) => item.trim().length > 0);
 }
 
-/** 当前 active 配置指向的那个模型；提供商或模型没配好时为 null */
-export function activeModelOf(settings: AppSettings): ProviderModel | null {
-  const entry = settings.providers.find((p) => p.id === settings.active.provider_id) ?? null;
-  return entry?.models.find((m) => m.name === settings.active.model) ?? null;
+/** 当前 active 配置指向的那个模型；提供商或模型没配好时为 null。
+ *  传入 active 可查"会话绑定的那个模型"而不是全局默认。 */
+export function activeModelOf(
+  settings: AppSettings,
+  active: ActiveProvider = settings.active,
+): ProviderModel | null {
+  const entry = settings.providers.find((p) => p.id === active.provider_id) ?? null;
+  return entry?.models.find((m) => m.name === active.model) ?? null;
 }
 
 interface ModelSelectorProps {
   settings: AppSettings | null;
   onUpdated: (settings: AppSettings) => void;
+  /** 会话态：会话绑定的模型三元组（null/undefined = 跟随全局默认） */
+  sessionId?: string | null;
+  sessionActive?: SessionActive | null;
+  /** 会话内切换模型后回灌本地状态（写的是会话绑定，不动全局默认） */
+  onSessionActiveChange?: (active: SessionActive) => void;
 }
 
-export function ModelSelector({ settings, onUpdated }: ModelSelectorProps) {
+export function ModelSelector({
+  settings,
+  onUpdated,
+  sessionId = null,
+  sessionActive = null,
+  onSessionActiveChange,
+}: ModelSelectorProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -54,18 +69,32 @@ export function ModelSelector({ settings, onUpdated }: ModelSelectorProps) {
     );
   }
 
+  // 生效的三元组：会话绑定优先，否则全局默认（2026-10-04：模型/档位按会话持久化）
+  const effective: ActiveProvider = sessionActive ?? settings.active;
   const activeEntry =
-    settings.providers.find((p) => p.id === settings.active.provider_id) ?? null;
+    settings.providers.find((p) => p.id === effective.provider_id) ?? null;
   const label = activeEntry
-    ? `${activeEntry.name} / ${settings.active.model || "未选模型"}`
+    ? `${activeEntry.name} / ${effective.model || "未选模型"}`
     : "未选择模型";
 
-  const activeModel: ProviderModel | null = activeModelOf(settings);
+  const activeModel: ProviderModel | null = activeModelOf(settings, effective);
 
   const save = async (active: ActiveProvider) => {
     setOpen(false);
     setSwitching(true);
     setError(null);
+    // 会话内切换：只改这个会话的绑定（全局默认留给新对话）；否则改全局默认
+    if (sessionId && onSessionActiveChange) {
+      try {
+        await api.setSessionActive(sessionId, active);
+        onSessionActiveChange(active);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSwitching(false);
+      }
+      return;
+    }
     try {
       await api.saveSettings({
         providers: settings.providers,
@@ -81,7 +110,7 @@ export function ModelSelector({ settings, onUpdated }: ModelSelectorProps) {
   };
 
   const pick = (providerId: string, model: ProviderModel) => {
-    if (settings.active.provider_id === providerId && settings.active.model === model.name) {
+    if (effective.provider_id === providerId && effective.model === model.name) {
       setOpen(false);
       return;
     }
@@ -130,7 +159,7 @@ export function ModelSelector({ settings, onUpdated }: ModelSelectorProps) {
                   <p className="px-3 py-1 text-[11px] opacity-40">无模型</p>
                 )}
                 {p.models.filter(isUsableModel).map((m) => {
-                  const current = p.id === settings.active.provider_id && m.name === settings.active.model;
+                  const current = p.id === effective.provider_id && m.name === effective.model;
                   return (
                     <button
                       key={m.name}

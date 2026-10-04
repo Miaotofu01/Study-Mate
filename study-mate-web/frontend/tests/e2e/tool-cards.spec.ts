@@ -26,11 +26,15 @@ test("tool loop streams tool cards then the final answer", async ({ page }) => {
   await expect(page.getByTitle("停止")).toBeVisible();
   await expect(page.getByTitle("停止")).toBeHidden({ timeout: 20_000 });
 
-  // 两次工具调用各渲染一张工具卡
+  // 工具卡已移出「中间过程」折叠区，直接常显在助手消息体里：无需展开任何折叠区
   const cards = page.getByTestId("tool-card");
   await expect(cards).toHaveCount(2);
   await expect(cards.filter({ hasText: "list_workspace" })).toHaveCount(1);
   await expect(cards.filter({ hasText: "read_course_file" })).toHaveCount(1);
+  await expect(cards.first()).toBeVisible();
+
+  // tools 场景既无思维链也无提示：折叠区整块不渲染（不留空面板）
+  await expect(page.getByTestId("process-panel")).toHaveCount(0);
 
   // 展开首卡：结果区出现（工作区根目录可列出）
   await cards.first().locator("summary").click();
