@@ -80,6 +80,14 @@ const groups = {
       'scripts/tests/test_host_reference_fence.mjs',
       'scripts/tests/test_host_path_boundary.mjs',
       'scripts/tests/test_host_yaml_workspace.mjs',
+      // 纯函数域（lib/core/**）：JSON Schema 子集校验器 + 四类校验 + 规则层。
+      // 最后一条是覆盖率下限门禁，它自己会 spawn 一轮带阈值的 `node --test`。
+      'scripts/tests/test_core_schema_subset.mjs',
+      'scripts/tests/test_validators_curriculum.mjs',
+      'scripts/tests/test_validators_progress_subject.mjs',
+      'scripts/tests/test_validators_handoff.mjs',
+      'scripts/tests/test_rules_pure.mjs',
+      'scripts/tests/test_core_coverage_floor.mjs',
     ],
   },
   '--static': {
