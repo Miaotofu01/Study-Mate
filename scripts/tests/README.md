@@ -102,6 +102,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 | `browser/hl_test.mjs` | 真实 Chrome 代码块高亮、语言识别与已有高亮保留 |
 | `browser/quiz_code_test.mjs` | 题目代码块的缩进、等宽字体与高亮 |
 | `browser/math_test.mjs` | KaTeX 排版、字体、错误公式与动态题目公式 |
+| `browser/reading_position_test.mjs` | 阅读位置三级恢复（section → offset → progress）与锚点四态复核：真 Chrome 里挂**真 `lib/client.js`**（最小模块装载器 + 真 React），用 CDP 点真按钮、滚真滚动区；夹具在 `fixtures/reading_position_fixture.mjs`。纯数学那一半在 `test_client_reading_position.mjs`（默认门禁里跑，不需要浏览器） |
 | `browser/measure.mjs` | 对比度、计算样式与 hover 测量 |
 | `browser/hovers.mjs` | 批量比较 hover 前后的样式 |
 | `browser/shot.mjs` | 浅色/深色截图与元素边界记录 |
