@@ -83,6 +83,10 @@ const groups = {
       // #71 的验收面：作答数据的幂等/版本栅栏，以及「拿一份 v0.2 真实工作区跑一遍」
       'scripts/tests/test_host_attempts_fence.mjs',
       'scripts/tests/test_host_v02_workspace.mjs',
+      // #72 的 Host 半：POST /api/studymate/attempts 的路由注册、请求体与状态码映射、
+      // 「POST 落盘 → 另起一次读仍带得回上次选了 X」（跨请求 = 刷新页面那条）、
+      // 冲突拒绝不写盘、主观题自评落盘、题库逐字不变。
+      'scripts/tests/test_host_attempts_route.mjs',
       // 纯函数域 lib/core/**：内容格式的解析与锚点题库对账（格式只有一个真相）
       'scripts/tests/test_core_format.mjs',
       'scripts/tests/test_core_anchors.mjs',
@@ -110,6 +114,10 @@ const groups = {
       // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
       'scripts/tests/test_client_search_index.mjs',
       'scripts/tests/test_client_fold_empty_state.mjs',
+      // #72 的 Client 半：作答落盘的写队列 + 合并轮询 + 陈旧响应围栏（旧读数/在飞写入
+      // 不许覆盖新作答）、版本冲突的重读与重来一次、自评走同一条路、界面文案不再说
+      // 「只在内存里作答」。夹具同上（client_harness.mjs）。
+      'scripts/tests/test_client_attempt_fence.mjs',
     ],
   },
   '--static': {
