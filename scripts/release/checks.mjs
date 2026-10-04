@@ -73,7 +73,14 @@ const groups = {
       'test_statuses.py', 'test_templates.py', 'test_workspace_config.py',
     ],
     node: ['quiz_dom_test.js', 'toc_dom_test.js'],
-    tests: ['scripts/release/release.test.mjs'],
+    tests: [
+      'scripts/release/release.test.mjs',
+      // Host 半数据层的特征化测试（lib/{workspace,library,assets,yaml,reference}.mjs）
+      'scripts/tests/test_host_library_payload.mjs',
+      'scripts/tests/test_host_reference_fence.mjs',
+      'scripts/tests/test_host_path_boundary.mjs',
+      'scripts/tests/test_host_yaml_workspace.mjs',
+    ],
   },
   '--static': {
     python: ['test_python_syntax.py', 'test_release_metadata.py', 'test_skill_frontmatter.py', 'test_skill_rules.py', 'test_templates.py'],
