@@ -114,7 +114,10 @@ const groups = {
   },
   '--static': {
     python: ['test_python_syntax.py', 'test_release_metadata.py', 'test_skill_frontmatter.py', 'test_skill_rules.py', 'test_templates.py'],
-    tests: ['scripts/tests/test_openai_skills.mjs', 'scripts/tests/test_openai_skill_ui.mjs', 'scripts/tests/test_antigravity_skills.mjs'],
+    tests: ['scripts/tests/test_openai_skills.mjs', 'scripts/tests/test_openai_skill_ui.mjs', 'scripts/tests/test_antigravity_skills.mjs',
+      // #81：技能调用面 ↔ lib/tools 注册表对账（点名的工具必须存在；无头宿主导出件里
+      // 不许留原生工具名，也不许留宿主跑不动的调用）。
+      'scripts/tests/test_skill_tool_refs.mjs'],
   },
   '--browser': {
     node: ['browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs'],

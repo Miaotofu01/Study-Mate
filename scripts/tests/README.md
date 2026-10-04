@@ -77,6 +77,10 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 
 断言问的是「这个技能够不够得着这条规则」：owner 默认是键所在的技能，声明过 `moved` 就按声明走，且 owner 必须在该技能的 `reaches` 名单里。表里的死条目（说明写错、owner 够不着）也会报错，不让声明悄悄空转。
 
+## 技能调用面与工具注册表
+
+`test_skill_tool_refs.mjs` 把「技能里点了哪些工具」与「工具真的注册了哪些」对上：技能正文里反引号包起来的 `studymate_*` 必须都在 `lib/tools/index.ts` 的 `STUDY_TOOL_NAMES` 里（注册表是唯一出处），而且**真跑一遍两个宿主的导出**——Codex/OpenAI 与 Antigravity 的导出件里不许再留原生工具名、必须有等价的引擎命令落点（映射表在两个 `bin/*-skill-compat.mjs` 里）。另外它守住 #81 的范围：两个教学协议与五个角色的技能里不写引擎脚本命令，也不再出现旧六档与旧四层名。
+
 ## DSH 实际安装与启动
 
 兼容性改动时，在独立目录安装要检查的 DSH，然后指定其包目录：
