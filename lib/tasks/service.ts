@@ -275,7 +275,7 @@ export function createTaskService(options: TaskServiceOptions = {}): TaskService
     const record = records.get(id);
     if (!record) throw new TaskNotFoundError(id, [...records.keys()]);
     if (record.owner !== actor && record.owner !== UNOWNED) {
-      throw new TaskAccessError({ id, actor, owner: record.owner, why: '它属于另一个调用方' });
+      throw new TaskAccessError({ id, actor, owner: record.owner, why: '这个任务不归你' });
     }
     return record;
   }
@@ -554,7 +554,9 @@ export function createTaskService(options: TaskServiceOptions = {}): TaskService
           fail(new TaskWaitAbortedError(record.id, String(signal?.reason ?? '调用方中止了这次等待')));
         };
         timer = setTimeout(finish, timeoutMs);
-        timer.unref?.();
+        // 这个 timer **不** unref（与进度节流那个刻意相反）：等待是调用方明确要的，进程不能因为
+        // 「没别的活干」就悄悄退出、把这个 Promise 永远挂着——那正是「吊死且静默」。
+        // 上界由 timeoutMs 兜住，所以它最多把进程留这么久。
         off = addWaiter(record.id, finish);
         signal?.addEventListener('abort', onAbort, { once: true });
       });
