@@ -97,6 +97,8 @@ const groups = {
       // 纯函数域的判据：写入栅栏（幂等台账 + 版本比较）、题库题型与字段、误解字段定型
       'scripts/tests/test_core_fence_questions.mjs',
       'scripts/tests/test_core_coverage_floor.mjs',
+      // #69：架构边界与依赖无环断言（扫真实 import 图，域规则表默认拒绝）
+      'scripts/tests/test_architecture_boundaries.mjs',
       // 工具域 lib/tools/**（#68）：域声明与越权即抛、工作区摘要、四个校验器、两个改写工具。
       // 夹具在 scripts/tests/fixtures/tools.mjs —— `fixtures/` 目录被上面的遍历显式跳过。
       'scripts/tests/test_tools_guard.mjs',
