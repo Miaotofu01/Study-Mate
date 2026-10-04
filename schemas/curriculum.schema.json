@@ -36,8 +36,10 @@
           "practice": { "type": "string" },
           "pitfalls": { "type": "array", "items": { "type": "string" } },
           "realworld": { "type": "string" },
-          "status": { "enum": ["未开始", "学习中", "初步理解", "能独立应用", "需要复习", "已通过项目验证"] },
-          "mastery": { "type": "number", "minimum": 0, "maximum": 1 }
+          "status": {
+            "enum": ["未开始", "学习中", "已学完"],
+            "description": "建课时的初始快照，三档；运行期状态只写 progress.yaml。旧六档的取值仍读得进（映射见目标态规格 §5.2），但新写的必须是这三档。"
+          }
         }
       }
     },

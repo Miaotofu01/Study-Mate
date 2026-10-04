@@ -157,16 +157,17 @@ test('科目与节点的键名是页面依赖的契约，逐个钉住', () => {
 
   assert.deepEqual(Object.keys(subject).sort(), [
     'continue_node', 'created_at', 'edges', 'glossary', 'goal', 'levels',
-    'misconception_library', 'misconceptions', 'mission', 'name', 'nodes', 'order', 'project',
-    'records', 'reference', 'reference_version', 'resources_md', 'slug', 'stats', 'status',
-    'updated_at',
+    'misconception_issues', 'misconception_library', 'misconceptions', 'mission', 'name', 'nodes',
+    'order', 'project', 'records', 'reference', 'reference_version', 'resources_md', 'slug',
+    'stats', 'status', 'updated_at',
   ]);
 
   const [node] = subject.nodes;
   assert.deepEqual(Object.keys(node).sort(), [
-    'anchors', 'concepts', 'id', 'kind', 'lab', 'lesson', 'lesson_md', 'level', 'notes',
-    'number', 'objective', 'orphan_keys', 'orphans', 'pitfalls', 'pool', 'practice',
-    'prerequisites', 'problem', 'raw_status', 'realworld', 'resources', 'tier', 'title',
+    'anchors', 'attempts', 'concepts', 'id', 'kind', 'lab', 'lesson', 'lesson_md', 'level',
+    'notes', 'number', 'objective', 'orphan_keys', 'orphans', 'pitfalls', 'pool', 'practice',
+    'prerequisites', 'problem', 'question_kinds', 'raw_status', 'realworld', 'resources', 'tier',
+    'title',
   ]);
 });
 
@@ -209,9 +210,11 @@ test('科目档案类附件按各自口径解析', () => {
   assert.deepEqual(subject.records.map((record) => ({ file: record.file, title: record.title, date: record.date })),
     [{ file: '2026-05-06-第一次.md', title: '第一次', date: '2026-05-06' }]);
   assert.equal(subject.resources_md, '# 资源\n\n- 《入门》\n');
-  assert.deepEqual(subject.misconceptions, ['把赋值当成相等']);
-  // progress.yaml 与 misconceptions.yaml 是双落点，两份都留在 payload 里
+  // 误解记录**只有一个落点**（misconceptions.yaml，规格 §5.4）：progress.yaml 里那份
+  // 旧副本（夹具里写着「把赋值当成相等」）不再进 payload——双落点只会带来不同步
+  assert.deepEqual(subject.misconceptions, []);
   assert.deepEqual(subject.misconception_library, []);
+  assert.deepEqual(subject.misconception_issues, []);
   assert.deepEqual(subject.edges, [{ from: '变量', to: '函数', reason: '先有绑定再谈调用' }]);
   assert.deepEqual(subject.order, { 变量: 0, 函数: 1 });
   // 依赖分层：变量是根（0 层），函数在它后面（1 层），levels 是总层数
@@ -379,6 +382,38 @@ test('正文里没声明的题库键进 orphan_keys，顺序按码位', () => {
   assert.deepEqual(subject.nodes[0].orphan_keys, ['没人声明']);
   // orphans 与它同源，另带题数——这是收编前**没有任何消费方**的那份结论
   assert.deepEqual(subject.nodes[0].orphans, [{ key: '没人声明', line: 1, count: 1 }]);
+});
+
+/* ── 题型：未知题型带题库文件与行号，旧题库零问题 ─────────────────────── */
+
+test('payload 里的 question_kinds：未知题型带题库文件与真实行号，旧题库零问题', () => {
+  // 旧题库（不写 kind）零问题
+  const clean = anchorWorkspace();
+  assert.deepEqual(readLibrary({ workspace: clean.workspace }).subjects[0].nodes[0].question_kinds, []);
+
+  const poolRaw = [
+    '{',
+    '  "精确命中": [',
+    '    { "kind": "选择题", "q": "题" }',
+    '  ]',
+    '}',
+    '',
+  ].join('\n');
+  const bad = makeWorkspace(subjectTree('demo', {
+    'subject.yaml': 'slug: demo\nname: 题型\n',
+    'curriculum.yaml': 'nodes:\n  - id: 变量\n    title: 变量\n',
+    'lessons/1-变量.md': '# 变量\n\n::: quiz 理解 锚点：精确命中\n:::\n',
+    'lessons/1-变量.quiz.json': poolRaw,
+  }));
+  const [subject] = readLibrary({ workspace: bad.workspace }).subjects;
+  const issues = subject.nodes[0].question_kinds;
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].file, '1-变量.quiz.json', '报的是题库文件名（与 pool-shape 同一口径）');
+  assert.equal(issues[0].line, 3, '行号指向那道题在 JSON 原文里的位置');
+  assert.equal(issues[0].code, 'unknown-kind');
+  assert.match(issues[0].message, /不在词表里/);
+  // 题型问题不连坐锚点四态：锚点照样 resolved
+  assert.equal(subject.nodes[0].anchors[0].resolution, 'resolved');
 });
 
 /* ── 坏数据当场抛错 ───────────────────────────────────────────────────── */

@@ -31,6 +31,18 @@ import type { ReferenceEntry } from './reference.ts';
 import { parseAnchors, reconcileAnchors } from './core/anchors.ts';
 import type { AnchorMatch } from './core/anchors.ts';
 import { cmpCodePoints } from './core/format.ts';
+// 题型与字段的判据在纯函数域（词表只有一份：lib/core/rules.ts 的 QUESTION_KINDS）。
+// 未知题型要带**题库文件与行号**报出来——行号来自扫 JSON 原文，不是文本搜索。
+import { checkPoolKinds } from './core/questions.ts';
+import type { PoolKindIssue } from './core/questions.ts';
+// 三档词表与旧六档映射的唯一实现在纯函数域（issue #67）。这里曾经自带一份硬编码映射，
+// 与 validate.ts 那份并存——改一次词表要动两处，漂了也没有测试拦得住。别再抄第二份。
+import { toTier } from './core/rules.ts';
+// 误解记录只有 misconceptions.yaml 一个落点（目标态规格 §5.4）；旧字段的归一是纯函数。
+import { normalizeMisconceptions, misconceptionIssues as misconceptionIssuesOf } from './core/misconceptions.ts';
+import type { Misconception } from './core/misconceptions.ts';
+// 作答数据（attempts/<NNNN>-<节点id>.json）与课件一一对应，绝不写回题库（ADR-0007）
+import { readAttempts, attemptsVersion } from './attempts.ts';
 
 /* ── 形状 ──────────────────────────────────────────────────────────────────
    这一份 JSON 是与阅读端（lib/client.js）之间的契约：字段名、层级、空值口径都按它走。
@@ -96,7 +108,21 @@ interface SubjectNode {
   orphan_keys: string[];
   /** 与 orphan_keys 同源，另带键在题库文件里的行号与题数（旧实现没有任何消费方） */
   orphans: { key: string; line: number; count: number }[];
+  /** 题库里每道题的题型结论（未知题型 / 字段不全），带题库文件与行号 */
+  question_kinds: PoolKindIssue[];
+  /** 这个节点的作答数据（attempts/<NNNN>-<节点id>.json）；没作答过就是空 */
+  attempts: AttemptsView;
   lab: Lab | null;
+}
+
+/** 阅读端要的作答数据：**只服务当场回顾**（「上次你选了 B」），不做汇总视图、不排期。 */
+interface AttemptsView {
+  /** 文件在不在——界面据此区分「没作答过」与「读不到」 */
+  present: boolean;
+  /** 写回时把它当 expectedVersion 带上来 */
+  version: string;
+  /** 题 id（<锚点文本>#<题号>）→ 这道题的作答记录 */
+  questions: Record<string, unknown>;
 }
 
 /** 大纲里的一条边。 */
@@ -120,8 +146,15 @@ interface SubjectPayload {
   resources_md: string;
   reference: ReferenceEntry[];
   reference_version: string;
-  misconceptions: unknown[];
-  misconception_library: unknown[];
+  /**
+   * 误解记录（单一落点：misconceptions.yaml）。旧文件里 progress.yaml 也有一份——
+   * 那份**不再读**：双落点只会带来不同步（目标态规格 §5.4）。旧文件仍在盘上、仍读得进，
+   * 只是不再进 payload。
+   */
+  misconceptions: Misconception[];
+  misconception_library: Misconception[];
+  /** 旧写法的迁移提示（可展示，不阻断）：读得进，写回时按新字段收敛 */
+  misconception_issues: string[];
   records: LearningRecord[];
   nodes: SubjectNode[];
   edges: SubjectEdge[];
@@ -141,22 +174,14 @@ interface LibraryPayload {
 }
 
 /* ── 三档词表（目标态规格 §5.2）─────────────────────────────────────────────
-   旧词表读到就映射，写回一律用新词表。用 Map 不用普通对象：状态值来自文件，
-   若恰好是 "constructor" 之类会撞上 Object.prototype，静默取到一个函数。 */
-const TIER_MAP = new Map([
-  ['未开始', '未开始'],
-  ['学习中', '学习中'],
-  ['初步理解', '学习中'],
-  ['能独立应用', '已学完'],
-  ['需要复习', '已学完'],
-  ['已通过项目验证', '已学完'],
-]);
-const TIERS = ['未开始', '学习中', '已学完'];
-
-/** 旧词表 → 三档。读到不认识的词退回「未开始」，绝不静默当成学会了。 */
-function tint(raw: string): string {
-  return TIER_MAP.get(raw || '') || '未开始';
+   词表与旧六档映射的**唯一实现**在 `lib/core/rules.ts`（issue #67 收编，`validate.ts` 也用它）。
+   这里只做一次类型收窄：`toTier` 吃 unknown、吐 `Tier`，读到不认识的词退回「未开始」。 */
+function tint(raw: unknown): string {
+  return toTier(raw);
 }
+
+/** stats 与「继续学」按这三档数；顺序即界面上的显示顺序。 */
+const TIERS = ['未开始', '学习中', '已学完'];
 
 /* ── 与 Python 对齐的小工具 ────────────────────────────────────────────── */
 
@@ -423,7 +448,7 @@ function levelsOf(nodes: any[]): Record<string, number> {
 
 /* ── 科目 ──────────────────────────────────────────────────────────────── */
 
-function buildSubject(subjectDir: string, dirName: string): SubjectPayload {
+function buildSubject(subjectDir: string, dirName: string, workspace: string): SubjectPayload {
   const subject = readYaml(path.join(subjectDir, 'subject.yaml'));
   const curriculum = readYaml(path.join(subjectDir, 'curriculum.yaml'));
   const progress = readYaml(path.join(subjectDir, 'progress.yaml'));
@@ -452,8 +477,10 @@ function buildSubject(subjectDir: string, dirName: string): SubjectPayload {
       ? null
       : path.join(lessonsDir, lessonFile.replace(/\.md$/, '.quiz.json'));
     let pool = {};
+    let poolRaw = '';
     if (poolFile !== null && isFile(poolFile)) {
       const raw = readTextIfPresent(poolFile);
+      poolRaw = raw ?? '';
       try {
         // isFile 已经证明读得到，只是类型系统看不见（与 readYamlList 同一个口径）
         pool = JSON.parse(raw as string) || {};
@@ -466,6 +493,15 @@ function buildSubject(subjectDir: string, dirName: string): SubjectPayload {
     const { anchors, orphanKeys, orphans } = reconcileAnchors(parseAnchors(lessonMarkdown), pool, {
       poolFile: poolFile === null ? '' : path.basename(poolFile),
     });
+    // 题型与字段：未知题型要带**题库文件与行号**报出来（旧题库不写 kind，按字段推断，照旧读得进）
+    const questionKinds = checkPoolKinds(pool, {
+      poolFile: poolFile === null ? '' : path.basename(poolFile),
+      poolRaw,
+    });
+    // 作答数据：与课件一一对应，只服务当场回顾；读不到就当没作答过（派生记录，坏了不抛）
+    const attempt = lessonFile === null
+      ? null
+      : readAttempts({ workspace, subject: slug, node: nodeId });
 
     const run = (Object.hasOwn(progressNodes, nodeId) ? progressNodes[nodeId] : null) || {};
     // progress 只记有变化的节点，没写的按大纲里的初始快照算
@@ -496,6 +532,14 @@ function buildSubject(subjectDir: string, dirName: string): SubjectPayload {
       anchors,
       orphan_keys: orphanKeys,
       orphans,
+      question_kinds: questionKinds,
+      attempts: {
+        present: attempt !== null,
+        version: attempt === null
+          ? attemptsVersion({ workspace, subject: slug, node: nodeId })
+          : attempt.version,
+        questions: attempt === null ? {} : attempt.data.题,
+      },
       lab: readLab(path.join(subjectDir, 'lab'), number),
     });
   }
@@ -516,6 +560,15 @@ function buildSubject(subjectDir: string, dirName: string): SubjectPayload {
   // 版本号（**不能给空串**：空串会让「第一次往空目录里写」没法带期望版本）。
   const { entries: reference, version: reference_version } = listReference({ subjectDir });
 
+  // 误解记录：**只有一个落点**（misconceptions.yaml，目标态规格 §5.4）。progress.yaml 里那份
+  // 旧副本不再读——双落点只会带来不同步。旧文件仍在盘上、仍读得进（不报错），只是不进 payload。
+  const misconceptionRaw = readYamlList(path.join(subjectDir, 'misconceptions.yaml'));
+  const misconceptions = normalizeMisconceptions(misconceptionRaw);
+  const misconceptionIssues: string[] = [];
+  misconceptionRaw.forEach((item, index) => {
+    misconceptionIssues.push(...misconceptionIssuesOf(item, index));
+  });
+
   return {
     slug,
     name: pick(subject, 'name', slug),
@@ -529,9 +582,10 @@ function buildSubject(subjectDir: string, dirName: string): SubjectPayload {
     resources_md: readTextIfPresent(path.join(subjectDir, 'RESOURCES.md')) ?? '',
     reference,
     reference_version,
-    misconceptions: pick(progress, 'misconceptions', null) || [],
-    // misconceptions.yaml 是与 progress.yaml 双落点的追加日志，两份都留着给界面核对
-    misconception_library: readYamlList(path.join(subjectDir, 'misconceptions.yaml')),
+    misconceptions,
+    // 与 misconceptions 同源：两份字段名都留着，阅读端从哪一份读都拿得到同一个结果
+    misconception_library: misconceptions,
+    misconception_issues: misconceptionIssues,
     records: readRecords(path.join(subjectDir, 'learning-records')),
     nodes,
     edges: edgesIn.map((edge) => {
@@ -579,7 +633,7 @@ export function buildLibrary(options: { workspace?: string; root?: string } = {}
   // 建课时会先建目录再填内容，所以零节点的科目直接跳过，不出现在阅读端
   const subjects: SubjectPayload[] = [];
   for (const name of subjectDirs) {
-    const subject = buildSubject(path.join(subjectsDir, name), name);
+    const subject = buildSubject(path.join(subjectsDir, name), name, workspace);
     if (subject.nodes.length > 0) subjects.push(subject);
   }
   if (subjects.length === 0) {

@@ -45,7 +45,7 @@ export const AGY_HOST_GUIDE = `## Antigravity 宿主约定（导出时生成）
   - **执行参数**：调用 Python 引擎脚本一律执行 \`python3 -B '<root>/scripts/<脚本名>.py' ...\`（带 \`-B\` 防止在只读插件目录生成 \`__pycache__\`）。
   - **路径与转义**：参数必须使用完整绝对路径，统一单引号包裹；严禁未转义拼接学生输入。
   - **沙箱策略（run_command）**：优先在标准沙箱执行（\`BypassSandbox: false\`）；仅在需要外部网络抓取（\`image-scout\` 采图、\`learning-coach\` 读来源原文）或工作区外部目录搬移时提权使用 \`BypassSandbox: true\`，且提权时保持 \`toolAction\` 与 \`toolSummary\` 逐字一致。
-- **逐次显式传参与状态幂等**：调用主页生成器始终显式传参 \`'<LEARN_WORKSPACE>'\`；各命令都传脚本与数据的绝对路径。工具调用之间不假设环境变量、工作目录（Cwd）或 shell 状态保留。跨会话只信任盘上真实存在的文件（\`MEMORY.md\`、\`curriculum.yaml\`、\`progress.yaml\`、\`assessments/\`、\`sessions/\`），严禁以聊天记忆替代磁盘恢复。
+- **逐次显式传参与状态幂等**：调用主页生成器始终显式传参 \`'<LEARN_WORKSPACE>'\`；各命令都传脚本与数据的绝对路径。工具调用之间不假设环境变量、工作目录（Cwd）或 shell 状态保留。跨会话只信任盘上真实存在的文件（\`MEMORY.md\`、\`curriculum.yaml\`、\`progress.yaml\`、\`misconceptions.yaml\`、\`learning-records/\`），严禁以聊天记忆替代磁盘恢复。
 - **原样无损搬运与质量防线**：子代理交付物从 \`.stage/.../deliver/\` 搬入科目目录时，必须保留原有相对路径，使用标准文件复制工具或 Python \`shutil.copy2\` / \`shutil.copytree(..., dirs_exist_ok=True)\` 原样合并，严禁通过 LLM 转录重写导致长文本或代码截断。合并前必须严格执行四大校验防线：大纲过 \`check_curriculum.py\`、图片库过 \`check_pool.py\`、课件预检过 \`render_lesson.py --check\`、最终课件过 \`check_lesson.py\`；未通过校验严禁合盘。
 - **HTML 课件呈现与导读 Artifact**：课件渲染并校验通过后，总控在回复中提供可点击的绝对文件超链接（\`[打开课件：<标题>](file://<绝对路径>)\`），提示学生用现代浏览器打开享受 Sayo UI 侧栏导航、滚动监听与离线 KaTeX 公式；同时可在 \`<appDataDir>/brain/<conversation-id>/\` 输出一份伴学 Markdown Artifact（如包含 Mermaid 依赖拓扑的路线图或本节核心导读），提升伴学阅读体验。
 - **局部答疑与打扰控制（local-qa）**：学生在阅读中截取课文或代码提问时，总控亲自依据 \`local-qa\` 规范在 200 字内解答，指出根因与正误对比；解答后将误解记录在后台档案（\`misconceptions\`），引导学生返回课件原位置继续阅读，不强行打断主线，不重新触发全套大纲盘问。
@@ -87,9 +87,9 @@ export const AGY_RECORD_CONTINUITY = `## Antigravity 学习档案与状态连续
 
 1. **共享记忆（\`MEMORY.md\`）**：维护学生跨科目的能力水平、已被证明有效的讲解偏好、常犯思维卡点。稳定的领域基础在此更新，下一门课自动继承，无需重复自我介绍。
 2. **科目使命（\`MISSION.md\`）**：记录当前科目的终极现实目标、目标层级、约束条件（\`## Constraints\`）与主线项目方案。
-3. **大纲与进度（\`curriculum.yaml\` / \`progress.yaml\`）**：大纲记录拓扑依赖 DAG 与节点类型（${KIND_LIST}）；进度表记录各节点的掌握度（0-1）、学习状态（${NODE_STATUS_LIST}）与最近评估时间。
-4. **评估记录与会话摘要（\`assessments/\` / \`sessions/\`）**：阶段评估时出题评估角色将真实运行证据与作答原文写入评估记录；每次会话暂停或结束时写会话摘要。
-5. **恢复会话时**：先读 \`.learning/MEMORY.md\`、当前科目的 \`progress.yaml\` 与最近一次的会话摘要，核对盘上真实产物后直接从断点继续，不重新询问整套开场。
+3. **大纲与进度（\`curriculum.yaml\` / \`progress.yaml\`）**：大纲记录拓扑依赖 DAG 与节点类型（${KIND_LIST}）；进度表记录各节点的学习状态（${NODE_STATUS_LIST}）——三档，掌握度字段已取消（不再写 \`mastery\`；旧文件里的旧六档状态读进来时自动映射）。
+4. **误解记录与学习记录（\`misconceptions.yaml\` / \`learning-records/\`）**：误解只写 \`misconceptions.yaml\` 一处（progress.yaml 不再重复存）；实验课验收结论写进学习记录。\`assessments/\` 与 \`sessions/\` 已退役——不再产生新文件，旧文件保留可读。
+5. **恢复会话时**：先读 \`.learning/MEMORY.md\`、当前科目的 \`progress.yaml\` 与 \`misconceptions.yaml\`、最近的学习记录，核对盘上真实产物后直接从断点继续，不重新询问整套开场。
 `;
 
 export const AGY_ROLE_BOUNDARY = `## Antigravity 角色规格

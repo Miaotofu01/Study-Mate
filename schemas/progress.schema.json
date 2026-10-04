@@ -1,34 +1,19 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Progress",
+  "description": "一个科目的运行期进度。词表是三档（未开始 / 学习中 / 已学完），`mastery` 与 `misconceptions` 已移除：掌握度字段取消（目标态规格 §5.2），误解记录只落在 misconceptions.yaml（§5.4）。旧工作区里的旧六档状态与 mastery 键仍读得进——读侧按 §5.2 的映射表归一，写回时才用新词表。",
   "type": "object",
-  "required": ["updated_at", "nodes", "misconceptions", "project"],
+  "required": ["updated_at", "nodes", "project"],
   "properties": {
     "updated_at": { "type": "string", "format": "date-time" },
     "nodes": {
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["status", "mastery"],
+        "required": ["status"],
         "properties": {
-          "status": { "enum": ["未开始", "学习中", "初步理解", "能独立应用", "需要复习", "已通过项目验证"] },
-          "mastery": { "type": "number", "minimum": 0, "maximum": 1 },
+          "status": { "enum": ["未开始", "学习中", "已学完"] },
           "notes": { "type": "string" }
-        }
-      }
-    },
-    "misconceptions": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["topic", "question", "misunderstanding", "answer_summary"],
-        "properties": {
-          "topic": { "type": "string" },
-          "question": { "type": "string" },
-          "misunderstanding": { "type": "string" },
-          "answer_summary": { "type": "string" },
-          "follow_up": { "type": "string" },
-          "importance": { "enum": ["low", "medium", "high"] }
         }
       }
     },

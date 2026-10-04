@@ -21,6 +21,10 @@ import path from 'node:path';
 
 // 复用仓库里那份对齐 PyYAML 的隐式类型解析器：判断一个标题裸着写会不会被读成非字符串
 import { resolvePlainScalar } from './yaml.ts';
+// 幂等与版本号这两件武器的**判据**住在纯函数域（ADR-0007/0010 共用一套，见 lib/core/fence.ts）。
+// 台账实例仍是本模块自己的：reference/ 的指纹是「科目+标题+正文」，attempts/ 的是「节点+一次作答」，
+// 共用一个 Map 会让两份台账互相挤掉（上限是共享的），幂等反而在最需要它的时候失效。
+import { IdempotencyLedger, checkOperationId, fingerprintOf, OPERATION_ID_MAX } from './core/fence.ts';
 import type { Stats } from 'node:fs';
 
 /* ── 常量 ──────────────────────────────────────────────────────────────── */
@@ -46,12 +50,6 @@ const FALLBACK_STEM = '参考资料';
 /** 同名文件最多试到 -999：到这一步不是碰撞，是有人在灌垃圾。 */
 const COLLISION_MAX = 999;
 
-/** operationId 上限：它同时是内存台账的键，不设上限等于让请求方决定内存占用。 */
-const OPERATION_ID_MAX = 200;
-
-/** 幂等台账上限：只防一次宿主生命周期内的双击与重试，记满就丢最旧的，不无界增长。 */
-const LEDGER_MAX = 200;
-
 /** 清单里的一条参考资料。形状就是 payload 里那一个对象，别在这里另起一套叫法。 */
 export interface ReferenceEntry {
   path: string;
@@ -64,7 +62,7 @@ export interface ReferenceEntry {
 }
 
 /** 拒绝写入：HTTP 语义由 bin/dsh-plugin.ts 映射成状态码。reference/version 是冲突时顺手带回去的当前清单。 */
-interface ReferenceRefusal {
+export interface ReferenceRefusal {
   ok: false;
   status: number;
   error: string;
@@ -74,14 +72,14 @@ interface ReferenceRefusal {
 }
 
 /** 写入成功：entry 是刚落的那一份，reference/version 是写完之后重读的清单（下一个 expectedVersion）。 */
-interface ReferenceSuccess {
+export interface ReferenceSuccess {
   ok: true;
   entry: ReferenceEntry;
   reference: ReferenceEntry[];
   version: string;
 }
 
-type WriteResult = ReferenceSuccess | ReferenceRefusal;
+export type WriteResult = ReferenceSuccess | ReferenceRefusal;
 
 /** 一次遍历里走到的文件：相对 reference/ 的路径 + stat（版本号与条目都从它俩算）。 */
 interface WalkedFile {
@@ -90,11 +88,11 @@ interface WalkedFile {
 }
 
 /**
- * 幂等台账：operationId → { fingerprint, response }。
- * **只在内存里**，只防同一个宿主进程内的双击与重试；宿主重启后台账就没了——所以
+ * 幂等台账：operationId → { fingerprint, response }。**只在内存里**，
+ * 只防同一个宿主进程内的双击与重试；宿主重启后台账就没了——所以
  * operationId 也写进了文件的 front matter，留给以后做持久幂等（或人工对账）用。
  */
-const LEDGER = new Map<string, { fingerprint: string; response: WriteResult }>();
+const LEDGER = new IdempotencyLedger<WriteResult>();
 
 /* ── 路径 ──────────────────────────────────────────────────────────────── */
 
@@ -447,10 +445,11 @@ export function writeReference({ workspace, subject, title, markdown, expectedVe
   { workspace?: unknown; subject?: unknown; title?: unknown; markdown?: unknown;
     expectedVersion?: unknown; operationId?: unknown; now?: unknown } = {}): WriteResult {
   // 先把请求体过一遍再碰台账：坏请求不该占用一个 operationId
-  const opId = typeof operationId === 'string' ? operationId.trim() : '';
-  if (opId === '' || [...opId].length > OPERATION_ID_MAX) {
+  const verdict = checkOperationId(operationId);
+  if (!verdict.ok) {
     return refusal(400, 'operation-id-invalid', `缺少或过长的 operationId（上限 ${OPERATION_ID_MAX} 字符）：没有它没法区分重复提交与新提交`);
   }
+  const opId = verdict.id;
   const subjectDir = subjectDirOf(workspace, subject);
   if (subjectDir === null) {
     return refusal(400, 'subject-invalid', '科目名不合法：不能为空，也不能带 / 、\\ 或 ..');
@@ -478,13 +477,13 @@ export function writeReference({ workspace, subject, title, markdown, expectedVe
   const dir = path.join(subjectDir, 'reference');
   // 边界给的是科目目录：reference/ 自己挂成符号链接指向别处时，下面每一次读写都要被挡下
   const realSubject = realPathOf(subjectDir);
-  const fingerprint = `${subject}\u0000${cleanTitle}\u0000${createHash('sha256').update(markdown).digest('hex')}`;
+  const fingerprint = fingerprintOf([`${subject}`, cleanTitle, createHash('sha256').update(markdown).digest('hex')]);
 
   // 幂等回放放在版本校验**之前**：第一次写成功之后版本号已经变了，重试带回来的
   // expectedVersion 必然是旧的，先校版本就会把一次正常的重试误判成冲突。
-  const remembered = LEDGER.get(opId);
-  if (remembered !== undefined) {
-    if (remembered.fingerprint === fingerprint) return remembered.response;
+  const lookup = LEDGER.lookup(opId, fingerprint);
+  if (lookup.kind === 'replay') return lookup.response;
+  if (lookup.kind === 'conflict') {
     const current = listReferenceDir(dir, realSubject);
     return {
       ...refusal(409, 'operation-id-conflict', '同一个 operationId 又提交了不同的内容：换个 operationId 再写（这次不写盘）'),
@@ -553,7 +552,6 @@ export function writeReference({ workspace, subject, title, markdown, expectedVe
     return refusal(500, 'write-verification-failed', `写完之后读不到刚落的文件：${rel}`);
   }
   const response: WriteResult = { ok: true, entry, reference: next.entries, version: next.version };
-  if (LEDGER.size >= LEDGER_MAX) LEDGER.delete(LEDGER.keys().next().value!); // 丢最旧的一条
-  LEDGER.set(opId, { fingerprint, response });
+  LEDGER.remember(opId, fingerprint, response);
   return response;
 }
