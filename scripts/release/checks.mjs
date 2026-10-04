@@ -84,6 +84,10 @@ const groups = {
       // #71 的验收面：作答数据的幂等/版本栅栏，以及「拿一份 v0.2 真实工作区跑一遍」
       'scripts/tests/test_host_attempts_fence.mjs',
       'scripts/tests/test_host_v02_workspace.mjs',
+      // #72 的 Host 半：POST /api/studymate/attempts 的路由注册、请求体与状态码映射、
+      // 「POST 落盘 → 另起一次读仍带得回上次选了 X」（跨请求 = 刷新页面那条）、
+      // 冲突拒绝不写盘、主观题自评落盘、题库逐字不变。
+      'scripts/tests/test_host_attempts_route.mjs',
       // 纯函数域 lib/core/**：内容格式的解析与锚点题库对账（格式只有一个真相）
       'scripts/tests/test_core_format.mjs',
       'scripts/tests/test_core_anchors.mjs',
@@ -123,6 +127,10 @@ const groups = {
       // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
       'scripts/tests/test_client_search_index.mjs',
       'scripts/tests/test_client_fold_empty_state.mjs',
+      // #72 的 Client 半：作答落盘的写队列 + 合并轮询 + 陈旧响应围栏（旧读数/在飞写入
+      // 不许覆盖新作答）、版本冲突的重读与重来一次、自评走同一条路、界面文案不再说
+      // 「只在内存里作答」。夹具同上（client_harness.mjs）。
+      'scripts/tests/test_client_attempt_fence.mjs',
       // #79：问答面板接模型。面板那一半在 Node 里点它的按钮、看它发的 POST（fetch 是假货）；
       // Host 那一半用**注入的假 llm** 证明链路通（真模型调用要花额度，门禁里不跑）。
       'scripts/tests/test_client_ask_panel.mjs',
@@ -131,15 +139,21 @@ const groups = {
   },
   '--static': {
     python: ['test_python_syntax.py', 'test_release_metadata.py', 'test_skill_frontmatter.py', 'test_skill_rules.py', 'test_templates.py'],
-    tests: ['scripts/tests/test_openai_skills.mjs', 'scripts/tests/test_openai_skill_ui.mjs', 'scripts/tests/test_antigravity_skills.mjs'],
+    tests: ['scripts/tests/test_openai_skills.mjs', 'scripts/tests/test_openai_skill_ui.mjs', 'scripts/tests/test_antigravity_skills.mjs',
+      // #81：技能调用面 ↔ lib/tools 注册表对账（点名的工具必须存在；无头宿主导出件里
+      // 不许留原生工具名，也不许留宿主跑不动的调用）。
+      'scripts/tests/test_skill_contracts.mjs'],
   },
   '--browser': {
-    // 前三个测旧静态模板（file:// 夹具），reading_test.mjs 测阅读端本体（真 lib/client.js）
-    // #76：真 Chrome 里跑真 lib/client.js（阅读位置三级恢复 + 锚点四态复核）
+    // 前三个测旧静态模板（file:// 夹具），reading_test.mjs 测阅读端本体（真 lib/client.js）。
+    // 后面两条各测阅读端的一块，夹具同一套（harness.mjs + mini-react）：
+    //   · #76 阅读位置三级恢复 + 锚点四态复核；
+    //   · #72 作答落盘（把阅读端打进一个说 HTTP 的迷你宿主，真的落盘到工作区文件）。
     node: [
       'browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs',
       'browser/reading_test.mjs',
       'browser/reading_position_test.mjs',
+      'browser/attempts_test.mjs',
     ],
   },
 };

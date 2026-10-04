@@ -78,6 +78,14 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 
 断言问的是「这个技能够不够得着这条规则」：owner 默认是键所在的技能，声明过 `moved` 就按声明走，且 owner 必须在该技能的 `reaches` 名单里。表里的死条目（说明写错、owner 够不着）也会报错，不让声明悄悄空转。
 
+## 技能正文与代码对账
+
+`test_skill_contracts.mjs` 把技能正文里点名的东西与代码里的唯一出处对上，分三类：
+
+- **调用面**：正文里反引号包起来的 `studymate_*` 必须都在 `lib/tools/index.ts` 的 `STUDY_TOOL_NAMES` 里（注册表是唯一出处），而且**真跑一遍两个宿主的导出**——Codex/OpenAI 与 Antigravity 的导出件里不许再留原生工具名、必须有等价的引擎命令落点（映射表在两个 `bin/*-skill-compat.mjs` 里）。
+- **词表**：`layered-practice` 的四层（含义与通过标准）与四种题型（服务哪一层、必备字段）必须与 `lib/core/rules.ts` 的 `LAYERS` / `LAYER_RULES` / `QUESTION_KINDS` / `QUESTION_KIND_SHAPES` / `QUESTION_RULES` 逐字一致；`evidence-check` 的可信度排序与排除清单必须与 `EVIDENCE_BY_TRUST` / `NON_INDEPENDENT_EVIDENCE` 逐条一致。
+- **#81 的范围**：两个教学协议与五个角色的技能里不写引擎脚本命令，也不再出现旧六档与旧四层名。
+
 ## DSH 实际安装与启动
 
 兼容性改动时，在独立目录安装要检查的 DSH，然后指定其包目录：
