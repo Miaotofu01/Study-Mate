@@ -1304,7 +1304,7 @@ export function renderBlock(block: Block, ctx: LessonCtx, indent: string): strin
     return lines.join('\n');
   }
   if (kind === 'directive') {
-    return renderDirective(block as { name: string }, ctx, indent);
+    return renderDirective(block as { name: string; line: number }, ctx, indent);
   }
   // 兜底：认不出的块**报错**而不是安静地丢——静默丢内容正是这次改造要消灭的东西
   ctx.problems.add(ctx.file, (block as { line?: number }).line ?? 1,
@@ -1332,9 +1332,11 @@ function renderList(
 }
 
 /** 指令块 → HTML。认不出的指令同样是渲染器的 bug，报错不做静默空输出。 */
-export function renderDirective(block: { name: string }, ctx: LessonCtx, indent: string): string {
+export function renderDirective(
+  block: { name: string; line: number }, ctx: LessonCtx, indent: string,
+): string {
   const name = block.name;
-  const line = (block as { line: number }).line;
+  const line = block.line;
   if (name === 'practice') {
     const node = block as PracticeBlock;
     const lines = [`${indent}<div class="lesson-practice">`,

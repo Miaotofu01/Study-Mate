@@ -25,19 +25,17 @@ import { parseYaml, pyStrip } from './yaml.ts';
 // 两边各写一份就会出现「明明没人动过却报冲突」。这里只把结果挂进 payload。
 import { listReference } from './reference.ts';
 import type { ReferenceEntry } from './reference.ts';
+// 锚点的**解析**与**对账**只有一份实现，在纯函数域 lib/core/**（issue #66 收编）：
+// 这里曾经自带一份行锚定正则 + 四态对账，与 Python 侧并存、没有测试，还带着三个洞
+// （exact 撞键静默覆盖 / orphans 没有消费方 / 不认围栏）。别再往这里抄第二份。
+import { parseAnchors, reconcileAnchors } from './core/anchors.ts';
+import type { AnchorMatch } from './core/anchors.ts';
+import { cmpCodePoints } from './core/format.ts';
 
 /* ── 形状 ──────────────────────────────────────────────────────────────────
    这一份 JSON 是与阅读端（lib/client.js）之间的契约：字段名、层级、空值口径都按它走。
    值域来自学习文件的地方标 unknown/any —— 那些地方本来就有运行期检查兜着，把检查
    改成类型收窄会连带改掉表达式，而这次迁移要求运行期逐字不变。 */
-
-/** 锚点 ↔ 题库键的一条对账结果，四态见 resolveAnchors。 */
-interface AnchorEntry {
-  text: string;
-  level: string;
-  resolution: 'resolved' | 'stale' | 'ambiguous' | 'missing';
-  keys: string[];
-}
 
 /** 术语表里的一条词。 */
 interface GlossaryTerm {
@@ -94,8 +92,10 @@ interface SubjectNode {
   lesson_md: string;
   lesson: string;
   pool: Record<string, any>;
-  anchors: AnchorEntry[];
+  anchors: AnchorMatch[];
   orphan_keys: string[];
+  /** 与 orphan_keys 同源，另带键在题库文件里的行号与题数（旧实现没有任何消费方） */
+  orphans: { key: string; line: number; count: number }[];
   lab: Lab | null;
 }
 
@@ -160,13 +160,10 @@ function tint(raw: string): string {
 
 /* ── 与 Python 对齐的小工具 ────────────────────────────────────────────── */
 
-// 同一份字符集也出现在 yaml.mjs 里（Python 的 \s / str.strip() 认的空白）。
-// JS 的 \s 多一个 \ufeff、少 \x1c-\x1f，锚点归一化必须逐字对齐 Python，所以显式写出来。
+// 同一份字符集也出现在 yaml.ts 里（Python 的 \s / str.strip() 认的空白）。
+// JS 的 \s 多一个 \ufeff、少 \x1c-\x1f，行尾处理必须逐字对齐 Python，所以显式写出来。
 const PY_WS = '\\t\\n\\v\\f\\r \\x1c-\\x1f\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
-// 量词只能挂在字符类上，所以单独留一份带方括号的写法（写成 `${PY_WS}*` 会退化成字面序列）
-const PY_WS_CLASS = `[${PY_WS}]`;
 const PY_RSTRIP_RE = new RegExp(`[${PY_WS}]+$`);
-const PY_NORM_RE = new RegExp(`[${PY_WS}]+`, 'g');
 const PY_LINE_BREAK_RE = /\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]/;
 
 function pyRstrip(text: string): string {
@@ -192,20 +189,6 @@ function pyStr(value: unknown): string {
 /** Python 的 dict.get(k, default)：键存在但值是 null 时不套用默认值。 */
 function pick(object: Record<string, any> | null | undefined, key: string, fallback: unknown): any {
   return object && Object.hasOwn(object, key) ? object[key] : fallback;
-}
-
-/** Python 的 sorted() 按码位比较；JS 的 < 按 UTF-16 码元比较，遇到增补平面字符会分叉。 */
-function cmpCodePoints(a: string, b: string): number {
-  const left = [...a];
-  const right = [...b];
-  const n = Math.min(left.length, right.length);
-  for (let i = 0; i < n; i++) {
-    // `!`：数组元素都是一个码位，codePointAt 不可能给 undefined——类型签名看不出这层
-    const x = left[i].codePointAt(0)!;
-    const y = right[i].codePointAt(0)!;
-    if (x !== y) return x < y ? -1 : 1;
-  }
-  return left.length - right.length;
 }
 
 /* ── 读盘 ──────────────────────────────────────────────────────────────── */
@@ -305,64 +288,7 @@ function lessonNumber(fileName: string | null): string {
   return match ? match[1] : '';
 }
 
-// `::: quiz <层级> 锚点：<文本>`：层级是四层题型名，正文其余块由浏览器侧渲染，这里只认声明。
-const ANCHOR_RE = new RegExp(
-  `^:::${PY_WS_CLASS}*quiz${PY_WS_CLASS}+([^${PY_WS}]+)${PY_WS_CLASS}+锚点：(.*?)${PY_WS_CLASS}*$`,
-  'gm',
-);
-
-function lessonAnchors(markdown: string): Array<{ level: string; text: string }> {
-  ANCHOR_RE.lastIndex = 0; // 带 g 的正则是有状态的，上一次的 lastIndex 会漏掉开头的锚点
-  return [...markdown.matchAll(ANCHOR_RE)].map((match) => ({ level: match[1], text: match[2] }));
-}
-
-/** 归一化只抹掉空白与全角空格——用来区分「逐字一致」与「只差空白」。 */
-function normalizeAnchor(text: unknown): string {
-  return String(text).replace(PY_NORM_RE, '');
-}
-
-/**
- * 锚点 ↔ 题库键对账，四态：resolved / stale / ambiguous / missing（目标态规格 §4.4）。
- * 多匹配绝不静默取第一个：ambiguous 原样报出来，让界面去问人。
- */
-function resolveAnchors(declared: Array<{ level: string; text: string }>, pool: Record<string, any>): { anchors: AnchorEntry[]; orphanKeys: string[] } {
-  const poolKeys = Object.keys(pool);
-  const exact = new Map<string, string>();
-  for (const key of poolKeys) exact.set(pyStrip(key), key); // 后写的覆盖先写的，同 Python 的字典推导
-
-  const byNormalized = new Map<string, string[]>();
-  for (const key of poolKeys) {
-    const normalized = normalizeAnchor(key);
-    if (!byNormalized.has(normalized)) byNormalized.set(normalized, []);
-    byNormalized.get(normalized)!.push(key);
-  }
-
-  const anchors: AnchorEntry[] = [];
-  const used = new Set<string>();
-  for (const item of declared) {
-    const text = pyStrip(item.text);
-    const entry: AnchorEntry = { text, level: item.level, resolution: 'missing', keys: [] };
-    if (exact.has(text)) {
-      entry.resolution = 'resolved';
-      entry.keys = [exact.get(text)!];
-    } else {
-      const candidates = byNormalized.get(normalizeAnchor(text)) || [];
-      if (candidates.length > 1) {
-        entry.resolution = 'ambiguous';
-        entry.keys = [...candidates].sort(cmpCodePoints);
-      } else if (candidates.length === 1) {
-        entry.resolution = 'stale';
-        entry.keys = [candidates[0]];
-      }
-    }
-    for (const key of entry.keys) used.add(key);
-    anchors.push(entry);
-  }
-
-  // 题库里有、正文里没声明的锚点：正文与题库脱钩的另一半，界面也要能看见
-  const orphanKeys = poolKeys.filter((key) => !used.has(key)).sort(cmpCodePoints);
-  return { anchors, orphanKeys };
-}
+/* 锚点的解析与对账**不在这里**——去 lib/core/anchors.ts（只有一份实现）。 */
 
 /* ── 附件类文件的解析 ──────────────────────────────────────────────────── */
 
@@ -535,7 +461,11 @@ function buildSubject(subjectDir: string, dirName: string): SubjectPayload {
         throw new Error(`题库不是合法 JSON：${poolFile}\n    ${(error as Error).message}`);
       }
     }
-    const { anchors, orphanKeys } = resolveAnchors(lessonAnchors(lessonMarkdown), pool);
+    // 四态由 lib/core/anchors.ts 判定（多匹配绝不静默取第一个）；orphans 是一等结论，
+    // 除了旧的 orphan_keys 还多留一个带行号与题数的 orphans，阅读端想显示就有得显示。
+    const { anchors, orphanKeys, orphans } = reconcileAnchors(parseAnchors(lessonMarkdown), pool, {
+      poolFile: poolFile === null ? '' : path.basename(poolFile),
+    });
 
     const run = (Object.hasOwn(progressNodes, nodeId) ? progressNodes[nodeId] : null) || {};
     // progress 只记有变化的节点，没写的按大纲里的初始快照算
@@ -565,6 +495,7 @@ function buildSubject(subjectDir: string, dirName: string): SubjectPayload {
       pool,
       anchors,
       orphan_keys: orphanKeys,
+      orphans,
       lab: readLab(path.join(subjectDir, 'lab'), number),
     });
   }

@@ -24,7 +24,10 @@
    本域不许 import 任何 `node:*`，也不许 import `lib/core/**` 之外的东西。
    ───────────────────────────────────────────────────────────────────────── */
 
-import { cmpCodePoints, pyIsSpace, pyStrip } from './format.ts';
+import {
+  FormatProblems, cmpCodePoints, parseBlocks, pyIsSpace, pyStrip,
+  type LessonCtx,
+} from './format.ts';
 
 /** 四态。`stale` / `ambiguous` / `missing` 定义见 content-format.md §3.5。 */
 export type AnchorResolution = 'resolved' | 'stale' | 'ambiguous' | 'missing';
@@ -66,6 +69,22 @@ export interface AnchorReconciliation {
   orphans: OrphanKey[];
   /** 与 `orphans` 同源，只是键名数组（旧 payload 的 `orphan_keys`） */
   orphanKeys: string[];
+}
+
+/**
+ * 只取 front matter 之后的正文起点（0 起的行下标）；首行不是 `---` 就是 0。
+ *
+ * `parseFrontMatter` 会为「没写 front matter」报一条错——那是**内容检查**该报的。
+ * 只想从一段正文里捞锚点时（阅读端读工作区里的任意 `.md`），不该因为缺 front matter
+ * 把整篇的锚点一起丢掉：Python 侧的 `parse_blocks(path, lines, body_start, len(lines), …)`
+ * 在同一个输入上照样能扫出锚点。所以这里给一个**不报错**的切分。
+ */
+export function bodyStartOf(lines: string[]): number {
+  if (lines.length === 0 || pyStrip(lines[0]).replace(/^\ufeff/, '') !== '---') return 0;
+  for (let index = 1; index < lines.length; index++) {
+    if (pyStrip(lines[index]) === '---') return index + 1;
+  }
+  return 0;
 }
 
 export interface ReconcileOptions {
@@ -252,4 +271,28 @@ function decodeJsonString(literal: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 从一段内容文件的**正文**里捞出 `::: quiz` 声明。
+ *
+ * 与 `parseLesson` 的差异只有两点，都是给「读工作区里的任意 `.md`」这个用途准备的：
+ *
+ * 1. **缺 front matter 不算错**（`bodyStartOf`），整篇照扫——否则一份没写 front matter
+ *    的课件会在阅读端静默丢掉全部锚点；
+ * 2. 只回声明，不回错误（格式对不对是内容检查的事，阅读端只负责显示四态）。
+ *
+ * 块级解析走 `lib/core/format.ts` 的 `parseBlocks`，所以**围栏里的 `:::` 不是锚点**
+ * ——旧实现的行锚定正则不认围栏，围栏里写一句 `::: quiz 理解 锚点：x` 就会凭空多出一个锚点。
+ */
+export function parseAnchors(markdown: string): DeclaredAnchor[] {
+  const lines = String(markdown).split('\n');
+  const ctx: LessonCtx = {
+    file: '',
+    problems: new FormatProblems(),
+    math: { value: false },
+    figureNo: { value: 0 },
+  };
+  const { blocks } = parseBlocks(lines, bodyStartOf(lines), lines.length, ctx);
+  return declaredFromBlocks(blocks as unknown as { kind?: string }[]);
 }
