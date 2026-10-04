@@ -10,7 +10,7 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readLibrary, buildLibrary } from '../../lib/library.mjs';
+import { readLibrary, buildLibrary } from '../../lib/library.ts';
 
 /* ── 临时工作区：跑完即弃 ─────────────────────────────────────────────── */
 

@@ -10,7 +10,7 @@ import { findPython } from '../../bin/studymate.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const python = findPython();
-const plugin = pathToFileURL(path.join(root, 'bin/dsh-plugin.mjs')).href;
+const plugin = pathToFileURL(path.join(root, 'bin/dsh-plugin.ts')).href;
 
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-bundle-'));
@@ -190,8 +190,8 @@ test('registry failures are reported without stopping the host or deleting learn
 
 test('missing Python is reported without stopping the host or creating installation files', t => {
   const f = fixture(t);
-  const copied = path.join(f.dir, 'dsh-plugin.mjs');
-  fs.copyFileSync(path.join(root, 'bin/dsh-plugin.mjs'), copied);
+  const copied = path.join(f.dir, 'dsh-plugin.ts');
+  fs.copyFileSync(path.join(root, 'bin/dsh-plugin.ts'), copied);
   // Simulate dependency failure at the installer boundary; Windows launchers
   // may find Python even with an empty PATH.
   fs.writeFileSync(path.join(f.dir, 'studymate.mjs'),

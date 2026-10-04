@@ -14,20 +14,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { parseYaml } from './yaml.mjs';
+import { parseYaml } from './yaml.ts';
 
 /** DSH 的 home：环境变量优先，其次是 ~/.dsh。 */
-export function dshHome() {
+export function dshHome(): string {
   return process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
 }
 
-export function configFile() {
+export function configFile(): string {
   return path.join(dshHome(), 'studymate-config.yaml');
 }
 
 /** 先按 YAML 读；读不动再看它是不是「注释 + JSON」。 */
-function readConfigObject(file) {
-  let text;
+function readConfigObject(file: string): Record<string, unknown> | null {
+  let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');
   } catch {
@@ -35,30 +35,31 @@ function readConfigObject(file) {
   }
   try {
     const parsed = parseYaml(text, { file });
-    if (parsed && typeof parsed === 'object') return parsed;
+    // 解析器给的是 unknown：这里按运行期已有的「是对象才算配置」收窄（不是断言对象一定长什么样）
+    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
   } catch {
     // 落到下面的 JSON 兜底：安装器写的就是 JSON
   }
   try {
     const jsonText = text.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n').trim();
     const parsed = JSON.parse(jsonText);
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
   } catch {
     return null;
   }
 }
 
-function stringField(file, key) {
+function stringField(file: string, key: string): string {
   const parsed = readConfigObject(file);
   const value = parsed && parsed[key];
   return typeof value === 'string' && value.trim() ? value.trim() : '';
 }
 
-export function resolveWorkspace(file = configFile()) {
+export function resolveWorkspace(file: string = configFile()): string {
   return stringField(file, 'workspace');
 }
 
 /** 引擎项目根（.learning 之外的那些源码）也在配置里，暂时只有诊断用得上。 */
-export function resolveRoot(file = configFile()) {
+export function resolveRoot(file: string = configFile()): string {
   return stringField(file, 'root');
 }
