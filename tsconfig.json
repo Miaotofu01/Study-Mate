@@ -20,13 +20,14 @@
     // Node 的类型擦除下没有实现可跑，所以让 tsc 直接拦住（decisions.md §1）。
     "erasableSyntaxOnly": true,
 
-    // verbatimModuleSyntax 在这里**必须是 false**：本包没有 `"type": "module"`，
-    // 而 scripts/tests/{quiz_dom_test,toc_dom_test}.js 是 CommonJS（require/__dirname），
-    // 加上 `"type": "module"` 会把那两个套件打掉。于是 tsc 按 nodenext 把 .ts 当 CJS 看，
+    // verbatimModuleSyntax：类型专用 import 必须写成 `import type`，擦除后不留空 import。
+    //
+    // 这条与 package.json 的 `"type": "module"` 是一对：没有它，tsc 按 nodenext 把 .ts 当 CJS 看，
     // 开着 verbatimModuleSyntax 就会以 TS1287/TS1295 拒绝文件里的 ESM 语法。
-    // 代价是“类型专用 import 必须手写 import type”不再由编译器强制 —— 但 Node 擦除
-    // 之后会原样保留写漏的那条 import，运行期立刻炸，而 npm test 会加载全部这些模块。
-    "verbatimModuleSyntax": false,
+    // 仓库里仅有的两个 CommonJS 套件已改名 `.cjs`（scripts/tests/{quiz_dom_test,toc_dom_test}.cjs），
+    // 所以加 `"type": "module"` 不再会把它们打掉；顺带也消掉了运行期的
+    // MODULE_TYPELESS_PACKAGE_JSON 警告（那警告的代价是每个 .ts 都要先按 CJS 解析失败再重解析）。
+    "verbatimModuleSyntax": true,
 
     // 与「逐文件擦除」同一个前提：跨文件只能靠 import 传值，类型不能靠 re-export 隐式传递。
     "isolatedModules": true,

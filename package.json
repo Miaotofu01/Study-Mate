@@ -2,6 +2,7 @@
   "name": "@yunmiao/studymate",
   "version": "1.0.0",
   "description": "StudyMate learning skills and lesson engine for DeepSeek Harness, Google Antigravity, Codex and ChatGPT Work.",
+  "type": "module",
   "bin": {
     "studymate": "bin/studymate.mjs"
   },
@@ -57,9 +58,7 @@
     "test:browser": "node scripts/release/checks.mjs --browser",
     "test:release": "node --test scripts/release/release.test.mjs",
     "test:dsh": "node --test scripts/tests/test_dsh_runtime.mjs",
-    "test:dsh-cli": "node --test scripts/tests/test_dsh_plugin_cli.mjs",
-    "prototype": "node prototype/reading-client/tools/serve.mjs",
-    "prototype:data": "python3 prototype/reading-client/tools/build-data.py"
+    "test:dsh-cli": "node --test scripts/tests/test_dsh_plugin_cli.mjs"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

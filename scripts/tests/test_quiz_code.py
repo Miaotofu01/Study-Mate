@@ -3,7 +3,7 @@
 
 `quiz.js` 把 ``` 围栏渲染成真代码块（<pre><code> + 缩进 + 自动上色），见它顶部契约。
 检查只管一件结构事：**围栏成对**——不成对的话后半段会被整段渲染成代码块，学生看到的
-题面就变了。渲染本身由 `quiz_dom_test.js`（结构）与 `browser/quiz_code_test.mjs`
+题面就变了。渲染本身由 `quiz_dom_test.cjs`（结构）与 `browser/quiz_code_test.mjs`
 （真实 Chrome 里的上色与缩进）钉。
 
 用法：python3 scripts/tests/test_quiz_code.py

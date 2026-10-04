@@ -11,7 +11,8 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 
 // 支持文件与「按需手动跑」的脚本：新增套件要么接进某个组或 package.json 的按需入口，
 // 要么明确登记到这里——不登记就会在下面报出来，不再有第三种「谁也不跑」的状态。
-const SUPPORT_FILES = new Set(['README.md', 'run_tests.sh', 'fixtures.py']);
+// browser/harness.mjs 是浏览器套件共用的骨架（探测二进制 + CDP + summary.json），自己不是套件。
+const SUPPORT_FILES = new Set(['README.md', 'run_tests.sh', 'fixtures.py', 'browser/harness.mjs']);
 const MANUAL_ONLY = new Set([
   'browser/measure.mjs', 'browser/hovers.mjs', 'browser/shot.mjs',  // 手动看的浏览器脚本
   'probe_bundle.mjs',                                               // 排障用
@@ -72,7 +73,7 @@ const groups = {
       'test_quiz_attr.py', 'test_quiz_code.py', 'test_render_lesson.py',
       'test_statuses.py', 'test_templates.py', 'test_workspace_config.py',
     ],
-    node: ['quiz_dom_test.js', 'toc_dom_test.js'],
+    node: ['quiz_dom_test.cjs', 'toc_dom_test.cjs'],
     tests: [
       'scripts/release/release.test.mjs',
       // Host 半数据层的特征化测试（lib/{workspace,library,assets,yaml,reference,attempts}.mjs）
@@ -97,6 +98,10 @@ const groups = {
       // 纯函数域的判据：写入栅栏（幂等台账 + 版本比较）、题库题型与字段、误解字段定型
       'scripts/tests/test_core_fence_questions.mjs',
       'scripts/tests/test_core_coverage_floor.mjs',
+      // 阅读端（lib/client.js）的契约：token 对比度达 WCAG AA（亮暗两套）、
+      // 动效四档与 prefers-reduced-motion、首次引导定位几何（纯函数，node:vm 里跑）
+      'scripts/tests/test_client_tokens.mjs',
+      'scripts/tests/test_client_pure.mjs',
       // #69：架构边界与依赖无环断言（扫真实 import 图，域规则表默认拒绝）
       'scripts/tests/test_architecture_boundaries.mjs',
       // 工具域 lib/tools/**（#68）：域声明与越权即抛、工作区摘要、四个校验器、两个改写工具。
@@ -105,6 +110,10 @@ const groups = {
       'scripts/tests/test_tools_context.mjs',
       'scripts/tests/test_tools_validate.mjs',
       'scripts/tests/test_tools_rewrite.mjs',
+      // 任务域 lib/tasks/**（#73）：六态状态机、owner 句柄与越权、durable 落盘的**跨进程**接上、
+      // 五个 studymate_task_* 工具、阅读端的 GET /api/studymate/tasks。
+      // 跨进程那一半的「进程 A」是夹具 scripts/tests/fixtures/tasks_producer.mjs。
+      'scripts/tests/test_tasks_model.mjs',
       // 阅读端（lib/client.js 是零构建的浏览器插件，没有 export）：跨科目搜索的索引覆盖与
       // 四个附件折叠块的空态。套件在 Node 里伪造 window.__ModuleLoader__ + react 桩把头文件
       // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
@@ -120,7 +129,8 @@ const groups = {
       'scripts/tests/test_skill_tool_refs.mjs'],
   },
   '--browser': {
-    node: ['browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs'],
+    // 前三个测旧静态模板（file:// 夹具），reading_test.mjs 测阅读端本体（真 lib/client.js）
+    node: ['browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs', 'browser/reading_test.mjs'],
   },
 };
 const mode = process.argv[2] || 'core';
