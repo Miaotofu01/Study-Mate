@@ -99,6 +99,8 @@ const groups = {
       'scripts/tests/test_core_coverage_floor.mjs',
       // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
       'scripts/tests/test_client_reading_position.mjs',
+      // #69：架构边界与依赖无环断言（扫真实 import 图，域规则表默认拒绝）
+      'scripts/tests/test_architecture_boundaries.mjs',
       // 工具域 lib/tools/**（#68）：域声明与越权即抛、工作区摘要、四个校验器、两个改写工具。
       // 夹具在 scripts/tests/fixtures/tools.mjs —— `fixtures/` 目录被上面的遍历显式跳过。
       'scripts/tests/test_tools_guard.mjs',

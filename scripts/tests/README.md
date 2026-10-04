@@ -59,7 +59,8 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_validators_progress_subject.mjs` | 进度与科目的 schema 与取值：旧六档读到就报映射、进度与大纲的引用完整性、空串 `name`/`goal`、`created_at` 是否真实存在、`slug` 与目录名不一致 |
 | `test_validators_handoff.mjs` | 交接门禁（`validateHandoff`）：明确放行/阻断、manifest ↔ `deliver/` 覆盖、角色/节点绑定、路径边界、symlink、可选 SHA-256、重复 JSON key 与 JSON 语法错误的真实行列 |
 | `test_rules_pure.mjs` | 纯函数规则层（`lib/core/rules.ts`）：四层判定逐条通过标准、题型与深度的匹配、旧六档 → 三档六条映射逐条断言、证据资格与分母口径；并断言 `lib/core/**` 不 import `node:*` |
-| `test_core_coverage_floor.mjs` | 覆盖率下限：自己 spawn 一轮带 `--test-coverage-*` 阈值的 `node --test`，规则层与整个 `lib/core/**` 的覆盖率不达标就让门禁红 |
+| `test_core_coverage_floor.mjs` | 覆盖率下限：自己 spawn 一轮带 `--test-coverage-*` 阈值的 `node --test`，规则层与整个 `lib/core/**` 的覆盖率不达标就让门禁红。统计范围**自动发现**（`lib/core/**` 有哪几个模块、哪几条套件真的把它们拉进这一轮，全从盘上算），并断言每个模块都出现在覆盖率报告里——没被加载的模块不进分母，静默少算会红 |
+| `test_architecture_boundaries.mjs` | 架构边界与依赖无环（#69）：扫真实源码解析 `import` / `export … from` / 动态 `import()` 得到 import 图，按文件顶部那张**域规则表**判（`lib/` 一级目录 = 域，未知域默认拒绝，`lib/core/**` 不许碰 `node:*` 与域外东西），域图与模块图都断言无环；另有合成图的反证用例钉住判据本身 |
 | `test_tools_guard.mjs` | 原生工具域（`lib/tools/{domains,access,define,index,capability}.ts`）：八个工具的名字与**声明表**（谁读哪些域、写哪些字段，放宽一行就红）、`description` 只有一句话、注册走 `ctx.effect`；**反证**越权读与越权写必须抛 `DomainViolationError`（写越权时回调一次都不跑）；`requires:['model']` 在无模型时不跑 body 并返回 `{available:false, reason}` |
 | `test_tools_context.mjs` | `studymate_workspace_context` 的结构化摘要（工作区路径、今天、时区、科目现状含当前节点与三档、最近学习记录、可用能力），以及**逐域投影**：`subjects` 切片里没有题库、没有课件正文（顺着节点也读不到别的域） |
 | `test_tools_validate.mjs` | 四个校验工具：数据层（大纲／进度／科目，逐条带行号）、内容层（格式 + 锚点四态 + 图片存在性 + 题库坏 JSON）、图片库（`check_pool.py` 的行为移植：表头、命名、三列非空、日期、体积）、交接门禁（明确放行／阻断） |
