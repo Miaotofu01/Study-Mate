@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { STREAM_LAST_SEGMENT, STREAM_SEGMENTS } from "./constants";
+import { STREAM_LAST_SEGMENT, STREAM_NEXT_STEP_ANCHOR, STREAM_VISIBLE_SEGMENTS } from "./constants";
 
 test("welcome starters start a streamed reply and the composer recovers", async ({ page }) => {
   await page.goto("/chat");
@@ -23,11 +23,14 @@ test("welcome starters start a streamed reply and the composer recovers", async 
 
   await expect(page.getByRole("button", { name: "出几道练习题" })).toHaveCount(0);
 
-  await expect(page.getByText(STREAM_SEGMENTS[0])).toBeVisible();
-  expect(await page.getByText(STREAM_LAST_SEGMENT).count()).toBe(0);
-  for (const segment of STREAM_SEGMENTS.slice(1)) {
+  await expect(page.getByText(STREAM_VISIBLE_SEGMENTS[0])).toBeVisible();
+  await expect.poll(async () => page.getByText(STREAM_LAST_SEGMENT).count()).toBe(0);
+  for (const segment of STREAM_VISIBLE_SEGMENTS.slice(1)) {
     await expect(page.getByText(segment)).toBeVisible();
   }
+
+  // H②：一段流式回复的末尾带「下一步」呈现锚点（回复「继续」进入下一节）
+  await expect(page.getByText(STREAM_NEXT_STEP_ANCHOR)).toBeVisible();
 
   await expect(page.getByTitle("发送")).toBeVisible();
   await expect(page.getByRole("textbox")).toBeEnabled();

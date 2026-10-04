@@ -20,7 +20,7 @@ export interface WallRecord {
   engine: EngineSignals;
 }
 
-export type RunStatus = "canonical" | "detour" | "blocked" | "budget_exhausted";
+export type RunStatus = "canonical" | "detour" | "blocked" | "budget_exhausted" | "agent_loop";
 
 function excerpt(text: string, max = 1500): string {
   return text.length > max ? `${text.slice(0, max)}…[截断，共 ${text.length} 字符]` : text;
@@ -120,7 +120,7 @@ export class Recorder {
       "",
       `- 目标：${input.goalTitle}`,
       `- 模型：${input.model}`,
-      `- 结果：**${input.status}**（canonical=正路完成 / detour=借道完成 / blocked=受阻 / budget_exhausted=预算耗尽）`,
+      `- 结果：**${input.status}**（canonical=正路完成 / detour=借道完成 / blocked=受阻 / budget_exhausted=预算耗尽 / agent_loop=动作循环护栏停机）`,
       `- 步数：${input.steps}`,
       `- 时间：${input.startedAt} → ${endedAt}`,
       `- 摘要：${input.summary}`,

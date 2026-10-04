@@ -10,7 +10,7 @@ test("status transitions follow the state machine and persist mastery and notes"
   page,
 }) => {
   await openNodeDetail(page, "computer-networks", "4. TCP 与可靠传输");
-  const detail = page.locator("div.w-80.border-l");
+  const detail = page.getByTestId("course-node-detail");
   const badge = detail.getByTestId("node-status-badge");
   const next = detail.getByTestId("node-next-statuses");
   await expect(badge).toHaveText("未开始");

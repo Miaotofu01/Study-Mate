@@ -31,7 +31,11 @@ test("sidebar can be resized by dragging and keeps the width across reloads", as
   expect(Math.round((await sidebarOf(page).boundingBox())!.width)).toBe(DEFAULT_WIDTH);
 
   // 右栏同样可拖拽，但左栏拖拽不应影响右栏（两者手势各自独立）
-  expect(Math.round((await page.getByTestId("chat-right-sidebar").boundingBox())!.width)).toBe(256);
+  // 新对话默认折叠右栏：先展开，等宽度过渡到位再量
+  await page.getByTitle("展开右侧边栏").click();
+  await expect
+    .poll(async () => Math.round((await page.getByTestId("chat-right-sidebar").boundingBox())!.width))
+    .toBe(256);
 
   // 向右拖宽 120px
   await dragHandleBy(page, 120);

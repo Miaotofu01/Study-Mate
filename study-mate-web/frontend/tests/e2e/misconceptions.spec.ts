@@ -124,3 +124,25 @@ test("edit an entry and see both stores updated", async ({ page }) => {
   expect(progress).toContain("E2E 待编辑条目");
   expect(progress).toContain(followUp);
 });
+
+test("node chip locates the node on the graph; query params prefill the filters", async ({ page }) => {
+  await page.goto("/misconceptions");
+  await page.getByRole("combobox", { name: "学科" }).selectOption({ label: "计算机网络" });
+  await expect(page.getByRole("button", { name: "记一条" })).toBeEnabled();
+  await createEntry(page, "E2E 定位节点条目", "中", true);
+
+  // 条目上的节点 chip → 图谱页定位该节点（详情在主区出现）
+  await card(page, "E2E 定位节点条目").getByTitle(/在课程图谱中定位/).click();
+  await expect(page).toHaveURL(/\/courses\?subject=computer-networks&node=net\.layers/);
+  await expect(page.getByTestId("course-node-detail")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "分层模型与封装" })).toBeVisible();
+
+  // 反向：带参进入概念本，筛选被预填
+  await page.goto("/misconceptions?subject=computer-networks&node=net.layers");
+  await expect(page.getByRole("combobox", { name: "节点" })).toHaveValue("net.layers");
+  await expect(card(page, "E2E 定位节点条目")).toBeVisible();
+
+  await page.on("dialog", (dialog) => dialog.accept());
+  await card(page, "E2E 定位节点条目").getByTitle("删除").click();
+  await expect(card(page, "E2E 定位节点条目")).toHaveCount(0);
+});

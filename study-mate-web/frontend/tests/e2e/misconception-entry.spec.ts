@@ -4,7 +4,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 import { STREAM_SEGMENTS, subjectDir } from "./constants";
-import { associateSubjectNode, sendChatMessage } from "./helpers";
+import { associateSubject, sendChatMessage } from "./helpers";
 
 const QUESTION = "分层有什么好处？为什么网络要分层？";
 // adverse 用例用独立问题文本：e2e 工作区数据跨用例保留，题目撞车会让卡片定位命中多个元素
@@ -13,7 +13,7 @@ const NO_SUBJECT_QUESTION = "没有关联科目时也能记入概念本吗？";
 test("save an assistant reply into the misconception notebook", async ({ page }) => {
   await page.goto("/chat");
   await expect(page.getByRole("heading")).not.toHaveText("你好");
-  await associateSubjectNode(page, "computer-networks", "net.layers");
+  await associateSubject(page, "computer-networks");
   await sendChatMessage(page, QUESTION);
 
   const saveButton = page.getByTitle("记入概念本");
@@ -27,7 +27,8 @@ test("save an assistant reply into the misconception notebook", async ({ page })
   await expect(page.getByRole("dialog").getByRole("combobox", { name: "科目" })).toHaveValue(
     "computer-networks",
   );
-  await expect(page.getByLabel("主题")).toHaveValue("分层模型与封装");
+  // 节点下拉已移除（2026-10-04）：聊天侧预填的主题回落为科目名
+  await expect(page.getByLabel("主题")).toHaveValue("计算机网络");
   await expect(page.getByLabel("当时的问题")).toHaveValue(QUESTION);
   await expect(page.getByLabel("答案要点")).toHaveValue(STREAM_SEGMENTS.join(""));
 

@@ -12,7 +12,7 @@ test("generate a subject via the AI wizard and land on its graph", async ({ page
   await page.getByRole("button", { name: "生成课程大纲" }).click();
 
   await expect(page).toHaveURL(/\/courses\?subject=subject-[a-f0-9]{6}/, { timeout: 30_000 });
-  await expect(page.getByRole("link", { name: /测试生成科目/ })).toBeVisible();
+  await expect(page.locator("aside").first().getByText("测试生成科目")).toBeVisible();
   for (const nodeId of ["demo.intro", "demo.core", "demo.lab"]) {
     await expect(page.getByTestId(`graph-node-${nodeId}`)).toBeVisible();
   }

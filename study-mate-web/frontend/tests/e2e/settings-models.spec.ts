@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const PROVIDER_NAME = "模型实验室";
 
-test("model rows expose four actions, the edit dialog and the chat-side thinking tier", async ({
+test("model rows expose four actions, the edit dialog and the chat-side reasoning tier dropdown", async ({
   page,
 }) => {
   page.on("dialog", (dialog) => dialog.accept());
@@ -40,7 +40,8 @@ test("model rows expose four actions, the edit dialog and the chat-side thinking
   await advancedToggle.click();
   await expect(advancedToggle).toHaveAttribute("aria-expanded", "true");
 
-  const capability = dialog.getByRole("checkbox", { name: "工具调用" });
+  // 工具调用默认开启、无开关；这里用仍在的「JSON Schema 输出」验证能力开关可切换
+  const capability = dialog.getByRole("checkbox", { name: "JSON Schema 输出" });
   await capability.click();
   await expect(capability).toHaveAttribute("aria-checked", "true");
 
@@ -50,20 +51,25 @@ test("model rows expose four actions, the edit dialog and the chat-side thinking
     "true",
   );
 
+  // 启用后默认预置 disabled / enabled 两档，默认档位取最高档（enabled）
   const chipInputs = dialog.locator("input[data-reasoning-variant-input]");
+  await expect(chipInputs).toHaveCount(2);
+  await expect(dialog.getByRole("combobox", { name: "默认档位" })).toHaveValue("enabled");
+
+  // 再追加三档并改名，验证 chip 编辑器可增改
   await dialog.getByRole("button", { name: "添加档位" }).click();
-  await chipInputs.nth(0).fill("off");
+  await chipInputs.nth(2).fill("low");
   await dialog.getByRole("button", { name: "添加档位" }).click();
-  await chipInputs.nth(1).fill("low");
+  await chipInputs.nth(3).fill("medium");
   await dialog.getByRole("button", { name: "添加档位" }).click();
-  await chipInputs.nth(2).fill("high");
-  await expect(chipInputs).toHaveCount(3);
+  await chipInputs.nth(4).fill("high");
+  await expect(chipInputs).toHaveCount(5);
 
   // 默认档位从档位列表里选
   await dialog.getByRole("combobox", { name: "默认档位" }).selectOption("high");
   await page.getByRole("button", { name: "保存模型" }).click();
 
-  await page.getByRole("button", { name: "保存", exact: true }).click();
+  // 实时生效：无需再点「保存」，左侧列表里该提供商已在
   await expect(page.getByRole("button", { name: new RegExp(PROVIDER_NAME) })).toBeVisible();
 
   // API Key 落盘后回填输入框（真实值，密码点显示）
@@ -120,21 +126,29 @@ test("model rows expose four actions, the edit dialog and the chat-side thinking
   await expect(modelSwitch).toContainText(`${PROVIDER_NAME} / lab-vision`);
 
   await modelSwitch.click();
-  // 对话侧：停用模型不出现；档位按模型的 reasoning.variants 展示，默认档位高亮
+  // 对话侧：停用模型不出现；模型弹层已不再承载档位 chip，档位走输入区旁的独立下拉
   await expect(page.getByRole("button", { name: /lab-base/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /视觉实验室/ })).toBeVisible();
-  await expect(page.getByText("思考档位")).toBeVisible();
-  await expect(page.getByRole("button", { name: "high", exact: true })).toHaveAttribute(
+
+  // 先收起模型弹层：它的 fixed 遮罩（z-30）会挡住旁边新加的档位下拉
+  await page.mouse.click(4, 4);
+  await expect(page.getByRole("button", { name: /视觉实验室/ })).toHaveCount(0);
+
+  // 档位下拉：当前档位（模型默认 high）显示在触发按钮上，展开后当前项打勾高亮
+  const tierTrigger = page.getByTitle("切换推理档位");
+  await expect(tierTrigger).toContainText("思考 · high");
+  await tierTrigger.click();
+  const tierMenu = page.getByTestId("reasoning-variant-menu");
+  await expect(tierMenu.getByRole("button", { name: "high", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
 
-  await page.getByRole("button", { name: "low", exact: true }).click();
-  await modelSwitch.click();
-  await expect(page.getByRole("button", { name: "low", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  // 选 low 落盘：触发按钮文案即时更新，刷新后仍保持（settings 已写回服务端）
+  await tierMenu.getByRole("button", { name: "low", exact: true }).click();
+  await expect(tierTrigger).toContainText("思考 · low");
+  await page.reload();
+  await expect(page.getByTitle("切换推理档位")).toContainText("思考 · low");
 
   // 自清理：删掉本轮创建的提供商，当前使用回落到 DeepSeek
   await page.goto("/settings/providers");

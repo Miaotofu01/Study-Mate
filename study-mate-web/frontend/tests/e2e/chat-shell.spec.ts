@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { associateSubjectNode, sendChatMessage } from "./helpers";
+import { associateSubject, expandRightRail, sendChatMessage } from "./helpers";
 
 // 与 ChatView 中的常量保持一致
 const RIGHT_WIDTH_KEY = "studymate-chat-right-sidebar-width";
@@ -36,19 +36,26 @@ test("chat shell: top bar keeps only the title plus a right-sidebar toggle", asy
 
   // 侧边栏里的「新对话」入口保留
   await expect(page.getByTitle("新对话")).toBeVisible();
+
+  // 新对话态：输入区上方出现关联行（科目 + 工作区并排）
+  const association = page.getByTestId("new-session-association");
+  await expect(association).toBeVisible();
+  await expect(association.getByTitle("关联科目", { exact: true })).toBeVisible();
+  await expect(association.getByTestId("new-session-workspace")).toBeVisible();
 });
 
 test("chat shell: right sidebar carries association controls and session meta", async ({ page }) => {
   await page.goto("/chat");
   await expect(page.getByRole("heading")).not.toHaveText("你好");
 
+  // 新对话默认折叠右侧边栏：先展开再做内容断言
+  await expandRightRail(page);
   const sidebar = page.getByTestId("chat-right-sidebar");
   await expect(sidebar).toBeVisible();
 
-  // 关联区：未选科目时节点下拉禁用
-  await expect(sidebar.getByTitle("关联科目", { exact: true })).toBeVisible();
-  await expect(sidebar.getByTitle("关联节点", { exact: true })).toBeDisabled();
-  await expect(sidebar.getByRole("button", { name: "生成小结" })).toBeDisabled();
+  // 关联区已移出右栏（2026-10-04）：右栏只剩附件区 + 会话信息
+  await expect(sidebar.getByTitle("关联科目", { exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: "生成小结" })).toHaveCount(0);
 
   // 元信息区：新会话没有创建时间
   await expect(sidebar.getByTestId("session-message-count")).toHaveText("0 条");
@@ -60,7 +67,11 @@ test("chat shell: right sidebar carries association controls and session meta", 
 
   // 折叠 / 展开：内容保持挂载（不 unmount），宽度过渡到 0 并标记 inert + aria-hidden
   await page.getByTitle("折叠右侧边栏").click();
-  await expect(sidebar).toBeHidden();
+  // 可折叠面板禁 toBeHidden()（`:visible` 对宽度过渡中的元素不可靠，v1.3 踩过）：
+  // 用宽度判据（boundingBox 宽度归零）+ aria-hidden / inert 属性判据，见 E2E 流程 §6 第 15 条
+  await expect
+    .poll(async () => Math.round((await sidebar.boundingBox())?.width ?? -1))
+    .toBe(0);
   await expect(sidebar).toHaveAttribute("aria-hidden", "true");
   await expect.poll(async () => sidebar.getAttribute("inert")).not.toBeNull();
   await expect(page.getByTitle("展开右侧边栏")).toBeVisible();
@@ -74,6 +85,8 @@ test("chat shell: right sidebar can be resized by dragging and persists the widt
   await page.goto("/chat");
   await expect(page.getByRole("heading")).not.toHaveText("你好");
 
+  // 新对话默认折叠：展开后再验宽度
+  await expandRightRail(page);
   const sidebar = page.getByTestId("chat-right-sidebar");
   await expect
     .poll(async () => Math.round((await sidebar.boundingBox())!.width))
@@ -86,9 +99,10 @@ test("chat shell: right sidebar can be resized by dragging and persists the widt
     .toBe(RIGHT_DEFAULT_WIDTH + 60);
   expect(await page.evaluate((key: string) => localStorage.getItem(key), RIGHT_WIDTH_KEY)).toBe("316");
 
-  // 刷新后保留宽度（与左栏一致；折叠态本身不持久化，刷新回到默认展开）
+  // 刷新后保留宽度（宽度全局持久化；折叠态只在已有会话上持久化，新对话刷新后回默认折叠）
   await page.reload();
   await expect(page.getByRole("heading")).not.toHaveText("你好");
+  await expandRightRail(page);
   await expect
     .poll(async () => Math.round((await sidebar.boundingBox())!.width))
     .toBe(RIGHT_DEFAULT_WIDTH + 60);
@@ -105,7 +119,7 @@ test("chat shell: right sidebar reflects course association and session meta", a
   await expect(page.getByRole("heading")).not.toHaveText("你好");
 
   const sidebar = page.getByTestId("chat-right-sidebar");
-  await associateSubjectNode(page, "computer-networks", "net.layers");
+  await associateSubject(page, "computer-networks");
   await sendChatMessage(page, "元信息面板下的会话");
 
   // 元信息随会话更新：消息数、创建时间、关联科目
@@ -113,6 +127,6 @@ test("chat shell: right sidebar reflects course association and session meta", a
   await expect(sidebar.getByTestId("session-created-at")).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
   await expect(sidebar.getByTestId("session-subject")).toHaveText("计算机网络");
 
-  // 生成小结在有关联科目且有消息后可用
-  await expect(sidebar.getByRole("button", { name: "生成小结" })).toBeEnabled();
+  // 已有会话：新对话关联行不再出现
+  await expect(page.getByTestId("new-session-association")).toHaveCount(0);
 });

@@ -11,16 +11,33 @@ export async function fillGenerateWizard(page: Page, name: string): Promise<void
   await page.getByLabel("前置基础").fill("E2E 前置：会命令行基本操作");
 }
 
-export async function associateSubjectNode(
-  page: Page,
-  slug: string,
-  nodeId?: string,
-): Promise<void> {
-  // exact：禁用态「生成小结」按钮的 title（需关联科目且会话中有消息）含同样字样
-  await page.getByTitle("关联科目", { exact: true }).selectOption(slug);
-  if (nodeId !== undefined) {
-    await page.getByTitle("关联节点", { exact: true }).selectOption(nodeId);
+/**
+ * 右侧边栏（RightRail）在「新对话」态默认折叠；关联科目等操作都在右栏内，
+ * 先把折叠的右栏展开再操作（已展开时为 no-op）。
+ */
+export async function expandRightRail(page: Page): Promise<void> {
+  const expand = page.getByTitle("展开右侧边栏");
+  if ((await expand.count()) > 0) {
+    await expand.click();
+    // 等宽度过渡到位（折叠态宽度为 0，展开后才有可点区域）
+    await expect
+      .poll(
+        async () =>
+          Math.round((await page.getByTestId("chat-right-sidebar").boundingBox())?.width ?? 0),
+      )
+      .toBeGreaterThan(0);
   }
+}
+
+export async function associateSubject(page: Page, slug: string): Promise<void> {
+  // 科目关联移到「新对话态」输入区上方的关联行（已有会话不再显示该行）。
+  // exact：禁用态「生成小结」按钮的 title（已随小结悬空移除，保留 exact 以防同名文案回归）。
+  await page.getByTitle("关联科目", { exact: true }).selectOption(slug);
+}
+
+/** 新对话态关联行里选工作区（空值 = 默认工作区，不调用它即可） */
+export async function associateWorkspace(page: Page, path: string): Promise<void> {
+  await page.getByTitle("关联工作区", { exact: true }).selectOption(path);
 }
 
 export async function sendChatMessage(page: Page, text: string): Promise<void> {
@@ -35,5 +52,10 @@ export async function sendChatMessage(page: Page, text: string): Promise<void> {
 export async function openNodeDetail(page: Page, slug: string, nodeLabel: string): Promise<void> {
   await page.goto(`/courses?subject=${slug}`);
   await expect(page.getByText("点击节点查看详情")).toBeVisible();
-  await page.getByRole("button", { name: nodeLabel }).dispatchEvent("click");
+  // 大纲与图谱都收进右栏（默认图谱，2026-10-04）：先切到「大纲」段，再按标题点节点行
+  await page.getByTestId("rail-view-outline").click();
+  await page
+    .getByTestId("course-outline")
+    .getByRole("button", { name: nodeLabel })
+    .dispatchEvent("click");
 }

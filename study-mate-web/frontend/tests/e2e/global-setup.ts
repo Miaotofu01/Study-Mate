@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { E2E_CONFIG_PATH, ensureWorkspaceConfig } from "./constants";
+
 const E2E_API_KEY = "sk-e2e-fixture";
 const FIXTURE_SETTINGS = () => {
   const now = Date.now() / 1000;
@@ -26,7 +28,11 @@ const FIXTURE_SETTINGS = () => {
       preset("openai", "OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"),
     ],
     active: { provider_id: "deepseek", model: "deepseek-chat" },
-    system_prompt: "你是 StudyMate，一个陪伴式学习助手。",
+    // 与后端 PERSONA_PROMPT 一致（config.py，2026-10-03 拍板⑧后的主教练口径）
+    system_prompt:
+      "你是 StudyMate 自学系统的主教练（学习模式），坚持 learn with doing：讲清概念后引导学习者动手练习，" +
+      "用通俗的语言和具体的例子解释知识。开场先按学习者近期状态报告上次学到哪、这次建议学什么；" +
+      "每轮回复的最后一行都按「**下一步**：<谁做什么> —— <怎么触发>」的格式给出下一步，别让学生停在那儿等。",
   };
 };
 
@@ -78,7 +84,8 @@ function prepareWorkspace(repoRoot: string): void {
   fs.rmSync(e2eDataDir, { recursive: true, force: true });
   fs.mkdirSync(e2eDataDir, { recursive: true });
 
-  const subjectsDir = path.join(workspaceDir, "subjects");
+  // 与插件 .learning 布局同构（<WS>/.learning/subjects/<slug>）
+  const subjectsDir = path.join(workspaceDir, ".learning", "subjects");
   fs.mkdirSync(subjectsDir, { recursive: true });
   for (const entry of fs.readdirSync(seedDir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
@@ -87,6 +94,12 @@ function prepareWorkspace(repoRoot: string): void {
   }
 
   const subjectDir = path.join(subjectsDir, "computer-networks");
+  // 术语表也进 e2e 副本：附件区（H④）的「术语表」组才有数据可链
+  const glossarySource = path.join(exampleSubjectDir, "GLOSSARY.md");
+  if (!fs.existsSync(glossarySource)) {
+    throw new Error(`E2E 术语表源缺失：${glossarySource}`);
+  }
+  fs.copyFileSync(glossarySource, path.join(subjectDir, "GLOSSARY.md"));
   for (const name of ["lessons", "assets"]) {
     const source = path.join(exampleSubjectDir, name);
     if (!fs.existsSync(source)) {
@@ -96,10 +109,17 @@ function prepareWorkspace(repoRoot: string): void {
   }
   injectScoredQuizGroup(subjectDir);
 
+  // 工作区发现走配置文件（STUDYMATE_CONFIG 指到 e2e-data）：PUT /api/workspace 的可观测切换
+  // 才有落点，且不会写进开发者真实的 ~/.dsh
+  ensureWorkspaceConfig();
+
   fs.writeFileSync(
     path.join(e2eDataDir, "settings.json"),
     `${JSON.stringify(FIXTURE_SETTINGS(), null, 2)}\n`,
   );
+  if (!fs.existsSync(E2E_CONFIG_PATH)) {
+    throw new Error(`E2E 工作区配置未落盘：${E2E_CONFIG_PATH}`);
+  }
 }
 
 export default function globalSetup(): void {

@@ -15,7 +15,7 @@ test("add a custom provider, activate it and see it in the chat bar", async ({ p
   await page.getByRole("dialog").getByLabel("模型 ID").fill("relay-pro");
   await page.getByRole("button", { name: "保存模型" }).click();
 
-  await page.getByRole("button", { name: "保存", exact: true }).click();
+  // 实时生效：无需点「保存」，左侧列表已出现
   await expect(page.getByRole("button", { name: /我的中转/ })).toBeVisible();
 
   await page.getByTitle("更多操作").click();
@@ -41,7 +41,6 @@ test("delete a custom provider and the active falls back to the first remaining"
   await page.getByRole("button", { name: "添加模型" }).click();
   await page.getByRole("dialog").getByLabel("模型 ID").fill("tmp-model");
   await page.getByRole("button", { name: "保存模型" }).click();
-  await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("button", { name: /待删除中转/ })).toBeVisible();
 
   await page.getByTitle("更多操作").click();
@@ -78,19 +77,18 @@ test("restore default resets preset fields", async ({ page }) => {
   await expect(page.getByTitle("编辑 custom-mirror-model")).toHaveCount(0);
 });
 
-test("test connection without an api key reports the error", async ({ page }) => {
+// 连接测试入口收敛到模型行内的「测试」按钮（底部「测试连接」已随实时生效一并移除）
+test("testing a model without an api key reports the error", async ({ page }) => {
   await page.goto("/settings/providers");
 
   await page.getByRole("button", { name: /SiliconFlow/ }).click();
   await page.getByLabel("Base URL").fill("http://10.255.255.1:9/v1");
-  await page.getByRole("button", { name: "测试连接" }).click();
+  await page.getByTitle("测试 deepseek-ai/DeepSeek-V3").click();
 
   await expect(page.getByText("缺少 API Key")).toBeVisible();
 });
 
-test("test connection surfaces an upstream failure for an unreachable address", async ({
-  page,
-}) => {
+test("a model test surfaces an upstream failure for an unreachable address", async ({ page }) => {
   await page.route("**/api/settings/test", (route) =>
     route.fulfill({
       status: 502,
@@ -103,7 +101,7 @@ test("test connection surfaces an upstream failure for an unreachable address", 
   await page.getByRole("button", { name: /SiliconFlow/ }).click();
   await page.getByLabel("Base URL").fill("http://10.255.255.1:9/v1");
   await page.getByLabel(/API Key/).fill("sk-e2e-unreachable");
-  await page.getByRole("button", { name: "测试连接" }).click();
+  await page.getByTitle("测试 deepseek-ai/DeepSeek-V3").click();
 
   await expect(page.getByText("APIConnectionError: Connection error.")).toBeVisible();
   await expect(page.getByText("连接成功")).toHaveCount(0);
@@ -127,9 +125,9 @@ test("a stored api key is backfilled into the input and drives the connection te
   await page.getByTitle("隐藏密钥").click();
   await expect(keyInput).toHaveAttribute("type", "password");
 
-  // 回填的 Key 参与测试连接（fixture 模式不外呼上游）
-  await page.getByRole("button", { name: "测试连接" }).click();
-  await expect(page.getByText("连接成功")).toBeVisible();
+  // 回填的 Key 参与模型连接测试（fixture 模式不外呼上游）
+  await page.getByTitle("测试 deepseek-chat").click();
+  await expect(page.getByText(/连接成功 · \d+ ms/)).toBeVisible();
   await expect(page.getByText("缺少 API Key")).toHaveCount(0);
 });
 
@@ -145,7 +143,7 @@ test("clearing the api key still falls back to the stored one for connection tes
   await keyInput.fill("");
   await expect(keyInput).toHaveValue("");
 
-  await page.getByRole("button", { name: "测试连接" }).click();
-  await expect(page.getByText("连接成功")).toBeVisible();
+  await page.getByTitle("测试 deepseek-chat").click();
+  await expect(page.getByText(/连接成功 · \d+ ms/)).toBeVisible();
   await expect(page.getByText("缺少 API Key")).toHaveCount(0);
 });
