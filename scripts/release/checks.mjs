@@ -102,6 +102,8 @@ const groups = {
       // 动效四档与 prefers-reduced-motion、首次引导定位几何（纯函数，node:vm 里跑）
       'scripts/tests/test_client_tokens.mjs',
       'scripts/tests/test_client_pure.mjs',
+      // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
+      'scripts/tests/test_client_reading_position.mjs',
       // #69：架构边界与依赖无环断言（扫真实 import 图，域规则表默认拒绝）
       'scripts/tests/test_architecture_boundaries.mjs',
       // 工具域 lib/tools/**（#68）：域声明与越权即抛、工作区摘要、四个校验器、两个改写工具。
@@ -127,7 +129,12 @@ const groups = {
   },
   '--browser': {
     // 前三个测旧静态模板（file:// 夹具），reading_test.mjs 测阅读端本体（真 lib/client.js）
-    node: ['browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs', 'browser/reading_test.mjs'],
+    // #76：真 Chrome 里跑真 lib/client.js（阅读位置三级恢复 + 锚点四态复核）
+    node: [
+      'browser/hl_test.mjs', 'browser/quiz_code_test.mjs', 'browser/math_test.mjs',
+      'browser/reading_test.mjs',
+      'browser/reading_position_test.mjs',
+    ],
   },
 };
 const mode = process.argv[2] || 'core';
