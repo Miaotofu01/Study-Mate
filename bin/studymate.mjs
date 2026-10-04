@@ -274,6 +274,8 @@ print(json.dumps(value, ensure_ascii=True))`, file]);
   return JSON.parse(result.stdout);
 }
 
+// 造出 standalone 安装留在 <dshHome>/studymate/engine 的那份引擎载荷。
+// 原生插件加载**不**走这里：插件自己就是引擎（见 payloadDirectory）。
 function copyPayload(destination) {
   for (const relative of ['.dsh/skills', 'preset/learning', 'templates', 'schemas']) {
     fs.cpSync(path.join(source, relative), path.join(destination, relative), {
@@ -296,6 +298,24 @@ function copyPayload(destination) {
   for (const file of ['package.json', 'LICENSE']) {
     fs.copyFileSync(path.join(source, file), path.join(destination, file));
   }
+}
+
+/**
+ * Which directory acts as the engine (`config.root`) for an install.
+ *
+ * 原生插件加载（native）下，已安装的包自身就是引擎：它就在
+ * `~/.dsh/profiles/<profile>/node_modules/@yunmiao/studymate`，package.json 的 `files`
+ * 已经带了 `scripts/`、`templates/`、`schemas/`、`docs/`、`.dsh/skills`，所以再拷一份源码树到
+ * `~/.dsh/studymate/engine/` 只是**同一份包的第二份副本**——两份会各自过期。
+ *
+ * 仍然是一个「含 `scripts/` 的目录」是刻意的过渡，不是遗漏：技能还在按
+ * `python3 -B <root>/scripts/<名>.py` 调脚本，包里就有 `scripts/`，所以这段窗口里旧路径照样解析得到。
+ *
+ * `--mode native` 的**交接安装**（native 且 mode==='native'）走 standalone 的 <root>：
+ * 那条路只改注册与归属，不落任何载荷，换成包目录反而会让 DSH 重启前的旧技能副本指错地方。
+ */
+function payloadDirectory({ native, mode, engine }) {
+  return native && mode !== 'native' ? source : engine;
 }
 
 /**
@@ -335,6 +355,8 @@ export function installPayload({ workspaceArg, profile, python, version, desktop
   }
   const workspace = absolute(workspaceArg || process.env.LEARN_WORKSPACE || config.workspace || path.join(os.homedir(), 'StudyMate'));
   const engine = path.join(dshHome, 'studymate', 'engine');
+  // 原生加载下这块盘一个字都不写；变量保留是给下面的符号链接与包含关系检查用。
+  const payload = payloadDirectory({ native, mode, engine });
   const preset = path.join(dshHome, '.agent-presets', 'learning');
   const installedMode = installModes[profile];
   if (native && (installedMode === 'standalone' ||
@@ -360,7 +382,10 @@ export function installPayload({ workspaceArg, profile, python, version, desktop
     }
   }
   // Build everything before changing the active preset or configuration.
-  fs.mkdirSync(path.dirname(engine), { recursive: true });
+  // 原生加载不写 <dshHome>/studymate/：连空目录也不建——一个空壳 engine/ 只会让"引擎在哪"变成猜谜。
+  // 只保证 dshHome 本身在（下面 mkdtemp 要往它里面开暂存目录）。
+  fs.mkdirSync(dshHome, { recursive: true });
+  if (!native) fs.mkdirSync(path.dirname(engine), { recursive: true });
   if (!native) fs.mkdirSync(path.dirname(preset), { recursive: true });
   const staging = fs.mkdtempSync(path.join(dshHome, '.studymate-install-'));
   const replacements = [];
@@ -368,26 +393,34 @@ export function installPayload({ workspaceArg, profile, python, version, desktop
   let registration;
   try {
     const stagedEngine = path.join(staging, 'engine');
-    copyPayload(stagedEngine);
+    // 只有要落盘的安装才造引擎载荷；原生加载直接用已安装的包，省掉一次整包拷贝
+    // （那段拷贝除了写进 staging 再被 finally 删掉，什么也没做）。
+    if (!native) copyPayload(stagedEngine);
+    // 技能改写只改写 staging 里的副本——**原生加载也不写包目录**：安装好的包是随包发的只读
+    // 材料，`link:` 安装下它更是学生自己的检出，一次启动就往里写会污染工作树。
+    // 原生加载的技能因此是包里那一份（`customSkillDirs` 指向它，见 payloadDirectory 的说明）。
     const stagedSkills = path.join(stagedEngine, '.dsh', 'skills');
-    for (const entry of fs.readdirSync(stagedSkills, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const skillFile = path.join(stagedSkills, entry.name, 'SKILL.md');
-      if (!fs.existsSync(skillFile)) continue;
-      const skill = fs.readFileSync(skillFile, 'utf8');
-      fs.writeFileSync(skillFile, adaptSkill(skill, {
-        platform: process.platform, pythonExecutable: python.command,
-        configFile, tempDirectory: os.tmpdir(),
-      }));
+    if (!native) {
+      for (const entry of fs.readdirSync(stagedSkills, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const skillFile = path.join(stagedSkills, entry.name, 'SKILL.md');
+        if (!fs.existsSync(skillFile)) continue;
+        const skill = fs.readFileSync(skillFile, 'utf8');
+        fs.writeFileSync(skillFile, adaptSkill(skill, {
+          platform: process.platform, pythonExecutable: python.command,
+          configFile, tempDirectory: os.tmpdir(),
+        }));
+      }
     }
     const stagedPreset = path.join(staging, 'learning');
     // A filter avoids Node 22.19's native Windows copy crash on Unicode paths.
     // https://github.com/nodejs/node/issues/59636
-    fs.cpSync(path.join(stagedEngine, 'preset', 'learning'), stagedPreset, { recursive: true, filter: () => true });
+    fs.cpSync(path.join(native ? source : stagedEngine, 'preset', 'learning'), stagedPreset,
+      { recursive: true, filter: () => true });
     const agentFile = path.join(stagedPreset, 'agent.cordis.yml');
     const agent = fs.readFileSync(agentFile, 'utf8');
     if (!agent.includes('__STUDYMATE_SKILLS__')) throw new Error('预设缺少 __STUDYMATE_SKILLS__，安装包不完整。');
-    fs.writeFileSync(agentFile, agent.replaceAll('__STUDYMATE_SKILLS__', path.join(engine, '.dsh', 'skills').split(path.sep).join('/').replaceAll("'", "''")));
+    fs.writeFileSync(agentFile, agent.replaceAll('__STUDYMATE_SKILLS__', path.join(payload, '.dsh', 'skills').split(path.sep).join('/').replaceAll("'", "''")));
 
     const stagedPatch = path.join(staging, 'cordis.patch.yml');
     const prepare = run(python.command, [...python.prefix, path.join(source, 'scripts', 'install_preset.py'),
@@ -400,22 +433,27 @@ export function installPayload({ workspaceArg, profile, python, version, desktop
     fs.mkdirSync(path.join(workspace, '.learning', 'subjects'), { recursive: true });
     const realWorkspace = fs.realpathSync(workspace);
     for (const managed of managedDirectories) {
-      const realManaged = path.join(fs.realpathSync(path.dirname(managed)), path.basename(managed));
+      // 父目录可能还不存在（原生加载一个字节都不写），realDestination 会逐级往上解析到已存在的祖先
+      const realManaged = realDestination(managed);
       if (contained(realManaged, realWorkspace)) throw new Error(`学习工作区不能指向安装器管理的目录：${managed}`);
     }
     config.workspace = realWorkspace;
-    config.root = engine;
+    // <root> 指向**这次的 payload**：standalone 是 ~/.dsh/studymate/engine 的副本，
+    // 原生插件加载是已安装的包自身（见 payloadDirectory）。
+    config.root = payload;
     config.installModes = { ...installModes, [profile]: native || mode === 'native' ? 'native' : 'standalone' };
     const stagedConfig = path.join(staging, 'config.yaml');
     // JSON objects are also valid YAML; retain unrelated user configuration keys.
     fs.writeFileSync(stagedConfig, `# StudyMate 学习工作区与引擎项目定位\n${JSON.stringify(config, null, 2)}\n`);
 
     const targets = [[stagedConfig, configFile]];
-    // Explicit handoff changes registration only; the selected native package
-    // initializes its own payload on the next start, avoiding an npx downgrade.
-    if (mode !== 'native') {
+    // 只有 standalone 安装落载荷：引擎目录 + 独立预设。
+    // · 原生插件加载（native）：引擎就是已安装的包，预设由插件在启动时注册；
+    // · 显式交接安装（mode==='native'）：只改注册与归属，载荷留给选定的原生包在下次启动时自己初始化，
+    //   免得被一次 npx 降级覆盖。
+    if (mode !== 'native' && !native) {
       targets.unshift([stagedEngine, engine]);
-      if (!native) targets.push([stagedPreset, preset]);
+      targets.push([stagedPreset, preset]);
     }
     if (registration.patchChanged) {
       const profilePatch = path.join(dshHome, 'profiles', profile, 'cordis.patch.yml');
@@ -448,7 +486,8 @@ export function installPayload({ workspaceArg, profile, python, version, desktop
   } finally {
     if (!preserveStaging) fs.rmSync(staging, { recursive: true, force: true });
   }
-  return { registration, engine, preset, configFile, workspace: config.workspace, profile };
+  // `engine` 报的是**这次的引擎实际落在哪**（原生加载 = 包自身），调用方照这个值提示用户
+  return { registration, engine: payload, preset, configFile, workspace: config.workspace, profile };
 }
 
 function install(workspaceArg, profile, mode, dshArg) {

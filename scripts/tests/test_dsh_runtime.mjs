@@ -107,8 +107,9 @@ async function probeNativeTools(app, home) {
   const probeWorkspace = path.join(root, '学习资料');
   fs.mkdirSync(probeDsh, { recursive: true });
   fs.mkdirSync(probeWorkspace, { recursive: true });
+  // 安装器写的形态：一行注释 + JSON 对象（JSON 也是合法 YAML）；下面原生加载那段要按同样形态读回来
   fs.writeFileSync(path.join(probeDsh, 'studymate-config.yaml'),
-    `workspace: ${JSON.stringify(probeWorkspace)}\n`);
+    `# StudyMate 学习工作区与引擎项目定位\n${JSON.stringify({ workspace: probeWorkspace }, null, 2)}\n`);
   writeSubject(probeWorkspace, 'demo');
   fs.writeFileSync(path.join(probeWorkspace, '.learning', 'MEMORY.md'), '# 画像\n\n探针用。\n');
 
@@ -135,6 +136,9 @@ async function probeNativeTools(app, home) {
       })),
       model: summary.capabilities.model,
     };
+
+    // ①′ #70 的原生安装断言不在这里：安装是 **runProfile 里插件 apply 触发的**，写的是 profile 的
+    //     DSH_HOME。探针不碰真实 DSH HOME，所以由 harness（外层测试）读那份配置逐条断言。
 
     // ② 两个校验器也走真 dispatch：参数校验 + 输出契约（含嵌套 oneOf）都由宿主盖章
     const curriculum = await dispatch(app, 'studymate_validate_curriculum', { paths: ['demo'] });
@@ -580,7 +584,7 @@ function fixture(t, scenario, profileName = 'web') {
     assert.equal(outcome.ok, true, JSON.stringify(outcome));
     return outcome;
   }
-  function install(selectedRuntime = runtime) {
+  function install(selectedRuntime = runtime, ...extra) {
     const bin = path.join(temporary, 'bin');
     fs.rmSync(bin, { recursive: true, force: true });
     fs.mkdirSync(bin);
@@ -597,12 +601,18 @@ function fixture(t, scenario, profileName = 'web') {
       STUDYMATE_TEST_NODE: process.execPath, STUDYMATE_TEST_DSH_BIN: dshBin };
     delete installerEnv.Path;
     const result = spawnSync(process.execPath, [path.join(project, 'bin/studymate.mjs'), 'install',
-      ...(profileName === 'web' ? [] : ['--profile', profileName])], {
+      ...(profileName === 'web' ? [] : ['--profile', profileName]), ...extra], {
       env: installerEnv, cwd: home, encoding: 'utf8', timeout: 60000, windowsHide: true,
     });
     assert.equal(result.status, 0, redact(result.error?.message || result.stderr || result.stdout));
   }
-  return { home, dshHome, workspace, patch, unchanged, runProbe, install };
+  // 安装器写的是「一行 YAML 注释 + JSON 对象」；JSON 对象也是合法 YAML（bin/studymate.mjs）
+  function settings() {
+    const file = path.join(dshHome, 'studymate-config.yaml');
+    assert.ok(fs.existsSync(file), `${file} 必须在安装后存在`);
+    return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^#[^\r\n]*\r?\n/, ''));
+  }
+  return { home, dshHome, workspace, patch, unchanged, runProbe, install, settings };
 }
 
 if (process.argv.includes('--probe')) {
@@ -630,13 +640,31 @@ if (process.argv.includes('--probe')) {
       assert.equal(fs.readFileSync(learningData, 'utf8'), 'existing learning data');
       f.unchanged();
     }
+    // #70 只改了**原生插件路径**：standalone 安装照旧把引擎副本落在 <dshHome>/studymate/engine，
+    // <root> 也照旧指向它——这段窗口里技能仍按 <root>/scripts/*.py 调脚本。
+    const config = f.settings();
+    const engine = path.join(f.dshHome, 'studymate', 'engine');
+    assert.equal(fs.realpathSync(config.root), fs.realpathSync(engine));
+    assert.equal(fs.existsSync(path.join(config.root, 'scripts', 'gen_home.py')), true);
+    assert.equal(fs.existsSync(path.join(config.root, '.dsh', 'skills', 'learning-system', 'SKILL.md')), true);
+    assert.equal(fs.realpathSync(config.workspace), fs.realpathSync(f.workspace));
   });
   test(`DSH ${metadata.version}: native entry keeps Web usable`, { timeout: 70000 }, t => {
     const f = fixture(t, 'native');
     const outcome = f.runProbe();
     assert.equal(outcome.learningPresets, modern(metadata.version) ? 1 : 0);
     if (modern(metadata.version)) {
-      // #68：插件在真 DSH 里加载后，八个原生工具注册得上、body 调得动、越权会抛
+      // #70：从零装一次（插件路径）——引擎就是已安装的包，~/.dsh/studymate/ 不该出现
+      const config = f.settings();
+      assert.equal(fs.realpathSync(config.root), fs.realpathSync(project),
+        `原生加载的 <root> 指向了 ${config.root}，不是包自身`);
+      assert.deepEqual(config.installModes, { web: 'native' });
+      assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate')), false,
+        '原生加载不许往 ~/.dsh/studymate/ 写源码树副本');
+      // 迁移窗口：技能仍按 <root>/scripts/*.py 调脚本，包里有 scripts/
+      assert.equal(fs.existsSync(path.join(config.root, 'scripts', 'gen_home.py')), true);
+      assert.equal(fs.existsSync(path.join(config.root, '.dsh', 'skills', 'learning-system', 'SKILL.md')), true);
+      // ① #68：插件在真 DSH 里加载后，八个原生工具注册得上、body 调得动、越权会抛
       const tools = outcome.nativeTools;
       assert.ok(tools, `原生工具探针没跑：${JSON.stringify(outcome.studyMateWarnings || [])}`);
       assert.equal(tools.workspaceContext.path, tools.workspaceContext.path);
@@ -703,6 +731,30 @@ if (process.argv.includes('--probe')) {
     const config = JSON.parse(fs.readFileSync(path.join(f.dshHome, 'studymate-config.yaml'), 'utf8').replace(/^#[^\r\n]*\r?\n/, ''));
     assert.equal(config.custom, 'keep');
     f.unchanged();
+  });
+  test(`DSH ${metadata.version}: switching standalone to native re-points <root> at the installed package`, { timeout: 70000 }, t => {
+    // 完整走一遍真实迁移：standalone 安装 → 显式交接（`--mode native`，只换注册与归属）→ 原生启动，
+    // 启动时插件自己跑一遍 installPayload。交接那一步不落载荷，所以引擎路径是原生启动写的。
+    const f = fixture(t, 'native');
+    f.install();
+    const standalone = f.settings();
+    const engine = path.join(f.dshHome, 'studymate', 'engine');
+    assert.equal(fs.realpathSync(standalone.root), fs.realpathSync(engine));
+    assert.equal(standalone.installModes.web, 'standalone');
+    // 交接安装必须先摘掉 installer 自己的声明，否则原生启动会拒绝接管（这是设计，不是这次改的）
+    f.install(runtime, '--mode', 'native');
+    assert.equal(f.settings().installModes.web, 'native');
+    const outcome = f.runProbe();
+    assert.equal(outcome.learningReady, true);
+    const switched = f.settings();
+    assert.equal(fs.realpathSync(switched.root), fs.realpathSync(project),
+      `native 启动后 <root> 还是 ${switched.root}`);
+    assert.deepEqual(switched.installModes, { web: 'native' });
+    // 迁移窗口没断：换完之后 <root>/scripts/*.py 照样解析得到（只是换成了包里的那一份），
+    // 而且换过去的目录里确实有技能——预设的 customSkillDirs 指的就是它
+    assert.equal(fs.existsSync(path.join(switched.root, 'scripts', 'gen_home.py')), true);
+    assert.equal(fs.existsSync(path.join(switched.root, '.dsh', 'skills', 'learning-system', 'SKILL.md')), true);
+    assert.equal(fs.realpathSync(switched.workspace), fs.realpathSync(f.workspace));
   });
   if (process.env.STUDYMATE_DSH_DOWNGRADE_PACKAGE) {
     test('a modern installer declaration cannot prevent older DSH from booting, and reinstall restores learning', { timeout: 120000 }, t => {

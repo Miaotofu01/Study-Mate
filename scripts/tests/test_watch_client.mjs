@@ -2,7 +2,11 @@
 //
 // 这个文件是手写 JS、零构建、没有导出面，所以在 VM 里按宿主的方式物化它
 // （`window.__ModuleLoader__.load({id, factory})` → `factory(require)`），
-// 再从 QA 缝（`window.__STUDYMATE_QA__`）取到 useLibrary 与合并函数。
+// 再从仓库既有的内部件钩子（`globalThis.__studymate_client_internals`，见 client.js 注册段）
+// 取到 useLibrary 与合并函数。
+//
+// 为什么不用 scripts/tests/fixtures/client_harness.mjs：那份 React 桩的 useState 只会读预置值、
+// useEffect 不执行——而这里要验的恰恰是「推送进来 → 重取 → 状态怎么合并」，需要真的状态更新。
 //
 // 验的是两件事：
 //   1. 重取回来的整份 payload 合进 state 时，**没变的顶层键沿用上一轮的引用**
@@ -69,18 +73,17 @@ function hooksRuntime() {
   };
 }
 
-/** 按宿主的方式物化 lib/client.js，返回 QA 缝与配套的 hook 运行时。 */
+/** 按宿主的方式物化 lib/client.js，返回内部件与配套的 hook 运行时。 */
 function materialize(context) {
   const source = fs.readFileSync(path.join(ROOT, 'lib/client.js'), 'utf8');
   let registration = null;
-  const qa = {};
+  const internals = {};
   const sandbox = {
     console,
     ...context,
-    window: {
-      __ModuleLoader__: { load(options) { registration = options; } },
-      __STUDYMATE_QA__: qa,
-    },
+    // 钩子是**回调**：client.js 工厂跑到注册那一段时把内部件交出来（生产里没人设它）
+    __studymate_client_internals: (value) => Object.assign(internals, value),
+    window: { __ModuleLoader__: { load(options) { registration = options; } } },
   };
   vm.runInNewContext(source, vm.createContext(sandbox), { filename: 'lib/client.js' });
   assert.ok(registration, 'lib/client.js 要通过 window.__ModuleLoader__.load 登记');
@@ -90,7 +93,7 @@ function materialize(context) {
     assert.equal(name, 'react', `只该 require 冻结模块表里的 react，实际要了 ${name}`);
     return runtime.React;
   });
-  return { qa, runtime };
+  return { qa: internals, runtime };
 }
 
 /** 假的 EventSource：把宿主会回调的那三个口子留给测试自己按。 */

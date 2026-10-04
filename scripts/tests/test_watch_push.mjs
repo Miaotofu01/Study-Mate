@@ -8,6 +8,7 @@
 // 真 DSH 里的同一条验在 test_dsh_runtime.mjs。
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -184,4 +185,26 @@ test('没有 connection.fetch.register 时自动退到 webServer，两条都没�
   assert.equal(typeof nothing, 'function');
   assert.doesNotThrow(() => nothing());
   assert.equal(warnings.some((text) => /没有 connection 也没有 webServer/.test(text)), true);
+});
+
+test('监听起不来不拖垮注册：取服务抛错 / 配置读不了都只警告，注册照常返回', async (t) => {
+  useHome(t, { withWorkspace: false });
+  watch.resetWatchRegistryForTests();
+  const warnings = captureWarnings(t);
+
+  // ① 取 fs 服务这一步就抛（宿主坏了 / 老宿主的 getter 会炸）：registerWatch 不许往外抛
+  assert.doesNotThrow(() => watch.registerWatch({
+    effect: (fn) => fn(),
+    get: () => { throw new Error('服务取不到（探针）'); },
+  }));
+  assert.equal(warnings.some((text) => /服务取不到/.test(text)), true, `要记下原因：${JSON.stringify(warnings)}`);
+
+  // ② 抛过一次之后，注册线还能再起来（不能把「已起」的标记留在半路）
+  watch.resetWatchRegistryForTests();
+  assert.doesNotThrow(() => watch.registerWatch({ effect: (fn) => fn(), get: () => undefined }));
+
+  // ③ 配置读不了（DSH_HOME 指向一个不存在的目录）也只是「没得监听」
+  process.env.DSH_HOME = path.join(os.tmpdir(), 'studymate-watch-不存在的家-' + Date.now());
+  watch.resetWatchRegistryForTests();
+  assert.doesNotThrow(() => watch.registerWatch({ effect: (fn) => fn(), get: () => undefined }));
 });

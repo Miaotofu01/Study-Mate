@@ -5,8 +5,7 @@
 // 失败路径（chrome 起不来 / 选择器没命中）也要收尾：非零退出、不留 profile、不留孤儿 chrome。
 import { spawn } from 'node:child_process';
 import { rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { requireBrowser, tempProfile } from './harness.mjs';
 
 const [url, prefix, selector] = process.argv.slice(2);
 if (!url || !prefix || !selector) {
@@ -14,8 +13,9 @@ if (!url || !prefix || !selector) {
   process.exit(2);
 }
 const PORT = 9950 + Math.floor(Math.random() * 40);
-const PROFILE = join(tmpdir(), 'smshot-' + Date.now());
-const chrome = spawn('google-chrome', ['--headless=new', '--disable-gpu', '--hide-scrollbars',
+const PROFILE = tempProfile('shot');
+// 浏览器二进制探测（环境变量 / PATH / macOS .app），不写死 google-chrome
+const chrome = spawn(requireBrowser('shot').path, ['--headless=new', '--disable-gpu', '--hide-scrollbars',
   '--no-first-run', `--user-data-dir=${PROFILE}`, `--remote-debugging-port=${PORT}`,
   '--window-size=820,900', 'about:blank'], { stdio: 'ignore' });
 // 没装 chrome / 起不来时 spawn 抛的是未捕获的 ENOENT（带回溯），把文档里那条失败路径变成死代码。

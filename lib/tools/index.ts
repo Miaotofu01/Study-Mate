@@ -17,6 +17,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 import { registerStudyTool } from './define.ts';
+import { registerTaskTools } from '../tasks/index.ts';
 
 // 转出去给「往注册点加一行」的子系统与测试用：造工具、域词表、越权错误。
 // （`registerStudyTool` 自己也在下面被用到，所以这里是 import + export 两件事。）
@@ -102,6 +103,12 @@ export function registerStudyMate(ctx: StudyPluginContext): void {
   registerValidatorTools(ctx);
   registerRewriteTools(ctx);
   registerExportTools(ctx);
+  // #73 任务模型：五个 studymate_task_* 工具 + 阅读端进度路由（GET /api/studymate/tasks）。
+  // 任务域不 import 工具域，所以把「造工具」这件事当参数递进去——域图上只有 tools → tasks
+  // 一条边。别的子系统照这个姿势加：自己的目录里导出 registerXxx(ctx)。
+  registerTaskTools(ctx, { registerStudyTool });
+  // #74 文件监听：学习工作区一变就往通知总线上发一条（推给打开的页面由 bin/dsh-plugin.ts
+  // 那一行挂的 SSE 路由负责；没有页面在听时，监听本身也不做别的事）。
   registerWatch(ctx);
   // ↑↑↑ 加完为止：不要动 bin/dsh-plugin.ts，也不要在这里写具体工具 ↑↑↑
 }
