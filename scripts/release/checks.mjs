@@ -102,6 +102,19 @@ const groups = {
       // 动效四档与 prefers-reduced-motion、首次引导定位几何（纯函数，node:vm 里跑）
       'scripts/tests/test_client_tokens.mjs',
       'scripts/tests/test_client_pure.mjs',
+      // #69：架构边界与依赖无环断言（扫真实 import 图，域规则表默认拒绝）
+      'scripts/tests/test_architecture_boundaries.mjs',
+      // 工具域 lib/tools/**（#68）：域声明与越权即抛、工作区摘要、四个校验器、两个改写工具。
+      // 夹具在 scripts/tests/fixtures/tools.mjs —— `fixtures/` 目录被上面的遍历显式跳过。
+      'scripts/tests/test_tools_guard.mjs',
+      'scripts/tests/test_tools_context.mjs',
+      'scripts/tests/test_tools_validate.mjs',
+      'scripts/tests/test_tools_rewrite.mjs',
+      // 阅读端（lib/client.js 是零构建的浏览器插件，没有 export）：跨科目搜索的索引覆盖与
+      // 四个附件折叠块的空态。套件在 Node 里伪造 window.__ModuleLoader__ + react 桩把头文件
+      // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
+      'scripts/tests/test_client_search_index.mjs',
+      'scripts/tests/test_client_fold_empty_state.mjs',
     ],
   },
   '--static': {

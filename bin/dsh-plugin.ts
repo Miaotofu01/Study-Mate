@@ -1,19 +1,22 @@
 // StudyMate 的 DSH 插件入口（Host 半）。
 //
-// 两件事：
+// 三件事：
 //   1. 注册「学习模式」预设（原有行为，保持不变）；
-//   2. 给阅读端（Client 半 lib/client.js）供学习工作区数据：
+//   2. 注册八个**原生工具**（#68）：总控拿到的是结构化返回，不是 exit code；
+//   3. 给阅读端（Client 半 lib/client.js）供学习工作区数据：
 //      GET  /api/studymate/library   —— 整份快照，走宿主的 /api 认证通道，与其他插件取业务数据同一条路；
 //      GET  /api/studymate/asset     —— 课件配图（二进制）；
 //      GET/POST /api/studymate/reference —— 学生自加的参考资料：读取与写入（ADR-0010）。
 //
-// 两处刻意的写法，别顺手改回去：
-//   · `lib/` 下的两个模块用**动态 import**，且在请求处理里才加载。这个文件会被
+// 三处刻意的写法，别顺手改回去：
+//   · `lib/` 下的模块用**动态 import**，且在注入回调里才加载。这个文件会被
 //     scripts/tests/test_bundle.mjs 单独拷进一个临时目录跑（那里没有 lib/），
 //     顶层静态 import 会让「安装器边界失败」那条用例在解析期就崩掉。
-//   · 路由不写成顶层 `inject: ['connection']`。那样在没装 connection 的组合
-//     （headless / tui）里整个插件都不会 apply，连预设都注册不上；用 ctx.inject
-//     只在服务就绪时挂路由，缺了就不挂。ctx.inject 不存在时也不该炸。
+//   · 路由与工具都不写成顶层 `inject: ['connection'|'tools']`。那样在没装那个服务的组合
+//     （headless / tui，或更老的宿主）里整个插件都不会 apply，连预设都注册不上；
+//     用 ctx.inject 只在服务就绪时挂上，缺了就不挂。ctx.inject 不存在时也不该炸。
+//   · 工具注册**只**走 `registerStudyMate(ctx)` 一个入口（见 lib/tools/index.ts）。
+//     #69/#70/#73/#74 往那个函数的清单里各加一行，不在这个文件里写具体工具。
 import { installPayload } from './studymate.mjs';
 
 /* ── 宿主的插件上下文 ────────────────────────────────────────────────────
@@ -37,9 +40,11 @@ interface FetchRegistry {
   }): unknown;
 }
 
-/** 服务就绪时挂上来的那一层 ctx（ctx.inject(['connection'], …) 的回调参数）。 */
-interface ConnectionContext {
+/** 服务就绪时挂上来的那一层 ctx（`ctx.inject([…], …)` 的回调参数）。 */
+interface InjectedContext {
   connection?: { fetch?: FetchRegistry };
+  /** 与 tools / connection 一起注入进来的服务；本文件只把它转交给 lib/tools。 */
+  tools?: unknown;
   /** 第二个参数是给宿主日志用的说明文字（cordis 的 effect(fn, label)）。 */
   effect?: (fn: () => unknown, description?: string) => unknown;
 }
@@ -48,7 +53,7 @@ interface PluginContext {
   get?: (name: string) => ProfileContext | undefined;
   agentPresets?: { register: (config: unknown) => unknown };
   effect?: (fn: () => unknown, description?: string) => unknown;
-  inject?: (names: string[], handler: (ctx: ConnectionContext) => void) => unknown;
+  inject?: (names: string[], handler: (ctx: InjectedContext) => void) => unknown;
 }
 
 export const inject = ['agentPresets'];
@@ -74,6 +79,27 @@ export async function apply(ctx: PluginContext): Promise<void> {
       // Startup may report a problem, but must not migrate profile ownership.
       console.warn(`StudyMate：已跳过原生加载。${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // ── 原生工具（#68）─────────────────────────────────────────────────────
+  // 与路由同一种姿势：tools 服务就绪才注册，缺了就不注册（不让整个插件不 apply）。
+  // 具体注册什么在 lib/tools/index.ts 的 registerStudyMate 里——这个文件不认识任何工具。
+  // 模块在这里 await 加载（不是丢一个浮动 Promise）：apply 返回时工具已经注册好，
+  // 「插件加载完就能按名字查到工具」才是可断言的；这个文件也可能被单独拷出去跑（那时 ctx
+  // 没有 inject），所以加载放在 inject 判断之后。
+  if (typeof ctx.inject !== 'function') return;
+  try {
+    const { registerStudyMate } = await import('../lib/tools/index.ts');
+    ctx.inject(['tools'], (toolsCtx) => {
+      try {
+        registerStudyMate(toolsCtx as unknown as Parameters<typeof registerStudyMate>[0]);
+      } catch (error) {
+        // 工具注册不上不该拖垮插件：预设与阅读端数据通路照常
+        console.warn(`StudyMate：原生工具注册失败，总控只能退回旧路径。${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+  } catch (error) {
+    console.warn(`StudyMate：原生工具模块加载不了，总控只能退回旧路径。${error instanceof Error ? error.message : String(error)}`);
   }
 
   // ── 阅读端的数据通路 ───────────────────────────────────────────────────
