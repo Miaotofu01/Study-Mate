@@ -78,11 +78,25 @@ test('teaching contracts and role ownership survive export', () => {
     ['learning-coach', ['你只写内容、留题目位置', '尤其别补 `empty_reason`', '**内容文件里只有内容格式。**']],
     ['practice-evaluator', ['全系统的题都由你出', '作答原文', '题目的唯一 owner']],
     ['learning-system', ['锚点是讲解的产物', '题面与答案一个字都不改', '同一科目同时只有一个写入者']],
-    ['record-keeping', ['建课时的初始快照', '已通过项目验证', '写一条当且仅当出现可观察的证据']],
+    // 这条断言原先钉的是术语「已通过项目验证」——那是旧六档里的词，#71 把词表收成三档之后
+    // 它必然与 schema 分叉。改成钉同一节的稳定标记（项目与实验课的置位规则），词表本身
+    // 由下面那条「跟 schema 走」的守卫负责：它检查 skills 里出现的状态词**只在 schema 的词表内**。
+    ['record-keeping', ['建课时的初始快照', '项目与实验课', '写一条当且仅当出现可观察的证据']],
     ['layered-practice', ['参考解必须自包含', '只有 `::: quiz` 的层级是元信息', '每条结论必须指向一条具体证据']],
   ]) {
     for (const term of terms) assert.ok(adapted.get(name).includes(term), `${name}: ${term}`);
   }
+  // 状态词表跟 schema 走（别在这里手抄第二份）：三档词表落地后，「初步理解 / 能独立应用 /
+  // 需要复习 / 已通过项目验证」这四个旧档位不该再出现在技能正文里——技能清洗归 #80/#81，
+  // 但 schema 这边一旦把旧档位写回词表，这条会先红，不至于静默漂回去。
+  const progressSchema = JSON.parse(fs.readFileSync(path.join(root, 'schemas', 'progress.schema.json'), 'utf8'));
+  const statuses = progressSchema.properties.nodes.additionalProperties.properties.status.enum;
+  assert.deepEqual(statuses, ['未开始', '学习中', '已学完'], '进度词表就是三档（规格 §5.2）');
+  for (const stale of ['初步理解', '能独立应用', '需要复习', '已通过项目验证']) {
+    assert.equal(statuses.includes(stale), false, `${stale} 是旧六档的词，不该在写侧词表里`);
+  }
+  assert.equal(Object.hasOwn(progressSchema.properties.nodes.additionalProperties.properties, 'mastery'), false,
+    'mastery 已从 schema 移除（规格 §5.2）');
   // Export must never mutate the DSH source files or depend on their line endings.
   for (const [name, source] of sources) {
     assert.equal(fs.readFileSync(path.join(skillRoot, name, 'SKILL.md'), 'utf8'), source);

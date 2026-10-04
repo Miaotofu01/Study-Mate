@@ -197,6 +197,148 @@ export interface PracticeItem {
   hasRunnableEvidence?: boolean;
 }
 
+/* ── 题库里一道题长什么样（规格 §7.2 的「判分」一列落成字段要求）────────────
+
+   四种题型各自的字段是**判分那一轨的入口**：客观题要选项与正确答案（页内即时判），
+   预测验证要先有预测（先写下预测，再跑起来对照），开放题要参考答案与判分要点
+   （学生自评），交付物要可运行证据（Host 半代跑）。少一个字段，那一轨就跑不起来，
+   而页面上的表现是「题目数据不完整」——所以要在题库层就报出来，别等学生点开才发现。
+
+   字段名沿用仓库既有的中文词表（`empty_reason` 之外的题库字段本来就是中文：锚点、层级），
+   与 `docs/规范/课件内容格式.md` 的题库一节逐字对应。 */
+
+/** 一种题型的字段要求：`required` 里每一项都要有非空值。 */
+export interface QuestionKindShape {
+  /** 写 `kind` 时用的词（与 `QUESTION_KINDS` 相同，这里重复一次是为了让字段表读起来自足）。 */
+  kind: QuestionKind;
+  required: readonly string[];
+}
+
+export const QUESTION_KIND_SHAPES: Readonly<Record<QuestionKind, QuestionKindShape>> = {
+  客观题: { kind: '客观题', required: ['opts', 'ans', 'why'] },
+  预测验证: { kind: '预测验证', required: ['预测', '比对'] },
+  开放题: { kind: '开放题', required: ['answer', 'criteria'] },
+  交付物: { kind: '交付物', required: ['交付物', '证据'] },
+};
+
+/** 字段名的中文说法：报错要能直接读，不用读者自己去猜 `opts` 是什么。 */
+const FIELD_LABELS: Readonly<Record<string, string>> = {
+  q: '题面（q）',
+  opts: '选项（opts）',
+  ans: '正确答案下标（ans）',
+  why: '答完的一句解释（why）',
+  answer: '参考答案（answer）',
+  criteria: '判分要点（criteria）',
+  预测: '预测（预测）',
+  比对: '跑完之后的比对（比对）',
+  交付物: '交付物说明（交付物）',
+  证据: '可运行证据（证据）',
+};
+
+/** 非空文本：字符串且不是纯空白。 */
+function nonEmptyText(value: unknown): boolean {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+function missingField(item: Record<string, unknown>, field: string): boolean {
+  const value = item[field];
+  if (field === 'opts') return !Array.isArray(value) || value.length < 2 || value.some((opt) => !nonEmptyText(opt));
+  if (field === 'ans') return typeof value !== 'number' || !Number.isInteger(value);
+  return !nonEmptyText(value);
+}
+
+/**
+ * 从一道题的字段**推断**题型（旧题库没有 `kind`）。
+ *
+ * 只认旧词表的两种：写 `opts`/`ans` 的是客观题，写 `answer`/`criteria` 的是开放题。
+ * 推断不出来返回 `null`——**不猜**：猜错的代价是拿一种题型的判分入口去判另一种题。
+ * 调用方对「显式写了 kind」与「靠推断」用不同的严格度：显式写了就要逐字段满足，
+ * 推断出来的只做形状冲突检查（旧题库不该因为新规矩而读不进去）。
+ */
+export function inferQuestionKind(item: Record<string, unknown>): QuestionKind | null {
+  const choice = Object.hasOwn(item, 'opts') || Object.hasOwn(item, 'ans');
+  const open = Object.hasOwn(item, 'answer') || Object.hasOwn(item, 'criteria');
+  if (choice && open) return null; // 两组字段同时出现：形状冲突，调用方报出来
+  if (choice) return '客观题';
+  if (open) return '开放题';
+  return null;
+}
+
+/** 一道题的问题：`code` 给调用方分类，`message` 可直接打给人看。 */
+export interface QuestionKindProblem {
+  /** `unknown-kind`：`kind` 不在词表里；`ambiguous`：两组字段同时出现；`missing-field`：字段不全。 */
+  code: 'unknown-kind' | 'ambiguous' | 'missing-field';
+  kind: string;
+  message: string;
+}
+
+/**
+ * 查一道题（题库里的一个对象）的题型与字段。
+ *
+ * `knownKinds` 缺省用 `QUESTION_KINDS`。返回 `null` 表示这道题没问题。
+ *
+ * **严格度的分界**：显式写了 `kind` 的题必须逐字段满足那种题型的要求（作者声称了是哪种题，
+ * 就该按那种题的判分入口给全字段）；没写 `kind` 的题只查「两组旧字段同时出现」这一条——
+ * 旧题库（`opts`/`ans`/`why` 或 `answer`/`criteria`）因此照旧读得进，不会因为新规矩变红。
+ *
+ * `kind` 在 `knownKinds` 里但**没有字段表**时不报错：没有表就没有可查的规则，
+ * 这一层不替调用方编一条。四个题型的表在 `QUESTION_KIND_SHAPES`。
+ */
+export function questionKindProblem(
+  item: Record<string, unknown>,
+  knownKinds: readonly string[] = QUESTION_KINDS,
+): QuestionKindProblem | null {
+  const raw = item.kind;
+  const explicit = raw !== undefined && raw !== null;
+  const inferred = inferQuestionKind(item);
+
+  if (explicit) {
+    if (typeof raw !== 'string' || !knownKinds.includes(raw)) {
+      return {
+        code: 'unknown-kind',
+        kind: String(raw),
+        message: `题型「${String(raw)}」不在词表里（认得的：${knownKinds.join('、')}）——`
+          + '写这四种之一，或者按旧词表删掉 kind 字段（opts/ans 认作客观题，answer/criteria 认作开放题）',
+      };
+    }
+    if (inferred !== null && inferred !== raw) {
+      return {
+        code: 'ambiguous',
+        kind: raw,
+        message: `题型标成「${raw}」，字段却是「${inferred}」那一组——`
+          + '两组字段不能同时出现，改字段或改 kind',
+      };
+    }
+    const shape = QUESTION_KIND_SHAPES[raw as QuestionKind];
+    if (shape === undefined) return null;
+    for (const field of shape.required) {
+      if (missingField(item, field)) {
+        return {
+          code: 'missing-field',
+          kind: raw,
+          message: `「${raw}」缺 ${FIELD_LABELS[field] ?? field}——`
+            + `这种题型要求：${shape.required.map((name) => FIELD_LABELS[name] ?? name).join('、')}`,
+        };
+      }
+    }
+    return null;
+  }
+
+  if (inferred === null) {
+    const choice = Object.hasOwn(item, 'opts') || Object.hasOwn(item, 'ans');
+    const open = Object.hasOwn(item, 'answer') || Object.hasOwn(item, 'criteria');
+    if (choice && open) {
+      return {
+        code: 'ambiguous',
+        kind: '',
+        message: '两组字段同时出现：客观题的 opts/ans 与开放题的 answer/criteria 只能二选一'
+          + '（或显式写一个 kind）',
+      };
+    }
+  }
+  return null;
+}
+
 export interface QuestionMixProblem {
   index: number;
   kind: QuestionKind;

@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   LAYERS, LAYER_RULES, judgeLayer, meetsLayer, missingCriteria,
-  QUESTION_KINDS, QUESTION_RULES, layersForQuestion, questionsForLayer, servesLayer, checkQuestionMix,
+  QUESTION_KINDS, QUESTION_KIND_SHAPES, QUESTION_RULES, layersForQuestion, questionsForLayer, servesLayer,
+  checkQuestionMix, inferQuestionKind, questionKindProblem,
   TIERS, LEGACY_TIERS, LEGACY_TIER_MAP, toTier, isTier,
   EVIDENCE_BY_TRUST, NON_INDEPENDENT_EVIDENCE, isIndependentEvidence, evidenceRank,
   advance, checkCoverage,
@@ -149,6 +150,84 @@ test('checkQuestionMix：合规的一组题不出问题', () => {
     { kind: '开放题', layer: '查错', hasReferenceAnswer: true },
     { kind: '交付物', layer: '造出', hasRunnableEvidence: true },
   ]), []);
+});
+
+/* ── 二之二、题库里一道题的字段要求（#71：题库扩到四种题型）───────────────
+   这一节断言的是**字段要求**本身（哪种题型必须有哪几个字段、显式 kind 与旧写法的严格度分界），
+   逐题带行号的检查在 lib/core/questions.ts，由 test_core_fence_questions.mjs 钉住。 */
+
+test('每种题型的字段表：kind 与键一致，必备字段非空', () => {
+  assert.deepEqual(Object.keys(QUESTION_KIND_SHAPES), [...QUESTION_KINDS]);
+  for (const kind of QUESTION_KINDS) {
+    assert.equal(QUESTION_KIND_SHAPES[kind].kind, kind);
+    assert.ok(QUESTION_KIND_SHAPES[kind].required.length > 0, `${kind} 的必备字段不该为空`);
+  }
+  assert.deepEqual(QUESTION_KIND_SHAPES['客观题'].required, ['opts', 'ans', 'why']);
+  assert.deepEqual(QUESTION_KIND_SHAPES['预测验证'].required, ['预测', '比对']);
+  assert.deepEqual(QUESTION_KIND_SHAPES['开放题'].required, ['answer', 'criteria']);
+  assert.deepEqual(QUESTION_KIND_SHAPES['交付物'].required, ['交付物', '证据']);
+});
+
+test('推断题型：旧词表两种按字段认出来，两组同时出现返回 null（不猜）', () => {
+  assert.equal(inferQuestionKind({ opts: ['a', 'b'], ans: 0, why: 'w' }), '客观题');
+  assert.equal(inferQuestionKind({ ans: 0 }), '客观题');
+  assert.equal(inferQuestionKind({ answer: 'a', criteria: 'c' }), '开放题');
+  assert.equal(inferQuestionKind({ criteria: 'c' }), '开放题');
+  assert.equal(inferQuestionKind({ opts: ['a'], answer: 'a' }), null, '两组同时出现：不猜');
+  assert.equal(inferQuestionKind({ q: '只有题面' }), null, '推不出来就 null');
+});
+
+test('显式 kind：未知题型 / 字段不全 / 字段与 kind 不一致，各报一条', () => {
+  const unknown = questionKindProblem({ kind: '选择题', q: 'q' });
+  assert.equal(unknown.code, 'unknown-kind');
+  assert.match(unknown.message, /不在词表里/);
+  assert.match(unknown.message, /客观题、预测验证、开放题、交付物/);
+
+  const missing = questionKindProblem({ kind: '客观题', q: 'q', opts: ['a', 'b'] });
+  assert.equal(missing.code, 'missing-field');
+  assert.match(missing.message, /正确答案下标/);
+  assert.match(missing.message, /选项（opts）、正确答案下标（ans）、答完的一句解释（why）/);
+
+  const ambiguous = questionKindProblem({ kind: '预测验证', q: 'q', 预测: 'p', 比对: 'b', opts: ['a', 'b'], ans: 0 });
+  assert.equal(ambiguous.code, 'ambiguous');
+
+  // 四种题型各来一条合格的
+  assert.equal(questionKindProblem({ kind: '客观题', q: 'q', opts: ['a', 'b'], ans: 1, why: 'w' }), null);
+  assert.equal(questionKindProblem({ kind: '预测验证', q: 'q', 预测: 'p', 比对: 'b' }), null);
+  assert.equal(questionKindProblem({ kind: '开放题', q: 'q', answer: 'a', criteria: 'c' }), null);
+  assert.equal(questionKindProblem({ kind: '交付物', q: 'q', 交付物: 'd', 证据: 'e' }), null);
+});
+
+test('旧题库（不写 kind）照旧读得进：只查两组旧字段同时出现', () => {
+  // 缺 why / opts 只有一项 / answer 是空串——旧题库不该因为新规矩变红
+  assert.equal(questionKindProblem({ q: 'q', opts: ['a'], ans: 9 }), null);
+  assert.equal(questionKindProblem({ q: 'q', answer: '', criteria: '' }), null);
+  assert.equal(questionKindProblem({ q: '只有题面' }), null);
+  // 唯一会红的：两组旧字段同时出现
+  const both = questionKindProblem({ q: 'q', opts: ['a', 'b'], ans: 0, why: 'w', answer: 'a', criteria: 'c' });
+  assert.equal(both.code, 'ambiguous');
+  assert.match(both.message, /只能二选一/);
+});
+
+test('字段的非空判据：空串、纯空白、选项少于两项、ans 不是整数都算缺', () => {
+  for (const item of [
+    { kind: '客观题', q: 'q', opts: ['a', 'b'], ans: 0, why: '   ' },
+    { kind: '客观题', q: 'q', opts: ['a'], ans: 0, why: 'w' },
+    { kind: '客观题', q: 'q', opts: ['a', ''], ans: 0, why: 'w' },
+    { kind: '客观题', q: 'q', opts: ['a', 'b'], ans: 1.5, why: 'w' },
+    { kind: '客观题', q: 'q', opts: ['a', 'b'], ans: '0', why: 'w' },
+    { kind: '开放题', q: 'q', answer: 'a', criteria: '' },
+    { kind: '预测验证', q: 'q', 预测: '', 比对: 'b' },
+    { kind: '交付物', q: 'q', 交付物: 'd', 证据: '  ' },
+  ]) {
+    assert.equal(questionKindProblem(item).code, 'missing-field', JSON.stringify(item));
+  }
+});
+
+test('knownKinds 可注入：词表换了判据跟着换（不在函数里硬编码第二份）', () => {
+  const custom = ['选择', '填空'];
+  assert.equal(questionKindProblem({ kind: '选择', q: 'q' }, custom), null, '认得的词就不报');
+  assert.equal(questionKindProblem({ kind: '客观题', q: 'q' }, custom).code, 'unknown-kind');
 });
 
 /* ── 三、旧六档 → 三档：逐条断言（验收标准点名的那六条）─────────────────── */
