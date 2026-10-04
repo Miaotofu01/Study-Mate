@@ -94,8 +94,10 @@ const groups = {
       'scripts/tests/test_validators_progress_subject.mjs',
       'scripts/tests/test_validators_handoff.mjs',
       'scripts/tests/test_rules_pure.mjs',
-      // 纯函数域的判据：写入栅栏（幂等台账 + 版本比较）、题库题型与字段、误解字段定型
+      // 纯函数域的判据：写入栅栏（幂等台账 + 版本比较）、题库题型与字段、误解字段定型、
+      // 问答面板的请求体（#79：上下文只带当前课件 / 选中文本 / 共享记忆，不背会话）
       'scripts/tests/test_core_fence_questions.mjs',
+      'scripts/tests/test_core_ask_context.mjs',
       'scripts/tests/test_core_coverage_floor.mjs',
       // #69：架构边界与依赖无环断言（扫真实 import 图，域规则表默认拒绝）
       'scripts/tests/test_architecture_boundaries.mjs',
@@ -114,6 +116,10 @@ const groups = {
       // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
       'scripts/tests/test_client_search_index.mjs',
       'scripts/tests/test_client_fold_empty_state.mjs',
+      // #79：问答面板接模型。面板那一半在 Node 里点它的按钮、看它发的 POST（fetch 是假货）；
+      // Host 那一半用**注入的假 llm** 证明链路通（真模型调用要花额度，门禁里不跑）。
+      'scripts/tests/test_client_ask_panel.mjs',
+      'scripts/tests/test_host_ask_route.mjs',
     ],
   },
   '--static': {

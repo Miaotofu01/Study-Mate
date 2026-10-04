@@ -50,9 +50,13 @@ const DOMAIN_RULES = {
   // （#74 的 watch、#82 的导出），这里加一个域名，别改成通配。
   tools:  { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },  // 原生工具（#68）+ 任务模型（#73）
   tasks:  { allow: ['core', 'lib'], builtin: true, package: false },  // 任务模型（#73）
+  // 问答域（#79）：阅读端问答面板那条 HTTP 路由。只依赖纯函数域与 Host 数据层——
+  // 它**不** import 工具域（能力探测的本体在 `lib/core/model.ts`，见那里的文件头），
+  // 所以这里没有 tools 这条边；反过来说，往这个域里加 `tools` 就是加了一条反向边。
+  ask:    { allow: ['core', 'lib'], builtin: true, package: false },
   watch:  { allow: ['core', 'lib'], builtin: true, package: false },  // 预留：#74 文件监听
   export: { allow: ['core', 'lib', 'tools', 'tasks'], builtin: true, package: false },  // 预留
-  bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'watch', 'export'], builtin: true, package: false },
+  bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'watch', 'export', 'ask'], builtin: true, package: false },
   client: { allow: [], builtin: false, package: false },  // 浏览器侧单文件：只与模块加载器打交道
 };
 
