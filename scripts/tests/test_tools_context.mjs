@@ -65,9 +65,10 @@ test('开场一次调用拿到：工作区路径、今天、科目现状（当�
   assert.deepEqual(value.notes, []);
 });
 
-test('三档状态来自 progress.yaml，旧词表读到就映射（不静默当学会）', async (t) => {
+test('三档状态来自 progress.yaml；旧词表读到就映射（不静默当学会）', async (t) => {
   const home = useHome(t);
   writeSubject(home.workspace, 'demo', {
+    // 旧六档的取值（#71 之后新写的只该是三档，但旧工作区读得进、要按 §5.2 映射）
     progress: [
       'updated_at: 2026-05-06T10:00:00+08:00',
       'nodes:',

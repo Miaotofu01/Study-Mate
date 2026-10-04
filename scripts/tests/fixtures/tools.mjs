@@ -5,8 +5,9 @@
    放别处会被当成「没登记的套件」把门禁红掉。
 
    数据**全部现造**在临时目录里、跑完即弃（ADR-0009：仓库里不存样例数据）。
-   夹具里的工作区按**现行** `schemas/*.json` 写（六档词表、progress 的 mastery 还在）——
-   #71 改数据模型时这份夹具要跟着改，这不是本 ticket 的范围。 */
+   夹具按**现行** `schemas/*.json` 写：三档词表（#71 之后 progress 与 curriculum 的 status
+   都只有 未开始 / 学习中 / 已学完），progress 里没有 mastery、也没有 misconceptions
+   （后者只剩 `misconceptions.yaml` 一个落点）。数据模型再变时这份夹具要跟着变。 */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -78,9 +79,8 @@ export function progressYaml(nodes, { current = nodes[0].id, updatedAt = '2026-0
   for (const node of nodes) {
     lines.push(`  ${node.id}:`);
     lines.push(`    status: ${node.progress ?? '未开始'}`);
-    lines.push(`    mastery: ${node.mastery ?? 0}`);
   }
-  lines.push('misconceptions: []', 'project:', `  current: ${current}`, '');
+  lines.push('project:', `  current: ${current}`, '');
   return lines.join('\n');
 }
 
