@@ -110,6 +110,10 @@ const groups = {
       'scripts/tests/test_client_pure.mjs',
       // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
       'scripts/tests/test_client_reading_position.mjs',
+      // #77 交付物题的界面：代跑事实块只显示事实（命令 / 退出码 / 两条流 / 截断），
+      // 界面文案里一个判决词都没有，入口只有一颗「跑一次」按钮且不点不跑。
+      // 渲染函数在工厂闭包里，靠 fixtures/client_harness.mjs 的 React 桩调起来。
+      'scripts/tests/test_client_lab_run.mjs',
       // #69：架构边界与依赖无环断言（扫真实 import 图，域规则表默认拒绝）
       'scripts/tests/test_architecture_boundaries.mjs',
       // 工具域 lib/tools/**（#68）：域声明与越权即抛、工作区摘要、四个校验器、两个改写工具。
@@ -169,6 +173,10 @@ const groups = {
       // #74：真浏览器里「改文件 → 监听 → SSE → 页面自己更新（不刷新）」的端到端。
       // 其余几套测的是阅读端的静态面；这一套要的是**真的 EventSource**接我们那条流式 Response。
       'browser/watch_push_test.mjs',
+      // #77：交付物题的「跑一次」——点一下 → 真命令跑起来 → 真实输出回到界面并落进
+      // attempts/。夹具与 attempts_test.mjs 同一套（真 lib/client.js + 真 HTTP 迷你宿主），
+      // 走的是 lib/lab/route.ts 注册出来的真路由。
+      'browser/lab_run_test.mjs',
     ],
   },
 };

@@ -480,165 +480,223 @@ export interface LabToolSpec {
 }
 
 /**
+ * 这个工具的**域声明**。工具域造工具时用它，Web 路由自己造 `access` 时也用它——
+ * 两条入口读同一批域、写同一个字段，声明表只有一份（`test_lab_runner.mjs` 按它断言）。
+ */
+export const LAB_READS: readonly string[] = ['pool', 'lab', 'attempts', 'workspace'];
+export const LAB_WRITES: Readonly<Record<string, readonly string[]>> = { attempts: ['**'] };
+
+/**
  * 造那个工具。`service` 由注册点那一份单例传进来——工具、路由、产出的任务必须看同一份台账。
+ *
+ * 形状与 `planLabRun` 一样是刻意的：**命令从题目里来、边界先判完、跑走任务模型、事实进作答
+ * 数据**，这四步在工具与 Web 路由两条入口上共用一个实现（`startLabRun` / `settledRunOutcome`）。
+ * 两边各写一遍的话，早晚会有一边忘了判某一条边界——那正是这张票要防的事。
  */
 export function labRunTool(service: TaskService): LabToolSpec {
   return {
     name: 'studymate_lab_run',
     description: '把一道交付物题里声明的测试命令在 lab 目录里代跑一遍，真实输出原样记进作答数据。',
     parameters: LAB_RUN_PARAMETERS,
-    reads: ['pool', 'lab', 'attempts', 'workspace'],
-    writes: { attempts: ['**'] },
+    reads: LAB_READS,
+    writes: LAB_WRITES,
     output: {
       schema: LAB_RUN_OUTPUT_SCHEMA,
       render: (_args, value: LabRunOutcome) => renderLabRun(value),
     },
-    execute: async (args: {
-      subject: string; node: string; question: string; cwd?: string;
-      writable?: string[]; predicted?: string; selfAssessment?: string;
-    }, run: {
-      access: { read: (domain: string, target?: string, options?: unknown) => unknown };
+    execute: async (args: LabRunArgs, run: {
+      access: LabAccess;
       signal?: AbortSignal; agent?: string;
     }): Promise<LabRunOutcome> => {
-      ensureLabTaskKind();
-
-      // ── 1. 命令的来源：题库里那道交付物题的「证据」字段 ──────────────────
-      // 读盘会抛（科目不存在、没工作区、域没声明……）：**转成一句能照着改的拒绝**，
-      // 别让一句栈里的 `Error` 直接穿到调用方那里——那读起来像插件坏了，而其实是「你这个
-      // 参数指向的东西不在」。域 guard 的 DomainViolationError 走同一条路（它带前缀，
-      // 一眼能认出来）。
-      let read;
-      try {
-        read = readDeliverable(
-          poolOf(run.access.read('pool', args.subject, { node: args.node })),
-          args.question,
-        );
-      } catch (error) {
-        return refused(
-          `读不到科目「${args.subject}」节点 ${args.node} 的题库：${error instanceof Error ? error.message : String(error)}`,
-          '先确认这个科目与节点真的在 .learning/subjects/ 下（科目 slug 就是那个目录名），'
-          + '再让出题那一侧把这道交付物题补齐。',
-        );
-      }
-      if ('code' in read) return refused(read.message, '换一道交付物题，或者让出题那一侧把这条题补齐。');
-      const commandFrom = `题目「${read.id}」的「证据」字段`;
-
-      // ── 2. 命令的文法 ───────────────────────────────────────────────────
-      const parsed = parseCommand(read.command);
-      if (!parsed.ok) {
-        return refused(`题目里那条命令读不下来：${parsed.reason}`, '把命令改成「程序 + 参数」的裸词形态，'
-          + '复杂的部分写成 lab 目录里的脚本文件。', `命令原文：${read.command}`);
-      }
-
-      // ── 3. 边界：lab 目录、cwd、可写范围、参数里的路径 ───────────────────
-      const labRead = run.access.read('lab', args.subject, { node: args.node }) as
-        { node: string; runDir: string | null } | null;
-      if (labRead === null || labRead.runDir === null) {
-        return refused(
-          `节点 ${args.node} 没有对应的 lab 实验目录（lab/<NNNN>-<短名>/ 里的编号与课件位次对齐）。`,
-          '没有实验目录就没有可以跑命令的地方——这一课多半是概念课，本来就产不出交付物。',
-        );
-      }
-      const workspace = (run.access.read('workspace') as { path: string }).path;
-      const runDir = labRead.runDir;
-
-      const cwdVerdict = resolveCwd(runDir, args.cwd ?? '.');
-      if (!cwdVerdict.ok) {
-        return refused(cwdVerdict.reason, '把 cwd 写成实验目录里的一个相对路径（`.` 就是实验目录本身）。',
-          `允许的范围：${cwdVerdict.within ?? runDir}`);
-      }
-
-      const writable: { 声明: string; 路径: string }[] = [];
-      for (const given of args.writable ?? []) {
-        const verdict = resolveWritable(runDir, given);
-        if (!verdict.ok) {
-          return refused(verdict.reason, '把可写路径写成实验目录里的相对路径（例如 result.txt / build/）。',
-            `允许的范围：${verdict.within ?? runDir}`);
-        }
-        writable.push({ 声明: given, 路径: verdict.resolved });
-      }
-
-      for (const token of parsed.argv.slice(1)) {
-        if (!looksLikePath(token)) continue;
-        const verdict = resolveArgumentPath(workspace, cwdVerdict.resolved, token);
-        if (!verdict.ok) {
-          return refused(verdict.reason, '参数里只写实验目录内的相对路径；要引用工作区里的东西，'
-            + '也把路径写在工作区之内。', `允许的范围：${verdict.within ?? workspace}`);
-        }
-      }
-
-      const plan: LabPlan = {
-        workspace,
-        subject: args.subject,
-        node: args.node,
-        question: args.question,
-        commandFrom,
-        command: read.command,
-        argv: parsed.argv,
-        cwd: cwdVerdict.resolved,
-        runDir,
-        writable,
-        ...args.predicted === undefined ? {} : { predicted: args.predicted },
-        ...args.selfAssessment === undefined ? {} : { selfAssessment: args.selfAssessment },
-      };
-      const input: LabJobInput = {
-        workspace: plan.workspace, runDir: plan.runDir, command: plan.command, argv: plan.argv,
-        cwd: plan.cwd, writable: plan.writable, subject: plan.subject, node: plan.node,
-        question: plan.question, commandFrom: plan.commandFrom,
-        ...plan.predicted === undefined ? {} : { 预测: plan.predicted },
-        ...plan.selfAssessment === undefined ? {} : { 自评: plan.selfAssessment },
-      };
-
-      // ── 4. 起任务（有进度、可查、可取消），并在这一次调用里尽量把事实带回来 ──
-      const actor = actorOf(run);
-      const handle = service.start(actor, {
-        kind: LAB_TASK_KIND,
-        label: `代跑交付物题：${args.subject}/${args.node}｜${read.command}`,
-        input: input as unknown as JsonValue,
-        durable: false,
-      });
-
-      const waited = await service.wait(actor, handle, {
-        timeoutMs: inlineWaitMs(),
+      const plan = planLabRun(run.access, args);
+      if ('拒' in plan) return plan;
+      return startLabRun(service, plan, {
+        actor: actorOf(run),
+        waitMs: inlineWaitMs(),
         ...run.signal === undefined ? {} : { signal: run.signal },
       });
-      if (!waited.settled) {
-        return {
-          状态: '还在跑',
-          说明: `命令最长跑 ${Math.round(TIMEOUT_MS / 1000)} 秒；这一次等了 `
-            + `${Math.round(waited.waitedMs / 1000)} 秒还没结束。${waited.next}`,
-          命令来源: commandFrom,
-          任务: waited.task,
-          跑: null,
-          作答数据: '',
-          拒: null,
-        };
-      }
-
-      const status = service.status(actor, handle);
-      const entry = runLedger().get(handle.id);
-      if (entry === null || entry.facts === null) {
-        return refused(
-          `任务 ${handle.id} 结束了（${status.status}）但没有留下跑的事实：${status.detail ?? '没有细节'}。`,
-          '这多半是命令起不来（程序名不在 PATH 上）：把命令里的程序换成 lab 目录里那份脚本、'
-          + '或者工作区里虚拟环境里的解释器，再跑一次。',
-        );
-      }
-      const facts = entry.facts;
-      return {
-        状态: '跑完了',
-        说明: entry.written
-          ? `真实输出已经原样写进作答数据（attempts/ 里那道题的「${RUN_KEY}」）。`
-          : `事实拿到了，但作答数据没写进去：${entry.writeNote}`,
-        命令来源: commandFrom,
-        任务: status,
-        跑: facts,
-        作答数据: entry.written
-          ? `attempts/｜题 ${args.question}｜字段「${RUN_KEY}」`
-          : '',
-        拒: null,
-      };
     },
+  };
+}
+
+/* ── 计划与执行：工具与 Web 路由共用（见 labRunTool 的注释）──────────────── */
+
+/**
+ * 「读得来域数据」的最小面：`access.read(domain, target?, options?)`。
+ * 工具域 `DomainAccess` 与路由自己造的那一个都满足它（结构化对齐，**不 import 工具域**：
+ * 域图上只有「工具域 → 实验域」一条边，见 `lib/lab/index.ts` 的文件头）。
+ *
+ * `domain` 用 `any` 而不是 `string`：工具域那边是 `Domain` 联合类型，`string` 收窄不了它
+ * （反过来也不行），两边用一个共同的宽类型对齐是这里唯一的办法。**运行期一道校验都不少**
+ * ——域名的合法性由 `createAccess` 判，写错一个字母当场抛（`lib/tools/access.ts`）。
+ */
+export interface LabAccess {
+  read: (domain: any, target?: string, options?: unknown) => unknown;
+}
+
+export interface LabRunArgs {
+  subject: string;
+  node: string;
+  question: string;
+  cwd?: string;
+  writable?: readonly string[];
+  predicted?: string;
+  selfAssessment?: string;
+}
+
+export function planLabRun(access: LabAccess, args: LabRunArgs): LabPlan | LabRunOutcome {
+  // ── 1. 命令的来源：题库里那道交付物题的「证据」字段 ──────────────────
+  // 读盘会抛（科目不存在、没工作区、域没声明……）：**转成一句能照着改的拒绝**，
+  // 别让一句栈里的 `Error` 直接穿到调用方那里——那读起来像插件坏了，而其实是「你这个
+  // 参数指向的东西不在」。域 guard 的 DomainViolationError 走同一条路（它带前缀，
+  // 一眼能认出来）。
+  let read: DeliverableQuestion | StatementProblem;
+  try {
+    read = readDeliverable(
+      poolOf(access.read('pool', args.subject, { node: args.node })),
+      args.question,
+    );
+  } catch (error) {
+    return refused(
+      `读不到科目「${args.subject}」节点 ${args.node} 的题库：${error instanceof Error ? error.message : String(error)}`,
+      '先确认这个科目与节点真的在 .learning/subjects/ 下（科目 slug 就是那个目录名），'
+      + '再让出题那一侧把这道交付物题补齐。',
+    );
+  }
+  if ('code' in read) return refused(read.message, '换一道交付物题，或者让出题那一侧把这条题补齐。');
+  const commandFrom = `题目「${read.id}」的「证据」字段`;
+
+  // ── 2. 命令的文法 ───────────────────────────────────────────────────
+  const parsed = parseCommand(read.command);
+  if (!parsed.ok) {
+    return refused(`题目里那条命令读不下来：${parsed.reason}`, '把命令改成「程序 + 参数」的裸词形态，'
+      + '复杂的部分写成 lab 目录里的脚本文件。', `命令原文：${read.command}`);
+  }
+
+  // ── 3. 边界：lab 目录、cwd、可写范围、参数里的路径 ───────────────────
+  const labRead = access.read('lab', args.subject, { node: args.node }) as
+    { node: string; runDir: string | null } | null;
+  if (labRead === null || labRead.runDir === null) {
+    return refused(
+      `节点 ${args.node} 没有对应的 lab 实验目录（lab/<NNNN>-<短名>/ 里的编号与课件位次对齐）。`,
+      '没有实验目录就没有可以跑命令的地方——这一课多半是概念课，本来就产不出交付物。',
+    );
+  }
+  const workspace = (access.read('workspace') as { path: string }).path;
+  const runDir = labRead.runDir;
+
+  const cwdVerdict = resolveCwd(runDir, args.cwd ?? '.');
+  if (!cwdVerdict.ok) {
+    return refused(cwdVerdict.reason, '把 cwd 写成实验目录里的一个相对路径（`.` 就是实验目录本身）。',
+      `允许的范围：${cwdVerdict.within ?? runDir}`);
+  }
+
+  const writable: { 声明: string; 路径: string }[] = [];
+  for (const given of args.writable ?? []) {
+    const verdict = resolveWritable(runDir, given);
+    if (!verdict.ok) {
+      return refused(verdict.reason, '把可写路径写成实验目录里的相对路径（例如 result.txt / build/）。',
+        `允许的范围：${verdict.within ?? runDir}`);
+    }
+    writable.push({ 声明: given, 路径: verdict.resolved });
+  }
+
+  for (const token of parsed.argv.slice(1)) {
+    if (!looksLikePath(token)) continue;
+    const verdict = resolveArgumentPath(workspace, cwdVerdict.resolved, token);
+    if (!verdict.ok) {
+      return refused(verdict.reason, '参数里只写实验目录内的相对路径；要引用工作区里的东西，'
+        + '也把路径写在工作区之内。', `允许的范围：${verdict.within ?? workspace}`);
+    }
+  }
+
+  return {
+    workspace,
+    subject: args.subject,
+    node: args.node,
+    question: args.question,
+    commandFrom,
+    command: read.command,
+    argv: parsed.argv,
+    cwd: cwdVerdict.resolved,
+    runDir,
+    writable,
+    ...args.predicted === undefined ? {} : { predicted: args.predicted },
+    ...args.selfAssessment === undefined ? {} : { selfAssessment: args.selfAssessment },
+  };
+}
+
+/**
+ * 起任务 + 等一等 + 把事实带回来。**工具与路由共用这一个**（命令已经由 `planLabRun` 定死）。
+ *
+ * `waitMs` 由调用方给：原生工具用 `inlineWaitMs()`（模型的一次调用可以等久一点），
+ * Web 路由用更短的（HTTP 请求不该挂住浏览器）。超时两边都是同一句话：句柄交回去，
+ * `studymate_task_status` / `_wait` / `_cancel` 或 `GET /api/studymate/tasks` 接手。
+ */
+export async function startLabRun(service: TaskService, plan: LabPlan, options: {
+  actor: string;
+  signal?: AbortSignal;
+  waitMs: number;
+}): Promise<LabRunOutcome> {
+  // 任务类型在这里登记（不是在各入口）：起活是**唯一**的瓶颈口，两条入口（原生工具与 Web
+  // 路由）都从这儿过。分开登记的结果是「有一条入口忘了登记」，而那条入口的表现是
+  // `[TASK_BAD_KIND] 没有登记的任务类型`——一条只有真跑起来才看得见的错。
+  ensureLabTaskKind();
+  const input: LabJobInput = {
+    workspace: plan.workspace, runDir: plan.runDir, command: plan.command, argv: plan.argv,
+    cwd: plan.cwd, writable: plan.writable, subject: plan.subject, node: plan.node,
+    question: plan.question, commandFrom: plan.commandFrom,
+    ...plan.predicted === undefined ? {} : { 预测: plan.predicted },
+    ...plan.selfAssessment === undefined ? {} : { 自评: plan.selfAssessment },
+  };
+  const handle = service.start(options.actor, {
+    kind: LAB_TASK_KIND,
+    label: `代跑交付物题：${plan.subject}/${plan.node}｜${plan.command}`,
+    input: input as unknown as JsonValue,
+    durable: false,
+  });
+  const waited = await service.wait(options.actor, handle, {
+    timeoutMs: options.waitMs,
+    ...options.signal === undefined ? {} : { signal: options.signal },
+  });
+  if (!waited.settled) {
+    return {
+      状态: '还在跑',
+      说明: `命令最长跑 ${Math.round(TIMEOUT_MS / 1000)} 秒；这一次等了 `
+        + `${Math.round(waited.waitedMs / 1000)} 秒还没结束。${waited.next}`,
+      命令来源: plan.commandFrom,
+      任务: waited.task,
+      跑: null,
+      作答数据: '',
+      拒: null,
+    };
+  }
+  return settledRunOutcome(service, options.actor, handle.id, plan);
+}
+
+/** 任务收尾之后把事实（或「没有事实」那句拒绝）凑出来；工具与路由共用。 */
+export function settledRunOutcome(service: TaskService, actor: string, taskId: string, plan: LabPlan): LabRunOutcome {
+  const status = service.status(actor, taskId);
+  const entry = runLedger().get(taskId);
+  if (entry === null || entry.facts === null) {
+    return refused(
+      `任务 ${taskId} 结束了（${status.status}）但没有留下跑的事实：${status.detail ?? '没有细节'}。`,
+      '这多半是命令起不来（程序名不在 PATH 上）：把命令里的程序换成 lab 目录里那份脚本、'
+      + '或者工作区里虚拟环境里的解释器，再跑一次。',
+    );
+  }
+  return {
+    状态: '跑完了',
+    说明: entry.written
+      ? `真实输出已经原样写进作答数据（attempts/ 里那道题的「${RUN_KEY}」）。`
+      : `事实拿到了，但作答数据没写进去：${entry.writeNote}`,
+    命令来源: plan.commandFrom,
+    任务: status,
+    跑: entry.facts,
+    作答数据: entry.written
+      ? `attempts/｜题 ${plan.question}｜字段「${RUN_KEY}」`
+      : '',
+    拒: null,
   };
 }
 

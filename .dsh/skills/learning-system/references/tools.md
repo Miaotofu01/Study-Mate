@@ -2,13 +2,13 @@
 
 **这份文件是给总控与角色按需读的参考，不是常驻指令**：参数表、返回形状、域边界、错误形状与旧命令对照都在这里；技能正文只留「这件事为什么要做、做到什么算好」。**别把它背进上下文**——要用哪个工具时再读它那一节。
 
-**唯一出处是代码**：八个工具在 [`lib/tools/index.ts`](../../../../lib/tools/index.ts) 的注册点注册，名字表 `STUDY_TOOL_NAMES` 与注册顺序同在那一份里。本文件与代码不一致时以代码为准，并回来改这一份。
+**唯一出处是代码**：八个学习数据工具在 [`lib/tools/index.ts`](../../../../lib/tools/index.ts) 的注册点注册，名字表 `STUDY_TOOL_NAMES` 与注册顺序同在那一份里（另有任务域五个与实验域一个，见各自的目录）。本文件与代码不一致时以代码为准，并回来改这一份。
 
 ## 一、先读这一节：宿主差异
 
 | 宿主 | 怎么执行 |
 |---|---|
-| **DSH** | 有原生工具：直接调下面这八个 `studymate_*`，拿结构化返回 |
+| **DSH** | 有原生工具：直接调下面这八个 `studymate_*`（以及任务域五个、实验域一个），拿结构化返回 |
 | **Antigravity / Codex / ChatGPT Work** | **没有原生工具**——下面这些名字在那些宿主里一个都不存在。按 §8 的旧命令对照表用文件读写 + `scripts/*.py` 降级执行；导出的技能由各自的「宿主约定」写明这一点 |
 
 无头侧**不要把工具名当成能调用的东西**，也不要假装调用过；缺的能力按宿主约定如实说明。
@@ -29,12 +29,35 @@
 | `studymate_renumber_lessons` | **`subject`**（科目目录或 slug）、`dryRun?` | 大纲插/删节点之后重排课件位次；不确定就先 `dryRun` 只算不改 |
 | `studymate_apply_empty_reasons` | **`subject`**、**`node`**（节点 id）、**`reasons`**（数组：每项一个 `anchor` 与它的 `reason`，锚点与正文逐字匹配）、`dryRun?` | 出题角色交回无题理由时：把 `empty_reason:` 打进内容文件（**别手工开文件改**） |
 | `studymate_export` | `subject?`（slug；省略＝全部科目） | 学生要一份能离线看的；**#82 落地前是占位**，见 §9 |
+| `studymate_lab_run` | **`subject`**（slug）、**`node`**（节点 id）、**`question`**（题 id：`<锚点文本>#<题号>`）、`cwd?`（相对这一课的 lab 实验目录，默认 `.`）、`writable?`（数组：声明这次会写的相对路径）、`predicted?`（学生先写下的预测）、`selfAssessment?`（`答对了` / `答了一半` / `没答上`，**只有学生能选**） | 判分三轨的第三轨（规格 §7.3）：`交付物` 题要**可运行证据**时，Host 半在学生本机上代跑那道题里**声明过的**命令。读 §3 的那一节，先看清「命令从哪来」与边界 |
 
 > 任务域（`studymate_task_status` / `_wait` / `_cancel` / `_destroy` / `_resume`）不在本表：那是插件自己跑的后台工作（导出、格式转换、索引重建）的句柄，契约见 `lib/tasks/tools.ts`。它只有一条常驻纪律——**状态查询从不阻塞，等待有上限，超时会告诉你下一步**。
 
 ## 三、返回形状与空值口径
 
 共同约定：**返回的是事实，不是结论**。校验器给「逐条问题 + 一句放行/阻断」，不给退出码；空的地方给明确的空值，不给 `null` 之外的猜测。
+
+### `studymate_lab_run`
+
+**命令不在参数里**：它来自题库里那道题。取值顺序是写死的——定位到 `kind: 交付物` 的那道题 → 读它的 `证据` 字段 → **空白切词**（不开 shell）。模型与学生**都没有**「现编一条命令」的入口。命令读不下来（带引号 / 管道 / 重定向 / 变量 / 通配）当场拒，并让你把那些东西写成 lab 目录里的脚本文件。
+
+四种结局，每种都是一句能照着改的话：
+
+| `状态` | 意思 |
+|---|---|
+| `跑完了` | 命令跑过了（**起不来也算这一种**，`跑.结局` 会写 `起不来`）。`跑` 里是事实：`命令` / `argv` / `程序` / `cwd` / `可写` / `退出码` / `信号` / `结局`（`跑完` / `超时` / `取消` / `起不来`）/ `毫秒` / `stdout` / `stderr` / `字节` / `截断` / `起不来`；`作答数据` 说清落没落进 `attempts/` |
+| `还在跑` | 命令最长跑 120 秒。这一次没等到，`任务` 里是句柄：用 `studymate_task_status` / `_wait` 查、`studymate_task_cancel` 取消（回执会说清哪些已完成的产物保留） |
+| `拒了` | 没跑任何命令。`拒.为什么` 说原因、`拒.下一步` 说怎么改、`拒.边界` 给允许的范围（例如那条 cwd 该落在哪个目录里） |
+
+**没有「通过」这个字段，也不许加**：`退出码` 是数字原样，非零**如实记、不是失败判决**；`结局` 只说这次是怎么结束的。通过与否由学生看输出后**自己选自评**（`selfAssessment` 那一栏只有学生能填，模型不许替他填）——三轨里没有一轨叫 agent（规格 §7.3）。
+
+边界（越界一律拒，不警告）：
+
+- `cwd` 与 `writable` 都在**这一课的 lab 实验目录**里（`lab/<NNNN>-<短名>/`）；参数里的绝对路径不许出工作区；已有的软链按真身判。
+- 命令的环境变量是**白名单重建**的：`HOME` / `TMPDIR` 指向本次运行专用的临时目录，跑完删掉；学生的 `SSH_AUTH_SOCK` / `AWS_*` 这类不会递给孩子。
+- 两条流各留 64 KiB，超了头尾都留、中间截掉，`截断` 字段如实写 `true`。**这不是 OS 级沙箱**：能挡的是命令的固定部分指着外面，挡不住程序运行期自己算出来的路径。
+
+学生那边有同一件事的**页面入口**（阅读端课件页「题目」tab 的「跑一次」按钮，走的 `POST /api/studymate/lab-run`）——它与你调这个工具走的是同一份实现（`lib/lab/tools.ts` 里的计划与执行两段），所以边界、拒绝理由、事实字段逐字相同。**不要**替学生按那个按钮。
 
 ### `studymate_workspace_context`
 
@@ -96,8 +119,9 @@ apply_empty_reasons → { subject, node, file, dryRun, ok,
 | `studymate_renumber_lessons` | workspace / curriculum / lessons | `lessons/*` |
 | `studymate_apply_empty_reasons` | workspace / curriculum / lessons | `lessons/*#empty_reason` |
 | `studymate_export` | —（一份学习数据都不读） | `export/**` |
+| `studymate_lab_run` | workspace / pool / lab / attempts | `attempts/**`（只写「跑」那一格，走 `lib/attempts.ts` 的栅栏） |
 
-域词表（`DOMAINS`）：`workspace`（路径、配置、今天、时区、找科目）、`memory`、`subjects`、`curriculum`、`progress`、`lessons`、`pool`、`assets`、`records`、`reference`（学生自加的资料，ADR-0010）、`misconceptions`、`handoff`、`export`（**只写**，读它会抛）。新增一个域要同时改域词表与 `vault.ts` 的读法。
+域词表（`DOMAINS`）：`workspace`（路径、配置、今天、时区、找科目）、`memory`、`subjects`、`curriculum`、`progress`、`lessons`、`pool`、`assets`、`records`、`reference`（学生自加的资料，ADR-0010）、`misconceptions`、`lab`（`subjects/<slug>/lab/<NNNN>-<短名>/`，读它要同时给 `node`）、`attempts`（`subjects/<slug>/attempts/<NNNN>-<节点id>.json`，读它也要给 `node`）、`handoff`、`export`（**只写**，读它会抛）。新增一个域要同时改域词表与 vault 的读法——词表、guard 与读法的实现在 `lib/lib/{domains,access,vault}.ts`（`lib/tools/` 下那三份只做转发，别再往转发处加逻辑）。
 
 **对技能的意味**：一个工具读不到的东西，就是它**不该**碰的东西。需要越界时不是绕开 guard，而是把域加进工具定义——那是改代码，不是改提示词。
 
@@ -147,6 +171,7 @@ DSH 侧**不再调这些脚本**；Antigravity / Codex 侧没有原生工具，�
 | `renumber_lessons.py <subject_path> [--dry-run] [--render]` | `studymate_renumber_lessons` | 原命令（`--render` 那半在无头侧仍要出页面） |
 | `apply_empty_reasons.py <subject_path> <节点id> <tsv>` | `studymate_apply_empty_reasons`（理由给数组，不给 TSV） | 原命令 |
 | `render_lesson.py` + `gen_home.py` | `studymate_export`（#82 落地） | 原命令（无头侧默认导出静态页面） |
+| 在学生本机上代跑题目里声明的测试命令 | `studymate_lab_run` | **没有等价脚本**：无头宿主没有「学生本机」这条通道，如实说明这一轨在那里跑不了（别假装跑过、也别把输出编出来）。学生自己在终端里跑那条命令，再把输出贴回来 |
 
 无头侧的**流程与归属不变**：产物照样先落 `.stage/…/deliver/`、照样过交接门禁、照样原样搬入——换的只是"用哪个命令"。
 

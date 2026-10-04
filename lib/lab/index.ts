@@ -20,13 +20,14 @@
    「工具域 → 实验域」一条边（见 `lib/tasks/index.ts` 文件头的同一口径）。
    ───────────────────────────────────────────────────────────────────────── */
 
-export { registerLabTools, LAB_TOOL_NAMES, LAB_RUN_OUTPUT_SCHEMA, LAB_RUN_PARAMETERS, labRunTool, readDeliverable, splitQuestionId, poolOf, runLabJob, ensureLabTaskKind, resetLabTaskKind, LAB_TASK_KIND, LAB_TASK_PREFIX, RUN_KEY, DEFAULT_INLINE_WAIT_MS, MAX_INLINE_WAIT_MS, inlineWaitMs } from './tools.ts';
+export { registerLabTools, LAB_TOOL_NAMES, LAB_RUN_OUTPUT_SCHEMA, LAB_RUN_PARAMETERS, LAB_READS, LAB_WRITES, labRunTool, planLabRun, startLabRun, settledRunOutcome, renderLabRun, readDeliverable, splitQuestionId, poolOf, runLabJob, ensureLabTaskKind, resetLabTaskKind, LAB_TASK_KIND, LAB_TASK_PREFIX, RUN_KEY, DEFAULT_INLINE_WAIT_MS, MAX_INLINE_WAIT_MS, inlineWaitMs } from './tools.ts';
 export { parseCommand } from './contract.ts';
 export { isWithin, resolveArgumentPath, resolveCwd, resolveWritable } from './sandbox.ts';
 export { runCommand, resolveProgram, TIMEOUT_MS, OUTPUT_LIMIT } from './runner.ts';
 export { createRunLedger, runLedger, resetRunLedger, labRunsDir } from './ledger.ts';
+export { LAB_RUN_PATH, ROUTE_WAIT_MS, registerLabRoute, runRouteRequest } from './route.ts';
 export type { RunFacts } from './runner.ts';
 export type { RunEntry, RunLedger } from './ledger.ts';
-export type { LabRunOutcome, LabToolSpec, DeliverableQuestion, StatementProblem } from './tools.ts';
+export type { LabRunOutcome, LabToolSpec, LabAccess, LabRunArgs, LabPlan, DeliverableQuestion, StatementProblem } from './tools.ts';
 export type { CommandVerdict } from './contract.ts';
 export type { PathVerdict } from './sandbox.ts';
