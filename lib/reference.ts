@@ -20,7 +20,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 // 复用仓库里那份对齐 PyYAML 的隐式类型解析器：判断一个标题裸着写会不会被读成非字符串
-import { resolvePlainScalar } from './yaml.mjs';
+import { resolvePlainScalar } from './yaml.ts';
+import type { Stats } from 'node:fs';
 
 /* ── 常量 ──────────────────────────────────────────────────────────────── */
 
@@ -51,30 +52,68 @@ const OPERATION_ID_MAX = 200;
 /** 幂等台账上限：只防一次宿主生命周期内的双击与重试，记满就丢最旧的，不无界增长。 */
 const LEDGER_MAX = 200;
 
+/** 清单里的一条参考资料。形状就是 payload 里那一个对象，别在这里另起一套叫法。 */
+export interface ReferenceEntry {
+  path: string;
+  name: string;
+  title: string;
+  ext: string;
+  bytes: number;
+  source: 'learner' | 'agent';
+  added_at: string;
+}
+
+/** 拒绝写入：HTTP 语义由 bin/dsh-plugin.ts 映射成状态码。reference/version 是冲突时顺手带回去的当前清单。 */
+interface ReferenceRefusal {
+  ok: false;
+  status: number;
+  error: string;
+  message: string;
+  reference?: ReferenceEntry[];
+  version?: string;
+}
+
+/** 写入成功：entry 是刚落的那一份，reference/version 是写完之后重读的清单（下一个 expectedVersion）。 */
+interface ReferenceSuccess {
+  ok: true;
+  entry: ReferenceEntry;
+  reference: ReferenceEntry[];
+  version: string;
+}
+
+type WriteResult = ReferenceSuccess | ReferenceRefusal;
+
+/** 一次遍历里走到的文件：相对 reference/ 的路径 + stat（版本号与条目都从它俩算）。 */
+interface WalkedFile {
+  rel: string;
+  stat: Stats;
+}
+
 /**
  * 幂等台账：operationId → { fingerprint, response }。
  * **只在内存里**，只防同一个宿主进程内的双击与重试；宿主重启后台账就没了——所以
  * operationId 也写进了文件的 front matter，留给以后做持久幂等（或人工对账）用。
  */
-const LEDGER = new Map();
+const LEDGER = new Map<string, { fingerprint: string; response: WriteResult }>();
 
 /* ── 路径 ──────────────────────────────────────────────────────────────── */
 
 /** Python 的 sorted() 按码位比较；JS 的 < 按 UTF-16 码元比较，遇到增补平面字符会分叉。
     这里再写一份是因为本模块不能反向 import lib/library.mjs（那边 import 本模块）。 */
-function cmpCodePoints(a, b) {
+function cmpCodePoints(a: string, b: string): number {
   const left = [...a];
   const right = [...b];
   const n = Math.min(left.length, right.length);
   for (let i = 0; i < n; i++) {
-    const x = left[i].codePointAt(0);
-    const y = right[i].codePointAt(0);
+    // `!`：数组元素都是一个码位，codePointAt 不可能给 undefined——类型签名看不出这层
+    const x = left[i].codePointAt(0)!;
+    const y = right[i].codePointAt(0)!;
     if (x !== y) return x < y ? -1 : 1;
   }
   return left.length - right.length;
 }
 
-function isDirectory(target) {
+function isDirectory(target: string): boolean {
   try {
     return fs.statSync(target).isDirectory();
   } catch {
@@ -83,19 +122,19 @@ function isDirectory(target) {
 }
 
 /** 目录里的名字要不要跳过：隐藏文件与 __pycache__ 都不是资料。 */
-function isSkippedName(name) {
+function isSkippedName(name: string): boolean {
   return name.startsWith('.') || SKIP_DIRS.has(name);
 }
 
 /** 科目目录的绝对路径。subject 里出现分隔符或 `..` 直接判不合法（与 lib/assets.mjs 一致）。 */
-function subjectDirOf(workspace, subject) {
+function subjectDirOf(workspace: unknown, subject: unknown): string | null {
   if (typeof workspace !== 'string' || !workspace) return null;
   if (typeof subject !== 'string' || !subject || subject.includes('/') || subject.includes('\\') || subject.includes('..')) return null;
   return path.resolve(workspace, '.learning', 'subjects', subject);
 }
 
 /** 越界判据与 lib/assets.mjs 同一写法：前后都补分隔符再比，避免 /a/bc 被当成在 /a/b 里面。 */
-function inside(root, full) {
+function inside(root: string, full: string): boolean {
   return full === root || full.startsWith(root + path.sep);
 }
 
@@ -103,9 +142,9 @@ function inside(root, full) {
  * 目标（或其最近存在的祖先）解掉符号链接之后的真实路径；解不出来返回 null。
  * 断链与不存在的目标都走这条路——调用方按「读不到」处理，不让 realpath 的异常冒成 500。
  */
-function realPathOf(target) {
+function realPathOf(target: string): string | null {
   let current = path.resolve(target);
-  const tail = [];
+  const tail: string[] = [];
   for (;;) {
     try {
       const real = fs.realpathSync(current);
@@ -125,17 +164,17 @@ function realPathOf(target) {
  * （真实工作区里合法），越界指的是目标逃出了科目目录（目标态规格 §4.3）。
  * 边界算不出来时一律判越界——宁可拒绝，也不要漏。
  */
-function insideReal(realRoot, target) {
+function insideReal(realRoot: string | null, target: string): boolean {
   if (typeof realRoot !== 'string' || realRoot === '') return false;
   const realTarget = realPathOf(target);
   return realTarget !== null && inside(realRoot, realTarget);
 }
 
-function toPosix(rel) {
+function toPosix(rel: string): string {
   return rel.split(path.sep).join('/');
 }
 
-function readTextIfPresent(file) {
+function readTextIfPresent(file: string): string | null {
   try {
     return fs.readFileSync(file, 'utf8');
   } catch {
@@ -164,27 +203,28 @@ const UNESCAPES = new Map([
 ]);
 
 /** 与 quoteScalar 对偶：只有长得像合法双引号标量的才还原（`"a" and "b"` 这种裸标量不动）。 */
-function decodeScalar(value) {
+function decodeScalar(value: string): string {
   if (!DOUBLE_QUOTED_RE.test(value)) return value;
   // \U 可以写出超越 Unicode 范围的码点，fromCodePoint 会抛——一份人写的奇怪 front matter
   // 不该把整份 payload 带崩，认不出来就原样留着
-  const codePoint = (hex) => {
+  const codePoint = (hex: string): string | null => {
     const code = parseInt(hex, 16);
     return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : null;
   };
   return value.slice(1, -1).replace(
     /\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|(.))/g,
-    (whole, hex2, hex4, hex8, simple) => {
+    (whole: string, hex2: string | undefined, hex4: string | undefined, hex8: string | undefined, simple: string) => {
       if (hex2 !== undefined) return codePoint(hex2) ?? whole;
       if (hex4 !== undefined) return codePoint(hex4) ?? whole;
       if (hex8 !== undefined) return codePoint(hex8) ?? whole;
-      return UNESCAPES.has(simple) ? UNESCAPES.get(simple) : whole;
+      // `!`：has 为真时 get 一定拿得到；Map 的类型签名看不出这层关系，运行期一字未改
+      return UNESCAPES.has(simple) ? UNESCAPES.get(simple)! : whole;
     },
   );
 }
 
 /** 读 `---` 包起来的 front matter；没有就返回 null（不是空 Map：调用方要能区分）。 */
-function parseFrontMatter(markdown) {
+function parseFrontMatter(markdown: string): Map<string, string> | null {
   if (typeof markdown !== 'string' || markdown === '') return null;
   const lines = markdown.split(/\r\n|\n|\r/);
   if (lines[0].replace(/^\ufeff/, '').trim() !== '---') return null;
@@ -210,11 +250,11 @@ function parseFrontMatter(markdown) {
  * YAML 里会被读成 datetime，不再是字符串——本仓库 subject.yaml / progress.yaml 里的
  * 日期也是引号写法。
  */
-function quotedScalar(text) {
+function quotedScalar(text: string): string {
   // 先转义反斜杠与引号（一遍走完，不会把刚写下的转义再转一次），再写控制字符的转义序列
   const escaped = String(text)
     .replace(/[\\"]/g, (ch) => `\\${ch}`)
-    .replace(/[\u0000-\u001f\u007f]/g, (ch) => ESCAPES.get(ch) ?? `\\u${ch.codePointAt(0).toString(16).padStart(4, '0')}`);
+    .replace(/[\u0000-\u001f\u007f]/g, (ch) => ESCAPES.get(ch) ?? `\\u${ch.codePointAt(0)!.toString(16).padStart(4, '0')}`);
   return `"${escaped}"`;
 }
 
@@ -224,7 +264,7 @@ function quotedScalar(text) {
  * 控制字符、`no` 这类会被读成布尔的词），改成双引号标量并按 YAML 的转义写——标题里带 `"`
  * 或换行也只会写进值里，不会多出一行 `source: learner` 冒充标记。
  */
-function quoteScalar(text) {
+function quoteScalar(text: string): string {
   const value = String(text);
   const plainUnsafe = value === ''
     || value !== value.trim()
@@ -245,7 +285,7 @@ function quoteScalar(text) {
    与结尾的点（开头是点会变成隐藏文件，我的清单口子正好会跳过它，等于写了个看不见的文件；
    结尾的点在 Windows 上会被文件系统抹掉），空白折叠成一个空格，按**码位**截到 NAME_MAX。
    CJK 原样保留：中文标题是常态，不该为它另起一套规则。 */
-function fileNameStem(title) {
+function fileNameStem(title: string): string {
   const flat = [...String(title)]
     .filter((ch) => !/[\u0000-\u001f\u007f]/.test(ch) && !'/\\:'.includes(ch))
     .join('')
@@ -259,7 +299,7 @@ function fileNameStem(title) {
 /* ── 清单与版本号 ──────────────────────────────────────────────────────── */
 
 /** 扩展名去掉之后的名字（`README` 没有扩展名，别把它截成空串）。 */
-function stemOf(name) {
+function stemOf(name: string): string {
   const ext = path.extname(name);
   return ext === '' ? name : name.slice(0, -ext.length);
 }
@@ -270,7 +310,7 @@ function stemOf(name) {
  * realBoundary 是**科目目录**已解过符号链接的真实路径：解出来跑到科目外面的条目一律不收，
  * 否则清单会列出一份读不到（或不该读）的资料，版本号也会跟着一起抖。
  */
-function walkReference(root, realBoundary, prefix = '', out = [], depth = 0) {
+function walkReference(root: string, realBoundary: string | null, prefix = '', out: WalkedFile[] = [], depth = 0): WalkedFile[] {
   if (depth > 32) return out; // 目录树深得离谱时主动截断，不做无限递归
   let entries;
   try {
@@ -301,7 +341,7 @@ function walkReference(root, realBoundary, prefix = '', out = [], depth = 0) {
 }
 
 /** 一条文件 → payload 条目。 */
-function entryFor(dir, rel, stat) {
+function entryFor(dir: string, rel: string, stat: Stats): ReferenceEntry {
   const name = path.posix.basename(rel);
   const ext = path.posix.extname(name);
   // 只有带 `source: learner` front matter 的 Markdown 算学生放的；其余（PDF、速查页、
@@ -311,7 +351,7 @@ function entryFor(dir, rel, stat) {
   return {
     path: rel,
     name,
-    title: learner && front.get('title') ? front.get('title') : stemOf(name),
+    title: learner && front.get('title') ? front.get('title')! : stemOf(name),
     ext,
     bytes: stat.size,
     source: learner ? 'learner' : 'agent',
@@ -323,7 +363,7 @@ function entryFor(dir, rel, stat) {
  * 条目清单（path + size + mtime）算出来的稳定字符串：写入时的并发栅栏。
  * 空目录也有版本号（空清单的哈希）：**不能**给空串——那样第一次写入就没法带期望版本。
  */
-function versionOf(files) {
+function versionOf(files: WalkedFile[]): string {
   const hash = createHash('sha256');
   for (const file of files) {
     hash.update(`${file.rel}\u0000${file.stat.size}\u0000${Math.round(file.stat.mtimeMs)}\n`);
@@ -333,20 +373,20 @@ function versionOf(files) {
 
 /** 清单与版本号共用一次遍历：两者必然同源，否则会出现「没人动过却报冲突」。
     realBoundary 是科目目录已解过符号链接的真实路径，越界的条目在遍历里就被丢掉。 */
-function listReferenceDir(dir, realBoundary) {
+function listReferenceDir(dir: string, realBoundary: string | null): { entries: ReferenceEntry[]; version: string } {
   const files = walkReference(dir, realBoundary);
   return { entries: files.map((file) => entryFor(dir, file.rel, file.stat)), version: versionOf(files) };
 }
 
 /** 一次性拿到清单与版本号（同一次遍历，两者必然同源）。传的是**科目目录**，不是 reference/。 */
-export function listReference({ subjectDir }) {
+export function listReference({ subjectDir }: { subjectDir?: unknown }): { entries: ReferenceEntry[]; version: string } {
   const hasSubject = typeof subjectDir === 'string' && subjectDir !== '';
   const root = hasSubject ? path.join(subjectDir, 'reference') : '';
   return listReferenceDir(root, hasSubject ? realPathOf(subjectDir) : '');
 }
 
 /** 现有条目的版本号：以条目清单（路径 + 大小 + mtime）算出来的稳定字符串。 */
-export function referenceVersion({ workspace, subject } = {}) {
+export function referenceVersion({ workspace, subject }: { workspace?: unknown; subject?: unknown } = {}): string {
   const dir = subjectDirOf(workspace, subject);
   if (dir === null) return '';
   return listReferenceDir(path.join(dir, 'reference'), realPathOf(dir)).version;
@@ -358,7 +398,7 @@ export function referenceVersion({ workspace, subject } = {}) {
  * 读取一份参考资料的文本内容（只给 .md/.txt 之类的文本；二进制返回 null）。
  * 越界、不存在、不是文本、或者落在清单会跳过的目录里（隐藏目录、__pycache__）都返回 null。
  */
-export function readReference({ workspace, subject, relPath } = {}) {
+export function readReference({ workspace, subject, relPath }: { workspace?: unknown; subject?: unknown; relPath?: unknown } = {}): { text: string; entry: ReferenceEntry } | null {
   const subjectDir = subjectDirOf(workspace, subject);
   if (subjectDir === null || typeof relPath !== 'string' || relPath === '') return null;
   const dir = path.join(subjectDir, 'reference');
@@ -384,14 +424,14 @@ export function readReference({ workspace, subject, relPath } = {}) {
 
 /* ── 写入 ──────────────────────────────────────────────────────────────── */
 
-function refusal(status, error, message) {
+function refusal(status: number, error: string, message: string): ReferenceRefusal {
   return { ok: false, status, error, message };
 }
 
 /** now 可注入（测试用）：Date / 毫秒数 / 可解析的字符串都行，读不出来的退回当前时间。 */
-function toIso(now) {
+function toIso(now: unknown): string {
   if (now === undefined || now === null) return new Date().toISOString();
-  const date = new Date(now);
+  const date = new Date(now as string | number | Date);
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 }
 
@@ -403,7 +443,9 @@ function toIso(now) {
  * 版本号是必填的：宁可让老的客户端写不进来（它会读到一次 400，重新读库再写），也不要
  * 让一次过期的提交静默盖掉别人刚放进去的资料。
  */
-export function writeReference({ workspace, subject, title, markdown, expectedVersion, operationId, now } = {}) {
+export function writeReference({ workspace, subject, title, markdown, expectedVersion, operationId, now }:
+  { workspace?: unknown; subject?: unknown; title?: unknown; markdown?: unknown;
+    expectedVersion?: unknown; operationId?: unknown; now?: unknown } = {}): WriteResult {
   // 先把请求体过一遍再碰台账：坏请求不该占用一个 operationId
   const opId = typeof operationId === 'string' ? operationId.trim() : '';
   if (opId === '' || [...opId].length > OPERATION_ID_MAX) {
@@ -494,7 +536,9 @@ export function writeReference({ workspace, subject, title, markdown, expectedVe
       full = candidate;
       break;
     } catch (error) {
-      if (error.code === 'EEXIST' || error.code === 'EISDIR') continue; // 撞名就换 -2、-3……
+      // catch 拿到的是 unknown；这里只读 errno 的 code（类型断言，运行期一字未改）
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST' || code === 'EISDIR') continue; // 撞名就换 -2、-3……
       return refusal(500, 'write-failed', `写不了 ${path.basename(candidate)}：${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -508,8 +552,8 @@ export function writeReference({ workspace, subject, title, markdown, expectedVe
   if (entry === undefined) {
     return refusal(500, 'write-verification-failed', `写完之后读不到刚落的文件：${rel}`);
   }
-  const response = { ok: true, entry, reference: next.entries, version: next.version };
-  if (LEDGER.size >= LEDGER_MAX) LEDGER.delete(LEDGER.keys().next().value); // 丢最旧的一条
+  const response: WriteResult = { ok: true, entry, reference: next.entries, version: next.version };
+  if (LEDGER.size >= LEDGER_MAX) LEDGER.delete(LEDGER.keys().next().value!); // 丢最旧的一条
   LEDGER.set(opId, { fingerprint, response });
   return response;
 }

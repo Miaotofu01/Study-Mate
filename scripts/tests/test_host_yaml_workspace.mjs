@@ -8,8 +8,8 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseYaml, pyStrip, resolvePlainScalar } from '../../lib/yaml.mjs';
-import { configFile, dshHome, resolveRoot, resolveWorkspace } from '../../lib/workspace.mjs';
+import { parseYaml, pyStrip, resolvePlainScalar } from '../../lib/yaml.ts';
+import { configFile, dshHome, resolveRoot, resolveWorkspace } from '../../lib/workspace.ts';
 
 const TEMPS = [];
 after(() => {

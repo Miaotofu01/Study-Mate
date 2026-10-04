@@ -16,22 +16,60 @@
 //     只在服务就绪时挂路由，缺了就不挂。ctx.inject 不存在时也不该炸。
 import { installPayload } from './studymate.mjs';
 
+/* ── 宿主的插件上下文 ────────────────────────────────────────────────────
+   本仓库不依赖宿主的类型包（Host 半是零依赖的插件），所以按**用到的成员**描述形状：
+   全部可选——缺 connection 的组合（headless / tui）与更老的宿主都会传进来一个残缺的 ctx，
+   下面每一步都在运行期自己判一次。 */
+
+/** `ctx.get('profileContext')` 给的 profile 归属。 */
+interface ProfileContext {
+  name: string;
+  home: string;
+}
+
+/** connection 的精确路由表：以 path 为键，同一个 path 注册第二次会抛「already registered」。 */
+interface FetchRegistry {
+  register(route: {
+    path: string;
+    methods: string[];
+    requestBody: 'buffered';
+    fetch: (request: Request) => Promise<Response> | Response;
+  }): unknown;
+}
+
+/** 服务就绪时挂上来的那一层 ctx（ctx.inject(['connection'], …) 的回调参数）。 */
+interface ConnectionContext {
+  connection?: { fetch?: FetchRegistry };
+  /** 第二个参数是给宿主日志用的说明文字（cordis 的 effect(fn, label)）。 */
+  effect?: (fn: () => unknown, description?: string) => unknown;
+}
+
+interface PluginContext {
+  get?: (name: string) => ProfileContext | undefined;
+  agentPresets?: { register: (config: unknown) => unknown };
+  effect?: (fn: () => unknown, description?: string) => unknown;
+  inject?: (names: string[], handler: (ctx: ConnectionContext) => void) => unknown;
+}
+
 export const inject = ['agentPresets'];
 
 const LIBRARY_PATH = '/api/studymate/library';
 const ASSET_PATH = '/api/studymate/asset';
 const REFERENCE_PATH = '/api/studymate/reference';
 
-export async function apply(ctx) {
+export async function apply(ctx: PluginContext): Promise<void> {
   const profile = ctx.get?.('profileContext');
   if (!profile || !ctx.agentPresets?.register) {
     console.warn('StudyMate：当前 DSH 不支持原生插件接口（需要 0.1.7-alpha.1+）；已跳过原生加载。旧版请使用 npx -y @yunmiao/studymate@latest install。');
   } else {
     try {
+      // installPayload 在 bin/studymate.mjs（本次不迁）：TS 从 JS 里推断出「四个必填参数」，
+      // 而 native 启动本来就只传这三个（其余由它自己探测/默认）。断言只影响类型，运行期一字未改。
       const { registration } = installPayload({
         native: true, profile: profile.name, dshHome: profile.home,
-      });
-      await ctx.effect(() => ctx.agentPresets.register(registration.config));
+      } as Parameters<typeof installPayload>[0]);
+      // `!`：ctx.effect 缺失时的 TypeError 由下面的 catch 兜住（与迁移前同一条路径）
+      await ctx.effect!(() => ctx.agentPresets!.register(registration.config));
     } catch (error) {
       // Startup may report a problem, but must not migrate profile ownership.
       console.warn(`StudyMate：已跳过原生加载。${error instanceof Error ? error.message : String(error)}`);
@@ -43,7 +81,8 @@ export async function apply(ctx) {
   // 不落盘索引、不加缓存，也就没有「文件变了页面还是旧的」这类要同步的状态。
   if (typeof ctx.inject !== 'function') return;
   ctx.inject(['connection'], (connectionCtx) => {
-    const connection = Reflect.get(connectionCtx, 'connection');
+    // 反射取出来的 connection 服务：形状由宿主决定，本文件只用下面判过的那两个成员
+    const connection: any = Reflect.get(connectionCtx, 'connection');
     if (!connection?.fetch?.register || typeof connectionCtx.effect !== 'function') return;
     connectionCtx.effect(() => connection.fetch.register({
       path: LIBRARY_PATH,
@@ -52,8 +91,8 @@ export async function apply(ctx) {
       fetch: async () => {
         try {
           const [{ resolveWorkspace }, { readLibrary }] = await Promise.all([
-            import('../lib/workspace.mjs'),
-            import('../lib/library.mjs'),
+            import('../lib/workspace.ts'),
+            import('../lib/library.ts'),
           ]);
           const workspace = resolveWorkspace();
           if (!workspace) {
@@ -72,14 +111,14 @@ export async function apply(ctx) {
       path: ASSET_PATH,
       methods: ['GET'],
       requestBody: 'buffered',
-      fetch: async (request) => {
+      fetch: async (request: Request) => {
         const url = new URL(request.url);
         const subject = url.searchParams.get('subject') || '';
         const rel = url.searchParams.get('path') || '';
         try {
           const [{ resolveWorkspace }, { assetFile, contentTypeOf }] = await Promise.all([
-            import('../lib/workspace.mjs'),
-            import('../lib/assets.mjs'),
+            import('../lib/workspace.ts'),
+            import('../lib/assets.ts'),
           ]);
           const workspace = resolveWorkspace();
           const file = workspace ? assetFile({ workspace, subject, rel }) : null;
@@ -102,14 +141,14 @@ export async function apply(ctx) {
       path: REFERENCE_PATH,
       methods: ['GET', 'POST'],
       requestBody: 'buffered',
-      fetch: async (request) => {
+      fetch: async (request: Request) => {
         try {
-          const { resolveWorkspace } = await import('../lib/workspace.mjs');
+          const { resolveWorkspace } = await import('../lib/workspace.ts');
           const workspace = resolveWorkspace();
           if (!workspace) {
             return Response.json({ error: '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。' }, { status: 500 });
           }
-          const { readReference, writeReference } = await import('../lib/reference.mjs');
+          const { readReference, writeReference } = await import('../lib/reference.ts');
 
           if (request.method === 'GET') {
             const url = new URL(request.url);
