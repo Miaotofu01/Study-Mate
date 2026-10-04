@@ -213,5 +213,9 @@ export async function apply(ctx: PluginContext): Promise<void> {
 
     // 作答数据（#72）：路径、方法、请求体、状态码映射都在 lib/attempts-route.ts 里，这里只挂一行
     import('../lib/attempts-route.ts').then((module) => module.registerAttemptRoutes(connectionCtx), (error) => { console.warn(`StudyMate：作答数据路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
+
+    // 问答面板（#79）：POST /api/studymate/ask —— 阅读端就地调模型，不经过总控。
+    // 具体实现在 lib/ask/**，这个文件不认识它的形状（与上面三条同一种姿势）。
+    void import('../lib/ask/index.ts').then(({ registerAskRoute }) => registerAskRoute(connectionCtx as Parameters<typeof registerAskRoute>[0])).catch((error) => { console.warn(`StudyMate：问答路由挂不上。${error instanceof Error ? error.message : String(error)}`); });
   });
 }
