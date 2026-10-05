@@ -199,8 +199,12 @@ export function taskToolSpecs(service: TaskService): TaskToolSpec[] {
         required: ['id'],
         properties: {
           id: { type: 'string', description: '任务 id。' },
+          // 上界只写在描述里，**不写 `minimum`/`maximum`**：宿主认的 JSON Schema 子集是
+          // 「type / oneOf / properties / required / additionalProperties / items / enum / const
+          // + 注解」，多一个关键字就整批工具注册不上（实测过：注册期直接抛，插件只能退回旧路径）。
+          // 真正的上界由 `service.wait` 按 `MAX_WAIT_MS` 自己拒（越界回 `[TASK_BAD_INPUT]`）。
           timeoutMs: {
-            type: 'integer', minimum: 1, maximum: MAX_WAIT_MS,
+            type: 'integer',
             description: `这次最多等多少毫秒（默认 ${DEFAULT_WAIT_MS}，上限 ${MAX_WAIT_MS}）；超时返回下一步提示。`,
           },
         },

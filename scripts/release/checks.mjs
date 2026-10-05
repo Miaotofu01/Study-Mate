@@ -125,6 +125,10 @@ const groups = {
       'scripts/tests/test_tools_context.mjs',
       'scripts/tests/test_tools_validate.mjs',
       'scripts/tests/test_tools_rewrite.mjs',
+      // 工具 schema 的**宿主子集**：多一个关键字、或把 `type` 写成数组，整批工具在真宿主里
+      // 注册不上（真发生过一次，而 test:dsh 的探针只按名字查八个学习工具、抓不住）。
+      // 这条直接逐个走 schema，不看名字。
+      'scripts/tests/test_tools_schema_subset.mjs',
       // 任务域 lib/tasks/**（#73）：六态状态机、owner 句柄与越权、durable 落盘的**跨进程**接上、
       // 五个 studymate_task_* 工具、阅读端的 GET /api/studymate/tasks。
       // 跨进程那一半的「进程 A」是夹具 scripts/tests/fixtures/tasks_producer.mjs。

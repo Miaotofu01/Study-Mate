@@ -295,7 +295,9 @@ export function inlineWaitMs(): number {
 
 const TEXT = { type: 'string' } as const;
 const INTEGER = { type: 'integer' } as const;
-const NULLABLE_TEXT = { type: ['string', 'null'] } as const;
+// 可空写成 `oneOf` 两支，**不写 `type: ['integer','null']`**：宿主认的 JSON Schema 子集里
+// `type` 只能是单个字符串，类型数组会让**整批工具**在注册期直接抛（插件只能退回旧路径）。
+const NULLABLE_INTEGER = { oneOf: [{ type: 'integer' }, { type: 'null' }] } as const;
 
 /** 跑的事实（`runner.ts` 的 `RunFacts`）的 JSON Schema。 */
 export const RUN_FACTS_SCHEMA = {
@@ -315,7 +317,7 @@ export const RUN_FACTS_SCHEMA = {
         properties: { 声明: TEXT, 路径: TEXT },
       },
     },
-    退出码: { type: ['integer', 'null'] },
+    退出码: NULLABLE_INTEGER,
     信号: TEXT,
     结局: { type: 'string', enum: ['跑完', '超时', '取消', '起不来'] },
     毫秒: INTEGER,
