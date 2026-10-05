@@ -19,7 +19,7 @@
          这是与 #84 用户故事 36 的**已知偏离**，宿主没有「按预设注册工具」的接口
          （`ctx.tools.restrict()` 要求 agent 作用域，插件拿到的是 profile 根 ctx），
          所以这条套件钉住的是事实而不是理想；结论与去向写在
-         `docs/规范/工程约束.md` §一「技能与工具的可见边界」。 */
+         `docs/规范/工程约束.md` §二「技能与工具的可见边界」。 */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
