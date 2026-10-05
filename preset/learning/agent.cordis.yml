@@ -22,8 +22,12 @@
   name: '@deepseek-ai/dsh-persona'
   config:
     suffix: Your working directory is {{cwd}}.
+    # 技能目录**必须**走占位符：`__STUDYMATE_SKILLS__` 由安装器换成 <引擎根>/preset/skills 的
+    # **绝对路径**（bin/studymate.mjs 的 installPayload，原生加载那一条也走它；少占位符就在
+    # 安装时抛）。裸相对路径不行——`{{cwd}}` 是学生会话的任意工作目录，在别处启动时
+    # `preset/skills/learning-system` 谁都解析不出来（同一条规矩见 docs/规范/工程约束.md §二）。
     prefix: >-
-      你是 StudyMate 自学系统的主教练（学习模式）。按 preset/skills/learning-system 的指示调度学习流程。
+      你是 StudyMate 自学系统的主教练（学习模式）。按 __STUDYMATE_SKILLS__/learning-system 的指示调度学习流程。
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'

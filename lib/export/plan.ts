@@ -151,9 +151,14 @@ export function planExport(options: PlanExportOptions): ExportPlan {
   const wanted = options.subjects === undefined || options.subjects.length === 0 ? null : new Set(options.subjects);
   const chosen = wanted === null ? allSubjects : allSubjects.filter((subject) => wanted.has(String(subject.slug)));
   if (chosen.length === 0) {
+    // 两条来路各说各的话，别共用同一个模板：`--subject` 点名了挑不出来的科目（要的是…有的是…），
+    // 与「工作区在、一个科目都没建」——#90 把后者从抛错改成空清单（lib/library.ts）之后，这条
+    // 以前到不了的路第一次可达；照旧模板印出来会是「要的是 ，有的是 （一门都没有）」，两个空位。
     const known = allSubjects.map((subject) => String(subject.slug)).join('、');
-    throw new ExportPlanError(`工作区里没有要导的科目：要的是 ${[...(wanted ?? [])].join('、')}，`
-      + `有的是 ${known || '（一门都没有）'}`);
+    throw new ExportPlanError(wanted === null
+      ? '工作区里一个科目都没有：还没建过科目，没有可以导的东西'
+      : `工作区里没有要导的科目：要的是 ${[...wanted].join('、')}，`
+        + `有的是 ${known || '（一门都没有）'}`);
   }
   // 快照里的工作区路径是**导出这台机器**的绝对路径：离线产物要能拷走、能分享，
   // 所以抹成一个标记（阅读端只在「读不到数据」那张错误卡上显示过它）。

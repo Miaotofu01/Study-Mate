@@ -306,7 +306,9 @@ export async function askPanel(deps: AskDeps, input: AskRequestInput = {}): Prom
   const summary = assembled.summary || assembled.body;
   const where = lesson.rel || lesson.file;
   // 引用与它的来源进证据：日后对账要能看出「学生当时划的是哪一段、在哪一小节」，
-  // 光有提问原文（那往往是一句「这里为什么」）读不出他卡在哪（#92）。
+  // 光有提问原文（那往往是一句「这里为什么」）读不出他卡在哪（#92）。`位置：` 因此比从前
+  // 多带一截小节——这是 US 32 驱动下的有意扩展（与 spec 的 Out of Scope 有张力，字段没变），
+  // 登记在 `docs/设计/阅读端呈现验收-2026-10-05.md` §五 第 15 条。
   const quote = quoteEvidence(input.selection);
   const anchor = selectionAnchorLabel(input.selectionAnchor);
   const evidence = [

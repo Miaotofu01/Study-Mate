@@ -19,6 +19,11 @@ import assert from 'node:assert/strict';
 import {
   clientInternals, findByProp, renderWithState, resetHookState, setHookState, viewText,
 } from './fixtures/client_harness.mjs';
+// 期望值**从唯一出处取**（`lib/math.ts` 是随包 KaTeX dist 的清单与取址判据）：
+// 在这里再抄一份 `katex.min.css` / `/api/studymate/math` 字面量，改真源时这条断言照样绿。
+import {
+  MATH_CSS, MATH_ENDPOINT as HOST_MATH_ENDPOINT, MATH_JS,
+} from '../../lib/math.ts';
 
 const internals = clientInternals();
 const { MathSpan, mathNodes, mathSource, MATH_ENDPOINT, Question, SubjectiveBody } = internals;
@@ -139,10 +144,14 @@ test('参考答案与判分要点（主观题）里的公式同样排版', () =>
 });
 
 test('资源位置：默认走 Host 半的投送路由（导出页那条覆盖在浏览器套件里验）', () => {
+  // 三个期望值全部来自 `lib/math.ts`：前缀、样式表名、引擎名。
+  // 这套件是「阅读端拼出来的地址 = Host 半真的投送的那几个」这条契约的 Node 侧判据，
+  // 所以它必须在**改真源时变红**——两边各写一份字面量就不是断言，是复读。
   const source = mathSource();
-  assert.equal(source.css, `${MATH_ENDPOINT}/katex.min.css`);
-  assert.equal(source.js, `${MATH_ENDPOINT}/katex.min.js`);
-  assert.equal(MATH_ENDPOINT, '/api/studymate/math', '这个常量必须与 lib/math.ts 的 MATH_ENDPOINT 逐字一致');
+  assert.equal(source.css, `${HOST_MATH_ENDPOINT}/${MATH_CSS}`);
+  assert.equal(source.js, `${HOST_MATH_ENDPOINT}/${MATH_JS}`);
+  assert.equal(MATH_ENDPOINT, HOST_MATH_ENDPOINT,
+    '这个常量必须与 lib/math.ts 的 MATH_ENDPOINT 逐字一致');
 });
 
 test('按需加载的判据在组件里：没有数学式就没有 MathSpan（也就没有请求）', () => {

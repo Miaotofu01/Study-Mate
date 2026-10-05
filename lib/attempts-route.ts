@@ -2,7 +2,7 @@
    StudyMate · Host 半路由 —— 作答数据的写入端点
 
    `POST /api/studymate/attempts` 是阅读端落盘作答的**唯一**入口（目标态规格 §4.3 的两条
-   写入路径之一，另一条是 student → `reference/`，见 ADR-0010）。前端点一下选项 → 这里 →
+   写入路径之一，另一条是 student → `reference/`，见 ADR-0010）。阅读端点一下选项 → 这里 →
    `lib/attempts.ts` 写 `attempts/<NNNN>-<节点id>.json`；**题库文件一个字节都不碰**（ADR-0007）。
 
    为什么单独成文件、只导出 `registerAttemptRoutes(ctx)`：`bin/dsh-plugin.ts` 是全插件共享的
@@ -15,10 +15,10 @@
      · **只开 POST，不另开 GET**：读走 payload（`GET /api/studymate/library` 的
        `node.attempts`，`lib/library.ts` 已经把它挂上去了）。再开一条读路径就是第二份真相。
      · 冲突（409 `version-conflict`）与幂等重放都只是把 `writeAttempts` 的回执**原样**递出去
-       ——栅栏在数据层，这里不做第二套判断（两处判断迟早不一致）。前端拿 409 里带回来的
+       ——栅栏在数据层，这里不做第二套判断（两处判断迟早不一致）。阅读端拿 409 里带回来的
        `attempts` + `version` 就地重读，不必再跑一趟。
      · 路由注册也走 `connectionCtx.effect`：注册是**有主的**副作用，插件卸载时各自拆各自的
-       （与 bin/dsh-plugin.ts 里另外三条路由同一口径）。
+       （与 bin/dsh-plugin.ts 里另外那几条路由同一口径）。
      · 注册约定与 `registerAskRoute` / `registerTaskRoute` 逐字相同：**收外层 ctx、自己
        `inject(['connection'])`**。原来这里收的是注入后的 `connectionCtx`、由 bin 那边注入，
        四条路由因此有两种姿势——同一个插件里「挂一条路由」不该有两套写法。
@@ -26,7 +26,7 @@
 
 import { routeError } from './route-envelope.ts';
 
-/** 路由路径：前端 `lib/client.js` 的 `ATTEMPTS_ENDPOINT` 必须与它逐字一致。 */
+/** 路由路径：阅读端 `lib/client.js` 的 `ATTEMPTS_ENDPOINT` 必须与它逐字一致。 */
 export const ATTEMPTS_PATH = '/api/studymate/attempts';
 
 /** connection 的精确路由表（形状由宿主决定，这里只描述用得到的成员）。 */
@@ -86,7 +86,7 @@ export function registerAttemptRoutes(ctx: RouteContext | null | undefined): voi
  *   `{ subject, node, questions, operationId, expectedVersion }`
  *     · `questions`：题 id（`<锚点文本>#<题号>`）→ 这次作答（`选` / `对` / `自评` / `错因`）；
  *     · `operationId`：幂等键——重放只回放上次的回执，不写第二遍（双击、超时重试）；
- *     · `expectedVersion`：前端读 payload 时看到的作答版本号，对不上就 409 拒绝并重读。
+ *     · `expectedVersion`：阅读端读 payload 时看到的作答版本号，对不上就 409 拒绝并重读。
  *
  * 返回就是 `writeAttempts` 的回执，HTTP 状态码取回执里的 `status`（成功恒 200）；
  * 失败那一侧的信封是 `lib/route-envelope.ts` 那一份（`{ ok: false, error: { code, message } }`，
