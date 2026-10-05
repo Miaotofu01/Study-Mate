@@ -10,7 +10,7 @@
    三档状态映射、按前置依赖分层、锚点四态对账、术语表 / Mission / 学习记录 / lab 的解析口径、
    「继续学」的挑选顺序、零节点科目跳过。刻意不同的地方只有四处，
    都写在各自位置的注释里：
-     1. 课件正文内联（lesson_md），不再让前端去 fetch lessons/<slug>/<file>.md；
+     1. 课件正文内联（lesson_md），不再让阅读端去 fetch lessons/<slug>/<file>.md；
      2. 顶层多出 workspace 与 memory_md（Host 半要知道自己在读哪个库、共享记忆是什么）；
      3. 顶层不再有 source / note —— 那是原型构建脚本自己的元信息（相对路径、
         「由构建脚本抽出」），放进插件 payload 会误导人；

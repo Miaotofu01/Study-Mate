@@ -166,7 +166,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
     }), 'studymate: 课件配图路由');
 
     // 参考资料：GET 读一份文本（二进制给 404），POST 落一份**学生自己加的**（ADR-0010 的
-    // 第二条、也是最后一条前端写学习内容的路径）。
+    // 第二条、也是最后一条阅读端写学习内容的路径）。
     // 两个动作用**一次注册**：connection 的精确路由以 path 为键，同一个 path 注册第二次会
     // 抛「already registered」，所以只能把方法一起声明、在处理器里看 request.method。
     connectionCtx.effect(() => connection.fetch.register({
@@ -223,7 +223,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
     void import('../lib/watch/index.ts').then((watch) => watch.registerWatchChannel(connectionCtx), (error) => console.warn(`StudyMate：变更推送通道没挂上。${error instanceof Error ? error.message : String(error)}`));
   });
 
-  /* ── 另外三条路由：各子系统自己 inject(['connection']) ─────────────────────
+  /* ── 另外那几条路由：各子系统自己 inject(['connection']) ───────────────────
      注册约定只有一种——**收外层 ctx、自己注入**（与 `registerTaskRoute` 逐字相同）。
      所以它们挂在这里、不挂进上面那个 `ctx.inject` 回调里：那个回调是「已经拿到
      connection」的地方，而这几个模块要自己决定「connection 就绪才注册」。

@@ -41,7 +41,7 @@ export const MANIFEST_FILE = 'export.json';
 export const VENDOR_DIR = 'vendor';
 export const ASSETS_DIR = 'assets';
 
-/** 与 `bin/dsh-plugin.ts` 里那三条路由同名——离线页面就地作答这几条（见 hostScript）。 */
+/** 与 `bin/dsh-plugin.ts` 里那几条路由同名——离线页面就地作答这几条（见 hostScript）。 */
 export const LIBRARY_ENDPOINT = '/api/studymate/library';
 export const REFERENCE_ENDPOINT = '/api/studymate/reference';
 export const ASSET_ENDPOINT = '/api/studymate/asset';
@@ -197,7 +197,7 @@ export function hostScript(): string {
      window.katex 上（产物里那份走 vendor 包装壳登记进模块表，由 boot.js 取出来挂上）。 */
   window.__STUDYMATE_MATH__ = { css: ${JSON.stringify(`${MATH_ASSET_DIR}/katex.min.css`)}, js: '' };
 
-  /* ③ fetch 应答：形状照 bin/dsh-plugin.ts 的三条路由。 */
+  /* ③ fetch 应答：形状照 Host 半那几条路由（bin/dsh-plugin.ts 与各子系统自己的路由模块）。 */
   function json(body, status) {
     return new Response(JSON.stringify(body), {
       status: status || 200,

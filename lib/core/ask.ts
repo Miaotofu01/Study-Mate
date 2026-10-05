@@ -52,9 +52,14 @@ export const LESSON_LIMIT = 12000;
 export const SUMMARY_LIMIT = 60;
 
 /**
- * 误解记录里那条引用原文的上限（字符）。`evidence` 整体上限 2000，引用不能把提问原文挤掉：
+ * 误解记录里那条引用原文的上限（字符）。500 是按**整条 `evidence` 上限 2000 字**倒推的：
  * 一次划了一整屏（长段落、整段代码）是正常用法，原样塞进去会让整条记录被判 400——
  * 学生答成了却「误解记录没写进去」，而罪魁只是他划得长了一点。
+ *
+ * **它保不住「提问原文一定不被挤掉」**：`question` 这一路没有 clamp（提问原文是这条记录里最
+ * 重要的一样，截它比截引用更伤），所以「超长提问 + 一段引用」仍可能被数据层拒（400）。
+ * 这是**已知边界**，不是没想到——登记在 `docs/设计/阅读端呈现验收-2026-10-05.md` §五 第 16 条；
+ * 要根治得给提问单独定一个上限，那是另一条决定，别顺手在这里截。
  */
 export const EVIDENCE_QUOTE_LIMIT = 500;
 
@@ -158,7 +163,8 @@ export function quoteEvidence(selection: unknown, limit = EVIDENCE_QUOTE_LIMIT):
  * 缺 `lesson` / `question` 直接抛 `AskContextError`——两样都缺的请求没有意义，静默发一次
  * 空上下文的调用既花钱又给不出对的答案。`selection` 与 `memory` 可以缺：没划中段落时面板
  * 本来就允许直接打字提问，共享记忆在工作区里也可能还是空的。
- */export function buildAskContext(input: AskContextInput = {}): AskRequestBody {
+ */
+export function buildAskContext(input: AskContextInput = {}): AskRequestBody {
   const lesson = text(input.lesson);
   if (lesson === '') {
     throw new AskContextError('lesson', '当前课件是空的：面板要带上正在读的这一课才答得准');

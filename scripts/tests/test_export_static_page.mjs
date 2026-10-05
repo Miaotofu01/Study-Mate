@@ -277,3 +277,22 @@ test('--subject 只导一门：另一门不进快照，配图也不搬', async (
   assert.ok(!outcome.files.some((file) => file.startsWith('assets/extra/')), '没导的科目不该有配图');
   assert.throws(() => planExport({ workspace, react, subjects: ['不存在的科目'] }), /没有要导的科目/);
 });
+
+test('一个科目都没建的工作区：导出给一句读得通的话，而不是把空变量塞进模板', (t) => {
+  // #90 把「工作区在、零可用科目」从抛错改成空清单（lib/library.ts 的第 4 条），于是 planExport
+  // 这条「挑不出科目」的分支第一次可达。它与 `--subject` 点名不存在科目（上一条）是两条来路，
+  // 共用同一个模板就会印出「要的是 ，有的是 （一门都没有）」——两个空位。
+  const root = tempDir(t, 'studymate-export-empty-');
+  const workspace = path.join(root, '学习资料');
+  fs.mkdirSync(path.join(workspace, '.learning', 'subjects'), { recursive: true });
+  const react = resolveReact({
+    env: { ...process.env, STUDYMATE_REACT_DIR: fakeReactRoot(root) },
+    probeGlobal: false,
+  });
+  assert.throws(() => planExport({ workspace, react }), (error) => {
+    assert.match(error.message, /一个科目都没有/, `说的是「一个都没有」：${error.message}`);
+    assert.ok(!/要的是\s*[，,]/.test(error.message), `别把空的「要的是」塞进模板：${error.message}`);
+    assert.ok(!error.message.includes('（）'), `别留空括号：${error.message}`);
+    return true;
+  });
+});
