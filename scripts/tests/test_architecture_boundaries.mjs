@@ -73,6 +73,13 @@ const DOMAIN_RULES = {
   export: { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },
   bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'lab', 'watch', 'export', 'ask'], builtin: true, package: false },
   client: { allow: [], builtin: false, package: false },  // 浏览器侧单文件：只与模块加载器打交道
+  // katex 域（#91）：**随包发的第三方 dist**（`lib/katex/**`：KaTeX 的 min.js / min.css /
+  // woff2 字体 / LICENSE、README），不是我们的源码——它没有 import、没有导出，唯一的读者是
+  // `lib/math.ts`（按路径读字节：投送给阅读端与搬进导出产物都走它）。
+  // 为什么也登记成域：`lib/` 下的一级目录就是域，**新增目录一律要在这张表里登记**；给第三方
+  // 字节开一个「反正扫不到东西所以不用登记」的例外，正是这条规矩最容易被绕开的口子。
+  // `allow: []` 是真话：dist 谁也不 import，我们的源码也不许 import 它（那不是模块）。
+  katex:  { allow: [], builtin: false, package: false },
 };
 
 /* `lib/client.js` 的域是 `client` 而不是 `lib`：那是浏览器里跑的单文件，跟 Host 数据层

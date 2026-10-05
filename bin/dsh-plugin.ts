@@ -241,4 +241,9 @@ export async function apply(ctx: PluginContext): Promise<void> {
   // 问答面板（#79）：POST /api/studymate/ask —— 阅读端就地调模型，不经过总控。
   // 具体实现在 lib/ask/**，这个文件不认识它的形状（与上面两条同一种姿势）。
   void import('../lib/ask/index.ts').then(({ registerAskRoute }) => registerAskRoute(ctx)).catch((error) => { console.warn(`StudyMate：问答路由挂不上。${error instanceof Error ? error.message : String(error)}`); });
+
+  // 公式排版的离线资源（#91）：GET /api/studymate/math/… —— 随包的 KaTeX dist，页面确实出现
+  // 数学式时阅读端才来取。清单、MIME 与边界判据在 lib/math.ts，注册在 lib/math-route.ts
+  // （一条文件一条精确路由），这个文件同样不认识它们的形状。
+  import('../lib/math-route.ts').then((module) => module.registerMathRoute(ctx), (error) => { console.warn(`StudyMate：公式资源路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
 }

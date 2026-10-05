@@ -174,6 +174,12 @@ const groups = {
       'scripts/tests/test_export_leak_guard.mjs',
       'scripts/tests/test_export_tool_task.mjs',
       'scripts/tests/test_export_cli.mjs',
+      // #91 的 Host 半：随包发的 KaTeX dist（CSS ↔ 字体的双向对账、版本对账、精确 MIME）
+      // 与它的投送路由（一条文件一条精确路由、路径落在 /api 之内、取址判据）。
+      // 阅读端那一半（题库字段只接数学式、降级可读）在 test_client_math.mjs；
+      // 真浏览器里「按需加载 → 排版成功」在 --browser 组的 browser/math_test.mjs。
+      'scripts/tests/test_host_math_route.mjs',
+      'scripts/tests/test_client_math.mjs',
       // #87 的验收面：技能与工具的**可见边界**。出方向（别的预设扫不到 StudyMate 的
       // 技能）、入方向（学习预设显式声明的技能目录在包内）各一条，外加一条把
       // 「工具/面板仍在 profile 根注册」这个与 spec 的已知偏离钉成事实的特征化断言。
@@ -216,7 +222,14 @@ const groups = {
       'browser/lab_run_test.mjs',
       // #82：**导出的产物本身**在 file:// 下打开（真 Chrome + 真 React）：样式、公式、图片、
       // 题目全部可用，且控制台/页面/失败请求干净。不搭夹具页——测的就是学生拿到的那份东西。
+      // #91 换掉了里面那条**假绿**的公式断言（原来只匹配 TeX 原文），并加了「题面里的公式也排
+      // 出来了」「KaTeX 字体真的加载了」两条。
       'browser/export_file_test.mjs',
+      // #91：公式排版。夹具是一个说 HTTP 的迷你宿主，它按 lib/math-route.ts 注册出来的路由投送
+      // **包里那份 KaTeX dist**，页面跑真 lib/client.js。五个场景：正文行内/块级公式排出来、
+      // 公式只写在题面里也照样加载（判据把题库字段算进去）、没有数学式的页面零请求、
+      // 资源缺失降级成可读 TeX、排版失败给一句明确的错。导出产物那一半在上面那条里（file://）。
+      'browser/math_test.mjs',
       // #86：阅读端**四路由 × 三档视口**。上面那条 reading_test 恒定 1440×960，于是
       // lib/client.js 里两条 `@media (max-width: 900px)` 从来没被执行过；这一条把四个面
       // （今天学什么 / 科目主页 / 课件页 / 搜索）在宽窄两档各取一次景，亮暗两套的实测对比度
