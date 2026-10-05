@@ -157,14 +157,23 @@ test('反色文字压在品牌填充上达 AA（两套主题）', () => {
 test('这些文本档都用在「正常字号」上，所以门槛是 4.5 而不是 3.0', () => {
   // WCAG 的「大号文字」是 ≥24px（或 ≥18.66px 粗体），那一档才够用 3.0:1。
   // 这条把「我们按 4.5 要求」的前提钉住：真有 ≥24px 的用法，就得回头重新论证门槛。
+  // 字号从 #89 起走 --smb-fs-* token（原来写的是字面 px），所以这里也要解 token——
+  // 不解的话这条会静默变空转，那比红更糟。
   const big = [];
   for (const match of CSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     const body = match[2];
     if (!/color\s*:\s*var\(--smb-(text|brand)/.test(body)) continue;
-    const size = /font-size\s*:\s*([\d.]+)px/.exec(body);
+    const literal = /font-size\s*:\s*([\d.]+)px/.exec(body);
+    const token = /font-size\s*:\s*var\((--smb-fs-[\w-]+)\)/.exec(body);
     const weight = /font-weight\s*:\s*([\d.]+)/.exec(body);
-    if (!size) continue;
-    const px = Number(size[1]);
+    let px = literal ? Number(literal[1]) : null;
+    if (px === null && token) {
+      const spec = TOKENS.get(token[1]);
+      const value = spec && /^([\d.]+)px$/.exec(String(spec.fallback));
+      if (!value) { big.push(`${match[1].trim().slice(0, 60)} → ${token[1]} 解不出 px`); continue; }
+      px = Number(value[1]);
+    }
+    if (px === null) continue;
     const bold = weight ? Number(weight[1]) >= 700 : false;
     if (px >= 24 || (bold && px >= 18.66)) big.push(`${match[1].trim().slice(0, 60)} → ${px}px`);
   }

@@ -124,6 +124,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 | `browser/reading_position_test.mjs` | 阅读位置三级恢复（section → offset → progress）与锚点四态复核：真 Chrome 里挂**真 `lib/client.js`**（最小模块装载器 + 真 React），用 CDP 点真按钮、滚真滚动区；夹具在 `fixtures/reading_position_fixture.mjs`。纯数学那一半在 `test_client_reading_position.mjs`（默认门禁里跑，不需要浏览器） |
 | `browser/lab_run_test.mjs` | 交付物题的**「跑一次」**（#77）：真浏览器里挂**真 `lib/client.js`**，打到真 HTTP 迷你宿主（`lib/lab/route.ts` 注册出来的真路由 → 真 spawn 一条命令）——验「不按不跑 → 按了才跑、真实输出回到界面、落进 `attempts/<NNNN>-<节点>.json`、刷新之后还在、界面上一个判决词都没有」；夹具与 `attempts_test.mjs` 同一套 |
 | `browser/export_file_test.mjs` | **导出的产物本身**在 `file://` 下打开（#82 验收第 1 条）：先用真导出器导一份到临时目录，再用真 Chrome 打开 `file://<导出目录>/index.html`——样式（离线兜底 token）、行内/块级公式、配图（`naturalWidth > 0`）、代码块、题目与判分、参考资料只读都要可用，且控制台/页面/失败请求干净。不搭夹具页：测的就是学生拿到的那份东西。真 React + 真浏览器缺任一就**明确跳过**（退出码 3） |
+| `browser/lesson_body_test.mjs` | **课件页正文与页头**（#89）：夹具里的每一份内容都是「刚好越界」的那一份——1100 宽的位图、铺满列宽的矢量图、一行比列宽长的代码、无空格的长标识符与长 URL、表头 nowrap 的宽表格、27 字的中文标题、三条题目锚点。宽窄两档各跑一遍：位图不超列宽、矢量图随列宽、暗色下配图被压暗、代码块语言标签与块内横向滚动、页面与正文列都没有横向滚动条、一屏里成句的文字只有一种字号（13px，行高 1.65 跟着走）、顶部只剩一条（课件标题 + 小节跳转 + 进度）、面包屑按全角字省略（宽档 17 字 / 窄档 11 字）、题目标记的组号与右栏那一组对得上 |
 | `browser/measure.mjs` | 对比度、计算样式与 hover 测量（手动） |
 | `browser/hovers.mjs` | 批量比较 hover 前后的样式（手动） |
 | `browser/shot.mjs` | 浅色/深色截图与元素边界记录（手动） |
