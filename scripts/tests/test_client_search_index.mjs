@@ -9,6 +9,7 @@
      3. 学习记录与误解记录的正文能被搜到                —— describe「学习记录 / 误解记录」
      4. 索引不落盘、重建一次与首次一致                  —— describe「派生物」
      5. 跨科目同名内容各留一条、点它进对的科目          —— describe「跨科目」
+     6. 每条命中说得出属于哪门科目、哪个节点（#90）      —— describe「出处」
 
    附件折叠块的空态（第六条验收）在 `test_client_fold_empty_state.mjs`：
    套件按「搜索」与「附件」切开，是因为它们改的是 `lib/client.js` 里两块互不相干的地方，
@@ -22,7 +23,7 @@ import assert from 'node:assert/strict';
 import { clientInternals, loadClient, renderWithState } from './fixtures/client_harness.mjs';
 
 const internals = clientInternals();
-const { buildIndex, lessonFragments, blockFragments, KIND_ORDER, SearchPalette } = internals;
+const { buildIndex, lessonFragments, blockFragments, KIND_ORDER, SearchPalette, hitWhere } = internals;
 
 /** 一节课件：`#78` 点名的六类块 + 未点名的四类，各来一条，标题都带可搜的独有词。 */
 const LESSON = [
@@ -379,6 +380,43 @@ test('#78 跨科目：同一科目内重复的同一段话仍然只留一条', (
     nodes: [nodeWith('## 小节\n\n重复的一段话\n\n另一个小节里重复的一段话', { id: 'one' })],
   })]);
   assert.equal(dup.filter((hit) => hit.text === '重复的一段话').length, 1, '同一节点内应去重');
+});
+
+/* ── 6. 每条命中说得出「在哪」（#90） ──────────────────────────────────────
+   结果行那一行出处文字是给跨科目搜索用的：同一条正文可能来自任何一门课，
+   科目与节点必须排在最前（被省略号截掉时先丢的是补充，不是出处）。 */
+
+test('#90 出处：科目在前、节点其次、这一条自己的补充在最后', () => {
+  const index = buildIndex([subject({
+    nodes: [nodeWith('## 小节·列表\n\n列表项甲', { id: 'demo.one', title: '演示节点' })],
+  })]);
+  assert.equal(hitWhere(findHits(index, '列表项甲')[0]), '演示科目 · 演示节点 · 小节·列表');
+  // 节点上的命中（大纲那几类）没有小节补充，出处就只有科目与节点
+  assert.equal(hitWhere(findHits(index, '说清演示目标')[0]), '演示科目 · 演示节点 · 目标');
+});
+
+test('#90 出处：节点为空的命中（术语 / 学习记录 / 误解）退到科目，补充照旧跟在后面', () => {
+  const index = buildIndex([subject({
+    nodes: [],
+    glossary: [{ title: '组', terms: [{ term: '术语甲', def: '释义甲', avoid: '' }] }],
+    records: [{ title: '记录标题', date: '2026-01-01', markdown: '# 记录标题\n\n记录的正文甲\n' }],
+  })]);
+  // 术语的 `label` 是它的释义（`buildIndex` 有意这么定：释义也要能搜到），所以出处那行
+  // 是「科目 · 释义」——科目在最前，方程那一条断的就是这个
+  const term = hitWhere(findHits(index, '术语甲')[0]);
+  assert.ok(term.startsWith('演示科目 · '), `科目没有排在最前：${term}`);
+  assert.ok(term.includes('释义甲'), `补充丢了：${term}`);
+  assert.equal(hitWhere(findHits(index, '记录的正文甲')[0]), '演示科目 · 2026-01-01');
+});
+
+test('#90 出处：补充与类别同名时丢掉（没有小节名的一课，隐含小节名就叫「正文」）', () => {
+  // 没有 front matter 标题、也没有二级标题：`parseLesson` 的兜底小节名恰好是「正文」，
+  // 那一条不丢补充的话会印成「正文 正文 正文」
+  const index = buildIndex([subject({ nodes: [nodeWith('一句话都没有小节名的正文。')] })]);
+  const hit = findHits(index, '一句话都没有小节名')[0];
+  assert.equal(hit.kind, '正文');
+  assert.equal(hit.label, '正文');
+  assert.equal(hitWhere(hit), '演示科目 · 演示节点');
 });
 
 test('#78 五类内容都建得出来，类目名与排序表一致', () => {
