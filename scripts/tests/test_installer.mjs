@@ -239,7 +239,7 @@ test('install, reinstall and downgrade preserve workspace and unrelated profile 
   collect(row.config.plugins);
   assert.equal(plugins.find(plugin => plugin.id === 'workflow-ptc').name, '@deepseek-ai/dsh-workflow-ptc');
   assert.deepEqual(plugins.find(plugin => plugin.id === 'skill-filesystem').config.customSkillDirs,
-    [path.join(f.env.DSH_HOME, 'studymate', 'engine', '.dsh', 'skills').split(path.sep).join('/')]);
+    [path.join(f.env.DSH_HOME, 'studymate', 'engine', 'preset', 'skills').split(path.sep).join('/')]);
   assert.match(fs.readFileSync(f.preset, 'utf8'), /@deepseek-ai\/dsh-workflow-ptc/);
   // 安装完必须说清"会话开在哪"：会话目录不在工作区里时，StudyMate 每一步落盘都要授权。
   assert.match(result.stdout, /启动会话时把工作目录设为/);
@@ -247,7 +247,7 @@ test('install, reinstall and downgrade preserve workspace and unrelated profile 
   // 临时目录（Linux 上两者常常都是 /tmp，所以真正钉住改写的是上面那条注入临时目录的断言）；
   // **工作区暂存模式已删**（ADR-0008），副本里不该再有会话目录下的暂存根。
   const skillCopy = fs.readFileSync(path.join(f.env.DSH_HOME, 'studymate', 'engine',
-    '.dsh', 'skills', 'learning-system', 'SKILL.md'), 'utf8');
+    'preset', 'skills', 'learning-system', 'SKILL.md'), 'utf8');
   assert.match(skillCopy, /<subject_path>\/\.stage\//);
   assert.ok(!skillCopy.includes('.studymate-stage'), '暂存模式已删：副本里不该再有工作区暂存根');
   const config = f.yaml(f.config);

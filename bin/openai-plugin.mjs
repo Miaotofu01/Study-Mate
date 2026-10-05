@@ -52,7 +52,8 @@ export function buildOpenAiPlugin({ output = path.resolve('dist') } = {}) {
     existing = path.dirname(existing);
   }
   const realOutput = path.join(fs.realpathSync(existing), ...suffix);
-  for (const name of ['.dsh', 'bin', 'scripts', 'schemas', 'templates', 'docs', 'openai']) {
+  // 技能源在 preset/skills：产物不许落进构建输入里（原来这条列的是 .dsh，技能搬家后跟着走）
+  for (const name of ['preset', 'bin', 'scripts', 'schemas', 'templates', 'docs', 'openai']) {
     if (inside(path.join(fs.realpathSync(source), name), realOutput)) {
       throw new Error(`输出目录不能位于构建源文件内：${outputDir}`);
     }
@@ -77,8 +78,8 @@ export function buildOpenAiPlugin({ output = path.resolve('dist') } = {}) {
     // package.json remains the single source of release versions.
     manifest.version = packageInfo.version;
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-    for (const name of fs.readdirSync(path.join(source, '.dsh', 'skills')).sort()) {
-      const skillSource = path.join(source, '.dsh', 'skills', name);
+    for (const name of fs.readdirSync(path.join(source, 'preset', 'skills')).sort()) {
+      const skillSource = path.join(source, 'preset', 'skills', name);
       if (!fs.statSync(skillSource).isDirectory()) continue;
       const destination = path.join(plugin, 'skills', name);
       copyTree(skillSource, destination);

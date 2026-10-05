@@ -34,7 +34,7 @@ macOS / Linux：
 ```sh
 cd Study-Mate-src
 git branch --show-current                 # 确认在你要试的分支上
-test -f .dsh/skills/learning-discovery/SKILL.md && echo OK
+test -f preset/skills/learning-discovery/SKILL.md && echo OK
 DSH_HOME="$PWD/../discovery-dsh" LEARN_WORKSPACE="$PWD/../discovery-workspace" \
   node bin/studymate.mjs install --profile web --workspace "$PWD/../discovery-workspace"
 dsh web

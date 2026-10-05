@@ -132,7 +132,8 @@ test('rebuild produces identical Antigravity ZIP bytes', t => {
 });
 
 test('buildAntigravityPlugin refuses output inside source directories', () => {
-  assert.throws(() => buildAntigravityPlugin({ output: path.join(root, '.dsh') }), /输出目录不能位于构建源文件内/);
+  // 技能源在 preset/skills：产物落进 preset/ 就是把构建输入当成输出目录
+  assert.throws(() => buildAntigravityPlugin({ output: path.join(root, 'preset') }), /输出目录不能位于构建源文件内/);
   assert.throws(() => buildAntigravityPlugin({ output: path.join(root, 'scripts') }), /输出目录不能位于构建源文件内/);
 });
 
@@ -168,14 +169,14 @@ test('CLI exports Antigravity plugin via build-antigravity', t => {
 });
 
 test('CRLF line endings in source skills adapt cleanly without residual carriage returns', () => {
-  const source = fs.readFileSync(path.join(root, '.dsh/skills/learning-system/SKILL.md'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'preset/skills/learning-system/SKILL.md'), 'utf8');
   const crlf = source.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');
   const adapted = adaptAntigravitySkill(crlf, 'learning-system');
   assert.ok(adapted.includes('Antigravity 宿主约定'));
   assert.doesNotMatch(adapted, /\r/);
 
   for (const role of AGENT_ROLES) {
-    const roleSource = fs.readFileSync(path.join(root, '.dsh/skills', role, 'SKILL.md'), 'utf8');
+    const roleSource = fs.readFileSync(path.join(root, 'preset/skills', role, 'SKILL.md'), 'utf8');
     const roleCrlf = roleSource.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');
     const agent = adaptAntigravityAgent(roleCrlf, role);
     assert.doesNotMatch(agent, /\r/);

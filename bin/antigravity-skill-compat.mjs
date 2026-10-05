@@ -411,7 +411,7 @@ export function adaptAntigravitySkill(content, name) {
   content = content.replaceAll('\r\n', '\n');
   const { frontmatter, body } = splitFrontmatter(content);
 
-  let adaptedBody = body.replaceAll('.dsh/skills/', 'skills/').replaceAll('.dsh/skills', 'skills');
+  let adaptedBody = body.replaceAll('preset/skills/', 'skills/').replaceAll('preset/skills', 'skills');
 
   if (name === 'learning-system') {
     adaptedBody = adaptAntigravityController(adaptedBody);
@@ -481,7 +481,7 @@ export function adaptAntigravityAgent(skillContent, name) {
     '---',
   ].join('\n');
 
-  let cleanBody = body.replaceAll('.dsh/skills/', 'skills/').replaceAll('.dsh/skills', 'skills');
+  let cleanBody = body.replaceAll('preset/skills/', 'skills/').replaceAll('preset/skills', 'skills');
   cleanBody = applyCommonRewrites(cleanBody);
 
   const instructions = `# ${displayName} (Google Antigravity Subagent)

@@ -7,7 +7,7 @@ import { adaptAntigravitySkill, adaptAntigravityAgent, AGENT_ROLES, AGENT_TOOLS 
 import { AGY_HOST_GUIDE, AGY_RECORD_CONTINUITY } from '../../bin/antigravity-interaction.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const skillsDir = path.join(root, '.dsh', 'skills');
+const skillsDir = path.join(root, 'preset', 'skills');
 const skills = fs.readdirSync(skillsDir).filter(name => fs.statSync(path.join(skillsDir, name)).isDirectory()).sort();
 const sources = new Map(skills.map(name => [name, fs.readFileSync(path.join(skillsDir, name, 'SKILL.md'), 'utf8')]));
 const adapted = new Map(skills.map(name => [name, adaptAntigravitySkill(sources.get(name), name)]));

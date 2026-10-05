@@ -5,7 +5,7 @@
 > [课件内容格式](../规范/课件内容格式.md)；要复跑规则断言用
 > `node --test scripts/tests/test_skill_rules.mjs`。
 
-实现基于上游 `14c44f144738ba83850d6bfa98338dc431a12881`；本轮优化接续开发分支的 `a2cb264efbedb1f0c80a8878ced74d74859e8949`。规则归 [learning-discovery](../../.dsh/skills/learning-discovery/SKILL.md)，交接归 [learning-system](../../.dsh/skills/learning-system/SKILL.md)，操作见 [使用指南](learning-discovery-guide.md)。
+实现基于上游 `14c44f144738ba83850d6bfa98338dc431a12881`；本轮优化接续开发分支的 `a2cb264efbedb1f0c80a8878ced74d74859e8949`。规则归 [learning-discovery](../../preset/skills/learning-discovery/SKILL.md)，交接归 [learning-system](../../preset/skills/learning-system/SKILL.md)，操作见 [使用指南](learning-discovery-guide.md)。
 
 **工程检查通过，实际模型行为尚未全部通过。** 已完成 36 次首轮对话尝试、8 次定向复测及 1 次报告格式采样；两次真实建课至首课的角色与渲染链路完成。仍发现过度补问、信息推断和报告偏长，不能把此版本称为稳定通过全部验收。
 

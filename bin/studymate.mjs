@@ -244,7 +244,10 @@ export function readConfig(file) {
 // 造出 standalone 安装留在 <dshHome>/studymate/engine 的那份引擎载荷。
 // 原生插件加载**不**走这里：插件自己就是引擎（见 payloadDirectory）。
 function copyPayload(destination) {
-  for (const relative of ['.dsh/skills', 'preset/learning', 'templates', 'schemas']) {
+  // 技能源与预设源都在 `preset/` 下（技能是 `preset/skills`）。**别挪回 `.dsh/skills`**：
+  // 宿主默认会扫「项目根/.dsh/skills」，技能摆在那里等于任何工作目录落在本仓库/本包里的
+  // 会话都看得见（#87）。拷贝保持同一个相对位置，装出来的副本因此也不在默认扫描面上。
+  for (const relative of ['preset/skills', 'preset/learning', 'templates', 'schemas']) {
     fs.cpSync(path.join(source, relative), path.join(destination, relative), {
       recursive: true,
       filter: (file) => !['__pycache__', '.DS_Store'].includes(path.basename(file)),
@@ -266,7 +269,7 @@ function copyPayload(destination) {
  *
  * 原生插件加载（native）下，已安装的包自身就是引擎：它就在
  * `~/.dsh/profiles/<profile>/node_modules/@yunmiao/studymate`，package.json 的 `files`
- * 已经带了 `templates/`、`schemas/`、`docs/`、`.dsh/skills`，所以再拷一份源码树到
+ * 已经带了 `templates/`、`schemas/`、`docs/`、`preset/skills`，所以再拷一份源码树到
  * `~/.dsh/studymate/engine/` 只是**同一份包的第二份副本**——两份会各自过期。
  *
  * standalone 的那份载荷是**只读材料**：技能、预设、schema、文档与工作区数据骨架
@@ -360,7 +363,7 @@ export function installPayload({ workspaceArg, profile, version, desktop = false
     // 技能改写只改写 staging 里的副本——**原生加载也不写包目录**：安装好的包是随包发的只读
     // 材料，`link:` 安装下它更是学生自己的检出，一次启动就往里写会污染工作树。
     // 原生加载的技能因此是包里那一份（`customSkillDirs` 指向它，见 payloadDirectory 的说明）。
-    const stagedSkills = path.join(stagedEngine, '.dsh', 'skills');
+    const stagedSkills = path.join(stagedEngine, 'preset', 'skills');
     if (!native) {
       for (const entry of fs.readdirSync(stagedSkills, { withFileTypes: true })) {
         if (!entry.isDirectory()) continue;
@@ -380,7 +383,7 @@ export function installPayload({ workspaceArg, profile, version, desktop = false
     const agentFile = path.join(stagedPreset, 'agent.cordis.yml');
     const agent = fs.readFileSync(agentFile, 'utf8');
     if (!agent.includes('__STUDYMATE_SKILLS__')) throw new Error('预设缺少 __STUDYMATE_SKILLS__，安装包不完整。');
-    fs.writeFileSync(agentFile, agent.replaceAll('__STUDYMATE_SKILLS__', path.join(payload, '.dsh', 'skills').split(path.sep).join('/').replaceAll("'", "''")));
+    fs.writeFileSync(agentFile, agent.replaceAll('__STUDYMATE_SKILLS__', path.join(payload, 'preset', 'skills').split(path.sep).join('/').replaceAll("'", "''")));
 
     // 注册预设：`lib/preset.ts`（迁移前的 Python 安装助手的 TS 替代，形状逐字段一致）。
     // 它自己保证「失败时一个字节都不落盘」——所以这里不需要再回滚它那部分。

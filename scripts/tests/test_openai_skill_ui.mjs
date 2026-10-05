@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { getOpenAiSkillDescription, getOpenAiSkillUi } from '../../bin/openai-skill-ui.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const names = fs.readdirSync(path.join(root, '.dsh', 'skills'), { withFileTypes: true })
+const names = fs.readdirSync(path.join(root, 'preset', 'skills'), { withFileTypes: true })
   .filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
 
 // The generator deliberately emits only this YAML subset: two top-level maps,
@@ -54,7 +54,7 @@ test('all twelve skills expose valid quoted UI fields and no tool dependencies',
 test('invocation policy preserves the source role flags and implicit shared protocols', () => {
   const explicitOnly = [];
   for (const name of names) {
-    const source = fs.readFileSync(path.join(root, '.dsh', 'skills', name, 'SKILL.md'), 'utf8');
+    const source = fs.readFileSync(path.join(root, 'preset', 'skills', name, 'SKILL.md'), 'utf8');
     const header = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
     assert.ok(header, `${name} source frontmatter`);
     const disabled = /^disable-model-invocation:[ \t]*true[ \t]*\r?$/m.test(header);

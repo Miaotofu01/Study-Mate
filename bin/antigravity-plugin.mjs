@@ -52,7 +52,8 @@ export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity
     existing = path.dirname(existing);
   }
   const realOutput = path.join(fs.realpathSync(existing), ...suffix);
-  for (const name of ['.dsh', 'bin', 'scripts', 'schemas', 'templates', 'docs', 'antigravity']) {
+  // 技能源在 preset/skills：产物不许落进构建输入里（原来这条列的是 .dsh，技能搬家后跟着走）
+  for (const name of ['preset', 'bin', 'scripts', 'schemas', 'templates', 'docs', 'antigravity']) {
     if (inside(path.join(fs.realpathSync(source), name), realOutput)) {
       throw new Error(`输出目录不能位于构建源文件内：${outputDir}`);
     }
@@ -88,7 +89,7 @@ export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity
     // 2. Generate agents/*.md for each role
     fs.mkdirSync(path.join(plugin, 'agents'), { recursive: true });
     for (const role of AGENT_ROLES) {
-      const skillPath = path.join(source, '.dsh', 'skills', role, 'SKILL.md');
+      const skillPath = path.join(source, 'preset', 'skills', role, 'SKILL.md');
       if (!fs.existsSync(skillPath)) {
         // 静默跳过会建出「没有这个 agent」的插件，而总控照样会按 AGENT_ROLES 派工。
         throw new Error(`Antigravity 插件缺少角色规格：${skillPath}`);
@@ -98,8 +99,8 @@ export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity
     }
 
     // 3. Copy and adapt skills/
-    for (const name of fs.readdirSync(path.join(source, '.dsh', 'skills')).sort()) {
-      const skillSource = path.join(source, '.dsh', 'skills', name);
+    for (const name of fs.readdirSync(path.join(source, 'preset', 'skills')).sort()) {
+      const skillSource = path.join(source, 'preset', 'skills', name);
       if (!fs.statSync(skillSource).isDirectory()) continue;
       const destination = path.join(plugin, 'skills', name);
       copyTree(skillSource, destination);
