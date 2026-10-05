@@ -24,7 +24,7 @@ import { adaptAntigravitySkill, NATIVE_TOOL_FALLBACK as AGY_FALLBACK }
   from '../../bin/antigravity-skill-compat.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const SKILLS_DIR = path.join(ROOT, '.dsh', 'skills');
+const SKILLS_DIR = path.join(ROOT, 'preset', 'skills');
 const { STUDY_TOOL_NAMES } = await import(pathToFileURL(path.join(ROOT, 'lib/tools/index.ts')).href);
 const {
   LAYERS, LAYER_RULES, QUESTION_KINDS, QUESTION_KIND_SHAPES, QUESTION_RULES,

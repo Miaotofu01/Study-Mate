@@ -11,8 +11,8 @@ import { parseYaml } from '../../lib/yaml.ts';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const plugin = pathToFileURL(path.join(root, 'bin/dsh-plugin.ts')).href;
 // 原生加载下引擎就是**已安装的包自身**——package.json 与 package.json 里 files 带的
-// scripts/、templates/、schemas/、docs/、.dsh/skills 都在这个目录里。
-const packageSkills = path.join(root, '.dsh', 'skills').split(path.sep).join('/');
+// scripts/、templates/、schemas/、docs/、preset/skills 都在这个目录里。
+const packageSkills = path.join(root, 'preset', 'skills').split(path.sep).join('/');
 
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-bundle-'));
@@ -76,8 +76,9 @@ test('native loading initializes portable skills and owns the preset lifetime wi
     { __jsExpr: "process.platform === 'win32'" });
   assert.deepEqual(state.config.plugins.find(row => row.id === 'skill-filesystem').config.customSkillDirs,
     [packageSkills]);
-  // 原生加载的引擎 = 已安装的包自身：<root> 是包目录，技能随包发布，摆在包里的 .dsh/skills
-  assert.ok(fs.statSync(path.join(root, '.dsh/skills/learning-system/SKILL.md')).isFile());
+  // 原生加载的引擎 = 已安装的包自身：<root> 是包目录，技能随包发布，摆在包里的 preset/skills
+  // （不是 `.dsh/skills`——那是宿主默认项目根扫描会命中的位置，见 test_skill_visibility.mjs）
+  assert.ok(fs.statSync(path.join(root, 'preset/skills/learning-system/SKILL.md')).isFile());
   assert.equal(fs.existsSync(f.patch), false);
   assert.equal(fs.existsSync(path.join(f.dshHome, '.agent-presets')), false);
   // ~/.dsh/studymate/ 里不再有源码树副本——连空壳目录都不留
@@ -88,7 +89,7 @@ test('native loading initializes portable skills and owns the preset lifetime wi
   fs.writeFileSync(data, 'my learning data');
   const config = { ...f.yaml(f.config), custom: 'keep' };
   fs.writeFileSync(f.config, JSON.stringify(config));
-  const skillSentinel = path.join(root, '.dsh', 'skills', 'obsolete.txt');
+  const skillSentinel = path.join(root, 'preset', 'skills', 'obsolete.txt');
   fs.writeFileSync(skillSentinel, 'old package');
   const again = f.boot({ LEARN_WORKSPACE: '' });
   assert.equal(again.status, 0, again.stderr + again.stdout);

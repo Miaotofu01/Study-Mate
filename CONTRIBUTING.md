@@ -20,7 +20,7 @@
 
 | 你要改 | 先读 |
 |---|---|
-| `.dsh/skills/**` 提示词与角色规格 | 该技能自己的 `SKILL.md`；课件规则归 `lesson-design`，题目归 `layered-practice` |
+| `preset/skills/**` 提示词与角色规格 | 该技能自己的 `SKILL.md`；课件规则归 `lesson-design`，题目归 `layered-practice` |
 | `lib/**` 引擎：纯函数域、数据域（`host/`）、工具域、任务域、监听域、问答域、实验域、导出域 | 该目录自己的文件头注释；[目标态规格](docs/设计/目标态规格.md) §3–§5 |
 | `templates/**` 工作区数据骨架 | [工程约束](docs/规范/工程约束.md) §二；[骨架说明](templates/README.md) |
 | `schemas/*.json` | 该 schema 本身；[文件归属](docs/规范/文件归属.md) |

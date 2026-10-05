@@ -31,10 +31,12 @@ export function listDocMarkdown(source) {
   }
 }
 
-/** 把要分发的那批 markdown 铺进插件的 docs/，保持相对路径，并把 `.dsh/skills` 改写成 `skills`。 */
+/** 把要分发的那批 markdown 铺进插件的 docs/，保持相对路径，并把技能的仓库路径改写成插件里的 `skills/`。 */
 export function writeDocsPayload(source, pluginDirectory) {
   for (const relative of listDocMarkdown(source)) {
-    const text = fs.readFileSync(path.join(source, 'docs', relative), 'utf8').replaceAll('.dsh/skills', 'skills');
+    // 技能在仓库里住 `preset/skills/`（#87 从 `.dsh/skills` 搬出来，避开宿主的默认项目根扫描），
+    // 在插件产物里住 `<plugin>/skills/`：两个无头宿主的适配器是同一个口径。
+    const text = fs.readFileSync(path.join(source, 'docs', relative), 'utf8').replaceAll('preset/skills', 'skills');
     const target = path.join(pluginDirectory, 'docs', relative);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, text);
