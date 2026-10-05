@@ -143,7 +143,7 @@ DSH 侧就是**一个插件包**（`@yunmiao/studymate`）：Host 半注册原�
 - **项目交流群**(QQ)：161914370
 - **参与开发**：[CONTRIBUTING.md](CONTRIBUTING.md)（改哪块先读哪份、本地怎么验、提交信息规范）
 - **变更日志**：[CHANGELOG.md](CHANGELOG.md)
-- **文档**：[使用说明](docs/使用/使用说明.md)（日常怎么用、课型与题型、检查与档案规则）· [Codex 与 ChatGPT](docs/使用/Codex与ChatGPT.md)（OpenAI 插件构建、安装与工作区）· [Antigravity 说明](docs/使用/Antigravity.md)（Antigravity 插件构建、多智能体协同与安装）· [课件内容格式](docs/规范/课件内容格式.md)（内容文件与题目位置的语法）· [文件归属](docs/规范/文件归属.md)（代称 ↔ 路径 ↔ 维护者）· [Agent 交接协议](docs/规范/Agent交接协议.md)（staged 子代理交付的机器边界）· [目标态规格](docs/设计/目标态规格.md)（重构后系统的形状与门禁）· [工程约束](docs/规范/工程约束.md)（目录约定、规则归属、原生工具指针）· [工作区数据骨架](templates/README.md)
+- **文档**：[使用说明](docs/使用/使用说明.md)（日常怎么用、课型与题型、检查与档案规则）· [Codex 与 ChatGPT](docs/使用/Codex与ChatGPT.md)（OpenAI 插件构建、安装与工作区）· [Antigravity 说明](docs/使用/Antigravity.md)（Antigravity 插件构建、多智能体协同与安装）· [课件内容格式](docs/规范/课件内容格式.md)（内容文件与题目位置的语法）· [阅读端呈现](docs/规范/阅读端呈现.md)（四个面「看起来对不对」的意图判据）· [文件归属](docs/规范/文件归属.md)（代称 ↔ 路径 ↔ 维护者）· [Agent 交接协议](docs/规范/Agent交接协议.md)（staged 子代理交付的机器边界）· [目标态规格](docs/设计/目标态规格.md)（重构后系统的形状与门禁）· [工程约束](docs/规范/工程约束.md)（目录约定、规则归属、原生工具指针）· [工作区数据骨架](templates/README.md)
 
 ### 提改动前先跑这几条
 
