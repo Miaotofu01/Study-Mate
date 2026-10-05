@@ -109,6 +109,9 @@ const groups = {
       'scripts/tests/test_core_coverage_floor.mjs',
       // 阅读端（lib/client.js）的契约：token 对比度达 WCAG AA（亮暗两套）、
       // 动效四档与 prefers-reduced-motion、首次引导定位几何（纯函数，node:vm 里跑）
+      // 排版那一层（#89）：token 与「字号行高成套」的静态判据（配对齐全、行高无单位数、
+      // 12px 以上必须引阶梯、正文那批选择器只许引 --smb-fs-body、窄档覆盖写在基础规则之后、
+      // 面包屑宽度按全角字算）。
       'scripts/tests/test_client_tokens.mjs',
       'scripts/tests/test_client_typography.mjs',
       'scripts/tests/test_client_pure.mjs',
@@ -215,6 +218,11 @@ const groups = {
       // （今天学什么 / 科目主页 / 课件页 / 搜索）在宽窄两档各取一次景，亮暗两套的实测对比度
       // 与动效四档也在里面。窄档不是截图，是换 CSS 视口再跑一遍。
       'browser/reading_routes_test.mjs',
+      // #89：课件页正文与页头的呈现——配图两条路（位图受列宽约束、矢量随列宽、暗色不刺眼）、
+      // 代码块语言标签与块内横向滚动、长标识符/URL/宽表格不撑出横向滚动条、一屏一种正文字号、
+      // 顶部只剩一条（课件标题 + 小节跳转）、面包屑按全角字省略、题目标记带组号。
+      // 宽窄两档各一遍，每个场景一张截图。
+      'browser/lesson_body_test.mjs',
     ],
   },
 };
