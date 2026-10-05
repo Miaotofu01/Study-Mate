@@ -111,6 +111,10 @@ const groups = {
       // 动效四档与 prefers-reduced-motion、首次引导定位几何（纯函数，node:vm 里跑）
       'scripts/tests/test_client_tokens.mjs',
       'scripts/tests/test_client_pure.mjs',
+      // #88 三栏几何：ADR-0011 的让位顺序（右栏先拿 / 左栏先让 / 中栏保底 420）与
+      // 「并排装不下就把那一栏盖在正文上」的降级。同样是纯函数——「任何画布宽度下都
+      // 有一栏打得开」是代数，浏览器里一条条试既慢又试不全。
+      'scripts/tests/test_client_panes.mjs',
       // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
       'scripts/tests/test_client_reading_position.mjs',
       // #77 交付物题的界面：代跑事实块只显示事实（命令 / 退出码 / 两条流 / 截断），
@@ -209,10 +213,12 @@ const groups = {
       // #82：**导出的产物本身**在 file:// 下打开（真 Chrome + 真 React）：样式、公式、图片、
       // 题目全部可用，且控制台/页面/失败请求干净。不搭夹具页——测的就是学生拿到的那份东西。
       'browser/export_file_test.mjs',
-      // #86：阅读端**四路由 × 两档视口**。上面那条 reading_test 恒定 1440×960，于是
+      // #86：阅读端**四路由 × 三档视口**。上面那条 reading_test 恒定 1440×960，于是
       // lib/client.js 里两条 `@media (max-width: 900px)` 从来没被执行过；这一条把四个面
       // （今天学什么 / 科目主页 / 课件页 / 搜索）在宽窄两档各取一次景，亮暗两套的实测对比度
       // 与动效四档也在里面。窄档不是截图，是换 CSS 视口再跑一遍。
+      // #88 加了紧档（700×900）与一场几何扫描：那一档课件页的右栏并排装不下，必须是
+      // 「盖在正文上 + 说明 + 收起」的抽屉——「点题目没反应」正是那张票要消掉的缺陷。
       'browser/reading_routes_test.mjs',
     ],
   },

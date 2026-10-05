@@ -1,9 +1,11 @@
-/* 阅读端**四路由 × 两档视口**的渲染套件（#86）。
+/* 阅读端**四路由 × 三档视口**的渲染套件（#86、紧档 #88）。
    ────────────────────────────────────────────────────────────────────────────────
    为什么单开一条：同目录的 reading_test.mjs 恒定 1440×960，于是 `lib/client.js` 里两条
    `@media (max-width: 900px)` 的响应式规则**从来没被执行过**（父 spec #84 的「现状与差距」
    四把它记成覆盖缺口）。这一条按**路由**取景：今天学什么 / 科目主页 / 课件页 / 搜索
-   各一个场景，宽窄两档各跑一遍；亮暗两套的实测对比度与动效四档也在这里。
+   各一个场景，三档视口各跑一遍；亮暗两套的实测对比度与动效四档也在这里。
+   第三档（紧档 700×900）是 #88 加的：课件页的右栏在那一档并排装不下，必须是
+   「盖在正文上 + 说明 + 收起」的抽屉——「点题目没反应」正是那张票要消掉的缺陷。
 
    夹具怎么搭与 reading_test.mjs 同一套（真 `lib/client.js` + `fixtures/mini-react.js` +
    `fixtures/host-theme-tokens.json` 的宿主 token + 现抠的内联 CSS + stub 掉 `fetch`/`EventSource`），
@@ -46,15 +48,24 @@ function check(label, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : `  — ${detail}`}`);
 }
 
-/* ── 两档视口 ──────────────────────────────────────────────────────────────
+/* ── 三档视口 ──────────────────────────────────────────────────────────────
    窄档取 800×900。它必须**真的**低于 900 那条断点，否则两条响应式规则还是跑不到；
    同时它刚好越过后台栏「装得下」的门槛（画布 − 两条窄轨 76 − 中栏保底 420 ≥ 右栏最小 280，
-   即 ≥ 776px），于是课件页在窄档下仍是一个**完整的三栏面**——否则窄档只能取到
-   「右栏打不开」那个已知缺陷，而不是这一面的渲染。 */
+   即 ≥ 776px），于是课件页在窄档下仍是一个**完整的三栏面**。
+
+   紧档取 700×900（#88）：它**低于**那个 776 的门槛，是「并排装不下」的那一档——
+   课件的右栏在这一档不是并排的栏，而是盖在正文上的抽屉（必须有可见的解释与一条出路）。
+   这一档专门取那个态：这不是截图上的细节，是「点题目有没有反应」这件事本身。 */
 const VIEWPORTS = [
   { key: 'wide', width: 1440, height: 960 },
   { key: 'narrow', width: 800, height: 900 },
+  { key: 'tight', width: 700, height: 900 },
 ];
+
+/** 三档各自的课件页几何：右栏该是并排还是抽屉、中栏该保底多少。宽档/窄档并排，紧档只能抽屉。 */
+const PANE_MODES = { wide: 'column', narrow: 'column', tight: 'drawer' };
+/** 中栏保底（`lib/client.js` 的 MIN_CENTER，出处是 ADR-0011）。 */
+const MIN_CENTER = 420;
 
 /* ── 临时工作区：跑完即弃 ──────────────────────────────────────────────── */
 
@@ -358,6 +369,15 @@ const LESSON_PROBE = `(() => {
   const img = q('.smb-figure img');
   const centerBody = q('.smb-center__body');
   const opts = qa('.smb-opt');
+  const drawer = q('.smb-drawer');
+  const bar = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left), w: Math.round(r.width) }; };
+  // 三栏壳自己的宽（不是视口宽）：三条栏加起来、中栏保底这些账都记在它身上
+  const frame = lesson ? Math.round(lesson.getBoundingClientRect().width) : 0;
+  const railBars = qa('.smb-railbar').reduce((n, el) => n + el.getBoundingClientRect().width, 0);
+  const railToken = getComputedStyle(q('.smb-root')).getPropertyValue('--smb-rail').trim();
+  // 右手把的落点：贴在这一栏的内侧边缘上（窄轨 + 这一栏的宽），量出来对账
+  const handle = q('.smb-panehandle[data-side="right"]');
+  const pane = q('.smb-right') || drawer;
   return {
     width: window.innerWidth,
     breakpoint900: window.matchMedia('(max-width: 900px)').matches,
@@ -375,9 +395,21 @@ const LESSON_PROBE = `(() => {
     figure: img ? { scheme: String(img.getAttribute('src')).split(':')[0], loaded: !!(img.complete && img.naturalWidth > 0), natural: img.naturalWidth } : null,
     figcaption: text('.smb-figure figcaption'),
     panes: lesson ? { left: lesson.getAttribute('data-left'), right: lesson.getAttribute('data-right') } : null,
+    modes: lesson ? { left: lesson.getAttribute('data-left-mode'), right: lesson.getAttribute('data-right-mode') } : null,
     rails: qa('.smb-rail').length,
+    railBars: Math.round(railBars),
+    railToken,
+    frame,
     centerBox: box('.smb-center'),
+    leftBox: box('.smb-left'),
     rightBox: box('.smb-right'),
+    docBox: box('article.smb-doc'),
+    nodeCards: qa('.smb-node').length,
+    handle: handle ? { dx: Math.round(handle.getBoundingClientRect().left + handle.getBoundingClientRect().width / 2 - (lesson ? lesson.getBoundingClientRect().left : 0)), pane: pane ? Math.round(pane.getBoundingClientRect().width) : 0 } : null,
+    drawer: drawer ? {
+      side: drawer.getAttribute('data-side'), box: bar(drawer),
+      note: text('.smb-drawer__note'), close: !!q('[data-proto="pane-drawer-close"]'),
+    } : null,
     questions: qa('.smb-q').length,
     questionText: text('.smb-q__text'),
     optionTags: opts.map((el) => el.tagName + (el.disabled ? ':disabled' : '')),
@@ -511,12 +543,21 @@ const CONTRAST_TARGETS = {
   ],
 };
 
-/* 窄档下左右两条栏装不下：`fitPanes` 先给右栏、左栏让位，所以左栏那条取样点取不到——
-   按档裁掉它，而不是把它算成「探针没命中」。 */
+/* 窄档下左右两条栏装不下：`planPanes` 先给右栏、左栏让位，所以左栏那条取样点取不到——
+   按档裁掉它，而不是把它算成「探针没命中」。
+   紧档（700）反过来：那一档左栏并排得下（204px）、右栏才是抽屉，所以这里的取样点一个不裁
+   ——右栏那几个（题干、选项、题型徽标）在抽屉里照样渲染得出来。 */
 function contrastTargets(face, viewportKey) {
   const rows = CONTRAST_TARGETS[face];
   return viewportKey === 'narrow' ? rows.filter(([sel]) => sel !== '.smb-node') : rows;
 }
+
+/* 紧档还要多量一处（#88）：抽屉顶上那条说明是「可见的解释」本身，它也得过得去对比度 */
+const DRAWER_CONTRAST = [[
+  '.smb-drawer__note', '紧档·抽屉顶上的说明条',
+], [
+  '.smb-drawer__note b', '紧档·抽屉说明条的「窗口太窄」',
+]];
 
 /* ── 页面上的几步操作（都靠真点击，不碰内部状态） ───────────────────────── */
 
@@ -563,6 +604,8 @@ async function useViewport(viewport) {
 
 /** 首页那两条响应式规则的实测读数，按档存下来给最后那一场对账。 */
 const layoutByViewport = {};
+/** 课件页那一面的读数（栏形态、正文列占中栏多少），同样留给对账那一场。 */
+const lessonByViewport = {};
 
 try {
   const { root, workspace } = makeWorkspace();
@@ -573,7 +616,9 @@ try {
 
   for (const viewport of VIEWPORTS) {
     await useViewport(viewport);
-    const narrow = viewport.key === 'narrow';
+    /* `compact` 是「落在 900 那条断点里没有」——紧档（700）也在里面，所以它不能写成
+       「是不是窄档」：三档里有两档都命中那条 @media。#88 加档时这里最容易写错。 */
+    const compact = viewport.width <= 900;
     const tag = '[' + viewport.key + ' ' + viewport.width + '×' + viewport.height + ']';
 
     /* ── 面一：今天学什么 ──────────────────────────────────────────────── */
@@ -592,17 +637,17 @@ try {
         JSON.stringify(seen.motionOptions) === JSON.stringify(['auto', 'full', 'reduced', 'off']),
         JSON.stringify(seen.motionOptions));
       check(`${tag} 断点 (max-width: 900px) 的命中状态与档位一致`,
-        seen.breakpoint900 === narrow, String(seen.breakpoint900));
+        seen.breakpoint900 === compact, String(seen.breakpoint900));
       // 两条响应式规则有没有真的落到计算样式与几何上——只看**关系**，不钉值
       const layout = seen.layout;
       check(`${tag} 壳那条规则（.smb-wrap / .smb-topbar / .smb-continue__bar）落到了计算样式上`,
-        layout.topbarWrap === (narrow ? 'wrap' : 'nowrap')
-        && layout.continueBarWrap === (narrow ? 'wrap' : 'nowrap'),
+        layout.topbarWrap === (compact ? 'wrap' : 'nowrap')
+        && layout.continueBarWrap === (compact ? 'wrap' : 'nowrap'),
         JSON.stringify(layout));
       check(`${tag} 科目行那条规则（.smb-course）落到了几何上`,
-        layout.courseWrap === (narrow ? 'wrap' : 'nowrap')
+        layout.courseWrap === (compact ? 'wrap' : 'nowrap')
         && !!layout.courseMain && !!layout.courseSide
-        && (narrow
+        && (compact
           ? layout.courseSide.y >= layout.courseMain.y + layout.courseMain.h - 1
           : layout.courseSide.y < layout.courseMain.y + layout.courseMain.h),
         JSON.stringify(layout));
@@ -646,6 +691,7 @@ try {
       await ctx.evaluate(`document.querySelector('[data-proto="toggle-quiz"]').click()`);
       await ctx.sleep(400);
       const seen = await ctx.evaluate(LESSON_PROBE);
+      const wantMode = PANE_MODES[viewport.key];
 
       check(`${tag} 进了课件页（面包屑停在节点名上）`, seen.crumb === '变量', String(seen.crumb));
       check(`${tag} 三栏壳在（左窄轨 1 条 + 右窄轨 2 条）`, !!seen.panes && seen.rails === 3,
@@ -661,9 +707,67 @@ try {
       check(`${tag} 右栏题目进了 DOM、选项是能点的按钮`,
         seen.questions >= 1 && seen.optionTags.length >= 3 && seen.optionTags.every((one) => one === 'BUTTON'),
         `questions=${seen.questions} options=${JSON.stringify(seen.optionTags)}`);
-      return {
-        viewport: viewport.key, size: [seen.width, viewport.height], panes: seen.panes, rails: seen.rails,
+
+      /* 这一档右栏该是什么形态（#88）：并排装得下就并排，装不下就盖在正文上。
+         紧档专取后者——「点了没反应」是这条票要消掉的缺陷，所以这里断的是
+         「有形态、有解释、有出路」，不是某几个像素。 */
+      check(`${tag} 右栏的形态与这一档画布一致（并排 / 盖在正文上）`,
+        seen.modes && seen.modes.right === wantMode,
+        `画布 ${seen.frame}px：形态=${seen.modes && seen.modes.right}，这一档应当是 ${wantMode}`);
+      check(`${tag} 收起时窄轨还在，右栏的窄轨认得这一档`,
+        seen.railBars > 0 && !!seen.railToken, `窄轨 ${seen.railBars}px（--smb-rail: ${seen.railToken}）`);
+
+      if (wantMode === 'drawer') {
+        // 画布不足时点「题目」必须给出**看得见的解释**与**一条出路**
+        check(`${tag} 画布不足：右栏盖在正文上，而不是静默归零`,
+          !!seen.drawer && seen.drawer.side === 'right' && seen.drawer.box.w > 0,
+          JSON.stringify(seen.drawer));
+        check(`${tag} 画布不足：抽屉顶上写着为什么（窗口太窄 + 拉宽就并排）`,
+          !!seen.drawer && /窗口太窄/.test(seen.drawer.note) && /拉宽窗口就并排/.test(seen.drawer.note),
+          JSON.stringify(seen.drawer && seen.drawer.note));
+        check(`${tag} 画布不足：出路就是这一栏本身——题目与选项都在抽屉里、点得到`,
+          seen.questions >= 1 && seen.optionTags.length >= 3 && seen.optionTags.every((one) => one === 'BUTTON'),
+          `questions=${seen.questions} options=${JSON.stringify(seen.optionTags)}`);
+        check(`${tag} 画布不足：抽屉给正文留了一条缝、也没越过画布`,
+          !!seen.centerBox && !!seen.drawer && seen.drawer.box.w < seen.centerBox.w
+          && seen.centerBox.x + seen.drawer.box.w <= seen.width,
+          `抽屉 ${JSON.stringify(seen.drawer.box)} 中栏 ${JSON.stringify(seen.centerBox)} 视口 ${seen.width}`);
+        check(`${tag} 画布不足：一条「收起」就回得去，收起后抽屉不在、窄轨还在`,
+          !!seen.drawer && seen.drawer.close,
+          JSON.stringify(seen.drawer));
+        await ctx.evaluate(`document.querySelector('[data-proto="pane-drawer-close"]').click()`);
+        await ctx.sleep(300);
+        const closed = await ctx.evaluate(LESSON_PROBE);
+        check(`${tag} 收起之后右栏不见了、正文回到整幅画布`,
+          closed.modes.right === 'off' && !closed.drawer && !!closed.docBox
+          && closed.docBox.x + closed.docBox.w <= closed.width,
+          `modes=${JSON.stringify(closed.modes)} drawer=${!!closed.drawer}`);
+        // 再点一次窄轨：出路是稳定的，不是一次性的
+        await ctx.evaluate(`document.querySelector('[data-proto="toggle-quiz"]').click()`);
+        await ctx.sleep(300);
+      }
+
+      // 正文列与中栏的读数：宽档要占得住、窄档不许被压成一条（对账见最后那一场）
+      check(`${tag} 中栏没被栏挤破保底（画布够宽时）`,
+        !!seen.centerBox && seen.centerBox.w >= Math.min(MIN_CENTER, seen.frame - seen.railBars) - 1,
+        `中栏 ${seen.centerBox && seen.centerBox.w}px / 画布 ${seen.frame}px`);
+      check(`${tag} 正文列没被压成一条（≥ 300px 的正文，永远铺满中栏）`,
+        !!seen.docBox && !!seen.centerBox && seen.docBox.w <= seen.centerBox.w + 1 && seen.docBox.w >= 300,
+        `正文列 ${seen.docBox && seen.docBox.w}px 中栏 ${seen.centerBox && seen.centerBox.w}px`);
+      if (wantMode === 'column') {
+        check(`${tag} 并排的右栏在它的下限之上，正文仍读得下去`,
+          !!seen.rightBox && seen.rightBox.w >= 280 && !!seen.docBox && seen.docBox.w >= 300,
+          `右栏 ${seen.rightBox && seen.rightBox.w}px 正文列 ${seen.docBox && seen.docBox.w}px`);
+      }
+
+      const lessonMetrics = {
+        viewport: viewport.key, size: [seen.width, viewport.height], panes: seen.panes, modes: seen.modes,
+        rails: seen.rails, railBarWidth: seen.railBars, railToken: seen.railToken, frame: seen.frame,
         centerWidth: seen.centerBox && seen.centerBox.w, rightWidth: seen.rightBox && seen.rightBox.w,
+        docWidth: seen.docBox && seen.docBox.w,
+        docShareOfCenter: seen.docBox && seen.centerBox ? Math.round(seen.docBox.w / seen.centerBox.w * 100) / 100 : null,
+        drawer: seen.drawer && { side: seen.drawer.side, width: seen.drawer.box.w, note: seen.drawer.note },
+        handle: seen.handle,
         sections: seen.sections, secs: seen.secs, questions: seen.questions,
         questionText: seen.questionText, options: seen.optionTexts, answered: seen.answered,
         // 公式在真浏览器里落到 DOM 上的读数：本票只记不判（排得好不好是 #91 的验收面）
@@ -672,6 +776,8 @@ try {
         // 正文列有没有横向溢出：本票只记不判（配图受不受列宽约束是呈现票的验收面）
         centerOverflowX: seen.centerOverflowX,
       };
+      lessonByViewport[viewport.key] = lessonMetrics;
+      return lessonMetrics;
     });
 
     /* ── 面四：搜索（覆盖层，不是路由） ─────────────────────────────────── */
@@ -716,8 +822,9 @@ try {
         await ctx.sleep(200);
 
         const rows = [];
-        const measure = async (where) => {
-          const part = await ctx.evaluate(CONTRAST_PROBE + '(' + JSON.stringify(contrastTargets(where, viewport.key)) + ')');
+        const measure = async (where, extra = []) => {
+          const targets = contrastTargets(where, viewport.key).concat(extra);
+          const part = await ctx.evaluate(CONTRAST_PROBE + '(' + JSON.stringify(targets) + ')');
           for (const one of part) rows.push(Object.assign({ face: where }, one));
         };
         await measure('home');
@@ -731,7 +838,7 @@ try {
         await ctx.sleep(200);
         await ctx.evaluate(`document.querySelector('[data-proto="toggle-quiz"]').click()`);
         await ctx.sleep(400);
-        await measure('lesson');
+        await measure('lesson', viewport.key === 'tight' ? DRAWER_CONTRAST : []);
         // 搜索覆盖层盖在课件页上：它是覆盖层，取样时不用离开当前这一面
         await ctx.evaluate(OPEN_PALETTE);
         await ctx.sleep(200);
@@ -753,9 +860,128 @@ try {
     }
   }
 
-  /* ── 两档对账：窄档的读数必须真的与宽档不同 ───────────────────────────
+  /* ── 三栏几何：从宽到窄扫几档（#88） ─────────────────────────────────
+     这一场回答的是**代数题**（「任何画布宽度下都有栏打得开」在 `test_client_panes.mjs`
+     里已经证了），这里要的是真浏览器里那一层：控件在不在、点得动点不动、正文列还剩多少。
+     每一档都重开一次夹具（换 CSS 视口 + 重新加载），因为夹具的 ResizeObserver 垫片只在
+     observe 时报一次真实尺寸——场景中途改视口，客户端量到的还是旧画布。
+
+     扫的几档围着那条门槛（窄轨 76 + 中栏保底 420 + 右栏最小 280 = 776）摆：
+     776 之上并排、之下只能是抽屉。判断口径不钉像素，断的是「有没有出路」与「中栏有没有
+     被挤破保底」这两件事。 */
+  await session.scene('reading-routes-panes', async (ctx) => {
+    const SWEEP = [1440, 1100, 900, 776, 700];
+    const rows = [];
+    for (const width of SWEEP) {
+      await useViewport({ key: 'sweep', width, height: 900 });
+      await ctx.navigate(fixture, { settle: 1200 });
+      await ctx.evaluate(OPEN_SUBJECT);
+      await ctx.sleep(250);
+      await ctx.evaluate(OPEN_LESSON);
+      await ctx.sleep(350);
+      const closed = await ctx.evaluate(LESSON_PROBE);
+      await ctx.evaluate(`document.querySelector('[data-proto="toggle-quiz"]').click()`);
+      await ctx.sleep(300);
+      const quiz = await ctx.evaluate(LESSON_PROBE);
+      await ctx.evaluate(`document.querySelector('[data-proto="toggle-left"]').click()`);
+      await ctx.sleep(300);
+      const nodes = await ctx.evaluate(LESSON_PROBE);
+      rows.push({ width, closed, quiz, nodes });
+
+      const at = `[${width}px]`;
+      // 一、点「题目」必须有反应：并排的栏，或者盖在正文上的抽屉（带说明与收起）
+      const quizOk = quiz.modes.right === 'column'
+        ? !!quiz.rightBox && quiz.rightBox.w >= 280
+        : quiz.modes.right === 'drawer' && !!quiz.drawer && quiz.drawer.side === 'right'
+          && /窗口太窄/.test(quiz.drawer.note) && quiz.drawer.close && quiz.drawer.box.w > 0;
+      check(`${at} 点「题目」有反应（并排，或者盖在正文上并说明为什么）`, quizOk,
+        `形态=${quiz.modes && quiz.modes.right} 抽屉=${JSON.stringify(quiz.drawer)} 右栏=${JSON.stringify(quiz.rightBox)}`);
+      check(`${at} 题目真的做得成（题干在、选项是能点的按钮）`,
+        quiz.questions >= 1 && quiz.optionTags.length >= 3 && quiz.optionTags.every((one) => one === 'BUTTON'),
+        `questions=${quiz.questions} options=${JSON.stringify(quiz.optionTags)}`);
+      // 二、点「节点」也必须有反应——「两栏都打不开」的宽度区间不存在
+      const nodesOk = nodes.modes.left === 'column'
+        ? !!nodes.leftBox && nodes.leftBox.w >= 200
+        : nodes.modes.left === 'drawer' && !!nodes.drawer && nodes.drawer.side === 'left'
+          && /窗口太窄/.test(nodes.drawer.note) && nodes.drawer.close;
+      check(`${at} 点「节点」有反应（并排，或者盖在正文上并说明为什么）`, nodesOk && nodes.nodeCards >= 3,
+        `形态=${nodes.modes && nodes.modes.left} 节点 ${nodes.nodeCards} 个 抽屉=${JSON.stringify(nodes.drawer)}`);
+      // 三、中栏保底：画布够宽时正文列不许被两条栏挤到保底以下
+      const floor = Math.min(MIN_CENTER, quiz.frame - quiz.railBars);
+      check(`${at} 中栏在保底之上（画布够宽时就是 420）`,
+        !!quiz.centerBox && quiz.centerBox.w >= floor - 1 && !!quiz.docBox && quiz.docBox.w >= 300,
+        `中栏 ${quiz.centerBox && quiz.centerBox.w}px（保底 ${floor}）正文列 ${quiz.docBox && quiz.docBox.w}px`);
+      check(`${at} 正文列没越过中栏（不出横向滚动条）`,
+        !!quiz.docBox && !!quiz.centerBox && quiz.docBox.x >= quiz.centerBox.x - 1
+        && quiz.docBox.x + quiz.docBox.w <= quiz.centerBox.x + quiz.centerBox.w + 1,
+        `正文列 ${JSON.stringify(quiz.docBox)} 中栏 ${JSON.stringify(quiz.centerBox)}`);
+    }
+
+    const widest = rows[0];
+    const tightest = rows[rows.length - 1];
+    // 四、宽画布上正文列占得住、又没填满窗口（测宽服务于可读行宽，不是把窗口铺满）
+    check('[1440px] 宽画布上正文列占得住中栏（≥ 六成），但没填满窗口',
+      !!widest.closed.docBox && !!widest.closed.centerBox
+      && widest.closed.docBox.w >= widest.closed.centerBox.w * 0.6
+      && widest.closed.docBox.w <= widest.closed.centerBox.w - 100,
+      `正文列 ${widest.closed.docBox && widest.closed.docBox.w} 中栏 ${widest.closed.centerBox && widest.closed.centerBox.w}`);
+    // 五、形态随画布走：宽的一头并排，窄的一头抽屉（阈值两侧各取一档）
+    check('[776px / 700px] 门槛两侧形态不同：够宽并排、不够宽盖在正文上',
+      rows.find((one) => one.width === 776).quiz.modes.right === 'column'
+      && rows.find((one) => one.width === 700).quiz.modes.right === 'drawer',
+      JSON.stringify(rows.map((one) => one.width + ':' + one.quiz.modes.right)));
+    check('[700px] 紧档下正文仍读得下去（正文列 ≥ 300px，抽屉给正文留了缝）',
+      !!tightest.quiz.docBox && tightest.quiz.docBox.w >= 300
+      && !!tightest.quiz.drawer && tightest.quiz.drawer.box.w < tightest.quiz.centerBox.w,
+      `正文列 ${tightest.quiz.docBox && tightest.quiz.docBox.w} 抽屉 ${JSON.stringify(tightest.quiz.drawer)}`);
+
+    await useViewport(VIEWPORTS[0]);
+    await ctx.navigate(fixture, { settle: 800 });   // 这一场只为扫描，别留一张空白页
+    return {
+      widths: SWEEP,
+      rows: rows.map((one) => ({
+        width: one.width, frame: one.closed.frame, rails: one.closed.railBars,
+        closed: { center: one.closed.centerBox && one.closed.centerBox.w, doc: one.closed.docBox && one.closed.docBox.w },
+        quiz: { mode: one.quiz.modes.right, right: one.quiz.rightBox && one.quiz.rightBox.w, drawer: one.quiz.drawer && one.quiz.drawer.box.w, center: one.quiz.centerBox && one.quiz.centerBox.w, doc: one.quiz.docBox && one.quiz.docBox.w },
+        nodes: { mode: one.nodes.modes.left, left: one.nodes.leftBox && one.nodes.leftBox.w, drawer: one.nodes.drawer && one.nodes.drawer.box.w, cards: one.nodes.nodeCards },
+      })),
+    };
+  });
+
+  /* ── 宽画布上的正文列：默认形态（两条栏都收起） ────────────────────────
+     #88 的第一条验收是「宽画布上正文列占得住面板可用宽的合理比例」——这是**默认**形态
+     （学生打开课件看到的就是它），而面三那张截图里右栏是开着的，替不了这一张。
+     断的仍然是关系：占得住（≥ 六成），又没填满窗口（两侧留白各 > 100px）。 */
+  await session.scene('reading-routes-wide-doc', async (ctx) => {
+    await useViewport(VIEWPORTS[0]);
+    await ctx.navigate(fixture, { settle: 1200 });
+    await ctx.evaluate(OPEN_SUBJECT);
+    await ctx.sleep(250);
+    await ctx.evaluate(OPEN_LESSON);
+    await ctx.sleep(350);
+    const seen = await ctx.evaluate(LESSON_PROBE);
+    const share = seen.docBox && seen.centerBox ? seen.docBox.w / seen.centerBox.w : 0;
+    check('[1440px·默认] 宽画布上正文列占得住中栏（≥ 六成）', share >= 0.6,
+      `正文列 ${seen.docBox && seen.docBox.w} 中栏 ${seen.centerBox && seen.centerBox.w} = ${Math.round(share * 100)}%`);
+    check('[1440px·默认] 测宽服务于可读行宽，不是填满窗口（两侧留白各 > 100px）',
+      !!seen.docBox && !!seen.centerBox && seen.centerBox.w - seen.docBox.w > 200,
+      `正文列 ${seen.docBox && seen.docBox.w} 中栏 ${seen.centerBox && seen.centerBox.w}`);
+    return {
+      viewport: 'wide', size: [seen.width, VIEWPORTS[0].height],
+      panes: seen.panes, modes: seen.modes, frame: seen.frame,
+      centerWidth: seen.centerBox && seen.centerBox.w, docWidth: seen.docBox && seen.docBox.w,
+      shareOfCenter: Math.round(share * 100) / 100,
+      marginEachSide: seen.docBox && seen.centerBox ? Math.round((seen.centerBox.w - seen.docBox.w) / 2) : null,
+    };
+  });
+
+  /* ── 三档对账：窄档的读数必须真的与宽档不同；三档的栏形态各就各位 ───────
      这一条是「窄档不是把宽档截个图」的机器判据：两条 @media 规则的实测读数在宽档下
      与窄档下必须不同，且窄档那边是规则声明的那一侧。
+
+     三档之间再对一次**三栏几何**（#88）：课件页右栏的形态要和画布档位一致（并排 / 抽屉），
+     把手要落在栏的内侧边缘上（窄轨宽只有 CSS 一处定义，脚本量出来再用），正文列要占得住
+     中栏——这三样都是「换个视口就变」的事，只有跨档比才看得出来。
 
      **只记不判的那几条**：`lib/client.js` 的两条 `@media (max-width: 900px)` 块写在
      被它们覆盖的基础规则**前面**（第一块在 .smb-wrap / .smb-crumb / .smb-continue__bar
@@ -766,7 +992,27 @@ try {
   await session.scene('reading-routes-compare', async (ctx) => {
     const wide = layoutByViewport.wide;
     const narrow = layoutByViewport.narrow;
-    check('两档的响应式读数都取到了（窄档跑在宽档之后）', !!wide && !!narrow, JSON.stringify(layoutByViewport));
+
+    /* 三栏几何的三档对账先跑：它不依赖下面那两块响应式读数 */
+    const lessons = VIEWPORTS.map((one) => ({ viewport: one.key, seen: lessonByViewport[one.key] }));
+    check('三档的课件页几何读数都取到了', lessons.every((one) => !!one.seen),
+      JSON.stringify(lessons.map((one) => one.viewport + ':' + !!one.seen)));
+    const wrongMode = lessons.filter((one) => !one.seen || one.seen.modes.right !== PANE_MODES[one.viewport]);
+    check('三档的右栏形态与画布一致（该并排就并排、装不下就盖在正文上）', wrongMode.length === 0,
+      wrongMode.map((one) => `${one.viewport}：${one.seen && one.seen.modes.right}（该是 ${PANE_MODES[one.viewport]}）`).join('；'));
+    // 把手落点 = 窄轨 + 这一栏的宽（抽屉也算这一栏）。脚本里若自己写死一份窄轨宽，这里就对不上
+    const misaligned = lessons.filter((one) => one.seen && (!one.seen.handle
+      || Math.abs(one.seen.handle.dx - (one.seen.frame - one.seen.railBarWidth - one.seen.handle.pane)) > 1));
+    check('三档下把手都贴在栏的内侧边缘上（窄轨宽是量出来的，不是脚本里写死的）', misaligned.length === 0,
+      misaligned.map((one) => `${one.viewport}：${JSON.stringify(one.seen.handle)} 画布 ${one.seen.frame} 窄轨 ${one.seen.railBarWidth}`).join('；'));
+    check('三档下正文列都占得住中栏（铺满也算，但绝不是正中一条细条）',
+      lessons.every((one) => one.seen && one.seen.docShareOfCenter !== null && one.seen.docShareOfCenter >= 0.6),
+      lessons.map((one) => `${one.viewport}:${one.seen && one.seen.docShareOfCenter}`).join(' '));
+    // 窄轨宽的唯一出处是 CSS 的 --smb-rail：渲染出来的两条窄轨加起来正好是它的两倍
+    check('两条窄轨加起来 = CSS 的 --smb-rail × 2（唯一那处定义真的在驱动几何）',
+      lessons.every((one) => one.seen && parseFloat(one.seen.railToken) * 2 === one.seen.railBarWidth),
+      lessons.map((one) => `${one.viewport}:${one.seen && one.seen.railBarWidth} vs ${one.seen && one.seen.railToken}`).join(' '));
+
     if (wide && narrow) {
       const declarations = [
         ['壳·.smb-wrap 的内边距', (one) => one.wrapPaddingLeft],
@@ -799,12 +1045,22 @@ try {
       await ctx.navigate(fixture, { settle: 800 });   // 这一场只为对账，别留一张空白页
       return {
         wide, narrow,
+        panes: lessons.map((one) => ({
+          viewport: one.viewport, mode: one.seen && one.seen.modes.right,
+          center: one.seen && one.seen.centerWidth, doc: one.seen && one.seen.docWidth,
+          docShareOfCenter: one.seen && one.seen.docShareOfCenter,
+          railBarWidth: one.seen && one.seen.railBarWidth, railToken: one.seen && one.seen.railToken,
+          handle: one.seen && one.seen.handle,
+        })),
         differing: differing.map(([name]) => name),
         inertDeclarations: inert.map(([name]) => name),
       };
     }
     await ctx.navigate(fixture, { settle: 800 });
-    return { wide, narrow };
+    return {
+      wide, narrow,
+      panes: lessons.map((one) => ({ viewport: one.viewport, mode: one.seen && one.seen.modes.right })),
+    };
   });
 
   /* ── 动效四档 + 跟随系统偏好 ─────────────────────────────────────────── */
