@@ -51,6 +51,13 @@ export const LESSON_LIMIT = 12000;
 /** 摘要上限（字符）。`【摘要】` 缺失时用它兜一个：宁可截断，也不要写一整段进误解记录。 */
 export const SUMMARY_LIMIT = 60;
 
+/**
+ * 误解记录里那条引用原文的上限（字符）。`evidence` 整体上限 2000，引用不能把提问原文挤掉：
+ * 一次划了一整屏（长段落、整段代码）是正常用法，原样塞进去会让整条记录被判 400——
+ * 学生答成了却「误解记录没写进去」，而罪魁只是他划得长了一点。
+ */
+export const EVIDENCE_QUOTE_LIMIT = 500;
+
 /** 组装请求体时缺了必填原料。路由把它映射成 400——**不猜**、也不用空串糊过去。 */
 export class AskContextError extends Error {
   readonly field: string;
@@ -61,12 +68,30 @@ export class AskContextError extends Error {
   }
 }
 
+/**
+ * 选中文本的**来源锚点**（#92）：阅读端在捕获那一下冻住，随引用一起送来。
+ *
+ * 三个字段都是「读到什么写什么」，缺了不补：`lesson` 是这一课在工作区里的相对路径，
+ * `section` 是正文那一小节的 id、`sectionTitle` 是它的标题。旧客户端不带这一格，
+ * 所以它整体是可选的——没有锚点时这条链路上的每一处输出都与从前一字不差。
+ */
+export interface SelectionAnchor {
+  /** 这一课在工作区里的相对路径，例如 `demo/0003-net.mask.md` */
+  lesson?: unknown;
+  /** 正文里那一小节的 id */
+  section?: unknown;
+  /** 那一小节的标题（给人看的；没有就用 id 兜） */
+  sectionTitle?: unknown;
+}
+
 /** 三样原料（加路由信息）。`provider` / `model` 不属于上下文，是路由选择。 */
 export interface AskContextInput {
   /** 当前课件正文（Markdown 原文） */
   lesson?: unknown;
   /** 选中的那一段（学生在正文里划出来的） */
   selection?: unknown;
+  /** 那一段的来源锚点（哪一课、哪一小节；可选） */
+  selectionAnchor?: unknown;
   /** 共享记忆（工作区 `.learning/MEMORY.md` 原文） */
   memory?: unknown;
   /** 学生问的那句话 */
@@ -99,13 +124,41 @@ function clamp(value: string, limit: number): string {
 }
 
 /**
+ * 来源锚点 → 一句给人看的位置说明（#92）：`小节「小结」`。
+ *
+ * **只写小节那一半**：「哪一课」由调用点自己写（请求体里的「当前课件」、误解记录里的
+ * `位置：` 都是那一课），锚点里再重复一次课名只是噪音。读到什么写什么——没有小节归属
+ * （学生划的是标题那一段）就给空串，别编一个「小节」出来；旧客户端不带锚点时同样给空串，
+ * 于是这条链路上的输出与从前一字不差。
+ */
+export function selectionAnchorLabel(anchor: unknown): string {
+  if (anchor === null || typeof anchor !== 'object') return '';
+  const id = text((anchor as SelectionAnchor).section);
+  const title = text((anchor as SelectionAnchor).sectionTitle);
+  const name = title || id;
+  return name === '' ? '' : `小节「${name}」`;
+}
+
+/**
+ * 误解记录里的那条引用（#92）：`引用：<原文>`，读不到引用时给空串（调用点据此决定要不要这一行）。
+ *
+ * 超长**截断并标注**，理由与 `EVIDENCE_QUOTE_LIMIT` 那份注释同一条：划了一整屏是正常用法，
+ * 原样塞进去会把整条记录顶成 400，学生答成了却「误解记录没写进去」。
+ */
+export function quoteEvidence(selection: unknown, limit = EVIDENCE_QUOTE_LIMIT): string {
+  const quote = text(selection);
+  if (quote === '') return '';
+  const chars = [...quote];
+  return `引用：${chars.length <= limit ? quote : chars.slice(0, limit).join('') + '……（引用太长，只记了开头一段）'}`;
+}
+
+/**
  * 组装发给模型的那一次请求。
  *
  * 缺 `lesson` / `question` 直接抛 `AskContextError`——两样都缺的请求没有意义，静默发一次
  * 空上下文的调用既花钱又给不出对的答案。`selection` 与 `memory` 可以缺：没划中段落时面板
  * 本来就允许直接打字提问，共享记忆在工作区里也可能还是空的。
- */
-export function buildAskContext(input: AskContextInput = {}): AskRequestBody {
+ */export function buildAskContext(input: AskContextInput = {}): AskRequestBody {
   const lesson = text(input.lesson);
   if (lesson === '') {
     throw new AskContextError('lesson', '当前课件是空的：面板要带上正在读的这一课才答得准');
@@ -132,10 +185,17 @@ export function buildAskContext(input: AskContextInput = {}): AskRequestBody {
   const lessonPart = clamp(lesson, LESSON_LIMIT)
     + (lesson.length > LESSON_LIMIT ? '\n（课件太长，只带了开头一段）' : '');
 
+  // 来源锚点是**选中文本那一段的一部分**，不是第四样上下文：模型要知道引的是哪一小节，
+  // 所以跟着选中文本走。没有锚点（旧客户端 / 没读到小节）时这一行不出现。
+  const anchor = selectionAnchorLabel(input.selectionAnchor);
+  const selectionPart = selection === ''
+    ? ''
+    : `【选中文本】\n${anchor === '' ? '' : `（来自${anchor}）\n`}${selection}`;
+
   const sections = [
     memoryPart === '' ? '' : `【共享记忆】\n${memoryPart}`,
     `【当前课件】\n${lessonPart}`,
-    selection === '' ? '' : `【选中文本】\n${selection}`,
+    selectionPart,
     `【我的问题】\n${question}`,
   ].filter((part) => part !== '');
 

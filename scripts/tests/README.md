@@ -20,7 +20,7 @@ npm test
 | `npm run test:antigravity` | Antigravity 插件 ZIP、原生 agents、导出保护与重复构建 |
 | `npm run test:release` | 版本、changelog、重试和发布保护 |
 | `npm run test:static` | 技能调用面与提示词规则归属、词表与发布元数据、文档悬空引用、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
-| `npm run test:browser` | 五套真实浏览器渲染测试（含阅读端与导出产物），浏览器二进制自动探测 |
+| `npm run test:browser` | 十套真实浏览器渲染测试（阅读端本体、阅读位置、作答落盘、监听推送、跑一次、导出产物、公式排版、四路由 × 三档视口、课件页正文与页头、问答引用），浏览器二进制自动探测 |
 | `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录；native 安装下还验八个原生工具的注册、body 可调用（走真 dispatch）与越权抛，以及 #70 的引擎路径：`root` 指向已安装的包、`~/.dsh/studymate/engine/` 不再出现 |
 | `npm run test:dsh-cli` | 真实 DSH CLI 安装、更新、卸载，还需要 `pnpm` |
 
@@ -128,6 +128,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 | `browser/export_file_test.mjs` | **导出的产物本身**在 `file://` 下打开（#82 验收第 1 条）：先用真导出器导一份到临时目录，再用真 Chrome 打开 `file://<导出目录>/index.html`——样式（离线兜底 token）、行内/块级公式（#91 起断的是**真的排出来了**：`.katex` 在容器里、TeX 从 annotation 读回、`document.fonts.check` 的 KaTeX_Main 真的加载）、题面里的公式同样排版、配图（`naturalWidth > 0`）、代码块、题目与判分、参考资料只读都要可用，且控制台/页面/失败请求干净。不搭夹具页：测的就是学生拿到的那份东西。真 React + 真浏览器缺任一就**明确跳过**（退出码 3） |
 | `browser/math_test.mjs` | 公式排版（#91）：夹具是一个说 HTTP 的迷你宿主，按 `lib/math-route.ts` 注册出来的真路由投送**包里那份 KaTeX dist**，页面跑真 `lib/client.js`。五个场景——正文行内/块级公式排出来（`.katex` + `document.fonts.check` 的 KaTeX_Main）、公式只写在题面里也照样加载（打开题库那一刻才取资源，判据含题库字段）、没有数学式的页面**零请求**（判服务端请求日志）、资源缺失降级成可读 TeX + 一句人话、坏 LaTeX 给同一句错且不影响别的公式 |
 | `browser/lesson_body_test.mjs` | **课件页正文与页头**（#89）：夹具里的每一份内容都是「刚好越界」的那一份——1100 宽的位图、铺满列宽的矢量图、一行比列宽长的代码、无空格的长标识符与长 URL、表头 nowrap 的宽表格、27 字的中文标题、三条题目锚点。宽窄两档各跑一遍：位图不超列宽、矢量图随列宽、暗色下配图被压暗、代码块语言标签与块内横向滚动、页面与正文列都没有横向滚动条、一屏里成句的文字只有一种字号（13px，行高 1.65 跟着走）、顶部只剩一条（课件标题 + 小节跳转 + 进度）、面包屑按全角字省略（宽档 17 字 / 窄档 11 字）、题目标记的组号与右栏那一组对得上 |
+| `browser/ask_quote_test.mjs` | 问答面板里那条**留得住的引用**（#92）：真 Chrome 里用 CDP 的 `Input.dispatchMouseEvent` 做**真鼠标拖拽**划正文（harness 没有选区/拖拽助手，套件自己补 `dragSelect` / `clickAt`），验「选中 → 浮出「就这段问一句」→ 点开问答 → **点输入框** / 打字 / 切走 tab 再切回来之后引用仍在」——点输入框会让浏览器把文档选区折叠成空，那一次 `mouseup` 正是这条票的病根；另有一场验显式「删掉」、一场验没有引用时面板照样能用、一场验没有可用模型时如实说明且**不清**引用。夹具与 `reading_routes_test.mjs` 同一套（真 `lib/client.js` + `fixtures/mini-react.js` + 宿主 token + 现抠的内联 CSS），`fetch` 是夹具里的假货（记下每一次 POST 的请求体） |
 | `browser/measure.mjs` | 对比度、计算样式与 hover 测量（手动） |
 | `browser/hovers.mjs` | 批量比较 hover 前后的样式（手动） |
 | `browser/shot.mjs` | 浅色/深色截图与元素边界记录（手动） |

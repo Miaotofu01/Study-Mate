@@ -168,7 +168,17 @@
     for (const key of Object.keys(props)) {
       const value = props[key];
       if (key === 'key' || key === 'children' || value === null || value === undefined) continue;
-      if (key === 'ref') { if (value && typeof value === 'object') value.current = el; continue; }
+      if (key === 'ref') {
+        // **回调 ref 也要认**（React 两种都支持）：阅读端把正文滚动区挂成回调 ref
+        // （`useReadingPosition` 的 attach，lib/client.js 的 .smb-center__body），它顺手记下
+        // `bodyRef.current` —— 问答引用的捕获（#92）就靠这个节点判「选区在不在正文里」。
+        // 只认对象 ref 的话 `bodyRef.current` 恒为 null，引用永远捕不到，看上去像客户端坏了。
+        // 夹具每次重渲染整树重建，所以每次都会拿新节点调一次——真 React 只在挂载/卸载时调，
+        // 而这里没有卸载那一半（draw() 直接换掉整棵树），`attach(null)` 那条清理路径不会跑到。
+        if (typeof value === 'function') value(el);
+        else if (value && typeof value === 'object') value.current = el;
+        continue;
+      }
       if (key === 'style' && typeof value === 'object') {
         for (const name of Object.keys(value)) el.style[name] = value[name];
         continue;

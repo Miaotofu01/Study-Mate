@@ -23,7 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { buildAskContext, assembleAnswer, topicFromQuestion, AskContextError } from '../core/ask.ts';
+import { buildAskContext, assembleAnswer, topicFromQuestion, quoteEvidence, selectionAnchorLabel, AskContextError } from '../core/ask.ts';
 import type { AskRequestBody } from '../core/ask.ts';
 import { probeModel } from '../core/model.ts';
 import { cmpCodePoints } from '../core/format.ts';
@@ -101,6 +101,8 @@ export interface AskRequestInput {
   node?: unknown;
   /** 选中的那一段 */
   selection?: unknown;
+  /** 那一段的来源锚点（#92：哪一课、哪一小节；旧客户端不带，可选） */
+  selectionAnchor?: unknown;
   /** 学生问的那句话 */
   question?: unknown;
   /** 幂等键（面板每次提问现造一个） */
@@ -276,6 +278,7 @@ export async function askPanel(deps: AskDeps, input: AskRequestInput = {}): Prom
     body = buildAskContext({
       lesson: stripFrontMatter(lesson.markdown),
       selection: input.selection,
+      selectionAnchor: input.selectionAnchor,
       memory: (deps.readMemory ?? readMemoryFromWorkspace)(deps.workspace),
       question,
       provider: chosen.provider,
@@ -302,10 +305,15 @@ export async function askPanel(deps: AskDeps, input: AskRequestInput = {}): Prom
   // 回答无痕：**不写会话、不写文件**。要落盘的只有这一条误解记录。
   const summary = assembled.summary || assembled.body;
   const where = lesson.rel || lesson.file;
+  // 引用与它的来源进证据：日后对账要能看出「学生当时划的是哪一段、在哪一小节」，
+  // 光有提问原文（那往往是一句「这里为什么」）读不出他卡在哪（#92）。
+  const quote = quoteEvidence(input.selection);
+  const anchor = selectionAnchorLabel(input.selectionAnchor);
   const evidence = [
     `提问原文：${question}`,
     `回答摘要：${summary}`,
-    `位置：${where}`,
+    ...(quote === '' ? [] : [quote]),
+    `位置：${anchor === '' ? where : `${where} · ${anchor}`}`,
   ].join('\n');
   const write = (deps.write ?? writeMisconception)({
     workspace: deps.workspace,
