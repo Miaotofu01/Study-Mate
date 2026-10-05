@@ -110,6 +110,7 @@ const groups = {
       // 阅读端（lib/client.js）的契约：token 对比度达 WCAG AA（亮暗两套）、
       // 动效四档与 prefers-reduced-motion、首次引导定位几何（纯函数，node:vm 里跑）
       'scripts/tests/test_client_tokens.mjs',
+      'scripts/tests/test_client_typography.mjs',
       'scripts/tests/test_client_pure.mjs',
       // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
       'scripts/tests/test_client_reading_position.mjs',
