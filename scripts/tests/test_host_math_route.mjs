@@ -61,7 +61,10 @@ test('版本对账：声明的版本与引擎自报的版本一致', () => {
     `katex.min.js 自报的版本与 lib/math.ts 的 KATEX_VERSION（${KATEX_VERSION}）对不上：换 dist 要一起改声明`);
   // 许可证随包发（MIT 的硬要求）：dist 根与字体目录各一份
   assert.match(readDist(LICENSE_FILE).toString('utf8'), /The MIT License \(MIT\)/);
-  assert.ok(fs.existsSync(path.join(DIST, MATH_FONT_DIR, LICENSE_FILE)), '字体目录里也要有一份 LICENSE');
+  // 两份许可是**两份**：代码/CSS 是 MIT，字体是 SIL OFL 1.1（带保留字体名）。合成一份就是漏发许可。
+  const fontLicense = fs.readFileSync(path.join(DIST, MATH_FONT_DIR, LICENSE_FILE), 'utf8');
+  assert.match(fontLicense, /SIL OPEN FONT LICENSE Version 1\.1/);
+  assert.match(fontLicense, /Reserved Font Names/);
 });
 
 test('清单：引擎 + 样式表 + 全部字体，MIME 精确到类型', () => {

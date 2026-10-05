@@ -293,7 +293,8 @@ try {
       JSON.stringify(asked));
     check('字体文件也取了（排版真的用上了那套字形）',
       asked.some((p) => p.startsWith('/api/studymate/math/fonts/')), JSON.stringify(asked));
-    return seen;
+    // 请求日志进 metrics：「按需加载」这条验收要的是**可核对的读数**，它就落在 summary.json 里
+    return { ...seen, mathRequests: asked };
   });
 
   /* ② 公式只出现在题面与选项里：打开题库那一刻才取资源；坏公式给一句人话 */
@@ -316,12 +317,14 @@ try {
     check('选项里的公式也排出来了', after.optionKatex >= 2, JSON.stringify(after.optionKatex));
     const asked = host.mathRequests();
     check('资源是在打开题库那一刻才取的', asked.some((p) => p.endsWith('/katex.min.js')), JSON.stringify(asked));
+    closed.mathRequests = null;
     check('坏公式给一句明确的错，TeX 原文仍可读',
       after.bad.length >= 1 && after.bad.every((text) => text.startsWith('公式没排出来：')),
       JSON.stringify(after.bad));
     check('坏公式不影响别的公式（同页其它公式照排）', after.questionKatex >= 1 && after.optionKatex >= 2,
       JSON.stringify([after.questionKatex, after.optionKatex]));
-    return { before, after };
+    // 两段读数都记下：开题库**之前**的请求列表是空的（按需），之后才有
+    return { beforeRequests: before, afterRequests: asked, before, after };
   });
 
   /* ③ 整页没有数学式：一条公式资源的请求都不发 */
@@ -341,7 +344,7 @@ try {
     check('零请求：没有数学式的页面不加载公式资源', asked.length === 0, JSON.stringify(asked));
     check('页面照常渲染（不是空白）', seen.docBlocks > 0 && String(seen.docText).includes('没有任何公式'),
       JSON.stringify([seen.docBlocks, seen.docText]));
-    return seen;
+    return { ...seen, mathRequests: asked };
   });
 
   /* ④ 资源缺失：降级成可读 TeX + 一句人话，页面不空白 */

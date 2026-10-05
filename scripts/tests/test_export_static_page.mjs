@@ -115,7 +115,8 @@ test('公式资源随产物走：引擎走 vendor 包装壳 + 哈希，样式表
   // 样式表与字体：落 assets/（守卫按路径前缀判成 asset：二进制不扫，也不按 utf8 比字节）。
   // 字体落别处会因为「utf8 读坏 → 字节数与清单对不上」判红（实测过）。
   assert.ok(files.includes('assets/katex/katex.min.css'));
-  assert.ok(files.includes('assets/katex/LICENSE'), 'MIT 要求许可证随副本分发');
+  assert.ok(files.includes('assets/katex/LICENSE'), 'MIT（代码与 CSS）要求许可证随副本分发');
+  assert.ok(files.includes('assets/katex/fonts/LICENSE'), '字体那份是另一份许可（SIL OFL 1.1），也要随副本走');
   const css = fs.readFileSync(path.join(outcome.out, 'assets/katex/katex.min.css'), 'utf8');
   const urls = [...css.matchAll(/url\(([^)]+)\)/g)].map((match) => match[1].trim());
   assert.ok(urls.length >= 20, `样式表里的字体引用太少（${urls.length}）`);

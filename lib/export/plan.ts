@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { readLibrary } from '../library.ts';
 import { readReference } from '../reference.ts';
 import { cmpCodePoints } from '../core/format.ts';
-import { KATEX_VERSION, LICENSE_FILE, MATH_JS, katexDistDir, mathAssets } from '../math.ts';
+import { KATEX_VERSION, LICENSE_FILE, MATH_FONT_DIR, MATH_JS, katexDistDir, mathAssets } from '../math.ts';
 import type { ReactSources } from './react.ts';
 import { ASSETS_DIR } from './page.ts';
 import type { VendorKey } from './page.ts';
@@ -240,11 +240,15 @@ export function planExport(options: PlanExportOptions): ExportPlan {
       bytes: asset.bytes,
     });
   }
-  // MIT 要求许可证随副本分发：产物是 KaTeX 的一份副本
-  const licenseFile = path.join(katexDistDir(), LICENSE_FILE);
-  products.push({
-    path: `${MATH_ASSET_DIR}/${LICENSE_FILE}`, role: 'asset', from: licenseFile, bytes: fs.statSync(licenseFile).size,
-  });
+  /* 许可证随副本分发：产物就是 KaTeX 的一份副本，而这里**是两份不同的许可**——
+     代码与 CSS 是 MIT，字体是 SIL OFL 1.1（带保留字体名）。两份都要带，别合成一份。 */
+  for (const rel of [LICENSE_FILE, `${MATH_FONT_DIR}/${LICENSE_FILE}`]) {
+    const licenseFile = path.join(katexDistDir(), rel);
+    if (!fs.existsSync(licenseFile)) continue;
+    products.push({
+      path: `${MATH_ASSET_DIR}/${rel}`, role: 'asset', from: licenseFile, bytes: fs.statSync(licenseFile).size,
+    });
+  }
 
   const generatedAt = now().toISOString();
   const dataText = dataScript({

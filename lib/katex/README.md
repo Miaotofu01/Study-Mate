@@ -10,7 +10,8 @@
 | `katex.min.js` | 排版引擎（UMD）。当 classic script 加载时它自己写上 `window.katex` |
 | `katex.min.css` | 排版结果的样式 + 20 条 `@font-face` |
 | `fonts/*.woff2` | 只有 woff2（上游 dist 里的 woff/ttf 回退被裁掉了）：排版真正会取的那一种 |
-| `LICENSE`、`fonts/LICENSE` | MIT 全文。随包发与随导出产物发都是许可证的要求，别删 |
+| `LICENSE` | **代码与 CSS** 那一份：MIT（Khan Academy 与其他贡献者） |
+| `fonts/LICENSE` | **字体**那一份：SIL OFL 1.1，带保留字体名（Design Science / Khan Academy）。与代码那份是**两份不同的许可**，别合成一份——随包发与随导出产物发都是许可证的要求，别删 |
 
 **为什么随包发而不是从机器解析**：像 React 那样「导出时在机器上找一份」的写法，在一台只装了
 StudyMate 的机器上一条候选都命中不了，公式就退化成 TeX 原文——与「阅读端自带」直接冲突
