@@ -141,10 +141,16 @@ test('buildLibrary 与 readLibrary 是同一份实现，相对 workspace 按 roo
   assert.deepEqual(fromBuild, fromRead);
 });
 
-test('没有学科目、或没有 workspace 时抛错，而不是给一份空 payload', () => {
+test('一个可用科目都没有时给空 payload（工作区在、课还没建），没有 workspace 才抛错', () => {
   const empty = makeWorkspace({});
   fs.mkdirSync(path.join(empty.workspace, '.learning', 'subjects'), { recursive: true });
-  assert.throws(() => readLibrary({ workspace: empty.workspace }), /没有可用科目/);
+  // 目录里躺着建课建到一半的科目目录（没有 curriculum.yaml）：那不算「读盘失败」，
+  // 也不该变成页面上那张「读不到学习工作区」的错误卡——照实给空清单，页面自己说「还没有科目」（#90）
+  fs.mkdirSync(path.join(empty.workspace, '.learning', 'subjects', '半成品'), { recursive: true });
+  const blank = readLibrary({ workspace: empty.workspace });
+  assert.deepEqual(blank.subjects, []);
+  assert.equal(blank.workspace, empty.workspace);
+  assert.equal(blank.today, '');
   assert.throws(() => readLibrary({}), /需要 workspace/);
   assert.throws(() => readLibrary({ workspace: path.join(empty.workspace, '不存在') }), /找不到学习工作区/);
 });

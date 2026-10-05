@@ -109,8 +109,16 @@ const groups = {
       'scripts/tests/test_core_coverage_floor.mjs',
       // 阅读端（lib/client.js）的契约：token 对比度达 WCAG AA（亮暗两套）、
       // 动效四档与 prefers-reduced-motion、首次引导定位几何（纯函数，node:vm 里跑）
+      // 排版那一层（#89）：token 与「字号行高成套」的静态判据（配对齐全、行高无单位数、
+      // 12px 以上必须引阶梯、正文那批选择器只许引 --smb-fs-body、窄档覆盖写在基础规则之后、
+      // 面包屑宽度按全角字算）。
       'scripts/tests/test_client_tokens.mjs',
+      'scripts/tests/test_client_typography.mjs',
       'scripts/tests/test_client_pure.mjs',
+      // #88 三栏几何：ADR-0011 的让位顺序（右栏先拿 / 左栏先让 / 中栏保底 420）与
+      // 「并排装不下就把那一栏盖在正文上」的降级。同样是纯函数——「任何画布宽度下都
+      // 有一栏打得开」是代数，浏览器里一条条试既慢又试不全。
+      'scripts/tests/test_client_panes.mjs',
       // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
       'scripts/tests/test_client_reading_position.mjs',
       // #77 交付物题的界面：代跑事实块只显示事实（命令 / 退出码 / 两条流 / 截断），
@@ -213,11 +221,18 @@ const groups = {
       // #82：**导出的产物本身**在 file:// 下打开（真 Chrome + 真 React）：样式、公式、图片、
       // 题目全部可用，且控制台/页面/失败请求干净。不搭夹具页——测的就是学生拿到的那份东西。
       'browser/export_file_test.mjs',
-      // #86：阅读端**四路由 × 两档视口**。上面那条 reading_test 恒定 1440×960，于是
+      // #86：阅读端**四路由 × 三档视口**。上面那条 reading_test 恒定 1440×960，于是
       // lib/client.js 里两条 `@media (max-width: 900px)` 从来没被执行过；这一条把四个面
       // （今天学什么 / 科目主页 / 课件页 / 搜索）在宽窄两档各取一次景，亮暗两套的实测对比度
       // 与动效四档也在里面。窄档不是截图，是换 CSS 视口再跑一遍。
+      // #88 加了紧档（700×900）与一场几何扫描：那一档课件页的右栏并排装不下，必须是
+      // 「盖在正文上 + 说明 + 收起」的抽屉——「点题目没反应」正是那张票要消掉的缺陷。
       'browser/reading_routes_test.mjs',
+      // #89：课件页正文与页头的呈现——配图两条路（位图受列宽约束、矢量随列宽、暗色不刺眼）、
+      // 代码块语言标签与块内横向滚动、长标识符/URL/宽表格不撑出横向滚动条、一屏一种正文字号、
+      // 顶部只剩一条（课件标题 + 小节跳转）、面包屑按全角字省略、题目标记带组号。
+      // 宽窄两档各一遍，每个场景一张截图。
+      'browser/lesson_body_test.mjs',
       // #92：问答面板里那条引用的**真浏览器**用例。Node 里没有真选区，而这张票的病根恰恰
       // 出在「document 级 mouseup 读实时选区、判定失败就清空」——点输入框会让浏览器把选区
       // 折叠成空。所以这里用 CDP 的 Input.dispatchMouseEvent 做真鼠标拖拽（harness 没有
