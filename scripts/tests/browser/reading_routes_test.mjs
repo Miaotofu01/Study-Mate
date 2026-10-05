@@ -66,6 +66,8 @@ const VIEWPORTS = [
 const PANE_MODES = { wide: 'column', narrow: 'column', tight: 'drawer' };
 /** 中栏保底（`lib/client.js` 的 MIN_CENTER，出处是 ADR-0011）。 */
 const MIN_CENTER = 420;
+/** 没拖动过时浏览器本地偏好里记着的栏宽（`PANE_LIMITS` 的两个 fallback）。 */
+const STORED_PANES = '{"left":264,"right":372}';
 
 /* ── 临时工作区：跑完即弃 ──────────────────────────────────────────────── */
 
@@ -886,7 +888,9 @@ try {
       await ctx.evaluate(`document.querySelector('[data-proto="toggle-left"]').click()`);
       await ctx.sleep(300);
       const nodes = await ctx.evaluate(LESSON_PROBE);
-      rows.push({ width, closed, quiz, nodes });
+      // 让步绝不回写：这一屏算出来的栏宽与「记住的栏宽」是两件事，后者只该是默认值
+      const stored = await ctx.evaluate(`window.localStorage.getItem('studymate.panes.v1')`);
+      rows.push({ width, closed, quiz, nodes, stored });
 
       const at = `[${width}px]`;
       // 一、点「题目」必须有反应：并排的栏，或者盖在正文上的抽屉（带说明与收起）
@@ -915,6 +919,9 @@ try {
         !!quiz.docBox && !!quiz.centerBox && quiz.docBox.x >= quiz.centerBox.x - 1
         && quiz.docBox.x + quiz.docBox.w <= quiz.centerBox.x + quiz.centerBox.w + 1,
         `正文列 ${JSON.stringify(quiz.docBox)} 中栏 ${JSON.stringify(quiz.centerBox)}`);
+      // 五、让步（收起 / 降级）绝不回写记忆值：这一屏怎么挤，记住的还是默认那两条
+      check(`${at} 让步没有回写记忆值（画布变窄只影响这一屏，变宽要能自动恢复）`,
+        stored === STORED_PANES, `localStorage 里是 ${stored}`);
     }
 
     const widest = rows[0];
