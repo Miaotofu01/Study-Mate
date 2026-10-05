@@ -281,8 +281,15 @@ export function workspaceContextTool(ctx: ServiceReader): StudyToolSpec {
           records.set(entry.slug, entry.records);
         }
       } catch (error) {
-        // 有目录但没有可用科目（建课建到一半）也算「还没有科目」，照实说而不是崩
+        // 科目清单读不出来（坏 YAML 之类）就照实说，不崩
         notes.push(`科目清单读不出来：${(error as Error).message}`);
+      }
+      /* 读得出来、但一个可用科目都没有（`subjects/` 下只有建课建到一半的目录）：
+         这也是「还没有科目」，要照实说一句并给出下一步——只留一行「（还没有科目）」
+         学生不知道是没建还是没读出来。`lib/library.ts` 对这种工作区给的是**空清单**
+         而不是抛错（#90），所以这句话只能在这里补。 */
+      if (subjects.length === 0 && notes.length === 0) {
+        notes.push(`工作区 ${facts.path} 里还没有可用科目（建课建到一半、大纲里一个节点都没有的目录不算）——先建一个。`);
       }
 
       const memory = run.access.read<{ file: string; present: boolean; markdown: string }>('memory');
