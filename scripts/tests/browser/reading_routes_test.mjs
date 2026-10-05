@@ -25,6 +25,11 @@
      · 同一档里每个场景都重新导航一次（夹具从头加载），场景之间不带着上一步的状态。
      · 记进 metrics 但不判红的读数有两处，都是**别的票**的验收面，这里只留证据：
        正文里的公式元素数量、正文列的横向溢出量。
+     · #90（课件页之外的三个面）把这三件事也纳进来守：主页第一屏那张卡**点得进去**（点到真
+       课件页、落在那张卡说的那个节点上）；空目录 / 半份数据给的是「还没有」这句话，**不是**
+       空白、也不是「读不到学习工作区」那张错误卡；搜索每条结果都标出科目与节点，且无断点的
+       长 URL 折在自己那一格里（结果行与列表都不出横向滚动条）。窄档那三条「死声明」修好后，
+       对账那一场把它们从「只记不判」升成断言。
 
    浏览器二进制由 harness 探测；找不到时明确跳过（退出码 3），不是静默绿。
 */
@@ -76,6 +81,13 @@ const FIGURE_SVG = [
   '</svg>',
 ].join('');
 const FIGURE_SRC = 'data:image/svg+xml;base64,' + Buffer.from(FIGURE_SVG, 'utf8').toString('base64');
+
+/* 一条**没有断点**的长 URL：斜杠之后全是连续字符，浏览器在哪儿都折不了行。
+   搜索面板要能把它折在自己那一格里（`overflow-wrap: anywhere`），而不是把结果行顶出
+   横向滚动条——`.smb-palette__list` 的 `overflow-y: auto` 会把横向也算成 auto（#90）。
+   放 40 个字符一段重复三遍：短了不触发溢出，这条断言就白写了。 */
+const LONG_URL = 'https://example.com/docs/reference/'
+  + 'pathSegmentWithoutAnyBreakPointInside'.repeat(3);
 
 /** 一份能读出「两层依赖 + 有课件」的最小科目树。demo 那一门的第一课是四个面的取景主角。 */
 function subjectFiles(dirName, { slug, name, touched }) {
@@ -161,7 +173,12 @@ function plainSubjectFiles(dirName, { slug, name, touched }) {
     [`.learning/subjects/${dirName}/progress.yaml`]: [
       `updated_at: "${touched}"`, 'nodes:', '  列表:', '    status: 已学完', '',
     ].join('\n'),
-    [`.learning/subjects/${dirName}/lessons/1-列表.md`]: '# 列表\n\n列表是一串有序的值。\n',
+    [`.learning/subjects/${dirName}/lessons/1-列表.md`]: [
+      '# 列表', '', '列表是一串有序的值。', '',
+      '## 参考', '',
+      // 搜索用的那条无断点长 URL：它得属于**另一门**科目，那条命中的出处才有东西可断
+      LONG_URL + ' 这一段没有断点，看它撑不撑破结果行。', '',
+    ].join('\n'),
     [`.learning/subjects/${dirName}/lessons/2-映射.md`]: '# 映射\n\n映射把每一项换成另一项。\n',
     [`.learning/subjects/${dirName}/lessons/3-过滤.md`]: '# 过滤\n\n过滤把不合条件的项去掉。\n',
     [`.learning/subjects/${dirName}/MISSION.md`]: '# 使命\n\n## Why\n\n给跨科目搜索凑一门。\n',
@@ -189,6 +206,50 @@ function makeWorkspace() {
   return { root, workspace };
 }
 
+/* ── 两份额外的数据：空目录 / 半份数据（#90 的空态验收面） ───────────────────
+   它们不是「四个面」的取景，而是同一批面的**退化输入**：一份是工作区里只有建课建到
+   一半的空科目目录（一个可用科目都没有），一份是大纲有了、课件与附件都没有的半份科目。
+   两份都要求页面说得出「还没有」，而不是空白或「读不到学习工作区」那张错误卡。 */
+
+/** 空目录：`subjects/` 在，里面只有一个空科目目录（一个文件都没有）。 */
+function makeEmptyWorkspace() {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sm-routes-blank-'));
+  TEMPS.push(root);
+  const workspace = path.join(root, 'ws');
+  fs.mkdirSync(path.join(workspace, '.learning', 'subjects', '半成品'), { recursive: true });
+  fs.writeFileSync(path.join(workspace, '.learning', 'MEMORY.md'), '# 共享记忆\n');
+  return { root, workspace, payload: readLibrary({ workspace }) };
+}
+
+/** 半份数据：有 subject.yaml 与大纲（两个节点、一条前置边），别的都没有；
+    旁边那个空目录用来证明「跳过一个科目」不是「读不出来」。 */
+function makeHalfWorkspace() {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sm-routes-half-'));
+  TEMPS.push(root);
+  const workspace = path.join(root, 'ws');
+  const files = {
+    '.learning/MEMORY.md': '# 共享记忆\n',
+    '.learning/subjects/half/subject.yaml': [
+      'slug: half', 'name: 半份科目', 'goal: 只有大纲，课件与附件还没写', 'status: 学习中', '',
+    ].join('\n'),
+    '.learning/subjects/half/curriculum.yaml': [
+      'nodes:',
+      '  - id: 一', '    title: 一号', '    kind: 概念', '    objective: 说清一号是什么',
+      '  - id: 二', '    title: 二号', '    kind: 概念', '    objective: 说清二号是什么',
+      '    prerequisites: [一]',
+      'edges:',
+      '  - from: 一', '    to: 二', '    reason: 先一号后二号', '',
+    ].join('\n'),
+  };
+  for (const [rel, content] of Object.entries(files)) {
+    const file = path.join(workspace, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+  }
+  fs.mkdirSync(path.join(workspace, '.learning', 'subjects', '半成品'), { recursive: true });
+  return { root, workspace, payload: readLibrary({ workspace }) };
+}
+
 /* ── 夹具页 ────────────────────────────────────────────────────────────── */
 
 /** 宿主 token 的两块（亮/暗）原样铺开，让 --dsw-alias-* 在夹具里和真宿主一样能解。 */
@@ -202,7 +263,7 @@ function hostTokenCss() {
   ].join('\n');
 }
 
-function buildFixture(dir, payload) {
+function buildFixture(dir, payload, name = 'reading-routes-fixture.html') {
   const css = extractCss(fs.readFileSync(path.join(ROOT, 'lib', 'client.js'), 'utf8'));
   const json = JSON.stringify(payload).replace(/</g, '\\u003c');
   const html = `<!doctype html>
@@ -279,7 +340,7 @@ function buildFixture(dir, payload) {
 </body>
 </html>
 `;
-  const file = path.join(dir, 'reading-routes-fixture.html');
+  const file = path.join(dir, name);
   fs.writeFileSync(file, html);
   return pathToFileURL(file).href;
 }
@@ -305,9 +366,11 @@ const HOME_PROBE = `(() => {
     hero: text('.smb-hero__title'),
     courses: qa('.smb-course').length,
     courseNames: qa('.smb-course__name').map((el) => el.textContent.trim()),
+    continueBlockTitle: text('.smb-block__title'),
     continueSubject: text('.smb-continue__subject'),
     continueTitle: text('.smb-continue__title'),
     continueGo: text('.smb-continue__go'),
+    continueEmpty: text('.smb-block .smb-empty'),
     progress: pbar ? { now: pbar.getAttribute('aria-valuenow'), max: pbar.getAttribute('aria-valuemax') } : null,
     motionOptions: qa('.smb-select option').map((el) => el.value),
     layout: {
@@ -316,6 +379,8 @@ const HOME_PROBE = `(() => {
       topbarWrap: style('.smb-topbar', 'flexWrap'),
       continueBarWrap: style('.smb-continue__bar', 'flexWrap'),
       continueProgressWidth: style('.smb-continue__bar .smb-progressbar', 'width'),
+      continueProgressBox: box('.smb-continue__bar .smb-progressbar'),
+      continueBarBox: box('.smb-continue__bar'),
       courseWrap: style('.smb-course', 'flexWrap'),
       courseBox: box('.smb-course'),
       courseMain: box('.smb-course__main'),
@@ -406,7 +471,10 @@ const SEARCH_PROBE = `(() => {
     hits: hits.length,
     kinds: hits.map((el) => el.querySelector('.smb-hit__kind').textContent.trim()),
     texts: hits.map((el) => el.querySelector('.smb-hit__text').textContent.trim().slice(0, 24)).slice(0, 6),
-    where: hits.map((el) => { const w = el.querySelector('.smb-hit__where'); return w ? w.textContent.trim() : null; }).slice(0, 6),
+    where: hits.map((el) => { const w = el.querySelector('.smb-hit__where'); return w ? w.textContent.trim() : null; }),
+    // 结果行与列表各有横向溢出多少：长 URL 撑破版面时这两个数会大于 0（#90）
+    hitOverflowX: hits.map((el) => el.scrollWidth - el.clientWidth),
+    listOverflowX: (() => { const list = q('.smb-palette__list'); return list ? list.scrollWidth - list.clientWidth : null; })(),
     boxRect: boxEl ? { w: Math.round(boxEl.getBoundingClientRect().width), left: Math.round(boxEl.getBoundingClientRect().left) } : null,
     bodyText: document.body.innerText.slice(0, 300),
   };
@@ -586,6 +654,18 @@ try {
       check(`${tag} 第一屏给出「接着上次」的去处`,
         seen.continueSubject === '演示科目' && !!seen.continueTitle && seen.continueGo === '继续读 →',
         `${seen.continueSubject} / ${seen.continueTitle} / ${seen.continueGo}`);
+      // 「可直接进入」不是看它长得像按钮，是**点下去真的落到那张卡说的那个节点上**（#90）。
+      // 点完把夹具重新导航一次：这一场的截图要的还是主页这一面，不是点进去之后的课件页。
+      await ctx.evaluate(`document.querySelector('[data-proto="continue"]').click()`);
+      await ctx.sleep(500);
+      const entered = await ctx.evaluate(LESSON_PROBE);
+      // 卡上那个标题带位次前缀（「2 函数」），落到页面上是节点名本身——所以断的是
+      // 「点进去那一页的标题就在卡上那段字里」+「真的是课件正文，不是缺课件那一页」
+      check(`${tag} 第一屏那张卡点得进去，且落在它说的那个节点上`,
+        !!entered.crumb && entered.crumb === entered.articleHeading
+        && String(seen.continueTitle).includes(entered.crumb) && entered.articleChars > 80,
+        `卡上写的是 ${seen.continueTitle}，点进去到了 ${entered.crumb} / ${entered.articleHeading}（正文 ${entered.articleChars} 字）`);
+      await ctx.navigate(fixture, { settle: 1000 });
       check(`${tag} 科目列表一行一门`, seen.courses === 2 && seen.courseNames.some((one) => one.includes('第二科目')),
         JSON.stringify(seen.courseNames));
       check(`${tag} 顶栏四档动效都还在`,
@@ -609,6 +689,8 @@ try {
       return {
         viewport: viewport.key, size: [seen.width, viewport.height], breakpoint900: seen.breakpoint900,
         courses: seen.courses, continueNode: seen.continueTitle, progress: seen.progress,
+        // 「点得进去」的读数：卡上写的那个节点 vs 点进去那一页的标题
+        entered: { card: seen.continueTitle, crumb: entered.crumb, heading: entered.articleHeading },
         layout, documentOverflowX: seen.overflowX,
       };
     });
@@ -697,11 +779,32 @@ try {
       check(`${tag} 覆盖层不撑出视口`,
         !!seen.boxRect && seen.boxRect.w <= seen.width && seen.boxRect.left >= 0,
         JSON.stringify(seen.boxRect) + ' vs ' + seen.width);
+      // 每条结果都看得出属于哪门科目（有节点的那几条还要看得出哪个节点）
+      check(`${tag} 每条结果都标出了科目，带节点的还标出了节点`,
+        seen.where.length === seen.hits
+        && seen.where.every((one) => /^(演示科目|第二科目)/.test(String(one)))
+        && seen.where.some((one) => String(one).includes('变量')),
+        JSON.stringify(seen.where.slice(0, 4)));
+
+      /* 无断点的长 URL：折在自己那一格，结果行与列表都不出横向滚动条。
+         查询词取 `example.com`——那条命中在**第二门**科目里，所以顺带证明出处那一段
+         跨科目也对（`第二科目 · 列表 · 参考`）。 */
+      await ctx.evaluate(typeSearch('example.com'));
+      await ctx.sleep(400);
+      const long = await ctx.evaluate(SEARCH_PROBE);
+      check(`${tag} 无断点的长 URL 撑不破结果行，也不给列表顶出横向滚动条`,
+        long.hits >= 1 && long.listOverflowX <= 0 && long.hitOverflowX.every((one) => one <= 0)
+        && long.where.every((one) => String(one).startsWith('第二科目 · 列表')),
+        `hits=${long.hits} list=${long.listOverflowX} rows=${JSON.stringify(long.hitOverflowX)} where=${JSON.stringify(long.where)}`);
+      // 取景回到「变量」那一组：这一场的截图要的是正常结果，不是这条极端样例
+      await ctx.evaluate(typeSearch('变量'));
+      await ctx.sleep(400);
       return {
         viewport: viewport.key, size: [seen.width, viewport.height],
         opened: { open: opened.open, focused: opened.focused, emptyState: opened.empty },
         query: seen.inputValue, hits: seen.hits, kinds: seen.kinds,
         texts: seen.texts, where: seen.where, boxWidth: seen.boxRect && seen.boxRect.w,
+        longText: { hits: long.hits, where: long.where, listOverflowX: long.listOverflowX, rowOverflowX: long.hitOverflowX },
       };
     });
 
@@ -754,15 +857,15 @@ try {
   }
 
   /* ── 两档对账：窄档的读数必须真的与宽档不同 ───────────────────────────
-     这一条是「窄档不是把宽档截个图」的机器判据：两条 @media 规则的实测读数在宽档下
-     与窄档下必须不同，且窄档那边是规则声明的那一侧。
+     这一条是「窄档不是把宽档截个图」的机器判据：@media 规则的实测读数在宽档下与窄档下
+     必须不同，且窄档那边是规则声明的那一侧。
 
-     **只记不判的那几条**：`lib/client.js` 的两条 `@media (max-width: 900px)` 块写在
-     被它们覆盖的基础规则**前面**（第一块在 .smb-wrap / .smb-crumb / .smb-continue__bar
-     的定义之前），同特异度下后写的赢——于是「正文列内边距压小」「面包屑上限收窄」
-     「接着上次的进度条占满一行」这三条声明是**死声明**，窄档下量到的与宽档一模一样。
-     这属于呈现面的账（另一张票），所以这里把它记进 metrics 并打一行 ⚠，**不据此判红**：
-     本套件要守的是「这两条规则被删了/断了会被发现」，不是替别的票验收。 */
+     #90 把三条**死声明**修活之后，这里从「只记不判」升成断言：`lib/client.js` 原来把
+     `@media (max-width: 900px)` 拆成两块写在被覆盖的基础规则**前面**（.smb-wrap /
+     .smb-crumb / .smb-continue__bar 的定义之前），同特异度下后写的赢——于是「正文列
+     内边距压小」「面包屑上限收窄」「接着上次的进度条占满一行」窄档下量到的与宽档一模一样。
+     现在它们在窄档真的落到计算样式与几何上；再被谁挪回前面去，下面这两条会红。
+     断的仍是**关系**（宽窄两档必须不同、窄档那边是规则说的那一侧），不是具体像素值。 */
   await session.scene('reading-routes-compare', async (ctx) => {
     const wide = layoutByViewport.wide;
     const narrow = layoutByViewport.narrow;
@@ -791,11 +894,22 @@ try {
         `wide=${JSON.stringify(wide)} narrow=${JSON.stringify(narrow)}`);
       check('两条规则的实测读数在宽窄两档确实不同（窄档不是宽档的截图）',
         differing.length >= 3, `不同的只有 ${differing.length} 条：${JSON.stringify(differing.map(([name]) => name))}`);
+      // #90：原来那三条「死声明」必须真的落在窄档上——内边距与面包屑上限都往小走，
+      // 进度条不再钉死宽档那 180px，而是占满自己那一行（宽档：钉死、比行窄）
+      const px = (value) => parseFloat(String(value)) || 0;
+      check('壳那三条声明都真的生效了（内边距 / 面包屑上限收窄，进度条改成占满一行）',
+        px(narrow.wrapPaddingLeft) < px(wide.wrapPaddingLeft)
+        && px(narrow.crumbMaxWidth) < px(wide.crumbMaxWidth)
+        && !!narrow.continueProgressBox && !!narrow.continueBarBox
+        && narrow.continueProgressBox.w >= narrow.continueBarBox.w - 1
+        && narrow.continueProgressBox.w > px(wide.continueProgressWidth)
+        && (wide.continueProgressBox ? wide.continueProgressBox.w < wide.continueBarBox.w : false),
+        `wrap=${wide.wrapPaddingLeft}→${narrow.wrapPaddingLeft} crumb=${wide.crumbMaxWidth}→${narrow.crumbMaxWidth} `
+        + `bar=${JSON.stringify(narrow.continueProgressBox)}/${JSON.stringify(narrow.continueBarBox)} `
+        + `wideBar=${JSON.stringify(wide.continueProgressBox)}/${JSON.stringify(wide.continueBarBox)}`);
+      check('没有「窄档下量到与宽档一模一样」的响应式声明了（死声明清零）',
+        inert.length === 0, inert.map(([name]) => name).join('；'));
 
-      if (inert.length) {
-        console.log(`      ⚠ 这几条 @media 声明在窄档下没落到计算样式上（被后面的同特异度基础规则盖掉，源码顺序）：`
-          + inert.map(([name]) => name).join('；'));
-      }
       await ctx.navigate(fixture, { settle: 800 });   // 这一场只为对账，别留一张空白页
       return {
         wide, narrow,
@@ -805,6 +919,86 @@ try {
     }
     await ctx.navigate(fixture, { settle: 800 });
     return { wide, narrow };
+  });
+
+  /* ── 空目录 / 半份数据（#90 的空态验收面） ─────────────────────────────
+     这一组不是「四个面」的取景，而是同一批面的**退化输入**：一个可用科目都没有的工作区、
+     有大纲但课件与附件都没写的半份科目、以及一份连节点都没有的 payload。三者要求的都是
+     「给得出『还没有』这句话」——空白与错误卡都算不达标。
+
+     为什么第三种要手造 payload：`lib/library.ts` 会把零节点的科目整个跳过，所以这种科目
+     到不了页面上（那是建课建到一半的正常中间态）。这里量的是**渲染器自己的兜底**：
+     真喂给它一份零节点的科目，它也不该画出一张只有图例的空地图。 */
+
+  await useViewport(VIEWPORTS[0]);   // 这三场与档位无关，固定用宽档取景
+
+  await session.scene('reading-routes-blank-workspace', async (ctx) => {
+    const blank = makeEmptyWorkspace();
+    await ctx.navigate(buildFixture(blank.root, blank.payload, 'blank-fixture.html'), { settle: 1000 });
+    const seen = await ctx.evaluate(`(() => {
+      const empty = document.querySelector('.smb-empty');
+      const text = empty ? empty.textContent.trim() : '';
+      return {
+        text,
+        workspaceShown: text.includes(${JSON.stringify(blank.workspace)}),
+        errorCard: /读不到学习工作区/.test(document.body.innerText),
+        retry: Array.from(document.querySelectorAll('button')).some((el) => el.textContent.trim() === '重试'),
+        root: !!document.querySelector('.smb-root'),
+      };
+    })()`);
+    check('空目录的工作区给的是「还没有科目」，不是空白也不是错误卡',
+      seen.root && /还没有科目/.test(seen.text) && !seen.errorCard && !seen.retry,
+      JSON.stringify(seen));
+    check('空态里说清了读的是哪个工作区（学生照着能去建课）', seen.workspaceShown, String(seen.text));
+    return { viewport: 'wide', size: [VIEWPORTS[0].width, VIEWPORTS[0].height], ...seen };
+  });
+
+  await session.scene('reading-routes-half-data', async (ctx) => {
+    const half = makeHalfWorkspace();
+    await ctx.navigate(buildFixture(half.root, half.payload, 'half-fixture.html'), { settle: 1000 });
+    const home = await ctx.evaluate(HOME_PROBE);
+    check('半份数据的主页：第一屏仍指得出去哪，并明说这一课还没有课件',
+      home.continueSubject === '半份科目' && home.continueGo === '还没有课件' && !!home.continueTitle,
+      JSON.stringify({ subject: home.continueSubject, node: home.continueTitle, go: home.continueGo }));
+    await ctx.evaluate(OPEN_SUBJECT);
+    await ctx.sleep(400);
+    const subject = await ctx.evaluate(SUBJECT_PROBE);
+    const body = String(subject.bodyText);
+    check('半份数据的科目主页：路线图卡片在，每张都写明「无课件」',
+      subject.nodeCards === 2 && (body.match(/无课件/g) || []).length === 2, `cards=${subject.nodeCards}`);
+    check('半份数据的科目主页：参考资料那一块给的是「还没有」，不是空白',
+      /还没有参考资料/.test(body), JSON.stringify(body).slice(-140));
+    check('半份数据的科目主页不空白、不报错',
+      !/读不到学习工作区/.test(body) && body.trim().length > 40 && subject.overflowX <= 0,
+      `overflowX=${subject.overflowX} ` + JSON.stringify(body).slice(0, 120));
+    return {
+      viewport: 'wide', size: [VIEWPORTS[0].width, VIEWPORTS[0].height],
+      home: { subject: home.continueSubject, node: home.continueTitle, go: home.continueGo },
+      nodeCards: subject.nodeCards, blocks: subject.blocks, bodyText: body.slice(0, 200),
+    };
+  });
+
+  await session.scene('reading-routes-no-nodes', async (ctx) => {
+    const half = makeHalfWorkspace();
+    // 大纲清空的那一份：零节点科目今天到不了页面（Host 半会跳过），这里直接喂给渲染器
+    const payload = JSON.parse(JSON.stringify(half.payload));
+    payload.subjects[0] = Object.assign({}, payload.subjects[0], {
+      nodes: [], edges: [], stats: {}, order: {}, continue_node: '', levels: 0,
+    });
+    await ctx.navigate(buildFixture(half.root, payload, 'no-nodes-fixture.html'), { settle: 1000 });
+    const home = await ctx.evaluate(HOME_PROBE);
+    check('零节点科目的主页：那张卡说得出「还没有节点」，而不是留一张空白卡',
+      /还没有节点/.test(String(home.continueEmpty)), JSON.stringify(home.continueEmpty));
+    await ctx.evaluate(OPEN_SUBJECT);
+    await ctx.sleep(400);
+    const subject = await ctx.evaluate(SUBJECT_PROBE);
+    check('零节点科目的路线图给的是「还没有节点」这句话，不是一张只有图例的空地图',
+      /还没有节点/.test(String(subject.bodyText)) && subject.mapLevels === 0,
+      JSON.stringify(subject.bodyText).slice(0, 160));
+    return {
+      viewport: 'wide', size: [VIEWPORTS[0].width, VIEWPORTS[0].height],
+      homeEmpty: home.continueEmpty, bodyText: String(subject.bodyText).slice(0, 200),
+    };
   });
 
   /* ── 动效四档 + 跟随系统偏好 ─────────────────────────────────────────── */
