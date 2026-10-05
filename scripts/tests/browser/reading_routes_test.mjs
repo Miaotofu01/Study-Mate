@@ -7,11 +7,14 @@
 
    夹具怎么搭与 reading_test.mjs 同一套（真 `lib/client.js` + `fixtures/mini-react.js` +
    `fixtures/host-theme-tokens.json` 的宿主 token + 现抠的内联 CSS + stub 掉 `fetch`/`EventSource`），
-   差别只有两处：
+   差别只有三处：
      · 课件页那份夹具**带公式、配图、代码块与题目**（四个面的取景要有真东西可看）；
      · 配图写成 `data:` URL——夹具页走 `file://`，取图路由 `/api/studymate/asset` 到不了
        任何服务端，`<img>` 会以「失败请求」把整个场景判红。这里量的是「位图进了正文」这条
-       呈现面，取图路由本身不在本套件的验收面上。
+       呈现面，取图路由本身不在本套件的验收面上；
+     · 夹具页把 `ResizeObserver` 换成一个只在 observe 时报一次真实尺寸的垫片——mini-react
+       每次重渲染整树重建 DOM，被 effect 闭住的旧节点一脱离文档就报 0 宽，于是画布宽被写成
+       0、两条栏永远打不开。这是夹具边界不是客户端缺陷，垫片那一处的注释把账记全了。
 
    口径（别顺手改回去）：
      · 断言只到「这一面渲染出来了、控制台干净」这一层。**不钉具体像素、不钉具体 CSS 值**：
