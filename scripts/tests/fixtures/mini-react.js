@@ -175,6 +175,10 @@
       }
       if (key === 'value') { el.value = value; continue; }
       if (key === 'checked') { el.checked = !!value; continue; }
+      // 原样透传一段 HTML（React 的那个 prop）：阅读端用它把 KaTeX 的输出放进公式容器里
+      // （#91）。不认这个 prop 的话，公式容器在夹具里会是一片空白——而真实 React 里有内容，
+      // 这种「夹具与真货不一样」的差别正是套件最该避免的假绿。
+      if (key === 'dangerouslySetInnerHTML') { el.innerHTML = (value && value.__html) || ''; continue; }
       if (key.length > 2 && key.startsWith('on') && key[2] === key[2].toUpperCase() && typeof value === 'function') {
         el.addEventListener(key.slice(2).toLowerCase(), value);
         continue;

@@ -83,7 +83,8 @@ test('第三方包装被改 / 内容被换 / 阅读端本体被改：哈希核�
   // 给了 dir 就保留临时目录（下面要从盘上把产物读回来逐个篡改）
   const result = await exportGuardRun({ dir: tempDir(t, 'studymate-export-tamper-') });
   const { files, manifest } = readExportDir(result.out);
-  assert.equal(manifest.third_party.length, 4);
+  // 四份 React + 一份 KaTeX（#91）：第三方构建的每一条都要有哈希可核
+  assert.equal(manifest.third_party.length, 5);
 
   const tamper = (rel, change) => files.map((file) => (file.path === rel ? { ...file, text: change(file.text) } : file));
 
