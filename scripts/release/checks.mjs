@@ -159,6 +159,10 @@ const groups = {
       // Host 那一半用**注入的假 llm** 证明链路通（真模型调用要花额度，门禁里不跑）。
       'scripts/tests/test_client_ask_panel.mjs',
       'scripts/tests/test_host_ask_route.mjs',
+      // #92：选中正文冻成一条**留得住的引用**（文本 + 来源锚点）。捕获那一下的判据在 Node 里
+      // 用假 DOM 逐个喂（含各种「读到空选区」的触发方式，都不得清掉已存在的引用），面板那一半
+      // 断言它渲染这条引用、提交时随问题送出、答成了才清。真鼠标拖拽那一条在 --browser 组。
+      'scripts/tests/test_client_ask_quote.mjs',
       // 监听域 lib/watch/**（#74）：变更通知的形状与域映射（纯）、目录集合监听（真 fs）、
       // 两条推送路（真 HTTP，bridge 与宿主同形）、阅读端「未变即同引用」（VM 里跑 lib/client.js）。
       // 真 DSH 里的端到端在 scripts/tests/test_dsh_runtime.mjs 的监听探针里。
@@ -174,6 +178,12 @@ const groups = {
       'scripts/tests/test_export_leak_guard.mjs',
       'scripts/tests/test_export_tool_task.mjs',
       'scripts/tests/test_export_cli.mjs',
+      // #91 的 Host 半：随包发的 KaTeX dist（CSS ↔ 字体的双向对账、版本对账、精确 MIME）
+      // 与它的投送路由（一条文件一条精确路由、路径落在 /api 之内、取址判据）。
+      // 阅读端那一半（题库字段只接数学式、降级可读）在 test_client_math.mjs；
+      // 真浏览器里「按需加载 → 排版成功」在 --browser 组的 browser/math_test.mjs。
+      'scripts/tests/test_host_math_route.mjs',
+      'scripts/tests/test_client_math.mjs',
       // #87 的验收面：技能与工具的**可见边界**。出方向（别的预设扫不到 StudyMate 的
       // 技能）、入方向（学习预设显式声明的技能目录在包内）各一条，外加一条把
       // 「工具/面板仍在 profile 根注册」这个与 spec 的已知偏离钉成事实的特征化断言。
@@ -216,7 +226,14 @@ const groups = {
       'browser/lab_run_test.mjs',
       // #82：**导出的产物本身**在 file:// 下打开（真 Chrome + 真 React）：样式、公式、图片、
       // 题目全部可用，且控制台/页面/失败请求干净。不搭夹具页——测的就是学生拿到的那份东西。
+      // #91 换掉了里面那条**假绿**的公式断言（原来只匹配 TeX 原文），并加了「题面里的公式也排
+      // 出来了」「KaTeX 字体真的加载了」两条。
       'browser/export_file_test.mjs',
+      // #91：公式排版。夹具是一个说 HTTP 的迷你宿主，它按 lib/math-route.ts 注册出来的路由投送
+      // **包里那份 KaTeX dist**，页面跑真 lib/client.js。五个场景：正文行内/块级公式排出来、
+      // 公式只写在题面里也照样加载（判据把题库字段算进去）、没有数学式的页面零请求、
+      // 资源缺失降级成可读 TeX、排版失败给一句明确的错。导出产物那一半在上面那条里（file://）。
+      'browser/math_test.mjs',
       // #86：阅读端**四路由 × 三档视口**。上面那条 reading_test 恒定 1440×960，于是
       // lib/client.js 里两条 `@media (max-width: 900px)` 从来没被执行过；这一条把四个面
       // （今天学什么 / 科目主页 / 课件页 / 搜索）在宽窄两档各取一次景，亮暗两套的实测对比度
@@ -233,6 +250,12 @@ const groups = {
       // 顶部只剩一条（课件标题 + 小节跳转）、面包屑按全角字省略、题目标记带组号。
       // 宽窄两档各一遍，每个场景一张截图。
       'browser/lesson_body_test.mjs',
+      // #92：问答面板里那条引用的**真浏览器**用例。Node 里没有真选区，而这张票的病根恰恰
+      // 出在「document 级 mouseup 读实时选区、判定失败就清空」——点输入框会让浏览器把选区
+      // 折叠成空。所以这里用 CDP 的 Input.dispatchMouseEvent 做真鼠标拖拽（harness 没有
+      // 选区/拖拽助手，套件自己补 dragSelect/clickAt），验「选中 → 打开问答 → 点输入框/打字/
+      // 切 tab 之后引用仍在」，以及提交时请求体里带的原文与来源锚点。
+      'browser/ask_quote_test.mjs',
     ],
   },
 };

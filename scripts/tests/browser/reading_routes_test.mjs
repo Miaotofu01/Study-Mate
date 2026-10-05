@@ -445,6 +445,18 @@ function buildFixture(dir, payload, name = 'reading-routes-fixture.html') {
   // （typeof EventSource !== 'function' 就不订阅），所以收掉它，别让注定失败的请求污染判据。
   // 这条通道本身由 browser/watch_push_test.mjs 与真 DSH 探针覆盖。
   window.EventSource = undefined;
+  /* 公式资源（#91）：这一页走 file://，Host 半那条投送路由（/api/studymate/math/…）到不了
+     任何服务端——真去取只会得到一条「失败请求」，而公式**排版**不在这一面的验收面上（这一面
+     量的是四路由的渲染与几何，公式元素的数量只记进 metrics）。
+     所以夹具声明「资源已由宿主备好」：css/js 都给空串 = 阅读端不插 <link>、不拉脚本；
+     再给一个最小引擎替身，让公式容器里仍有内容可看（截图里不会是两块空白）。
+     真排版在 browser/math_test.mjs（真 HTTP 迷你宿主投送真 dist）与 export_file_test.mjs
+     （file:// 下的真产物）里验，两边都断言 .katex 与字体。 */
+  window.__STUDYMATE_MATH__ = { css: '', js: '' };
+  window.katex = {
+    renderToString: function (tex) { return '<span class="katex">' + String(tex) + '</span>'; },
+    render: function () {},
+  };
   /* mini-react 每次重渲染都**整树重建 DOM**（不 diff），所以「把节点闭进 effect 里、之后还去量它」
      的代码在夹具里量到的是已经被换掉的旧节点：LessonPage 的 ResizeObserver 量画布宽
      （lib/client.js 的 measure），旧节点一脱离文档就报 0，画布宽被写成 0，两条栏于是永远打不开。

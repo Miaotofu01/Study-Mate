@@ -25,7 +25,8 @@ import { runExport, resolveOutDir, writeUnder, ExportCancelledError } from '../.
 import { planExport, clientSourceFile } from '../../lib/export/plan.ts';
 import { resolveReact, ReactMissingError, reactCandidates } from '../../lib/export/react.ts';
 import { readExportDir, checkExport } from '../../lib/export/guard.ts';
-import { assetProductPath, indexHtml } from '../../lib/export/page.ts';
+import { assetProductPath, indexHtml, splitVendor } from '../../lib/export/page.ts';
+import { KATEX_VERSION, MATH_JS, katexDistDir } from '../../lib/math.ts';
 import { tempDir } from './fixtures/tools.mjs';
 import { writeExportWorkspace, addSecondSubject, fakeReactRoot } from './fixtures/export_workspace.mjs';
 
@@ -82,9 +83,63 @@ test('index.html 的脚本顺序是依赖顺序，且没有 ES 模块（file:// 
     'data.js', 'host.js',
     'vendor/scheduler.production.js', 'vendor/react.production.js',
     'vendor/react-dom.production.js', 'vendor/react-dom-client.production.js',
+    // #91：公式引擎排在阅读端本体**之前**——它只是登记进模块表（懒执行），晚于阅读端就来不及
+    'vendor/katex.production.js',
     'studymate-client.js', 'boot.js',
   ]);
   assert.match(html, /<noscript>/, '无脚本时要说明白为什么看不到内容');
+});
+
+test('公式资源随产物走：引擎走 vendor 包装壳 + 哈希，样式表与字体落 assets/（#91）', async (t) => {
+  const { workspace, react } = fixture(t);
+  const outcome = await runExport({ workspace, react });
+  const files = outcome.files;
+
+  // 引擎：与 React 那四份同一条口径（vendor 包装壳 + third_party 哈希）。
+  // 为什么不放根目录：它自己写着 CommonJS 的 module.exports，泄漏守卫按原文扫会判红（实测过）。
+  assert.ok(files.includes('vendor/katex.production.js'), `产物里少了公式引擎：${files.join('、')}`);
+  const engine = fs.readFileSync(path.join(outcome.out, 'vendor/katex.production.js'), 'utf8');
+  const parts = splitVendor(engine);
+  assert.ok(parts, '公式引擎必须在 vendor 包装壳里（守卫按它能切出来判有没有被改过）');
+  assert.equal(parts.moduleName, 'katex');
+  assert.equal(parts.body, fs.readFileSync(path.join(katexDistDir(), MATH_JS), 'utf8'),
+    '壳里那一段必须是包里那份 KaTeX 的逐字节拷贝');
+  const { manifest } = readExportDir(outcome.out);
+  const katex = manifest.third_party.find((entry) => entry.module === 'katex');
+  assert.ok(katex, 'third_party 里要有 katex 那一条（守卫按哈希核对它）');
+  assert.equal(katex.path, 'vendor/katex.production.js');
+  assert.equal(katex.version, KATEX_VERSION);
+  assert.equal(katex.sha256, sha256(parts.body));
+  assert.equal(katex.upstream, `lib/katex/${MATH_JS}`, 'upstream 记的是包内相对路径，不含机器路径');
+
+  // 样式表与字体：落 assets/（守卫按路径前缀判成 asset：二进制不扫，也不按 utf8 比字节）。
+  // 字体落别处会因为「utf8 读坏 → 字节数与清单对不上」判红（实测过）。
+  assert.ok(files.includes('assets/katex/katex.min.css'));
+  assert.ok(files.includes('assets/katex/LICENSE'), 'MIT（代码与 CSS）要求许可证随副本分发');
+  assert.ok(files.includes('assets/katex/fonts/LICENSE'), '字体那份是另一份许可（SIL OFL 1.1），也要随副本走');
+  const css = fs.readFileSync(path.join(outcome.out, 'assets/katex/katex.min.css'), 'utf8');
+  const urls = [...css.matchAll(/url\(([^)]+)\)/g)].map((match) => match[1].trim());
+  assert.ok(urls.length >= 20, `样式表里的字体引用太少（${urls.length}）`);
+  for (const url of urls) {
+    // CSS 里的 url() 相对**样式表自己的 URL** 解析：CSS 在 assets/katex/ 下，字体就得也在它下面
+    assert.ok(files.includes(`assets/katex/${url}`), `样式表指着产物里没有的字体：${url}`);
+  }
+  // 字体是二进制：落成 asset（没有 text）才不会在守卫那一步被 utf8 读坏
+  const { files: onDisk } = readExportDir(outcome.out);
+  const font = onDisk.find((file) => file.path === 'assets/katex/fonts/KaTeX_Main-Regular.woff2');
+  assert.ok(font, '至少要有正文最常用的那个字体');
+  assert.equal(font.role, 'asset');
+  assert.equal(typeof font.text, 'undefined', 'asset 不该被当文本读（二进制读坏了字节数就对不上）');
+  const entry = manifest.files.find((file) => file.path === 'assets/katex/fonts/KaTeX_Main-Regular.woff2');
+  assert.equal(entry.bytes, fs.statSync(path.join(katexDistDir(), 'fonts', 'KaTeX_Main-Regular.woff2')).size);
+
+  // 装配：阅读端默认去 Host 半的路由取资源，导出页得用宿主那个覆盖声明产物里的位置，
+  // 并把引擎从模块表里挂成 window.katex（与 DSH 里 UMD 自己写这个名字同一条判据）。
+  const host = fs.readFileSync(path.join(outcome.out, 'host.js'), 'utf8');
+  const boot = fs.readFileSync(path.join(outcome.out, 'boot.js'), 'utf8');
+  assert.match(host, /__STUDYMATE_MATH__\s*=\s*\{\s*css:\s*"assets\/katex\/katex\.min\.css"/,
+    '导出页要把公式资源的位置告诉阅读端（css 指产物内的相对路径）');
+  assert.match(boot, /__smRequire\('katex'\)/, '引擎要从产物里的模块表取出来挂到 window.katex 上');
 });
 
 test('index.html 的属性位置按属性口径转义：双引号与单引号都转，标题走文本口径', () => {

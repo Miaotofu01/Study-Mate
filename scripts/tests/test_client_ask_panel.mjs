@@ -4,7 +4,7 @@
    钉住**换成真调用之后**的三件事：
 
      1. 点「问一句」真的发 `POST /api/studymate/ask`，请求体里只有那几样（subject / node /
-        selection / question / operationId / expectedVersion）——**没有会话**；
+        selection / selectionAnchor / question / operationId）——**没有会话**；
      2. 回答与那条误解记录按 Host 半的回执渲染出来，不再有「尚未接模型」与「会记一条」；
      3. 没有可用模型时如实说明，并且**一个字的回答都不编**。
 
@@ -33,6 +33,10 @@ beforeEach(() => { calls = []; reply = null; });
 const SUBJECT = { slug: 'computer-networks', misconception_version: 'v1' };
 const NODE = { id: 'net.mask', title: '子网与掩码' };
 const SELECTION = '掩码是按位与：100 与 192 逐位相与得 64。';
+// #92：面板拿到的是一条**冻好的引用**（文本 + 来源锚点），不是一个跟着实时选区跑的字符串。
+// 这一份套件是 #79 的验收面（面板接模型），所以只按新形状喂进去；「读到空不清引用」「提交
+// 才清」那些判据归 test_client_ask_quote.mjs。
+const QUOTE = { text: SELECTION, anchor: { lesson: 'computer-networks/0003-net.mask.md', section: 'mask-2', sectionTitle: '掩码' } };
 const QUESTION = '掩码怎么算？';
 
 const OK_REPLY = {
@@ -57,7 +61,7 @@ const UNAVAILABLE_REPLY = {
 
 /** 把面板渲染成文本（把 useState 驱到某一帧）。 */
 function render(state) {
-  return renderWithState(AskPanel, { subject: SUBJECT, node: NODE, selection: SELECTION, focusTick: 1 }, state)
+  return renderWithState(AskPanel, { subject: SUBJECT, node: NODE, quote: QUOTE, focusTick: 1 }, state)
     .replace(/\s+/g, ' ').trim();
 }
 
@@ -71,7 +75,7 @@ function render(state) {
 function clickAsk(question = QUESTION) {
   setHookState([question, null, false]);
   try {
-    const tree = AskPanel({ subject: SUBJECT, node: NODE, selection: SELECTION, focusTick: 1 });
+    const tree = AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, focusTick: 1 });
     const found = findByProp(tree, 'data-proto', 'qa-ask');
     assert.equal(found.length, 1, '面板里应该恰好有一颗「问一句」按钮');
     return found[0].props.onClick;
@@ -89,10 +93,12 @@ test('#79 面板：点「问一句」真的发 POST，请求体只有那几样',
   assert.equal(calls[0].url, '/api/studymate/ask');
   assert.equal(calls[0].options.method, 'POST');
   const body = JSON.parse(calls[0].options.body);
-  assert.deepEqual(Object.keys(body).sort(), ['node', 'operationId', 'question', 'selection', 'subject']);
+  assert.deepEqual(Object.keys(body).sort(), ['node', 'operationId', 'question', 'selection', 'selectionAnchor', 'subject']);
   assert.equal(body.subject, 'computer-networks');
   assert.equal(body.node, 'net.mask');
   assert.equal(body.selection, SELECTION);
+  // #92：引用不是光有原文——来源锚点（哪一课、哪一小节）也随问题一起送出去
+  assert.deepEqual(body.selectionAnchor, QUOTE.anchor);
   assert.equal(body.question, QUESTION);
   assert.match(body.operationId, /^ask-/);
   // 面板**不背会话**：请求体里没有 messages / history / sessionId 这类东西
@@ -149,7 +155,7 @@ test('#79 面板：回答拿到了但写盘失败时，两件事分开报（回�
 });
 
 test('#79 面板：输入框空着时按钮是禁用的（不会拿空问题去花一次调用）', () => {
-  const tree = AskPanel({ subject: SUBJECT, node: NODE, selection: SELECTION, focusTick: 0 });
+  const tree = AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, focusTick: 0 });
   const found = findByProp(tree, 'data-proto', 'qa-ask');
   assert.equal(found.length, 1);
   assert.equal(found[0].props.disabled, true, '空问题也能点');

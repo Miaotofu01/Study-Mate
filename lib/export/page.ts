@@ -66,6 +66,19 @@ export const VENDOR_FILES: Record<VendorKey, string> = {
   reactDom: `${VENDOR_DIR}/react-dom-client.production.js`,
 };
 
+/* ── 公式（#91）：引擎与它的样式表/字体在产物里的落点 ────────────────────────
+   两处的判据不同，别照着一个改另一个（两条都是实测出来的）：
+     · **引擎**（`katex.min.js`）走 vendor 包装壳：它自己写着 CommonJS 的 `module.exports`，
+       直接放导出根目录会被泄漏守卫的 `node-module-exports` 判红；包一层就是宿主那个懒 CJS
+       模型本身，守卫按 `third_party` 的哈希核对壳里那一段。
+     · **样式表与字体**落 `assets/`：守卫按路径前缀把 `assets/**` 判成 asset（二进制不扫、
+       也不按 utf8 读），字体落别处会因为「utf8 读坏 → 字节数与清单对不上」判红。
+       字体与 CSS 的相对位置**是契约**：CSS 里的 `url(fonts/…)` 相对样式表自己的 URL 解析，
+       所以两者都在这一个目录下（`file://` 下这条已被实测验证）。 */
+export const MATH_VENDOR_FILE = `${VENDOR_DIR}/katex.production.js`;
+/** 公式资源在产物里的目录（CSS 与 `fonts/` 是兄弟，见上）。 */
+export const MATH_ASSET_DIR = `${ASSETS_DIR}/katex`;
+
 /* ── vendor 包装：登记 + 懒执行 ─────────────────────────────────────────── */
 
 /**
@@ -177,6 +190,13 @@ export function hostScript(): string {
     load: function (entry) { window.__STUDYMATE_CLIENT__ = entry; },
   };
 
+  /* ②′ 公式资源的位置（#91）：阅读端默认去 Host 半的投送路由取（DSH 里那条
+     /api/studymate/math/…），导出页没有 Host 半——与取图那条改写同一个口径，用一个全局把
+     产物里的位置告诉它。css 给相对路径（相对 index.html，也就是产物根），字体随样式表自己
+     的 URL 解析（url(fonts/…)），所以只需要这一个字段；js 给空串 = 引擎必须已经挂在
+     window.katex 上（产物里那份走 vendor 包装壳登记进模块表，由 boot.js 取出来挂上）。 */
+  window.__STUDYMATE_MATH__ = { css: ${JSON.stringify(`${MATH_ASSET_DIR}/katex.min.css`)}, js: '' };
+
   /* ③ fetch 应答：形状照 bin/dsh-plugin.ts 的三条路由。 */
   function json(body, status) {
     return new Response(JSON.stringify(body), {
@@ -287,6 +307,11 @@ export function bootScript(): string {
   try {
     var React = window.__smRequire('react');
     var client = window.__smRequire('react-dom/client');
+    /* 公式引擎（#91）：产物里那份 KaTeX 在 vendor 的包装壳里（守卫按哈希核对它是不是上游构建的
+       逐字节拷贝）。DSH 那边是一个 classic script，UMD 自己会写上 window.katex；这里是懒登记的
+       模块，得取一次才执行——判据因此是同一条：**阅读端只看 window.katex**。
+       取不到就不挂（这次导出没带公式资源 / 壳坏了）：阅读端那边降级成可读的 TeX 原文。 */
+    try { window.katex = window.__smRequire('katex'); } catch (error) { /* 没有就算了，别挡住页面 */ }
     var entry = window.__STUDYMATE_CLIENT__;
     if (!entry || typeof entry.factory !== 'function') {
       throw new Error('阅读端本体没有登记（studymate-client.js 没跑起来）');
@@ -377,6 +402,9 @@ export function scriptFiles(reactFiles: Record<VendorKey, string>): string[] {
     reactFiles.react,
     reactFiles.reactDomCore,
     reactFiles.reactDom,
+    // 公式引擎（#91）排在阅读端本体之前：它只是往模块表里登记（懒执行），而阅读端渲染到公式
+    // 时就要用它——排在后面就来不及（阅读端那次渲染已经在跑了）。
+    MATH_VENDOR_FILE,
     CLIENT_FILE,
     BOOT_FILE,
   ];

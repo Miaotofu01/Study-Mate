@@ -88,7 +88,7 @@ try {
       JSON.stringify([seen.background, seen.color, seen.fontSize]));
     check('画布撑满视口（1400 宽）', Number(seen.width) >= 1300, String(seen.width));
     check('全部是 classic script（file:// 下 ES 模块加载不了）',
-      seen.moduleScripts === 0 && seen.scripts.length === 8, JSON.stringify(seen.scripts));
+      seen.moduleScripts === 0 && seen.scripts.length === 9, JSON.stringify(seen.scripts));
     return seen;
   });
 
@@ -104,13 +104,30 @@ try {
     await ctx.sleep(400);
     const seen = await ctx.evaluate(`(() => {
       const math = document.querySelector('.smb-math-block');
+      const inline = document.querySelector('.smb-math');
+      const qtext = document.querySelector('.smb-q__text');
+      const styled = getComputedStyle(document.querySelector('.smb-doc'));
+      const texOf = (el) => (el ? (el.querySelector('annotation[encoding="application/x-tex"]') || {}).textContent : null);
       const img = document.querySelector('.smb-figure img');
       const code = document.querySelector('.smb-code code');
       const options = Array.from(document.querySelectorAll('[data-proto="option"]'));
       const groups = Array.from(document.querySelectorAll('.smb-agroup'));
       return {
         crumb: document.querySelector('.smb-crumb--current') && document.querySelector('.smb-crumb--current').textContent.trim(),
+        // #91：块级公式必须**排出来**（.katex 在里面），不是把 TeX 原文露给学生。
+        // 判据分三层：①容器里有没有 .katex；②TeX 是不是原样躺在里面当文本；③字体有没有真的加载。
         math: math && math.textContent.trim(),
+        mathKatex: !!(math && math.querySelector('.katex')),
+        // 「还是 TeX 原文」= 容器里根本没有 KaTeX 的输出（块级那份外面还包着一层 .katex-display）
+        mathRaw: math ? !math.querySelector('.katex') : null,
+        mathTex: texOf(math),
+        inlineKatex: !!(inline && inline.querySelector('.katex')),
+        inlineTex: texOf(inline),
+        questionKatex: !!(qtext && qtext.querySelector('.katex')),
+        questionTex: texOf(qtext),
+        mathFont: document.fonts ? document.fonts.check('16px KaTeX_Main') : null,
+        mathStylesheet: Array.from(document.styleSheets).some((sheet) => String(sheet.href || '').includes('katex.min.css')),
+        docFamily: styled && styled.fontFamily,
         imgSrc: img && img.getAttribute('src'),
         imgLoaded: img ? (img.complete && img.naturalWidth > 0) : false,
         imgSize: img ? [img.naturalWidth, img.naturalHeight] : null,
@@ -122,7 +139,20 @@ try {
       };
     })()`);
     check('进了课件页（面包屑停在节点名上）', seen.crumb === '变量', String(seen.crumb));
-    check('块级公式渲染出来了', /E\s*=\s*mc/.test(String(seen.math)), JSON.stringify(seen.math));
+    // #91 换掉了原来那条**假绿**断言：它断的是 TeX 原文在不在（`/E\s*=\s*mc/`），
+    // 排版一行没做也照样过。现在断的是「真的排出来了」：
+    //   ① 容器里是 KaTeX 的输出（.katex），不是一段原样躺着的文本；
+    //   ② 那一段正是课件的块级公式（从 KaTeX 输出里的 annotation 读回 TeX）；
+    //   ③ 排版用的字体真的加载了（离线产物带得走字体，不是「看起来像但字形是兜底」）。
+    check('块级公式真的排出来了（.katex 在容器里，不是 TeX 原文）',
+      seen.mathKatex && seen.mathRaw === false, JSON.stringify([seen.mathKatex, seen.mathRaw, seen.math]));
+    check('排的就是正文那个块级公式', /E\s*=\s*mc/.test(String(seen.mathTex)), JSON.stringify(seen.mathTex));
+    check('行内公式也排出来了', seen.inlineKatex && /a\^2\s*\+\s*b\^2/.test(String(seen.inlineTex)),
+      JSON.stringify([seen.inlineKatex, seen.inlineTex]));
+    check('题面里的公式同样排出来（题库字段走同一个排版器）',
+      seen.questionKatex && /x/.test(String(seen.questionTex)), JSON.stringify([seen.questionKatex, seen.questionTex]));
+    check('KaTeX 的字体在 file:// 下真的加载了', seen.mathFont === true, String(seen.mathFont));
+    check('样式表随产物带上了（assets/katex/…）', seen.mathStylesheet === true, String(seen.mathStylesheet));
     check('配图是导出目录里的本地文件', seen.imgSrc === 'assets/demo/assets/img/pool/dot.png', String(seen.imgSrc));
     check('配图真的解码出来了（naturalWidth > 0）', seen.imgLoaded === true, JSON.stringify(seen.imgSize));
     check('代码块逐字保留', String(seen.code).includes("console.log('代码块里的内容也要能看')"), JSON.stringify(seen.code));

@@ -98,7 +98,14 @@ test('#79 链路：面板独立调模型，回答拼回来，误解记录落盘�
 
   const view = await askPanel(
     { workspace, llm, defaultSelection: DEFAULT_SELECTION, now: new Date(2026, 9, 5) },
-    { subject: SUBJECT, node: NODE, selection: '192.168.1.100/26 的网络地址是 192.168.1.64。', question: '/26 的掩码是 255.255.255.192，为什么网络地址是 192.168.1.64，不是 192.168.1.0？', operationId: op('first') },
+    {
+      subject: SUBJECT, node: NODE,
+      selection: '192.168.1.100/26 的网络地址是 192.168.1.64。',
+      // #92：引用不是光有原文——捕获那一下冻住的来源锚点也随问题一起送来
+      selectionAnchor: { lesson: `${SUBJECT}/${LESSON_FILE}`, section: 'mask-1', sectionTitle: '掩码是按位与' },
+      question: '/26 的掩码是 255.255.255.192，为什么网络地址是 192.168.1.64，不是 192.168.1.0？',
+      operationId: op('first'),
+    },
   );
 
   assert.equal(view.available, true);
@@ -114,19 +121,22 @@ test('#79 链路：面板独立调模型，回答拼回来，误解记录落盘�
   assert.ok(sentText.includes('【共享记忆】') && sentText.includes(MEMORY_MD.trim()), '共享记忆没进请求体');
   assert.ok(sentText.includes('【当前课件】') && sentText.includes('掩码是按位与'), '当前课件没进请求体');
   assert.ok(sentText.includes('【选中文本】') && sentText.includes('192.168.1.100/26'), '选中文本没进请求体');
+  // #92：来源锚点落在「选中文本」那一段里，模型知道引的是哪一小节
+  assert.ok(sentText.includes('小节「掩码是按位与」'), '来源锚点没进请求体');
   assert.ok(sentText.includes('【我的问题】'), '提问原文没进请求体');
   assert.equal(sentText.includes('---\ntitle:'), false, '课件 front matter 也发给了模型');
   assert.equal(sent.messages.length, 1);
   assert.equal(Object.hasOwn(sent, 'sessionId'), false);
 
-  // 落盘：五字段齐全、source 是「问答面板」
+  // 落盘：五字段齐全、source 是「问答面板」；引用原文与它的来源都在证据里（日后对账靠它）
   assert.deepEqual(view.misconception, {
     topic: '/26 的掩码是 255.255.255.192，为什么网络地址是 192.16',
     source: '问答面板',
     evidence: [
       '提问原文：/26 的掩码是 255.255.255.192，为什么网络地址是 192.168.1.64，不是 192.168.1.0？',
       '回答摘要：掩码按位与算出网络地址',
-      `位置：${SUBJECT}/${LESSON_FILE}`,
+      '引用：192.168.1.100/26 的网络地址是 192.168.1.64。',
+      `位置：${SUBJECT}/${LESSON_FILE} · 小节「掩码是按位与」`,
     ].join('\n'),
     status: '未处理',
     at: '2026-10-05',
@@ -147,6 +157,25 @@ test('#79 链路：面板独立调模型，回答拼回来，误解记录落盘�
   }]);
   assert.deepEqual(readMisconceptions({ workspace, subject: SUBJECT }), parsed);
   assert.equal(view.write.version, misconceptionsVersion({ workspace, subject: SUBJECT }));
+});
+
+test('#92 落盘：划了一整屏的长引用也顶不掉误解记录（引用按码位截断并标注）', async () => {
+  const { workspace } = makeWorkspace();
+  // 2100 字：原样塞进 evidence 就会超过 2000 那一格的上限，整条写盘会被判 400——
+  // 那样学生答成了却「误解记录没写进去」，而罪魁只是他划得长了一点
+  const view = await askPanel(
+    { workspace, llm: fakeLlm(), defaultSelection: DEFAULT_SELECTION, now: new Date(2026, 9, 5) },
+    { subject: SUBJECT, node: NODE, selection: '掩码是按位与。'.repeat(300), question: '这一整段在说什么？', operationId: op('long') },
+  );
+
+  assert.equal(view.ok, true, JSON.stringify(view));
+  assert.equal(view.write.ok, true, '长引用把误解记录顶掉了：' + JSON.stringify(view.write));
+  const items = readMisconceptions({ workspace, subject: SUBJECT });
+  assert.equal(items.length, 1);
+  assert.ok(items[0].evidence.includes('提问原文：这一整段在说什么？'), '提问原文被引用挤掉了：' + items[0].evidence.slice(0, 60));
+  assert.ok(items[0].evidence.includes('引用：'), '引用没进证据：' + items[0].evidence.slice(0, 60));
+  assert.ok(items[0].evidence.includes('引用太长') && items[0].evidence.includes('开头一段'), '截断了却没标出来');
+  assert.ok([...items[0].evidence].length < 2000, '证据还是超过了上限：' + [...items[0].evidence].length);
 });
 
 test('#79 落盘：追加不覆盖——文件头注释与旧记录原样留着', () => {
