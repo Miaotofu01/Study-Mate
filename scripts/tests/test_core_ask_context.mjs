@@ -17,7 +17,8 @@ import assert from 'node:assert/strict';
 
 import {
   ASK_SYSTEM_PROMPT, MEMORY_LIMIT, LESSON_LIMIT,
-  AskContextError, askContextText, assembleAnswer, buildAskContext, summarizeAnswer, topicFromQuestion,
+  AskContextError, askContextText, assembleAnswer, buildAskContext, quoteEvidence,
+  selectionAnchorLabel, summarizeAnswer, topicFromQuestion,
 } from '../../lib/core/ask.ts';
 // 能力探测的本体在纯函数域（工具域与问答域共用一份，见 lib/core/model.ts 的文件头）
 import { probeModel, unmetRequirement } from '../../lib/core/model.ts';
@@ -94,6 +95,50 @@ test('#79 请求体：没划中段落时不带「选中文本」那一段，其�
   const text = askContextText(body({ selection: '   ' }));
   assert.equal(text.includes('【选中文本】'), false);
   assert.ok(text.includes('【共享记忆】') && text.includes('【当前课件】') && text.includes('【我的问题】'));
+});
+
+/* ── #92：引用是「文本 + 来源锚点」，锚点跟着选中文本一起进请求体 ───────────── */
+
+test('#92 请求体：选中文本带着它的来源（哪一小节）', () => {
+  const text = askContextText(body({
+    selectionAnchor: { lesson: 'demo/1-变量.md', section: 'var-2', sectionTitle: '小结' },
+  }));
+  const at = text.indexOf('【选中文本】');
+  assert.ok(at >= 0, '没带选中文本');
+  const section = text.slice(at, text.indexOf('【我的问题】'));
+  assert.ok(section.includes('小节「小结」'), '来源没跟着选中文本进去：' + section);
+  assert.ok(section.includes(SELECTION), '选中文本本身没了：' + section);
+  // 锚点是**选中文本的一部分**，不是第四样上下文：它不能跑到别的段落去
+  assert.equal(text.slice(0, at).includes('小节「小结」'), false, '来源跑到了选中文本之外');
+});
+
+test('#92 请求体：没有来源锚点时那一段与从前一字不差（老客户端照旧）', () => {
+  const text = askContextText(body());
+  const at = text.indexOf('【选中文本】');
+  const end = text.indexOf('【我的问题】');
+  assert.equal(text.slice(at, end), '【选中文本】\n' + SELECTION + '\n\n', '没锚点时多写了什么：' + text.slice(at, end));
+});
+
+test('#92 来源锚点：只写读到的那一半，全没读到就是空串', () => {
+  assert.equal(selectionAnchorLabel({ lesson: 'demo/1-变量.md', section: 'var-2', sectionTitle: '小结' }), '小节「小结」');
+  // 小节还没解析出标题时用 id 兜（正文的小节标题总是有的，这是防一手）
+  assert.equal(selectionAnchorLabel({ section: 'var-2' }), '小节「var-2」');
+  // 只有课、没有小节归属（选中了标题那一段）：不编一个小节出来
+  assert.equal(selectionAnchorLabel({ lesson: 'demo/1-变量.md' }), '');
+  for (const empty of [null, undefined, {}, '字符串', { sectionTitle: '   ' }]) {
+    assert.equal(selectionAnchorLabel(empty), '', JSON.stringify(empty) + ' 编出了一个来源');
+  }
+});
+
+test('#92 引用进误解记录：写成一整行，太长按码位截断并标注', () => {
+  assert.equal(quoteEvidence(SELECTION), '引用：' + SELECTION);
+  assert.equal(quoteEvidence('   '), '', '没有引用就不该有这一行');
+  assert.equal(quoteEvidence(null), '');
+  const long = '掩'.repeat(1200);
+  const line = quoteEvidence(long);
+  assert.ok(line.startsWith('引用：'), line.slice(0, 20));
+  assert.ok([...line].length < 1200, '超长引用没截断：' + [...line].length);
+  assert.ok(line.includes('引用太长') && line.includes('开头一段'), '截断了却没标出来：' + line.slice(-30));
 });
 
 test('#79 回答拆分：【回答】/【摘要】两段，摘要按码位截到上限', () => {

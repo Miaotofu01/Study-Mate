@@ -151,6 +151,10 @@ const groups = {
       // Host 那一半用**注入的假 llm** 证明链路通（真模型调用要花额度，门禁里不跑）。
       'scripts/tests/test_client_ask_panel.mjs',
       'scripts/tests/test_host_ask_route.mjs',
+      // #92：选中正文冻成一条**留得住的引用**（文本 + 来源锚点）。捕获那一下的判据在 Node 里
+      // 用假 DOM 逐个喂（含各种「读到空选区」的触发方式，都不得清掉已存在的引用），面板那一半
+      // 断言它渲染这条引用、提交时随问题送出、答成了才清。真鼠标拖拽那一条在 --browser 组。
+      'scripts/tests/test_client_ask_quote.mjs',
       // 监听域 lib/watch/**（#74）：变更通知的形状与域映射（纯）、目录集合监听（真 fs）、
       // 两条推送路（真 HTTP，bridge 与宿主同形）、阅读端「未变即同引用」（VM 里跑 lib/client.js）。
       // 真 DSH 里的端到端在 scripts/tests/test_dsh_runtime.mjs 的监听探针里。
@@ -214,6 +218,12 @@ const groups = {
       // （今天学什么 / 科目主页 / 课件页 / 搜索）在宽窄两档各取一次景，亮暗两套的实测对比度
       // 与动效四档也在里面。窄档不是截图，是换 CSS 视口再跑一遍。
       'browser/reading_routes_test.mjs',
+      // #92：问答面板里那条引用的**真浏览器**用例。Node 里没有真选区，而这张票的病根恰恰
+      // 出在「document 级 mouseup 读实时选区、判定失败就清空」——点输入框会让浏览器把选区
+      // 折叠成空。所以这里用 CDP 的 Input.dispatchMouseEvent 做真鼠标拖拽（harness 没有
+      // 选区/拖拽助手，套件自己补 dragSelect/clickAt），验「选中 → 打开问答 → 点输入框/打字/
+      // 切 tab 之后引用仍在」，以及提交时请求体里带的原文与来源锚点。
+      'browser/ask_quote_test.mjs',
     ],
   },
 };

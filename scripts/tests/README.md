@@ -124,6 +124,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 | `browser/reading_position_test.mjs` | 阅读位置三级恢复（section → offset → progress）与锚点四态复核：真 Chrome 里挂**真 `lib/client.js`**（最小模块装载器 + 真 React），用 CDP 点真按钮、滚真滚动区；夹具在 `fixtures/reading_position_fixture.mjs`。纯数学那一半在 `test_client_reading_position.mjs`（默认门禁里跑，不需要浏览器） |
 | `browser/lab_run_test.mjs` | 交付物题的**「跑一次」**（#77）：真浏览器里挂**真 `lib/client.js`**，打到真 HTTP 迷你宿主（`lib/lab/route.ts` 注册出来的真路由 → 真 spawn 一条命令）——验「不按不跑 → 按了才跑、真实输出回到界面、落进 `attempts/<NNNN>-<节点>.json`、刷新之后还在、界面上一个判决词都没有」；夹具与 `attempts_test.mjs` 同一套 |
 | `browser/export_file_test.mjs` | **导出的产物本身**在 `file://` 下打开（#82 验收第 1 条）：先用真导出器导一份到临时目录，再用真 Chrome 打开 `file://<导出目录>/index.html`——样式（离线兜底 token）、行内/块级公式、配图（`naturalWidth > 0`）、代码块、题目与判分、参考资料只读都要可用，且控制台/页面/失败请求干净。不搭夹具页：测的就是学生拿到的那份东西。真 React + 真浏览器缺任一就**明确跳过**（退出码 3） |
+| `browser/ask_quote_test.mjs` | 问答面板里那条**留得住的引用**（#92）：真 Chrome 里用 CDP 的 `Input.dispatchMouseEvent` 做**真鼠标拖拽**划正文（harness 没有选区/拖拽助手，套件自己补 `dragSelect` / `clickAt`），验「选中 → 浮出「就这段问一句」→ 点开问答 → **点输入框** / 打字 / 切走 tab 再切回来之后引用仍在」——点输入框会让浏览器把文档选区折叠成空，那一次 `mouseup` 正是这条票的病根；另有一场验显式「删掉」、一场验没有引用时面板照样能用、一场验没有可用模型时如实说明且**不清**引用。夹具与 `reading_routes_test.mjs` 同一套（真 `lib/client.js` + `fixtures/mini-react.js` + 宿主 token + 现抠的内联 CSS），`fetch` 是夹具里的假货（记下每一次 POST 的请求体） |
 | `browser/measure.mjs` | 对比度、计算样式与 hover 测量（手动） |
 | `browser/hovers.mjs` | 批量比较 hover 前后的样式（手动） |
 | `browser/shot.mjs` | 浅色/深色截图与元素边界记录（手动） |
