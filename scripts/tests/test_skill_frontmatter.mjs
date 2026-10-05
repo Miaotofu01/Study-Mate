@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { parseYaml } from '../../lib/yaml.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const SKILLS = path.join(ROOT, '.dsh', 'skills');
+const SKILLS = path.join(ROOT, 'preset', 'skills');
 const ROLES = ['curriculum-designer', 'image-scout', 'learning-coach',
   'practice-evaluator', 'resource-scout'];
 

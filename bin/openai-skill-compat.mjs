@@ -33,7 +33,7 @@ function replaceRequired(text, pattern, replacement, name) {
 /* 无头宿主（Codex / ChatGPT Work）没有原生工具，也没有引擎脚本：技能正文里的
    `studymate_*` 在这里换成**本宿主做得到的那件事**。校验器那一档如实写成「按 schema 与格式
    要求逐项自查」——不假装有一条能跑的命令（Python 引擎随 #83 退役，Node CLI 目前只有导出）。
-   契约与人类可读的对照表在 `.dsh/skills/learning-system/references/tools.md` 的宿主差异一节。 */
+   契约与人类可读的对照表在 `preset/skills/learning-system/references/tools.md` 的宿主差异一节。 */
 export const NATIVE_TOOL_FALLBACK = {
   studymate_workspace_context: '读工作区配置、.learning/MEMORY.md、当前科目的 progress.yaml 与最近的学习记录',
   studymate_validate_curriculum: '按 `<root>/schemas/curriculum.schema.json` 与 `progress.schema.json` 逐项自查：字段齐全、`prerequisites` 指向存在的节点 id、无环、实验课前置非空',
@@ -153,7 +153,7 @@ export function adaptOpenAiSkill(content, name) {
   for (const [tool, fallback] of Object.entries(NATIVE_TOOL_FALLBACK)) {
     body = body.replaceAll(tool, fallback);
   }
-  body = body.replaceAll('.dsh/skills/', 'skills/')
+  body = body.replaceAll('preset/skills/', 'skills/')
     .replaceAll('/tmp', '<STUDYMATE_SCRATCH>')
     .replaceAll('`ask_user_question`', '宿主提问工具')
     .replaceAll('（`read` 那个文件）', '（用宿主图片查看工具打开那个文件）')

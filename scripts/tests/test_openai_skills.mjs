@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { adaptOpenAiSkill } from '../../bin/openai-skill-compat.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const skillRoot = path.join(root, '.dsh', 'skills');
+const skillRoot = path.join(root, 'preset', 'skills');
 const skills = fs.readdirSync(skillRoot, { withFileTypes: true })
   .filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
 const sources = new Map(skills.map(name => [name,

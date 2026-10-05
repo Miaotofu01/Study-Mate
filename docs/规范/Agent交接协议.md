@@ -81,7 +81,7 @@
 任何 staged deliver 在合并到正式科目目录之前，先过交接门禁：
 
 ```text
-DSH：调原生工具 studymate_validate_handoff（参数与返回形状见 .dsh/skills/learning-system/references/tools.md）
+DSH：调原生工具 studymate_validate_handoff（参数与返回形状见 preset/skills/learning-system/references/tools.md）
 无头宿主（Antigravity / Codex）：按 deliver/ 清单逐项自查——manifest 与交付文件一一对应、角色与节点
 对得上、路径不越界、没有符号链接；逐条结论随报告交回
 ```

@@ -2,7 +2,7 @@
 
 StudyMate 的 OpenAI 版本是一个技能插件：包含总控 `learning-system`、五个角色、五个规范，以及生成 HTML 课件所需的脚本、模板和数据结构。它不依赖 DSH，也不需要单独的 MCP 服务。
 
-插件使用 OpenAI 仍支持的 `.codex-plugin/plugin.json` 兼容结构。宿主提供子代理时可委派角色，否则由同一助手按顺序执行；提问、文件操作与页面展示使用宿主已有工具。原有 `.dsh/skills/` 与 DSH 安装方式保留。
+插件使用 OpenAI 仍支持的 `.codex-plugin/plugin.json` 兼容结构。宿主提供子代理时可委派角色，否则由同一助手按顺序执行；提问、文件操作与页面展示使用宿主已有工具。原有 `preset/skills/` 与 DSH 安装方式保留。
 
 ## 1. 下载、导入与更新
 

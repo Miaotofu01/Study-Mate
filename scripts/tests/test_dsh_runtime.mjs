@@ -661,7 +661,7 @@ if (process.argv.includes('--probe')) {
     assert.equal(fs.existsSync(path.join(config.root, 'preset', 'learning', 'agent.cordis.yml')), true);
     assert.equal(fs.existsSync(path.join(config.root, 'schemas', 'curriculum.schema.json')), true);
     assert.equal(fs.existsSync(path.join(config.root, 'templates', 'MEMORY.md')), true);
-    assert.equal(fs.existsSync(path.join(config.root, '.dsh', 'skills', 'learning-system', 'SKILL.md')), true);
+    assert.equal(fs.existsSync(path.join(config.root, 'preset', 'skills', 'learning-system', 'SKILL.md')), true);
     assert.equal(fs.realpathSync(config.workspace), fs.realpathSync(f.workspace));
   });
   test(`DSH ${metadata.version}: native entry keeps Web usable`, { timeout: 70000 }, t => {
@@ -685,7 +685,7 @@ if (process.argv.includes('--probe')) {
         '原生加载不许往 ~/.dsh/studymate/ 写源码树副本');
       // 原生加载的引擎就是包自身：技能、预设、schema 与数据骨架都在包里
       assert.equal(fs.existsSync(path.join(config.root, 'preset', 'learning', 'agent.cordis.yml')), true);
-      assert.equal(fs.existsSync(path.join(config.root, '.dsh', 'skills', 'learning-system', 'SKILL.md')), true);
+      assert.equal(fs.existsSync(path.join(config.root, 'preset', 'skills', 'learning-system', 'SKILL.md')), true);
       // ① #68：插件在真 DSH 里加载后，八个原生工具注册得上、body 调得动、越权会抛
       const tools = outcome.nativeTools;
       assert.ok(tools, `原生工具探针没跑：${JSON.stringify(outcome.studyMateWarnings || [])}`);
@@ -774,7 +774,7 @@ if (process.argv.includes('--probe')) {
     assert.deepEqual(switched.installModes, { web: 'native' });
     // 换完之后 <root> 是包自身：技能、预设与数据骨架都在里面——预设的 customSkillDirs 指的就是它
     assert.equal(fs.existsSync(path.join(switched.root, 'preset', 'learning', 'agent.cordis.yml')), true);
-    assert.equal(fs.existsSync(path.join(switched.root, '.dsh', 'skills', 'learning-system', 'SKILL.md')), true);
+    assert.equal(fs.existsSync(path.join(switched.root, 'preset', 'skills', 'learning-system', 'SKILL.md')), true);
     assert.equal(fs.realpathSync(switched.workspace), fs.realpathSync(f.workspace));
   });
   if (process.env.STUDYMATE_DSH_DOWNGRADE_PACKAGE) {

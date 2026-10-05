@@ -10,7 +10,7 @@
 | 判断某份文件归谁维护、路径是什么 | [文件归属](docs/规范/文件归属.md)：代称 ↔ 路径 ↔ 维护者，以及角色代称与派工值 |
 | 改模板、渲染器、生成器、占位符 | [工程约束](docs/规范/工程约束.md) §三 占位符契约、§四 脚本一览 |
 | 写或改课件内容文件 | [课件内容格式](docs/规范/课件内容格式.md) |
-| 改角色提示词 `.dsh/skills/**` | 该技能自己的 `SKILL.md`；课件规则归 `lesson-design`，题目归 `layered-practice` |
+| 改角色提示词 `preset/skills/**` | 该技能自己的 `SKILL.md`；课件规则归 `lesson-design`，题目归 `layered-practice` |
 | 判断该跑哪些检查、怎么单跑 | [测试说明](scripts/tests/README.md) |
 
 ## Agent skills

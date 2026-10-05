@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const SKILLS_DIR = path.join(ROOT, '.dsh', 'skills');
+const SKILLS_DIR = path.join(ROOT, 'preset', 'skills');
 const SKILL_TEXT = new Map(fs.readdirSync(SKILLS_DIR, { withFileTypes: true })
   .filter(entry => entry.isDirectory())
   .map(entry => [entry.name, fs.readFileSync(path.join(SKILLS_DIR, entry.name, 'SKILL.md'), 'utf8')]));
@@ -721,7 +721,7 @@ test('调用面仍在（技能正文确实点名了原生工具，判据不空�
    但验收第 4 条写的是「技能里搜不到 `.py`」，无条件：技能正文不写死扩展名，路径的唯一出处
    是 `docs/规范/文件归属.md`（那里写的是「产图脚本」这个代称与它的落点）。
 
-   扫的是**所有**技能正文（含 `.dsh/skills/**` 的 12 份），不是导出件——导出件那三套各自还有
+   扫的是**所有**技能正文（含 `preset/skills/**` 的 12 份），不是导出件——导出件那三套各自还有
    一条更窄的判据（`scripts/*.py`），两条不重复。 */
 test('技能正文里一个 `.py` 都没有（路径的唯一出处是文件归属，技能不写扩展名）', () => {
   const offenders = [];

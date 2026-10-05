@@ -33,7 +33,7 @@
     "openai/studymate/scripts/*.mjs",
     "openai/studymate/skills/learning-system/references/*.md",
     "antigravity/studymate/**",
-    ".dsh/skills/**",
+    "preset/skills/**",
     "preset/learning/**",
     "schemas/*.json",
     "templates/**",

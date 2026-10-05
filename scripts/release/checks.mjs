@@ -166,6 +166,10 @@ const groups = {
       'scripts/tests/test_export_leak_guard.mjs',
       'scripts/tests/test_export_tool_task.mjs',
       'scripts/tests/test_export_cli.mjs',
+      // #87 的验收面：技能与工具的**可见边界**。出方向（别的预设扫不到 StudyMate 的
+      // 技能）、入方向（学习预设显式声明的技能目录在包内）各一条，外加一条把
+      // 「工具/面板仍在 profile 根注册」这个与 spec 的已知偏离钉成事实的特征化断言。
+      'scripts/tests/test_skill_visibility.mjs',
     ],
   },
   '--static': {
