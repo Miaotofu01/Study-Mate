@@ -8,12 +8,14 @@
    这份实现脱胎于阅读端版式原型里那个一次性构建脚本（`prototype/reading-client/`，
    那个目录已在 #75 里删除），语义逐条对齐它：
    三档状态映射、按前置依赖分层、锚点四态对账、术语表 / Mission / 学习记录 / lab 的解析口径、
-   「继续学」的挑选顺序、零节点科目跳过、无可读科目时报错。刻意不同的地方只有三处，
+   「继续学」的挑选顺序、零节点科目跳过。刻意不同的地方只有四处，
    都写在各自位置的注释里：
      1. 课件正文内联（lesson_md），不再让前端去 fetch lessons/<slug>/<file>.md；
      2. 顶层多出 workspace 与 memory_md（Host 半要知道自己在读哪个库、共享记忆是什么）；
      3. 顶层不再有 source / note —— 那是原型构建脚本自己的元信息（相对路径、
-        「由构建脚本抽出」），放进插件 payload 会误导人。
+        「由构建脚本抽出」），放进插件 payload 会误导人；
+     4. 一个可用科目都没有时给**空清单**，不抛错（#90）：那是「工作区在、课还没建」，
+        不是读盘失败，页面照实说「还没有科目」比显示错误卡对。理由在同名注释处。
 
    缺失的可选文件一律给空值，不抛错；但 YAML 里出现本解析器不支持的构造时**必须**抛错，
    那是真错，不是缺失。
@@ -631,15 +633,19 @@ export function buildLibrary(options: { workspace?: string; root?: string } = {}
     .map((entry) => entry.name)
     .sort(cmpCodePoints);
 
-  // 建课时会先建目录再填内容，所以零节点的科目直接跳过，不出现在阅读端
+  // 建课时会先建目录再填内容，所以零节点的科目直接跳过，不出现在阅读端。
   const subjects: SubjectPayload[] = [];
   for (const name of subjectDirs) {
     const subject = buildSubject(path.join(subjectsDir, name), name, workspace);
     if (subject.nodes.length > 0) subjects.push(subject);
   }
-  if (subjects.length === 0) {
-    throw new Error(`学习工作区里没有可用科目：${subjectsDir} 下 ${subjectDirs.length} 个目录都没有节点`);
-  }
+  /* 一个可用科目都没有时给一份**空清单**，不抛错：这是「工作区在、课还没建」，
+     不是读盘失败。原来这里抛错，页面于是只能显示「读不到学习工作区」那张错误卡——
+     把「还没有科目」说成了「读不出来」，而阅读端本来就有一条 `subjects.length === 0`
+     的空态分支（`lib/client.js` 的主页壳）能照实说这句话；原生工具那一侧同一条判据
+     也早就写着「有目录但没有可用科目（建课建到一半）也算『还没有科目』，照实说而不是崩」
+     （`lib/tools/context.ts` 现在把这句话自己说出来了）。真正该报「读不到工作区」的只剩
+     上面那条：`.learning/subjects/` 这个目录根本不在。 */
 
   // 注意：这里与参考实现一样取**字典序**最大再截前 10 位，不是按时间先后比大小。
   // 两种写法在 updated_at 混用「只有日期」与「带时区时间戳」时结果不同，见交付说明。
