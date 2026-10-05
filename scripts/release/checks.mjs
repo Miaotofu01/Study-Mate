@@ -205,6 +205,11 @@ const groups = {
       // #82：**导出的产物本身**在 file:// 下打开（真 Chrome + 真 React）：样式、公式、图片、
       // 题目全部可用，且控制台/页面/失败请求干净。不搭夹具页——测的就是学生拿到的那份东西。
       'browser/export_file_test.mjs',
+      // #86：阅读端**四路由 × 两档视口**。上面那条 reading_test 恒定 1440×960，于是
+      // lib/client.js 里两条 `@media (max-width: 900px)` 从来没被执行过；这一条把四个面
+      // （今天学什么 / 科目主页 / 课件页 / 搜索）在宽窄两档各取一次景，亮暗两套的实测对比度
+      // 与动效四档也在里面。窄档不是截图，是换 CSS 视口再跑一遍。
+      'browser/reading_routes_test.mjs',
     ],
   },
 };
