@@ -32,6 +32,16 @@
        空白、也不是「读不到学习工作区」那张错误卡；搜索每条结果都标出科目与节点，且无断点的
        长 URL 折在自己那一格里（结果行与列表都不出横向滚动条）。窄档那三条「死声明」修好后，
        对账那一场把它们从「只记不判」升成断言。
+     · #93（右栏题库的内部呈现）在每一档后面加了两场，用的是**另造的一份夹具**（三种题型各
+       一组、题干与选项里各一段没有断点的长 token、题库带着一次落盘的作答）：
+       `-quiz` 断言条目 17（题型徽标贴字、不是被弹性行拉长的竖条）、19（tab 选中态是右栏专用
+       的下划线而不是左栏那套胶囊，且 tab 条在内容上方、与内容同宽）、21（上次作答的结果在
+       右栏里，切 tab 与就地作答之后都还在）、22（只出纵向滚动条）与 18（点正文标记 → 那一组
+       是「当前」，换到下一课不跟过去）；`-quiz-marked` 把镜头停在「点过标记之后」，三档各一张
+       可判的截图。
+       条目 22 有一处**假绿要记一笔**：`.smb-agroup` 自己带 `overflow: hidden`，题干被长 token
+       顶宽时不是出横向滚动条、而是被裁掉——只看 `scrollWidth` 会把「字被裁」判成「没有横向
+       滚动条」，所以这一条连着量「内容右边缘有没有越过裁切线」（metrics 里的 `overhang`）。
 
    浏览器二进制由 harness 探测；找不到时明确跳过（退出码 3），不是静默绿。
 */
@@ -101,6 +111,12 @@ const FIGURE_SRC = 'data:image/svg+xml;base64,' + Buffer.from(FIGURE_SVG, 'utf8'
    放 40 个字符一段重复三遍：短了不触发溢出，这条断言就白写了。 */
 const LONG_URL = 'https://example.com/docs/reference/'
   + 'pathSegmentWithoutAnyBreakPointInside'.repeat(3);
+
+/* 右栏题库那两条验收（#93 条目 17 / 22）要用的「刚好越界」的料：一段**没有断点**的长标识符
+   放进题干，一段放进选项。它们是「把右栏顶出横向滚动条」的那一类内容——右栏最窄时只有 280px
+   （PANE_LIMITS.right.min），这一段在**任何一档**下都比它宽，所以「撑不撑破」在宽窄两档都验得到。 */
+const STEM_TOKEN = 'studymate_right_pane_overflow_token_' + 'x'.repeat(40);
+const OPTION_TOKEN = 'https://example.com/quiz/option/without/any/break/point/' + 'y'.repeat(40);
 
 /** 一份能读出「两层依赖 + 有课件」的最小科目树。demo 那一门的第一课是四个面的取景主角。 */
 function subjectFiles(dirName, { slug, name, touched }) {
@@ -260,6 +276,123 @@ function makeHalfWorkspace() {
     fs.writeFileSync(file, content);
   }
   fs.mkdirSync(path.join(workspace, '.learning', 'subjects', '半成品'), { recursive: true });
+  return { root, workspace, payload: readLibrary({ workspace }) };
+}
+
+/* ── 右栏题库那一面的夹具（#93） ────────────────────────────────────────────
+   四个面那一份夹具是为「取景」造的：三条锚点、三种题型都没有，题干与选项里也没有长 token，
+   题库里更没有一次已作答。这一份专为右栏造，三样都摆齐：
+
+     · **三种题型各一组**（客观题 / 开放题 / 交付物）——题型徽标这个词表要挨个渲染一次，
+       截图才看得出「贴字」是不是对每一种都成立；
+     · **题干与选项里各一段没有断点的长 token**——「右栏只出纵向滚动条」这件事要有东西顶它；
+     · **题库带着一次落盘的作答**（`attempts/<NNNN>-<节点>.json`）——「上次作答看得见」这条
+       能力是从盘上读上来的，不是当场点出来的；所以按 `lib/attempts.ts` 的文件名规矩
+       （`<NNNN>` 取课件文件名那四位）现写一份，让它真的走进 payload。
+
+   课件文件名必须是 `0001-<节点id>.md`（四位数字前缀）：作答数据与课件同名不同后缀，
+   `attempts.ts` 的 `lessonNumberOf` 就是按这四位找的——写成 `1-绑定.md` 那份种子会被静默忽略。
+   节点 id 还必须是 **ASCII** 的（`attempts.ts` 的 `NODE_ID_RE`：`^[a-z0-9]+([.-][a-z0-9]+)*$`）——
+   中文 id 的节点读得到课件、却读不到作答数据（`readAttempts` 直接返回 null），
+   种子文件就白写了。所以这里 id 用 `binding.scope`，标题与锚点照样是中文。 */
+const QUIZ_NODE = 'binding.scope';
+const QUIZ_TITLE = '绑定';
+const QUIZ_ANCHORS = ['变量的比喻', '作用域的嵌套', '造一个绑定的小例子'];
+/** 第二课（两处用它）：① 「当前」标记不许跟着换课跑过去；② 课件页底部那条「下一课」点得到。 */
+const NEXT_NODE = 'scope.order';
+const NEXT_ANCHORS = ['先声明后使用', '顺序与提升'];
+
+function quizSubjectFiles(dirName, { slug, name, touched }) {
+  const lesson = [
+    `# ${QUIZ_TITLE}`, '',
+    '绑定是名字指向值；这一课的题都在右栏。', '',
+    ...QUIZ_ANCHORS.map((anchor, i) => `::: quiz ${['理解', '应用', '交付'][i]} 锚点：${anchor}\n:::\n`),
+    '## 小结', '',
+    '小结里也放一个长标识符：' + STEM_TOKEN + '。', '',
+  ].join('\n');
+  const nextLesson = [
+    '# 顺序', '',
+    '顺序说的是绑定在什么时候生效。', '',
+    ...NEXT_ANCHORS.map((anchor) => `::: quiz 理解 锚点：${anchor}\n:::\n`),
+    '',
+  ].join('\n');
+
+  return {
+    [`.learning/subjects/${dirName}/subject.yaml`]: [
+      `slug: ${slug}`, `name: ${name}`, 'goal: 把右栏题库的内部呈现挨个看一遍', 'status: 学习中',
+      'created_at: "2026-01-02T03:04:05+08:00"', '',
+    ].join('\n'),
+    [`.learning/subjects/${dirName}/curriculum.yaml`]: [
+      'nodes:',
+      `  - id: ${QUIZ_NODE}`, `    title: ${QUIZ_TITLE}`, '    kind: 概念',
+      '    objective: 说清绑定发生在作用域里而不是值里', '    status: 学习中',
+      `  - id: ${NEXT_NODE}`, '    title: 顺序', '    kind: 概念',
+      '    objective: 说清绑定在什么时候生效', `    prerequisites: [${QUIZ_NODE}]`, '    status: 未开始', '',
+    ].join('\n'),
+    [`.learning/subjects/${dirName}/progress.yaml`]: [
+      `updated_at: "${touched}"`, 'nodes:', `  ${QUIZ_NODE}:`, '    status: 学习中', '',
+    ].join('\n'),
+    [`.learning/subjects/${dirName}/lessons/0001-${QUIZ_NODE}.md`]: lesson,
+    [`.learning/subjects/${dirName}/lessons/0001-${QUIZ_NODE}.quiz.json`]: JSON.stringify({
+      [QUIZ_ANCHORS[0]]: [{
+        kind: '客观题',
+        q: '变量最接近下面哪个说法？题干里也有一段长标识符：' + STEM_TOKEN,
+        opts: ['名字指向值', '容器装着值（' + OPTION_TOKEN + '）', '一段可复用的调用'],
+        ans: 0,
+        why: '绑定是名字与值的对应，不是把值装进盒子里。',
+      }],
+      [QUIZ_ANCHORS[1]]: [{
+        kind: '开放题',
+        q: '内层作用域看得到外层的绑定吗？',
+        answer: '看得到，作用域链向上查。',
+        criteria: '提到作用域链与「向上」就够了。',
+      }],
+      [QUIZ_ANCHORS[2]]: [{
+        kind: '交付物',
+        q: '写一个会捕获外层绑定的函数。',
+        交付物: '一个能跑的 .mjs 文件',
+        证据: 'node --test 的输出',
+      }],
+    }),
+    // 第二课：两处用它——「当前」标记不许跟着换课跑过去，以及课件页底部那条「下一课」点得到
+    [`.learning/subjects/${dirName}/lessons/0002-${NEXT_NODE}.md`]: nextLesson,
+    [`.learning/subjects/${dirName}/lessons/0002-${NEXT_NODE}.quiz.json`]: JSON.stringify({
+      [NEXT_ANCHORS[0]]: [{ kind: '客观题', q: '先声明后使用是什么意思？', opts: ['读之前先绑好', '随便写'], ans: 0, why: '顺序决定读到什么。' }],
+      [NEXT_ANCHORS[1]]: [{ kind: '开放题', q: '提升是怎么回事？', answer: '声明被提到作用域顶部。', criteria: '提到声明与初始化的分别。' }],
+    }),
+    // 一次落盘的作答：读进 payload 之后，右栏那一题上就该有「上次选了 A，对了」
+    [`.learning/subjects/${dirName}/attempts/0001-${QUIZ_NODE}.json`]: JSON.stringify({
+      节点: QUIZ_NODE,
+      课件: `0001-${QUIZ_NODE}.md`,
+      最后写入: touched,
+      题: {
+        [`${QUIZ_ANCHORS[0]}#0`]: {
+          id: `${QUIZ_ANCHORS[0]}#0`,
+          作答历史: [{ 时: touched, 选: 0, 对: true }],
+          上次结果: { 时: touched, 选: 0, 对: true },
+        },
+      },
+    }, null, 2),
+    [`.learning/subjects/${dirName}/MISSION.md`]: '# 使命\n\n## Why\n\n因为要看右栏。\n',
+    [`.learning/subjects/${dirName}/GLOSSARY.md`]: '## 基础\n\n**绑定**: 名字指向值\n',
+    [`.learning/subjects/${dirName}/RESOURCES.md`]: '# 资源\n\n- 《入门》\n',
+    [`.learning/subjects/${dirName}/misconceptions.yaml`]: '[]\n',
+  };
+}
+
+/** 右栏那一面自己的临时工作区（跑完即弃，与四个面那份互不干扰）。 */
+function makeQuizWorkspace() {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sm-quiz-'));
+  TEMPS.push(root);
+  const workspace = path.join(root, 'ws');
+  fs.mkdirSync(path.join(workspace, '.learning'), { recursive: true });
+  fs.writeFileSync(path.join(workspace, '.learning', 'MEMORY.md'), '# 共享记忆\n');
+  const files = quizSubjectFiles('demo', { slug: 'demo', name: '演示科目', touched: '2026-05-06T07:08:09+08:00' });
+  for (const [rel, content] of Object.entries(files)) {
+    const file = path.join(workspace, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+  }
   return { root, workspace, payload: readLibrary({ workspace }) };
 }
 
@@ -487,6 +620,132 @@ const LESSON_PROBE = `(() => {
   };
 })()`;
 
+/**
+ * 右栏题库那一面的读数（#93 条目 17 / 18 / 19 / 21 / 22）。全部量**真渲染出来的元素**：
+ *
+ *   · 题型徽标取 `.smb-q__ask` 里那颗 chip——**不预设类名**（类名是实现，贴不贴字是行为）；
+ *   · 「当前组」取 `aria-current`，同时量它的边与编号圈（光有属性、看不见不算「明显的标记」）；
+ *   · 上次作答取 `.smb-review`，并量它**在不在右栏里**（在正文里出现不算数）；
+ *   · 滚动条取滚动容器的 `scrollWidth/clientWidth` 与计算出来的 `overflow-x`；
+ *   · 品牌色不写死：现造一个只设 `color` 的元素让浏览器把 `--smb-brand` 解出来，
+ *     之后只比「相等 / 不相等」，不钉任何具体色值。
+ */
+const QUIZ_PROBE = `(() => {
+  const q = (sel) => document.querySelector(sel);
+  const qa = (sel) => Array.from(document.querySelectorAll(sel));
+  const cs = (el) => (el ? getComputedStyle(el) : null);
+  const px = (value) => Math.round(parseFloat(value) * 100) / 100;
+  const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; };
+
+  const probe = document.createElement('span');
+  probe.style.color = 'var(--smb-brand)';
+  (q('.smb-root') || document.body).appendChild(probe);
+  const brand = getComputedStyle(probe).color;
+  probe.remove();
+
+  const paneBody = q('.smb-right__body');
+  const lesson = q('.smb-lesson');
+  const overflowOf = (el) => (el ? el.scrollWidth - el.clientWidth : null);
+
+  const tabs = qa('.smb-right__tabs button').map((el) => {
+    const s = cs(el);
+    return {
+      text: el.textContent.trim(), classes: el.className, selected: el.getAttribute('aria-selected') === 'true',
+      backgroundColor: s.backgroundColor, color: s.color,
+      borderBottomWidth: px(s.borderBottomWidth), borderBottomColor: s.borderBottomColor,
+      borderTopWidth: px(s.borderTopWidth), borderRadius: px(s.borderTopLeftRadius),
+      fontWeight: s.fontWeight, box: box(el),
+    };
+  });
+
+  const cards = qa('.smb-q').map((el) => {
+    const ask = el.querySelector('.smb-q__ask');
+    const badge = ask ? ask.querySelector('.smb-chip') : null;
+    const stem = el.querySelector('.smb-q__text');
+    const lines = Array.from(el.querySelectorAll('.smb-q__text p'));
+    const optionTexts = Array.from(el.querySelectorAll('.smb-opt > span:last-child'));
+    const opts = Array.from(el.querySelectorAll('.smb-opt'));
+    /* 「折没折」的判据落在**右边缘**上，不是只看 scrollWidth：组卡片（.smb-agroup）自己带
+       overflow: hidden，题干被顶宽时它不是出横向滚动条而是**被裁掉**——只看滚动条读数，
+       会把「文字被裁」误判成「没有横向滚动条」。#93 条目 22 问的是学生看不看得见那段字，
+       所以这里量的是「内容右边缘有没有越过裁切线」。 */
+    const group = el.closest('.smb-agroup');
+    const clipEdge = group ? group.getBoundingClientRect().right - 1 : null;
+    const texts = [stem].concat(lines, optionTexts).filter(Boolean);
+    return {
+      badge: badge ? {
+        text: badge.textContent.trim(), box: box(badge),
+        fontSize: px(cs(badge).fontSize), whiteSpace: cs(badge).whiteSpace,
+      } : null,
+      ask: box(ask), stem: box(stem), clipEdge: clipEdge === null ? null : Math.round(clipEdge),
+      overhang: clipEdge === null ? null
+        : Math.round(texts.reduce((worst, one) => Math.max(worst, one.getBoundingClientRect().right - clipEdge), -Infinity)),
+      stemOverflowX: overflowOf(stem),
+      stemLinesOverflowX: lines.map(overflowOf),
+      optionOverflowX: opts.map(overflowOf),
+      review: Array.from(el.querySelectorAll('.smb-review')).map((one) => one.textContent.trim()),
+    };
+  });
+
+  const groups = qa('.smb-agroup').map((el) => {
+    const s = cs(el);
+    const circle = el.querySelector('.smb-agroup__no');
+    return {
+      no: circle ? circle.textContent.trim() : null,
+      title: el.querySelector('.smb-agroup__text') ? el.querySelector('.smb-agroup__text').textContent.trim() : null,
+      current: el.getAttribute('aria-current'),
+      box: box(el), borderTopColor: s.borderTopColor,
+      circleBackground: circle ? cs(circle).backgroundColor : null,
+      circleBorderColor: circle ? cs(circle).borderTopColor : null,
+    };
+  });
+
+  return {
+    width: window.innerWidth,
+    mode: lesson ? lesson.getAttribute('data-right-mode') : null,
+    open: lesson ? lesson.getAttribute('data-right') : null,
+    brand, tabs, cards, groups,
+    // 题型徽标的参照物：正文里的「练习」徽标是同一个画法，但它在一条 align-items:center 的行里，
+    // 高度就是「贴字」的天然高度——拿它当尺子，就不用钉任何像素值
+    markerBadge: box(q('.smb-qmark__badge')),
+    markers: qa('[data-proto="quiz-marker"]').map((el) => ({
+      group: el.getAttribute('data-group'), no: el.querySelector('.smb-qmark__no').textContent.trim(),
+      text: el.querySelector('.smb-qmark__text').textContent.trim(),
+    })),
+    review: qa('.smb-review').map((el) => ({ text: el.textContent.trim(), inPane: !!(paneBody && paneBody.contains(el)) })),
+    pane: paneBody ? {
+      box: box(paneBody), tabsBox: box(q('.smb-right__tabs')),
+      clientWidth: px(paneBody.clientWidth), scrollWidth: px(paneBody.scrollWidth),
+      clientHeight: px(paneBody.clientHeight), scrollHeight: px(paneBody.scrollHeight),
+      overflowX: cs(paneBody).overflowX, overflowY: cs(paneBody).overflowY,
+      innerOverflowX: overflowOf(paneBody),
+    } : null,
+    pageOverflowX: document.documentElement.scrollWidth - window.innerWidth,
+    bodyText: document.body.innerText.slice(0, 240),
+  };
+})()`;
+
+/** 点正文里第 n 条题目标记（0 起）：右栏那一组该出现「当前」标记。 */
+function clickMarker(index) {
+  return `(() => {
+    const marks = document.querySelectorAll('[data-proto="quiz-marker"]');
+    if (!marks[${index}]) throw new Error('正文里没有第 ${index + 1} 条题目标记');
+    marks[${index}].click();
+    return marks[${index}].getAttribute('data-group');
+  })()`;
+}
+
+/** 点右栏第 n 个 tab（0 起）：选中态该换人，面板内容跟着换。 */
+function clickTab(index) {
+  return `(() => {
+    const tabs = document.querySelectorAll('.smb-right__tabs button');
+    if (!tabs[${index}]) throw new Error('右栏没有第 ${index + 1} 个 tab');
+    tabs[${index}].click();
+    return tabs[${index}].textContent.trim();
+  })()`;
+}
+
 const SEARCH_PROBE = `(() => {
   ${HELPERS}
   const palette = q('.smb-palette');
@@ -602,7 +861,10 @@ const CONTRAST_TARGETS = {
     ['.smb-rail__label', '窄轨·标签'],
     ['.smb-q__text', '右栏·题干'],
     ['.smb-opt', '右栏·选项'],
-    ['.smb-chip--kind', '右栏·题型徽标'],
+    // #93 条目 17 那颗题型徽标。原来这里指 `.smb-chip--kind`，而那个类名是**顶部那条**里
+    // 节点类型的 chip（第一个就命中它），量的一直不是右栏的徽标——现在徽标有了自己的类名，
+    // 这条取样点才真的落在它身上
+    ['.smb-q__kind', '右栏·题型徽标'],
   ],
   search: [
     ['.smb-palette__input input', '搜索·输入框'],
@@ -676,13 +938,20 @@ async function useViewport(viewport) {
 const layoutByViewport = {};
 /** 课件页那一面的读数（栏形态、正文列占中栏多少），同样留给对账那一场。 */
 const lessonByViewport = {};
+/** 右栏题库那一面的读数（#93）：给最后那一场对账「并排与抽屉两种形态下都成立」。 */
+const quizByViewport = {};
 
 try {
   const { root, workspace } = makeWorkspace();
   const payload = readLibrary({ workspace });
   const fixture = buildFixture(root, payload);
+  // 右栏那一面自己的夹具（三种题型 + 长 token + 一次已作答），同一档视口下另开一份
+  const quizWorkspace = makeQuizWorkspace();
+  const quizFixture = buildFixture(quizWorkspace.root, quizWorkspace.payload, 'quiz-fixture.html');
   console.log(`夹具：${fixture}`);
   console.log(`数据：${workspace}（跑完删）`);
+  console.log(`右栏夹具：${quizFixture}`);
+  console.log(`右栏数据：${quizWorkspace.workspace}（跑完删）`);
 
   for (const viewport of VIEWPORTS) {
     await useViewport(viewport);
@@ -862,6 +1131,222 @@ try {
       };
       lessonByViewport[viewport.key] = lessonMetrics;
       return lessonMetrics;
+    });
+
+    /* ── 面三·右栏题库（#93 条目 17 / 18 / 19 / 21 / 22） ──────────────────
+       右栏只在课件页里存在，所以这一场跟在「面三」后面、同一档视口，换一份**专门把右栏摆满**的
+       夹具（三种题型各一组、题干与选项里各一段没有断点的长 token、题库带着一次已作答）。
+
+       形态由 #88 的几何决定：宽档与窄档是并排的一栏，紧档是盖在正文上的抽屉。**两种形态下
+       量的是同一份 DOM**（`Inspector` 在两种形态下是同一个元素），所以这里断的是同一批关系，
+       只在读数里把形态记下来——「抽屉里也成立」不是另写一套断言，而是同一套断言跑在不同的
+       形态上。这一档的形态如果不符（`data-right-mode` 不是该有的那个），下面那条会红。 */
+    await session.scene('reading-routes-' + viewport.key + '-quiz', async (ctx) => {
+      await ctx.navigate(quizFixture, { settle: 1200 });
+      await ctx.evaluate(OPEN_SUBJECT);
+      await ctx.sleep(300);
+      await ctx.evaluate(OPEN_LESSON);
+      await ctx.sleep(400);
+      await ctx.evaluate(`document.querySelector('[data-proto="toggle-quiz"]').click()`);
+      await ctx.sleep(400);
+      const seen = await ctx.evaluate(QUIZ_PROBE);
+      const wantMode = PANE_MODES[viewport.key];
+      check(`${tag} 右栏开在这一档该有的形态上（并排 / 盖在正文上）`,
+        seen.open === '1' && seen.mode === wantMode, `形态=${seen.mode}（该是 ${wantMode}）`);
+      check(`${tag} 右栏渲染出了三组题（这道夹具就是为了把它摆满）`,
+        seen.groups.length === 3 && seen.cards.length === 3,
+        JSON.stringify({ groups: seen.groups.map((one) => one.no), cards: seen.cards.length }));
+      check(`${tag} 三组题的编号与正文里三条标记对得上`,
+        JSON.stringify(seen.groups.map((one) => one.no)) === JSON.stringify(seen.markers.map((one) => one.no))
+        && seen.markers.length === 3, JSON.stringify({ groups: seen.groups, markers: seen.markers }));
+
+      /* 条目 17：题型徽标是个**贴字**的标签，不是被弹性行拉成一根约 150px 高的竖条。
+         两条关系：① 高不过自己那行字的两倍；② 高与正文里那颗「练习」徽标（同一个画法、
+         在一条 align-items:center 的行里）差不多——后者是「贴字」的天然尺子，所以不用钉像素。 */
+      const badges = seen.cards.map((one) => one.badge).filter(Boolean);
+      check(`${tag} 三条题各自的题型徽标都在（客观题 / 开放题 / 交付物）`,
+        JSON.stringify(badges.map((one) => one.text)) === JSON.stringify(['客观题', '开放题', '交付物']),
+        JSON.stringify(badges));
+      const stretchLimit = badges.map((one) => Math.round(one.fontSize * 2));
+      check(`${tag} 题型徽标是贴字的标签：高 ${badges.map((one) => one.box.h).join('/')}px，都没超过自己那行字的两倍`,
+        badges.length === 3 && badges.every((one) => one.box.h > 0 && one.box.h <= one.fontSize * 2),
+        JSON.stringify({ badges: badges.map((one) => one.box), limit: stretchLimit }));
+      check(`${tag} 题型徽标不是竖条：横着比竖着宽，高也与正文那颗「练习」徽标同档`,
+        badges.every((one) => one.box.w > one.box.h) && !!seen.markerBadge
+        && badges.every((one) => Math.abs(one.box.h - seen.markerBadge.h) <= 4),
+        JSON.stringify({ badges: badges.map((one) => one.box), reference: seen.markerBadge }));
+
+      /* 条目 19：右栏 tab 的选中态是**下划线**（右栏专用那条规则），不是左栏那套胶囊。
+         两条关系：① 选中的那个底边是品牌色、未选中的不是；② 选中不换底色（胶囊的选中态
+         恰恰靠换底色 + 描边）。品牌色是现解出来的，不写死。 */
+      const selected = seen.tabs.filter((one) => one.selected);
+      const unselected = seen.tabs.filter((one) => !one.selected);
+      check(`${tag} 右栏两个 tab 恰好选中一个（题目 / 问答）`,
+        seen.tabs.length === 2 && selected.length === 1 && seen.tabs[0].text.indexOf('题目') === 0,
+        JSON.stringify(seen.tabs.map((one) => ({ text: one.text, selected: one.selected }))));
+      check(`${tag} 右栏 tab 的选中态是下划线：底边是品牌色（未选中的不是）`,
+        selected.length === 1 && unselected.length === 1
+        && selected[0].borderBottomColor === seen.brand && selected[0].borderBottomWidth > 0
+        && unselected[0].borderBottomColor !== seen.brand,
+        JSON.stringify({ selected: selected[0], unselected: unselected[0], brand: seen.brand }));
+      check(`${tag} 右栏 tab 的选中态不是左栏那套胶囊：选中不换底色（${selected.length === 1 ? selected[0].backgroundColor : '?'}）`,
+        selected.length === 1 && unselected.length === 1
+        && selected[0].backgroundColor === unselected[0].backgroundColor,
+        JSON.stringify(seen.tabs.map((one) => ({ text: one.text, selected: one.selected, bg: one.backgroundColor, radius: one.borderRadius }))));
+      /* tab 条与内容的关系（两种形态都要成立）：tab 条在内容**上方**、与内容**同宽同起边**。
+         抽屉那一档最容易坏：抽屉的 body 是一条弹性行，检查器若交出两个兄弟节点，
+         tab 条就被摊成左边一竖列（内容被挤到右半幅）——选中态再对，学生也看不到设计的样子。 */
+      check(`${tag} tab 条在内容上方、与内容同宽同起边（并排与抽屉都该如此）`,
+        !!seen.pane && !!seen.pane.tabsBox
+        && seen.pane.tabsBox.y + seen.pane.tabsBox.h <= seen.pane.box.y + 2
+        && Math.abs(seen.pane.tabsBox.x - seen.pane.box.x) <= 2
+        && Math.abs(seen.pane.tabsBox.w - seen.pane.box.w) <= 2,
+        JSON.stringify({ tabs: seen.pane.tabsBox, body: seen.pane.box }));
+
+      /* 条目 21：上次作答的结果在右栏看得见——它来自 attempts/，不是当场点出来的。
+         这一条是「已有能力，别丢」：改动右栏时它必须还在，并且得**在右栏里**（正文里不算）。 */
+      check(`${tag} 上次作答的结果在右栏看得见（来自 attempts/ 的那一条）`,
+        seen.review.length === 1 && seen.review[0].inPane && /上次选了 A，对了/.test(seen.review[0].text),
+        JSON.stringify(seen.review));
+
+      /* 条目 22：右栏只出纵向滚动条。长 token 不许把内容顶宽（题干与选项各自也不许），
+         纵向该滚还得滚得动——「只有纵向」的正面那一半。
+
+         两条一起断才算数：① 右栏那个滚动容器自己没有横向溢出；② 题干与选项的右边缘都在
+         裁切线以内（`.smb-agroup` 带 overflow: hidden，只断 ① 的话「文字被裁掉」也会绿——
+         这条夹具刚写出来时量到的就是那个假绿：题干被顶宽、被组卡片裁掉，滚动条一根没有）。 */
+      const stems = seen.cards.map((one) => one.stemOverflowX);
+      const lines = seen.cards.flatMap((one) => one.stemLinesOverflowX);
+      const options = seen.cards.flatMap((one) => one.optionOverflowX);
+      const overhangs = seen.cards.map((one) => one.overhang);
+      check(`${tag} 长 token 不在题干里顶出横向溢出（题干 ${stems.join('/')}、每一行 ${lines.join('/')}）`,
+        !!seen.pane && stems.every((one) => one <= 0) && lines.every((one) => one <= 0),
+        JSON.stringify({ stems, lines }));
+      check(`${tag} 长 token 不在选项里顶出横向溢出（每个选项 ${options.join('/')}）`,
+        options.length >= 3 && options.every((one) => one <= 0), JSON.stringify(options));
+      check(`${tag} 长题干与长选项都没被裁掉：右边缘都在组卡片的裁切线以内（越过 ${overhangs.join('/')}px）`,
+        overhangs.length === 3 && overhangs.every((one) => one !== null && one <= 1),
+        JSON.stringify(seen.cards.map((one) => ({ overhang: one.overhang, clipEdge: one.clipEdge, stem: one.stem }))));
+      check(`${tag} 右栏自己不出横向滚动条（内容 ${seen.pane && seen.pane.scrollWidth} ≤ 可见 ${seen.pane && seen.pane.clientWidth}）`,
+        !!seen.pane && seen.pane.innerOverflowX <= 0, JSON.stringify(seen.pane));
+      check(`${tag} 纵向照旧滚得动（内容 ${seen.pane && seen.pane.scrollHeight} > 可见 ${seen.pane && seen.pane.clientHeight}，overflow-y=${seen.pane && seen.pane.overflowY}）`,
+        !!seen.pane && seen.pane.scrollHeight > seen.pane.clientHeight && seen.pane.overflowY === 'auto',
+        JSON.stringify(seen.pane));
+
+      /* 条目 18：点正文里的题目标记 → 右栏**对应的那一组**出现明确的「当前」标记。
+         先记一份点之前的读数：不许一上来就有哪一组自称当前。 */
+      check(`${tag} 还没点标记时，右栏没有任何一组自称「当前」`,
+        seen.groups.every((one) => one.current !== 'true'),
+        JSON.stringify(seen.groups.map((one) => one.current)));
+
+      const clickedGroup = await ctx.evaluate(clickMarker(1));
+      await ctx.sleep(700);   // 滚动是 smooth 的，留出它走完的时间
+      const marked = await ctx.evaluate(QUIZ_PROBE);
+      const current = marked.groups.filter((one) => one.current === 'true');
+      check(`${tag} 点第 ${clickedGroup} 组的标记之后，右栏恰好那一组是「当前」`,
+        current.length === 1 && current[0].no === clickedGroup
+        && marked.groups.filter((one) => one.no === clickedGroup).length === 1,
+        JSON.stringify({ clicked: clickedGroup, groups: marked.groups.map((one) => ({ no: one.no, current: one.current })) }));
+      check(`${tag} 「当前」看得见：那一组的边与编号圈都换成了品牌色，别组没有`,
+        current.length === 1
+        && current[0].borderTopColor === marked.brand && current[0].circleBackground === marked.brand
+        && marked.groups.filter((one) => one.current !== 'true')
+          .every((one) => one.borderTopColor !== marked.brand && one.circleBackground !== marked.brand),
+        JSON.stringify({ brand: marked.brand, groups: marked.groups.map((one) => ({ no: one.no, border: one.borderTopColor, circle: one.circleBackground })) }));
+      check(`${tag} 点标记之后那一组落在右栏的可见范围里（定位与标记是一件事）`,
+        current.length === 1 && !!marked.pane && current[0].box.y >= marked.pane.box.y - 2
+        && current[0].box.y + 8 <= marked.pane.box.y + marked.pane.box.h,
+        JSON.stringify({ group: current.length === 1 ? current[0].box : null, pane: marked.pane && marked.pane.box }));
+
+      /* 条目 21 的另一半：切到「问答」再切回来，上次作答那句还在（别在切 tab 的路上丢了）。 */
+      await ctx.evaluate(clickTab(1));
+      await ctx.sleep(300);
+      const asked = await ctx.evaluate(QUIZ_PROBE);
+      check(`${tag} 切到「问答」tab：选中态跟着换人，面板换成问答`,
+        asked.tabs.filter((one) => one.selected).length === 1 && asked.tabs[1].selected === true
+        && !!asked.bodyText, JSON.stringify(asked.tabs.map((one) => ({ text: one.text, selected: one.selected }))));
+      await ctx.evaluate(clickTab(0));
+      await ctx.sleep(300);
+      const back = await ctx.evaluate(QUIZ_PROBE);
+      check(`${tag} 切回「题目」tab：上次作答那句还在右栏里，当前组也还是那一组`,
+        back.review.length === 1 && back.review[0].inPane && /上次选了 A，对了/.test(back.review[0].text)
+        && back.groups.filter((one) => one.current === 'true').length === 1
+        && back.groups.filter((one) => one.current === 'true')[0].no === clickedGroup,
+        JSON.stringify({ review: back.review, groups: back.groups.map((one) => ({ no: one.no, current: one.current })) }));
+
+      /* 就地答一题：那句「上次选了 …」要跟着换成刚落下的这一次。
+         夹具页的 fetch 是 stub 的（作答接口回 404），所以这一条断的是**界面**的即时读数，
+         落盘那一半由 attempts_test.mjs 在真 HTTP 迷你宿主上验——这里不假装它落了盘。 */
+      await ctx.evaluate(`(() => {
+        const opts = document.querySelectorAll('.smb-q .smb-opt');
+        if (opts.length < 3) throw new Error('第一题没有三个选项');
+        opts[1].click();
+      })()`);
+      await ctx.sleep(300);
+      const answered = await ctx.evaluate(QUIZ_PROBE);
+      check(`${tag} 就地作答之后，那句「上次选了 …」换成刚落下的这一次`,
+        answered.review.length === 1 && answered.review[0].inPane && /上次选了 B，错了/.test(answered.review[0].text),
+        JSON.stringify(answered.review));
+
+      /* 条目 18 的另一半：**当前**只属于点过的那一课。LessonPage 的状态换课不重挂，
+         所以「当前」标记很容易不请自来——下一课谁也没点过，右栏就不该有哪一组自称当前。 */
+      await ctx.evaluate(`(() => {
+        const buttons = document.querySelectorAll('.smb-navfoot button');
+        if (!buttons.length) throw new Error('课件页底部没有前后课');
+        buttons[buttons.length - 1].click();
+      })()`);
+      await ctx.sleep(600);
+      const next = await ctx.evaluate(QUIZ_PROBE);
+      check(`${tag} 换到下一课：「当前」标记不跟过去（那一课谁也没点过）`,
+        next.groups.length >= 2 && next.groups.every((one) => one.current !== 'true'),
+        JSON.stringify(next.groups.map((one) => ({ no: one.no, current: one.current }))));
+
+      const quizMetrics = {
+        viewport: viewport.key, size: [seen.width, viewport.height], mode: seen.mode,
+        pane: seen.pane, markerBadge: seen.markerBadge,
+        tabs: seen.tabs.map((one) => ({
+          text: one.text, classes: one.classes, selected: one.selected,
+          backgroundColor: one.backgroundColor, borderBottomColor: one.borderBottomColor,
+          borderBottomWidth: one.borderBottomWidth, borderRadius: one.borderRadius, fontWeight: one.fontWeight,
+        })),
+        badges: badges.map((one) => ({ text: one.text, box: one.box, fontSize: one.fontSize, whiteSpace: one.whiteSpace })),
+        overflow: { stems, lines, options, overhangs, clipEdge: seen.cards.map((one) => one.clipEdge) },
+        groups: marked.groups.map((one) => ({ no: one.no, title: one.title, current: one.current, box: one.box })),
+        clickedGroup,
+        review: { onLoad: seen.review, afterTabs: back.review, afterAnswer: answered.review },
+        nextLesson: next.groups.map((one) => ({ no: one.no, current: one.current })),
+      };
+      quizByViewport[viewport.key] = quizMetrics;
+      return quizMetrics;
+    });
+
+    /* ── 面三·右栏题库的取景（#93）：镜头停在「点过标记之后」那一刻 ──────────
+       上一场最后一步换到了下一课，拍不到「当前」那一下；这一场把状态停在「点过第 2 组的
+       标记、右栏正是那一组」，宽窄三档各一张。人照着截图就能判条目 17（题型徽标）、
+       19（tab 下划线）、21（上次作答）、22（只有纵向滚动条）：这四样都在同一屏里。 */
+    await session.scene('reading-routes-' + viewport.key + '-quiz-marked', async (ctx) => {
+      await ctx.navigate(quizFixture, { settle: 1200 });
+      await ctx.evaluate(OPEN_SUBJECT);
+      await ctx.sleep(300);
+      await ctx.evaluate(OPEN_LESSON);
+      await ctx.sleep(400);
+      await ctx.evaluate(`document.querySelector('[data-proto="toggle-quiz"]').click()`);
+      await ctx.sleep(400);
+      await ctx.evaluate(clickMarker(1));
+      await ctx.sleep(700);
+      const seen = await ctx.evaluate(QUIZ_PROBE);
+      const current = seen.groups.filter((one) => one.current === 'true');
+      check(`${tag} 取景这一幕停在「当前」那一组上（截图看的就是这一下）`,
+        current.length === 1 && current[0].no === '2' && seen.mode === PANE_MODES[viewport.key]
+        && seen.review.some((one) => /上次选了 A，对了/.test(one.text)),
+        JSON.stringify({ mode: seen.mode, current: current.map((one) => one.no), review: seen.review }));
+      return {
+        viewport: viewport.key, size: [seen.width, viewport.height], mode: seen.mode,
+        current: current.map((one) => ({ no: one.no, box: one.box })),
+        badges: seen.cards.map((one) => (one.badge ? { text: one.badge.text, box: one.badge.box } : null)),
+        review: seen.review, paneWidth: seen.pane && seen.pane.clientWidth,
+        overhangs: seen.cards.map((one) => one.overhang),
+      };
     });
 
     /* ── 面四：搜索（覆盖层，不是路由） ─────────────────────────────────── */
@@ -1123,6 +1608,37 @@ try {
       lessons.every((one) => one.seen && parseFloat(one.seen.railToken) * 2 === one.seen.railBarWidth),
       lessons.map((one) => `${one.viewport}:${one.seen && one.seen.railBarWidth} vs ${one.seen && one.seen.railToken}`).join(' '));
 
+    /* 右栏题库那五条（#93）在三档下的对账：这一条要证的是**形态无关**——宽档窄档是并排的一栏，
+       紧档是盖在正文上的抽屉，而「题型徽标贴字、当前组看得见、上次作答在、只纵向滚」在两种
+       形态下都得成立。三档都取到读数 + 三档的读数都过那批关系，才算成立。 */
+    const quizReadings = VIEWPORTS.map((one) => ({ viewport: one.key, seen: quizByViewport[one.key] }));
+    check('三档的右栏题库读数都取到了（并排与抽屉都取到了）',
+      quizReadings.every((one) => !!one.seen), JSON.stringify(quizReadings.map((one) => one.viewport + ':' + !!one.seen)));
+    check('三档的右栏形态确实两种都有（并排 + 抽屉：不是三档都跑在同一种形态上）',
+      new Set(quizReadings.filter((one) => one.seen).map((one) => one.seen.mode)).size >= 2,
+      JSON.stringify(quizReadings.map((one) => one.viewport + ':' + (one.seen && one.seen.mode))));
+    check('三档下右栏都没有横向溢出（长题干与长选项都折在栏里）',
+      quizReadings.every((one) => one.seen && one.seen.pane.innerOverflowX <= 0),
+      quizReadings.map((one) => `${one.viewport}:${one.seen && one.seen.pane.innerOverflowX}`).join(' '));
+    check('三档下长题干与长选项都没被裁掉（右边缘都在裁切线以内）',
+      quizReadings.every((one) => one.seen.overflow.overhangs.length === 3
+        && one.seen.overflow.overhangs.every((value) => value !== null && value <= 1)),
+      JSON.stringify(quizReadings.map((one) => [one.viewport, one.seen && one.seen.overflow.overhangs])));
+    check('三档下题型徽标都还是贴字的（高不过两倍字号，也都不是竖条）',
+      quizReadings.every((one) => one.seen && one.seen.badges.length === 3
+        && one.seen.badges.every((badge) => badge.box.h <= badge.fontSize * 2 && badge.box.w > badge.box.h)),
+      JSON.stringify(quizReadings.map((one) => [one.viewport, one.seen && one.seen.badges.map((b) => [b.box.w, b.box.h])])));
+    check('三档下点过的标记都落在同一个组号上，且那一组是唯一的「当前」',
+      quizReadings.every((one) => one.seen && one.seen.clickedGroup === '2'
+        && one.seen.groups.filter((group) => group.current === 'true').length === 1
+        && one.seen.groups.filter((group) => group.current === 'true')[0].no === '2'),
+      JSON.stringify(quizReadings.map((one) => [one.viewport, one.seen && one.seen.clickedGroup,
+        one.seen && one.seen.groups.map((group) => group.no + ':' + group.current)])));
+    // 三档的右栏宽度确实不同（抽屉那一档与并排的宽算法不同）——顺带证明三档不是同一张截图
+    check('三档的右栏可见宽确实不同（紧档的抽屉不是宽档那一栏的截图）',
+      new Set(quizReadings.filter((one) => one.seen).map((one) => one.seen.pane.clientWidth)).size >= 2,
+      JSON.stringify(quizReadings.map((one) => one.viewport + ':' + (one.seen && one.seen.pane.clientWidth))));
+
     if (wide && narrow) {
       const declarations = [
         ['壳·.smb-wrap 的内边距', (one) => one.wrapPaddingLeft],
@@ -1175,12 +1691,20 @@ try {
         })),
         differing: differing.map(([name]) => name),
         inertDeclarations: inert.map(([name]) => name),
+        quiz: quizReadings.map((one) => ({
+          viewport: one.viewport, mode: one.seen && one.seen.mode,
+          paneWidth: one.seen && one.seen.pane.clientWidth, paneOverflowX: one.seen && one.seen.pane.innerOverflowX,
+          badges: one.seen && one.seen.badges.map((badge) => ({ text: badge.text, w: badge.box.w, h: badge.box.h })),
+          current: one.seen && one.seen.groups.map((group) => group.no + ':' + group.current),
+          clickedGroup: one.seen && one.seen.clickedGroup,
+        })),
       };
     }
     await ctx.navigate(fixture, { settle: 800 });
     return {
       wide, narrow,
       panes: lessons.map((one) => ({ viewport: one.viewport, mode: one.seen && one.seen.modes.right })),
+      quiz: quizReadings.map((one) => ({ viewport: one.viewport, mode: one.seen && one.seen.mode })),
     };
   });
 
