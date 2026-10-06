@@ -1,7 +1,8 @@
 // StudyMate 的 DSH 插件入口（Host 半）。
 //
 // 三件事：
-//   1. 注册「学习模式」预设（原有行为，保持不变）；
+//   1. 注册两条预设：「学习模式」（原有行为，一字不变）与「答疑模式」（#104，阅读端的就地
+//      答疑，只带一个只读的取课件工具）；
 //   2. 注册八个**原生工具**（#68）：总控拿到的是结构化返回，不是 exit code；
 //   3. 给阅读端（Client 半 lib/client.js）供学习工作区数据：
 //      GET  /api/studymate/library   —— 整份快照，走宿主的 /api 认证通道，与其他插件取业务数据同一条路；
@@ -75,6 +76,11 @@ export async function apply(ctx: PluginContext): Promise<void> {
       } as Parameters<typeof installPayload>[0]);
       // `!`：ctx.effect 缺失时的 TypeError 由下面的 catch 兜住（与迁移前同一条路径）
       await ctx.effect!(() => ctx.agentPresets!.register(registration.config));
+      // 「答疑模式」是第二条预设，自己的 effect、自己的 disposer。`installPayload` 一次产出
+      // 两条（学习 + 答疑），这里各注册各的——缺了它（老包）只少一条预设，学习的照常。
+      if (registration.qaConfig !== undefined) {
+        await ctx.effect!(() => ctx.agentPresets!.register(registration.qaConfig));
+      }
     } catch (error) {
       // Startup may report a problem, but must not migrate profile ownership.
       console.warn(`StudyMate：已跳过原生加载。${error instanceof Error ? error.message : String(error)}`);

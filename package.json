@@ -8,6 +8,7 @@
   },
   "exports": {
     ".": "./bin/dsh-plugin.ts",
+    "./qa-preset": "./lib/tools/qa-preset.ts",
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
@@ -35,6 +36,7 @@
     "antigravity/studymate/**",
     "preset/skills/**",
     "preset/learning/**",
+    "preset/qa/**",
     "schemas/*.json",
     "templates/**",
     "docs/**/*.md",

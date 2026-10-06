@@ -29,13 +29,17 @@ function fixture(t) {
   function boot(overrides = {}, scenario = 'normal', url = plugin) {
     return run(`import { apply } from ${JSON.stringify(url)};
       const scenario = ${JSON.stringify(scenario)};
-      const state = {registered: 0, disposed: 0, warnings: []};
+      const state = {registered: 0, disposed: 0, warnings: [], configs: []};
       console.warn = message => {state.warnings.push(String(message));};
       const effects = [];
       const ctx = {
         get: () => ({name: 'web', home: process.env.DSH_HOME}),
         agentPresets: {register: async config => {
-          state.config = config; state.registered++;
+          state.configs.push(config);
+          // #104 起这里注册两条（学习 + 答疑）：state.config 仍是**学习模式**那一条，
+          // 答疑那条在 state.configs 里（既有断言因此一个字都不用改）。
+          state.config = state.configs.find(item => item.id === 'learning') ?? config;
+          state.registered++;
           if (scenario === 'duplicate') throw new Error('Duplicate agent preset: learning');
           return async () => { state.disposed++; };
         }},
@@ -68,14 +72,24 @@ test('native loading initializes portable skills and owns the preset lifetime wi
   const result = f.boot();
   assert.equal(result.status, 0, result.stderr + result.stdout);
   const state = JSON.parse(result.stdout);
-  assert.equal(state.registered, 1);
-  assert.equal(state.disposed, 1);
+  // #104：两条预设各注册一次（学习模式 + 答疑模式），各有自己的 disposer。
+  assert.equal(state.registered, 2);
+  assert.equal(state.disposed, 2);
   assert.deepEqual(state.warnings, []);
   assert.equal(state.config.id, 'learning');
   assert.deepEqual(state.config.plugins.find(row => row.id === 'tool-bash').disabled,
     { __jsExpr: "process.platform === 'win32'" });
   assert.deepEqual(state.config.plugins.find(row => row.id === 'skill-filesystem').config.customSkillDirs,
     [packageSkills]);
+  // 第二条是答疑模式：名字/顺序与学习并列，技能目录只指包内的 local-qa，工具面是四行最小面。
+  const qa = state.configs.find(item => item.id === 'qa');
+  assert.ok(qa, '答疑模式必须与学习模式一起注册');
+  assert.equal(qa.name, '答疑模式');
+  assert.notEqual(qa.order, state.config.order);
+  assert.deepEqual(qa.plugins.find(row => row.id === 'skill-filesystem').config.customSkillDirs,
+    [`${packageSkills}/local-qa`]);
+  assert.ok(qa.plugins.some(row => row.id === 'studymate-qa-tools'
+    && row.name === '@yunmiao/studymate/qa-preset'));
   // 原生加载的引擎 = 已安装的包自身：<root> 是包目录，技能随包发布，摆在包里的 preset/skills
   // （不是 `.dsh/skills`——那是宿主默认项目根扫描会命中的位置，见 test_skill_visibility.mjs）
   assert.ok(fs.statSync(path.join(root, 'preset/skills/learning-system/SKILL.md')).isFile());
@@ -126,7 +140,7 @@ test('standalone installation in another profile preserves native Web ownership'
   const f = fixture(t);
   const initial = f.boot();
   assert.equal(initial.status, 0, initial.stdout + initial.stderr);
-  assert.equal(JSON.parse(initial.stdout).registered, 1);
+  assert.equal(JSON.parse(initial.stdout).registered, 2);
   assert.deepEqual(f.yaml(f.config).installModes, { web: 'native' });
   const cliUrl = pathToFileURL(path.join(root, 'bin/studymate.mjs')).href;
   const installed = f.run(`import {installPayload} from ${JSON.stringify(cliUrl)};
@@ -140,7 +154,7 @@ test('standalone installation in another profile preserves native Web ownership'
   const restarted = f.boot();
   assert.equal(restarted.status, 0, restarted.stdout + restarted.stderr);
   const state = JSON.parse(restarted.stdout);
-  assert.equal(state.registered, 1);
+  assert.equal(state.registered, 2);
   assert.deepEqual(state.warnings, []);
   assert.deepEqual(f.yaml(f.config).installModes, { web: 'native', headless: 'standalone' });
   assert.deepEqual(fs.readFileSync(headlessPatch), originalPatch);

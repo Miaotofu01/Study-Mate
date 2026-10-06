@@ -247,7 +247,7 @@ function copyPayload(destination) {
   // 技能源与预设源都在 `preset/` 下（技能是 `preset/skills`）。**别挪回 `.dsh/skills`**：
   // 宿主默认会扫「项目根/.dsh/skills」，技能摆在那里等于任何工作目录落在本仓库/本包里的
   // 会话都看得见（#87）。拷贝保持同一个相对位置，装出来的副本因此也不在默认扫描面上。
-  for (const relative of ['preset/skills', 'preset/learning', 'templates', 'schemas']) {
+  for (const relative of ['preset/skills', 'preset/learning', 'preset/qa', 'templates', 'schemas']) {
     fs.cpSync(path.join(source, relative), path.join(destination, relative), {
       recursive: true,
       filter: (file) => !['__pycache__', '.DS_Store'].includes(path.basename(file)),
@@ -375,21 +375,35 @@ export function installPayload({ workspaceArg, profile, version, desktop = false
         }));
       }
     }
+    // 两条预设各把自己的技能目录占位符换成**引擎侧的绝对路径**（同一份 `preset/skills`；
+    // 答疑那条在它后面接 `/local-qa`，见 `preset/qa/agent.cordis.yml`）。少占位符就抛——
+    // 那说明这份安装包不完整，猜不出路径时不能往下走。**学习那一条的检查放在最前**：它要
+    // 先于答疑那条的拷贝发生（老包/坏包可能没有 `preset/qa/`，先报「缺占位符」更准确）。
+    const skillsPath = path.join(payload, 'preset', 'skills').split(path.sep).join('/').replaceAll("'", "''");
+    const stagePreset = (relative, destination, label) => {
+      // A filter avoids Node 22.19's native Windows copy crash on Unicode paths.
+      // https://github.com/nodejs/node/issues/59636
+      fs.cpSync(path.join(native ? source : stagedEngine, 'preset', relative), destination,
+        { recursive: true, filter: () => true });
+      const file = path.join(destination, 'agent.cordis.yml');
+      const text = fs.readFileSync(file, 'utf8');
+      if (!text.includes('__STUDYMATE_SKILLS__')) {
+        throw new Error(`预设缺少 __STUDYMATE_SKILLS__，安装包不完整（${label}）。`);
+      }
+      fs.writeFileSync(file, text.replaceAll('__STUDYMATE_SKILLS__', skillsPath));
+    };
     const stagedPreset = path.join(staging, 'learning');
-    // A filter avoids Node 22.19's native Windows copy crash on Unicode paths.
-    // https://github.com/nodejs/node/issues/59636
-    fs.cpSync(path.join(native ? source : stagedEngine, 'preset', 'learning'), stagedPreset,
-      { recursive: true, filter: () => true });
-    const agentFile = path.join(stagedPreset, 'agent.cordis.yml');
-    const agent = fs.readFileSync(agentFile, 'utf8');
-    if (!agent.includes('__STUDYMATE_SKILLS__')) throw new Error('预设缺少 __STUDYMATE_SKILLS__，安装包不完整。');
-    fs.writeFileSync(agentFile, agent.replaceAll('__STUDYMATE_SKILLS__', path.join(payload, 'preset', 'skills').split(path.sep).join('/').replaceAll("'", "''")));
+    stagePreset('learning', stagedPreset, '学习模式');
+    const stagedQaPreset = path.join(staging, 'qa');
+    stagePreset('qa', stagedQaPreset, '答疑模式');
 
     // 注册预设：`lib/preset.ts`（迁移前的 Python 安装助手的 TS 替代，形状逐字段一致）。
+    // 两条预设**一次**产出：托管块的 BEGIN/END 只有一套，分两次调用后一次会把前一次剥掉。
     // 它自己保证「失败时一个字节都不落盘」——所以这里不需要再回滚它那部分。
     const stagedPatch = path.join(staging, 'cordis.patch.yml');
     registration = installPreset({
-      presetDir: stagedPreset, dshHome, profile, patchOutput: stagedPatch,
+      presetDir: stagedPreset, extraPresets: [{ id: 'qa', dir: stagedQaPreset }],
+      dshHome, profile, patchOutput: stagedPatch,
       ...(native ? { bundle: true } : { dshVersion: version, mode }),
     });
 

@@ -49,24 +49,29 @@ function rows(data) {
   return found;
 }
 
-/** 在临时 HOME 里摆一份可安装的预设目录（真预设的副本）。 */
+/** 在临时 HOME 里摆一份可安装的预设目录（真预设的副本：学习 + 答疑）。 */
 function fixture(t) {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-preset-'));
   t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
   const home = path.join(temporary, "dsh O'Brien 中文");
   const staged = path.join(home, 'staged-learning');
+  const stagedQa = path.join(home, 'staged-qa');
   fs.mkdirSync(home, { recursive: true });
   fs.cpSync(path.join(ROOT, 'preset', 'learning'), staged, { recursive: true });
+  fs.cpSync(path.join(ROOT, 'preset', 'qa'), stagedQa, { recursive: true });
   const patch = path.join(home, 'profiles', 'web', 'cordis.patch.yml');
   fs.mkdirSync(path.dirname(patch), { recursive: true });
-  return { temporary, home, staged, target: path.join(home, '.agent-presets', 'learning'), patch };
+  return { temporary, home, staged, stagedQa, target: path.join(home, '.agent-presets', 'learning'), patch };
 }
 
-/** 调一次注册。默认 dsh 版本 0.1.7-alpha.1（声明式那条路）。 */
+/** 调一次注册。默认 dsh 版本 0.1.7-alpha.1（声明式那条路）；`qa: true` 才带上第二条预设
+    （已有的用例一个都不动它们的环境，见下面那条「两条预设共用一段托管块」）。 */
 function invoke(f, options = {}) {
-  const { version = '0.1.7-alpha.1', profile, mode, bundle, patchOutput } = options;
+  const { version = '0.1.7-alpha.1', profile, mode, bundle, patchOutput, qa, presetId } = options;
   return installPreset({
     presetDir: f.staged, dshHome: f.home,
+    ...(qa ? { extraPresets: [{ id: 'qa', dir: f.stagedQa }] } : {}),
+    ...(presetId === undefined ? {} : { presetId }),
     ...(profile === undefined ? {} : { profile }),
     ...(mode === undefined ? {} : { mode }),
     ...(bundle === undefined ? {} : { bundle }),
@@ -480,4 +485,96 @@ test('符号链接一律不覆盖（预设或补丁）', { skip: process.platfor
     presetDir: presetLink, dshHome: f.home, dshVersion: '0.1.7',
   }), /符号链接/);
   assert.deepEqual(fs.readFileSync(path.join(f.home, 'real.patch.yml')), before);
+});
+
+/* ── #104：第二条预设「答疑模式」与学习模式共用一段托管块 ─────────────────
+   已有的用例一个都没放宽：它们仍按「只注册学习模式」跑（`invoke` 不带 `qa`）。这里补的是
+   **新事实**——同一次调用带两条预设时，托管块仍是**一个** BEGIN/END 块，里面两行 insert。 */
+
+test('答疑模式与学习模式共用一段托管块：一个 BEGIN/END，两行 insert（各占一行）', (t) => {
+  const f = fixture(t);
+  const original = '# user patch\n[]\n';
+  fs.writeFileSync(f.patch, original, 'utf8');
+  const result = invoke(f, { qa: true });
+  assert.equal(result.mode, 'declarative');
+  assert.equal(result.patchChanged, true);
+  const text = fs.readFileSync(f.patch, 'utf8');
+  assert.equal(text.split(BEGIN).length - 1, 1, '托管块只能有一个 BEGIN');
+  assert.equal(text.split('# END STUDYMATE LEARNING PRESET').length - 1, 1);
+  assert.ok(text.includes('# user patch'), '用户的配置原样留着');
+  const declarations = rows(parsed(f.patch)).filter(row => row.name === PLUGIN);
+  assert.deepEqual(declarations.map(row => row.id),
+    ['studymate-learning-preset', 'studymate-qa-preset'], '两条预设各一行，顺序固定');
+  assert.deepEqual(declarations.map(row => row.config.id), ['learning', 'qa']);
+  // 学习那一条逐字段没变：还是那份真预设的元数据与插件行
+  assert.equal(declarations[0].config.name, '学习模式');
+  assert.equal(declarations[0].config.plugins[0].name, '@deepseek-ai/dsh-persona');
+  // 答疑那一条：名字/顺序与学习并列但不同；技能目录只指 local-qa（占位符还在——替换是安装器的活）
+  assert.equal(declarations[1].config.name, '答疑模式');
+  assert.equal(declarations[1].config.order, 20);
+  assert.notEqual(declarations[1].config.order, declarations[0].config.order);
+  const skillRow = declarations[1].config.plugins.find(row => row.id === 'skill-filesystem');
+  assert.deepEqual(skillRow.config.customSkillDirs, ['__STUDYMATE_SKILLS__/local-qa']);
+  assert.equal(skillRow.config.includeDefaultRoots, false);
+  assert.ok(declarations[1].config.plugins.some(row => row.id === 'studymate-qa-tools'
+    && row.name === '@yunmiao/studymate/qa-preset'));
+  // 幂等：再来一次一个字节都不动
+  assert.equal(invoke(f, { qa: true }).patchChanged, false);
+  assert.equal(fs.readFileSync(f.patch, 'utf8'), text);
+  // 回到 legacy：两块托管行一起删，用户那行原样留
+  invoke(f, { version: '0.1.5-rc.2', qa: true });
+  assert.ok(!fs.readFileSync(f.patch, 'utf8').includes(BEGIN));
+  assert.ok(fs.readFileSync(f.patch, 'utf8').includes('# user patch'));
+});
+
+test('答疑模式单独被手动声明时也拦下（两条预设的 id 都认）', (t) => {
+  const f = fixture(t);
+  const declaration = `- insert:\n  - id: user-qa\n    name: "${PLUGIN}"\n`
+    + '    config: {id: qa, name: Custom, plugins: []}\n';
+  fs.writeFileSync(f.patch, declaration, 'utf8');
+  const before = fs.readFileSync(path.join(f.stagedQa, 'agent.cordis.yml'));
+  assert.throws(() => invoke(f, { qa: true }), /qa/);
+  assert.equal(fs.readFileSync(f.patch, 'utf8'), declaration);
+  assert.deepEqual(fs.readFileSync(path.join(f.stagedQa, 'agent.cordis.yml')), before);
+});
+
+test('主预设 id 可参数化（默认仍是 learning）：托管行与 config.id 都跟着它', (t) => {
+  const f = fixture(t);
+  fs.writeFileSync(f.patch, '[]\n', 'utf8');
+  invoke(f, { presetId: 'other' });
+  const declaration = rows(parsed(f.patch)).find(row => row.name === PLUGIN);
+  assert.equal(declaration.id, 'studymate-other-preset');
+  assert.equal(declaration.config.id, 'other');
+  // 默认那一侧没变：不带 presetId 时还是 learning 的三样
+  const defaults = fixture(t);
+  fs.writeFileSync(defaults.patch, '[]\n', 'utf8');
+  invoke(defaults);
+  const learning = rows(parsed(defaults.patch)).find(row => row.name === PLUGIN);
+  assert.equal(learning.id, 'studymate-learning-preset');
+  assert.equal(learning.config.id, 'learning');
+  // bundle 那条路也认这个参数
+  const bundled = invoke(fixture(t), { version: null, bundle: true, presetId: 'other' });
+  assert.equal(bundled.config.id, 'other');
+});
+
+test('bundle 模式给两条 config：学习的字段名一字不改，答疑的另给 qaConfig', (t) => {
+  const f = fixture(t);
+  withoutDsh(t);
+  const result = invoke(f, { version: null, bundle: true, qa: true });
+  assert.equal(result.mode, 'bundle');
+  assert.equal(result.patchChanged, false);
+  assert.equal(fs.existsSync(f.patch), false);
+  assert.equal(result.config.id, 'learning');
+  assert.equal(result.config.name, '学习模式');
+  assert.equal(result.qaConfig.id, 'qa');
+  assert.equal(result.qaConfig.name, '答疑模式');
+  assert.equal(result.qaConfig.description.includes('答疑'), true);
+  assert.deepEqual(result.qaConfig.plugins.find(row => row.id === 'skill-filesystem')
+    .config.customSkillDirs, ['__STUDYMATE_SKILLS__/local-qa']);
+  // 最小面：那条插件行只有四行，没有 shell / 文件 / 子 agent / workflow
+  assert.deepEqual(result.qaConfig.plugins.map(row => row.id),
+    ['persona', 'skill-filesystem', 'tool-skill', 'studymate-qa-tools']);
+  // 不带 qa 时旧形状仍然只有 config、没有 qaConfig
+  const alone = invoke(f, { version: null, bundle: true });
+  assert.equal('qaConfig' in alone, false);
 });
