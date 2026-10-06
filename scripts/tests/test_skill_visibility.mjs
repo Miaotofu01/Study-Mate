@@ -15,11 +15,14 @@
    三部分：
      一、出方向——工作目录在本仓库里时，宿主默认的那两条项目根扫描路径上什么都没有；
      二、入方向——学习预设显式声明技能目录，且那份声明落在包内（宿主默认不扫的位置）；
-     三、工具与面板——**现状**是它们不在预设作用域内，标准预设的会话里也看得见。
+     三、工具与面板——**现状**是它们的**注册面**不在预设作用域内，标准预设的会话里也看得见。
          这是与 #84 用户故事 36 的**已知偏离**，宿主没有「按预设注册工具」的接口
          （`ctx.tools.restrict()` 要求 agent 作用域，插件拿到的是 profile 根 ctx），
          所以这条套件钉住的是事实而不是理想；结论与去向写在
-         `docs/规范/工程约束.md` §二「技能与工具的可见边界」。 */
+         `docs/规范/工程约束.md` §二「技能与工具的可见边界」。
+         **可见边界本身能按预设收**：#104 的「答疑模式」预设住在 agent 作用域里，用
+         `ctx.tools.restrict({ deny })` 把继承来的那批原生工具从自己那条会话的工具面上
+         收掉了（`lib/tools/qa-preset.ts`）——本条钉的是注册面，与那条收窄不矛盾。 */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -146,6 +149,11 @@ test('预设里少了技能目录占位符就装不上（搬家没把这条守�
 
 test('工具与面板的注册面在预设之外（现状：标准预设的会话里也看得见）', async () => {
   // 这一段是**特征化**测试：它钉住的是宿主当前给得起的形状，不是理想形状。
+  // 口径（#104 之后）：这里钉的是**注册面**——`registerStudyMate` 那八个学习工具落在插件所在的
+  // profile 根 ctx 上，插件没有「按预设注册工具/面板」的接口可用。可见边界是另一件事：
+  // 「答疑模式」预设住在 agent 作用域里，可以用 `ctx.tools.restrict({ deny })` 把**继承来的**
+  // 那批原生工具从自己这条会话的工具面上收掉（`lib/tools/qa-preset.ts`）。两者不矛盾，
+  // 所以 #104 的收窄不改变本条的判据，也不该把这条删掉。
   // 哪天宿主给了「按预设注册工具/面板」的接口，这条会红——那时改它，并同步规范里的偏离记录。
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-visibility-'));
   const previous = { HOME: process.env.HOME, DSH_HOME: process.env.DSH_HOME, LEARN_WORKSPACE: process.env.LEARN_WORKSPACE };
