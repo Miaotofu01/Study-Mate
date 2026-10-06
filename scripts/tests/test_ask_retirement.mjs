@@ -11,8 +11,11 @@
         （那会以带引号的路径字面量出现），也没有那份上下文组装；旧链路的两个模块本身不在盘上，
         也没有任何源码还 import 它们。
      3. **问一句不写 `misconceptions.yaml`**：新会话链路跑一遍，整个工作区逐字节不变；
-        同时断言**其余写入方仍写得进去**（`writeMisconception` 落一条 `讲解反馈`），
-        以及 `问答面板` 这个值仍留在词表与 schema 里（旧数据要校验得过，读侧兼容）。
+        面板那个**写入方**（`lib/misconceptions.ts`）整份退役——不在盘上、也没有源码 import 它。
+        但误解记录这套**机制一个字都没退役**：旧记录（`source: 问答面板`，以及更老的
+        `question` / `date` 写法）与新记录（`讲解反馈` / `实验课验收`）照样读得进、校验得过
+        （走 `lib/core/misconceptions.ts` 的归一化与 `lib/library.ts` 的读侧），`问答面板`
+        这个值也仍留在词表与 schema 的 enum 里（读侧兼容，与旧六档只活在读侧映射同一条先例）。
 
    数据现造现弃（ADR-0009）：工作区是临时目录，宿主的服务是假对象，`fetch` 不联网。
    ──────────────────────────────────────────────────────────────────────── */
@@ -25,8 +28,10 @@ import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { QA_AGENT_PRESET, QA_SESSION_PATH, registerAskSessionRoute } from '../../lib/ask/index.ts';
-import { readMisconceptions, writeMisconception } from '../../lib/misconceptions.ts';
-import { MISCONCEPTION_SOURCES } from '../../lib/core/misconceptions.ts';
+import { readLibrary } from '../../lib/library.ts';
+import { normalizeMisconceptions, MISCONCEPTION_SOURCES } from '../../lib/core/misconceptions.ts';
+import { validateAgainstSchema } from '../../lib/core/schema.ts';
+import { writeSubject } from './fixtures/tools.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 
@@ -43,6 +48,8 @@ after(() => {
 });
 
 const MEMORY_MD = '讲法偏好：先给结论再给为什么。\n';
+/** 一份误解记录：**三个来源都有**，最后一条还是更老的写法（`question` / `date`，没有 source）。
+ *  它同时是「建会话那条链路一个字都不落盘」的字节基准与「读侧照样读得进」的输入。 */
 const MISCONCEPTIONS_YAML = [
   '# 这份文件只追加，不做整篇重写',
   '- topic: 掩码',
@@ -50,6 +57,19 @@ const MISCONCEPTIONS_YAML = [
   '  evidence: 提问原文：为什么网络地址是 .64？',
   '  status: 未处理',
   '  at: 2026-09-24',
+  '- topic: 掩码的算法',
+  '  source: 讲解反馈',
+  '  evidence: 讲解里说了掩码按位与',
+  '  status: 已补练',
+  '  at: 2026-10-01',
+  '- topic: 子网划分',
+  '  source: 实验课验收',
+  '  evidence: 验收结论：第三问算错',
+  '  status: 未处理',
+  '  at: 2026-10-02',
+  '- topic: 网关',
+  '  question: 旧写法：网关是干什么的',
+  '  date: 2026-09-20',
   '',
 ].join('\n');
 
@@ -285,34 +305,64 @@ test('#107 走一遍新会话链路：整个工作区逐字节不变（一个字
   assert.equal(fs.readFileSync(path.join(workspace, '.learning', 'subjects', '网络', 'misconceptions.yaml'), 'utf8'), MISCONCEPTIONS_YAML);
 });
 
-test('#107 其余写入方照旧：讲解反馈仍写得进，旧记录里的「问答面板」仍读得进、校验得过', () => {
-  const { workspace, dshHome } = makeWorkspace();
-  process.env.DSH_HOME = dshHome;
+test('#107 面板那个写入方整份退役：lib/misconceptions.ts 不在盘上，也没有源码 import 它', () => {
+  const relative = 'lib/misconceptions.ts';
+  assert.equal(fs.existsSync(path.join(ROOT, relative)), false, `${relative} 还留在盘上（#107 之后它没有生产调用方）`);
+  const sources = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (['.ts', '.js', '.mjs'].includes(path.extname(entry.name))) sources.push(full);
+    }
+  };
+  for (const root of ['lib', 'bin']) walk(path.join(ROOT, root));
+  const offenders = sources
+    // 只认「写到 lib/misconceptions.ts」这一份；`lib/core/misconceptions.ts`（读侧归一，仍在用）不算
+    .filter((file) => /(?:from|import)\s*\(?\s*['"][^'"]*(?<!core\/)misconceptions\.ts['"]/.test(fs.readFileSync(file, 'utf8')))
+    .map((file) => path.relative(ROOT, file).split(path.sep).join('/'));
+  assert.deepEqual(offenders, [], `还有源码 import 已退役的 ${relative}：${offenders.join('、')}`);
+});
 
-  // 面板不再是写入方，但误解记录这套机制一个字都没退役：另一条写入方照样落得下去
-  const write = writeMisconception({
-    workspace,
-    subject: '网络',
-    record: { topic: '掩码的算法', source: '讲解反馈', evidence: '讲解里说了掩码按位与' },
-    operationId: 'retire-1',
-    now: new Date('2026-10-07T00:00:00Z'),
-  });
-  assert.equal(write.ok, true, JSON.stringify(write));
-  assert.equal(write.entry.source, '讲解反馈');
+test('#107 机制还在：三个来源（含旧的「问答面板」与更老的写法）照样读得进、校验得过', () => {
+  // 现造现弃的工作区：一份最小科目 + 上面那份误解记录。走的是**读侧**（lib/library.ts 的
+  // payload）与纯函数域（lib/core/misconceptions.ts 的归一化），没有写入方参与。
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'studymate-ask-read-'));
+  TEMPS.push(root);
+  const workspace = path.join(root, 'ws');
+  writeSubject(workspace, '网络');
+  const file = path.join(workspace, '.learning', 'subjects', '网络', 'misconceptions.yaml');
+  fs.writeFileSync(file, MISCONCEPTIONS_YAML);
 
-  const items = readMisconceptions({ workspace, subject: '网络' });
-  assert.deepEqual(items.map((item) => item.source), ['问答面板', '讲解反馈']);
-  // 没给 source 时兜底成「讲解反馈」——与读侧归一同一句话（不再是面板那个值）
-  const fallback = writeMisconception({
-    workspace, subject: '网络',
-    record: { topic: '兜底', evidence: '没给 source' },
-    operationId: 'retire-2', now: new Date('2026-10-07T00:00:00Z'),
-  });
-  assert.equal(fallback.ok, true, JSON.stringify(fallback));
-  assert.equal(fallback.entry.source, '讲解反馈');
+  const payload = readLibrary({ workspace });
+  const subject = payload.subjects.find((one) => one.slug === '网络');
+  assert.ok(subject, '读侧没认出这个科目');
+  const items = subject.misconceptions;
+  assert.deepEqual(items.map((item) => item.source), ['问答面板', '讲解反馈', '实验课验收', '讲解反馈'],
+    '旧记录里的「问答面板」必须原样读得出；更老的写法（没有 source）按读侧归一兜成「讲解反馈」');
+  assert.deepEqual(items.map((item) => item.topic), ['掩码', '掩码的算法', '子网划分', '网关']);
+  // 更老的那条：question → evidence、date → at，旧字段原样留在 legacy 里不丢
+  const legacy = items[3];
+  assert.equal(legacy.evidence, '旧写法：网关是干什么的');
+  assert.equal(legacy.at, '2026-09-20');
+  assert.equal(legacy.legacy.question, '旧写法：网关是干什么的');
+  assert.equal(legacy.legacy.date, '2026-09-20');
+  // 归一是纯函数：直接喂原始 YAML 数组也给同一个结果（读侧只是它的调用方之一）
+  assert.deepEqual(normalizeMisconceptions([{ topic: '掩码', source: '问答面板', evidence: 'x', status: '未处理', at: '2026-09-24' }]),
+    [{ topic: '掩码', source: '问答面板', evidence: 'x', status: '未处理', at: '2026-09-24' }]);
+  // 旧写法会被说清楚（不阻断，但别静默）
+  assert.ok(subject.misconception_issues.some((line) => line.includes('旧写法')),
+    '旧字段被搬走时该有一条可读提示：' + JSON.stringify(subject.misconception_issues));
+
+  // 「校验得过」：归一之后的那几条逐条过 schema 的字段与 enum（含「问答面板」这个值）
+  const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'schemas', 'misconceptions.schema.json'), 'utf8'));
+  assert.deepEqual(validateAgainstSchema(items.map((one) => ({
+    topic: one.topic, source: one.source, evidence: one.evidence, status: one.status, at: one.at,
+  })), schema), [], '旧数据在校验器那里过不去');
 
   // 读侧兼容：`问答面板` 这个值仍在词表与 schema 的 enum 里（旧学科里已落盘的记录要校验得过）
   assert.ok([...MISCONCEPTION_SOURCES].includes('问答面板'));
-  const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'schemas', 'misconceptions.schema.json'), 'utf8'));
   assert.ok(schema.items.properties.source.enum.includes('问答面板'), 'schema 里把「问答面板」删掉了：旧数据会校验不过');
+  assert.deepEqual([...MISCONCEPTION_SOURCES], [...schema.items.properties.source.enum],
+    '词表与 schema 的 enum 分叉了');
 });

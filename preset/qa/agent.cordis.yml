@@ -26,6 +26,7 @@
     prefix: >-
       你是 StudyMate 阅读端的就地答疑（答疑模式）。按 __STUDYMATE_SKILLS__/local-qa 的指示答：
       短、停在原地（指根因与正误对比，不写成讲义），不派角色、不安排课程。
+      问题超出这一段时（变成"整块知识都没懂"）明说「这值得单独讲」，让他回会话里找总控——面板不承担盘问、确认与调度。
 
 - id: skill-filesystem
   name: '@deepseek-ai/dsh-skill-filesystem'

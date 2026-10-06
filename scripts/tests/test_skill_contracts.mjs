@@ -25,7 +25,7 @@ import { adaptAntigravitySkill, NATIVE_TOOL_FALLBACK as AGY_FALLBACK }
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SKILLS_DIR = path.join(ROOT, 'preset', 'skills');
-const { STUDY_TOOL_NAMES } = await import(pathToFileURL(path.join(ROOT, 'lib/tools/index.ts')).href);
+const { STUDY_TOOL_NAMES, QA_TOOL_NAMES } = await import(pathToFileURL(path.join(ROOT, 'lib/tools/index.ts')).href);
 const {
   LAYERS, LAYER_RULES, QUESTION_KINDS, QUESTION_KIND_SHAPES, QUESTION_RULES,
   EVIDENCE_BY_TRUST, NON_INDEPENDENT_EVIDENCE,
@@ -48,10 +48,16 @@ const referenced = new Map([...sources].map(([name, text]) => [name, referencedT
 const allReferenced = [...new Set([...referenced.values()].flat())].sort();
 
 test('技能点名的原生工具都在 lib/tools 的注册表里（没有悬空引用）', () => {
-  const registered = new Set(STUDY_TOOL_NAMES);
+  // 两张名字表的**并集**：学习面八条（`STUDY_TOOL_NAMES`）+ 答疑面那条只读工具
+  // （`QA_TOOL_NAMES`，只挂答疑预设）。local-qa 那条链上点名它时不该莫名其妙变红——
+  // 它确实是注册过的工具，只是不在学习会话的工具面上。
+  const registered = new Set([...STUDY_TOOL_NAMES, ...QA_TOOL_NAMES]);
   const unknown = allReferenced.filter(name => !registered.has(name));
   assert.deepEqual(unknown, [],
-    `技能里点名了没注册的工具：${unknown}；注册表里只有 ${STUDY_TOOL_NAMES.join('、')}`);
+    `技能里点名了没注册的工具：${unknown}；注册表里只有 ${[...STUDY_TOOL_NAMES, ...QA_TOOL_NAMES].join('、')}`);
+  // 两张表各管一摊、不重叠：答疑面那条不许混进学习面那八条
+  assert.deepEqual(STUDY_TOOL_NAMES.filter(name => QA_TOOL_NAMES.includes(name)), [],
+    '学习面与答疑面的名字表重叠了');
 });
 
 test('调用面守卫自身不空转：至少四份技能点名了原生工具', () => {

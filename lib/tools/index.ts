@@ -39,6 +39,7 @@ import { applyEmptyReasonsTool, renumberLessonsTool } from './rewrite.ts';
 import { exportTool } from './export.ts';
 import { registerWatch } from '../watch/index.ts';
 import { registerLabTools } from '../lab/index.ts';
+import { LESSON_READ_TOOL_NAME } from './lesson-read.ts';
 
 /** `ctx.inject(['tools'], …)` 给的那层上下文：只用得到这几个成员。 */
 export interface StudyPluginContext extends ServiceReader {
@@ -92,6 +93,16 @@ export const STUDY_TOOL_NAMES = [
   'studymate_apply_empty_reasons',
   'studymate_export',
 ] as const;
+
+/* ── 答疑面那一个只读工具的名字表（#104）────────────────────────────────────
+   与上面的学习面**并列、不混**：`studymate_lesson_read`（`./lesson-read.ts`）由答疑预设那条
+   插件行（`./qa-preset.ts`）注册进它**自己的作用域**，不在 `registerStudyMate` 的注册面上，
+   所以学习会话的工具面里没有它（`STUDY_TOOL_NAMES` 仍是八条）。
+
+   为什么要单独一张表：技能正文里反引号点名的 `studymate_*` 必须能在代码里找到出处
+   （`scripts/tests/test_skill_contracts.mjs` 守这条），而那个判据认的是**两张表的并集**——
+   `local-qa` 那条链上的工具属于这一张。别为了省一张表把它塞进上面那八条。 */
+export const QA_TOOL_NAMES = [LESSON_READ_TOOL_NAME] as const;
 
 /**
  * 把一个 StudyMate 插件的全部原生工具注册到当前上下文。

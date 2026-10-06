@@ -128,6 +128,7 @@ function buildFixture(dir, payload) {
   ${hostTokenCss()}
 </style>
 <style id="plugin-css">${css}</style>
+<script src="${pathToFileURL(path.join(HERE, '..', 'fixtures', 'ask_draft_facade.js')).href}"></script>
 <script>
   // 阅读端的宿主契约：window.__ModuleLoader__.load({id, factory})，factory 只 require('react')
   window.__StudymateSpec = null;
@@ -161,51 +162,12 @@ function buildFixture(dir, payload) {
       refresh: function () { window.__HOST.refreshes += 1; return Promise.resolve(); },
     },
   };
-  // 假的宿主输入门面（#106）：那颗引用 chip 进的就是这里。照宿主的行为写照——
-  // state.getSnapshot() 给 {draft, draftRev, occurrences}，insertReference 在 span.draftRev
-  // 过期时**静默返回 false**，成功时把这一段换成一颗 chip（后面跟一个分隔空格）。
-  window.__DRAFT = (function () {
-    var listeners = [], notices = [];
-    var api = { rev: 1, draft: '', chips: [], session: null, notices: notices };
-    function snapshot() {
-      return { draft: api.draft, draftRev: api.rev, phase: 'plain',
-        occurrences: api.chips.map(function (chip) {
-          return { occurrenceId: chip.occurrenceId, source: chip.source, ref: chip.ref,
-            offset: chip.offset, length: chip.length, label: chip.label, clipboardText: chip.clipboardText };
-        }) };
-    }
-    function bump() { api.rev += 1; listeners.slice().forEach(function (fn) { fn(); }); }
-    function splice(text, span, chip) {
-      var covered = api.draft.slice(span.start, span.end);
-      var delta = text.length - covered.length;
-      api.draft = api.draft.slice(0, span.start) + text + api.draft.slice(span.end);
-      api.chips = api.chips.filter(function (one) { return one.offset + one.length <= span.start || one.offset >= span.end; });
-      api.chips.forEach(function (one) { if (one.offset >= span.end) one.offset += delta; });
-      if (chip) { api.chips.push(chip); api.chips.sort(function (a, b) { return a.offset - b.offset; }); }
-      bump();
-    }
-    api.state = {
-      getSnapshot: snapshot,
-      subscribe: function (fn) { listeners.push(fn); return function () { var at = listeners.indexOf(fn); if (at >= 0) listeners.splice(at, 1); }; },
-    };
-    api.notify = function (level, text) { notices.push({ level: level, text: text }); };
-    api.insertReference = function (ref, span) {
-      if (span.draftRev !== api.rev) return false;
-      var tail = api.draft.slice(span.end, span.end + 1);
-      var piece = tail === ' ' ? ref.clipboardText : ref.clipboardText + ' ';
-      splice(piece, span, { occurrenceId: api.chips.length + 100, source: ref.source, ref: ref.ref, label: ref.label,
-        offset: span.start, length: ref.clipboardText.length, clipboardText: ref.clipboardText });
-      return true;
-    };
-    api.insertText = function (text, span) {
-      if (span.draftRev !== api.rev) return false;
-      splice(text, span, null);
-      return true;
-    };
-    api.setDraft = function (text) { api.draft = text; api.chips = []; bump(); };
-    api.reset = function () { api.rev += 1; api.draft = ''; api.chips = []; api.session = null; notices.length = 0; bump(); };
-    return api;
-  }());
+  // 假的宿主输入门面（#106）：那颗引用 chip 进的就是这里。**与 Node 套件共用同一份**
+  // （scripts/tests/fixtures/ask_draft_facade.js，见那里的文件头）——它同时照宿主的**两套投影**：
+  // occurrences[].offset/length 是剪贴板的（一颗 chip 占它的 clipboardText 那么长），
+  // detectText 里同一颗 chip 只占一个占位符，insertReference / insertText 收到的 span
+  // 按 **detect** 长度校验（越界就拒，照宿主 selectSpan 的行为）。
+  window.__DRAFT = window.StudymateAskDraft.makeAskDraft();
   // 建会话那条路由的替身：记下请求体，回一条新会话，并把它放进列表（标题按同一套拼法）。
   window.__QA = {
     calls: [], reply: null,

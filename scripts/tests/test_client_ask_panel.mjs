@@ -32,7 +32,7 @@ import {
 const internals = clientInternals();
 const {
   AskPanel, QA_SESSION_ENDPOINT, ASK_RETAIN_SOURCE, ASK_SESSION_PREFIX, ASK_SESSION_SEP,
-  titleForAskSession, isAskSessionTitle, askSessionRows, latestAskSessionId, askHost,
+  titleForAskSession, isAskSessionTitle, askSessionRows, latestAskSessionId,
 } = internals;
 
 /* ── 假服务与假 fetch ──────────────────────────────────────────────────── */
@@ -135,7 +135,7 @@ function findByType(node, type, found = []) {
 /** 面板渲染成文本（把 useState 驱到某一帧）；effect 不跑，行为类断言调 `drainEffects`。 */
 function renderText(state, props = {}) {
   const { kit } = fakeKit();
-  return renderWithState(AskPanel, { subject: SUBJECT, node: NODE, quote: null, host: kit, ...props }, state)
+  return renderWithState(AskPanel, { subject: SUBJECT, node: NODE, quote: null, hostKit: kit, ...props }, state)
     .replace(/\s+/g, ' ').trim();
 }
 
@@ -144,7 +144,7 @@ function renderTree(state, props = {}) {
   resetHookState();
   setHookState(state);
   try {
-    return AskPanel({ subject: SUBJECT, node: NODE, quote: null, host: fakeKit().kit, ...props });
+    return AskPanel({ subject: SUBJECT, node: NODE, quote: null, hostKit: fakeKit().kit, ...props });
   } finally {
     resetHookState();
   }
@@ -219,7 +219,7 @@ test('#105 建会话：面板 POST /api/studymate/qa/session，请求体只有 {
   setHookState(frame());
   let tree = null;
   try {
-    tree = AskPanel({ subject: SUBJECT, node: NODE, quote: null, host: kit.kit });
+    tree = AskPanel({ subject: SUBJECT, node: NODE, quote: null, hostKit: kit.kit });
     assert.ok(tree, '面板没渲染出来');
     // 挂载时没有现成会话 → 请宿主半建一条（effect 里的事；桩要显式跑一次）
     for (const cleanup of drainEffects()) cleanup();
@@ -246,7 +246,7 @@ test('#105 建会话：没有现成会话时，面板不去 retain 一条不存�
   resetHookState();
   setHookState(frame());
   try {
-    AskPanel({ subject: SUBJECT, node: NODE, quote: null, host: fakeKit().kit });
+    AskPanel({ subject: SUBJECT, node: NODE, quote: null, hostKit: fakeKit().kit });
     drainEffects();
   } finally {
     resetHookState();
@@ -260,7 +260,7 @@ test('#105 retain：选中的那条会话用 { source: "studymateAsk" } retain�
   resetHookState();
   setHookState(frame({ sessionId: 'qa-7', reference: { sessionId: 'qa-7', release() {} } }));
   try {
-    AskPanel({ subject: SUBJECT, node: NODE, quote: null, host: fakeKit().kit });
+    AskPanel({ subject: SUBJECT, node: NODE, quote: null, hostKit: fakeKit().kit });
     const cleanups = drainEffects();
     assert.equal(sessions.retained.length, 1, '没有 retain 面板那条会话');
     assert.equal(sessions.retained[0].id, 'qa-7');
@@ -280,7 +280,7 @@ test('#105 retain：选中的那条会话用 { source: "studymateAsk" } retain�
 test('#105 嵌正文：SessionProvider 包着 conversation.content（embedded），指向我们 retain 的引用', () => {
   const reference = { sessionId: 'qa-9', binding: { sessionId: 'qa-9' }, ready: Promise.resolve(), release() {} };
   const { kit, factoryCalls, SessionProvider } = fakeKit();
-  const tree = renderTree(frame({ sessionId: 'qa-9', reference }), { host: kit });
+  const tree = renderTree(frame({ sessionId: 'qa-9', reference }), { hostKit: kit });
 
   const providers = findByType(tree, SessionProvider);
   assert.equal(providers.length, 1, '面板没有用 SessionProvider 把正文罩起来');
@@ -297,7 +297,7 @@ test('#105 嵌正文：SessionProvider 包着 conversation.content（embedded）
 });
 
 test('#105 没有宿主标准件时如实说明（嵌不了就说嵌不了，不是白屏）', () => {
-  const text = renderText(frame({ sessionId: 'qa-9', reference: { sessionId: 'qa-9', release() {} } }), { host: null });
+  const text = renderText(frame({ sessionId: 'qa-9', reference: { sessionId: 'qa-9', release() {} } }), { hostKit: null });
   assert.ok(text.includes('嵌不了宿主会话'), text);
 });
 
