@@ -420,7 +420,7 @@ function frame({ sessionId = null, reference = null } = {}) {
 }
 
 test('#106 chip 界面：原文 + 来源小节在，点开看全文的入口在，删掉的入口也在', () => {
-  const text = renderWithState(AskPanel, { subject: SUBJECT, node: NODE, quote: QUOTE, host: fakeKit() }, frame())
+  const text = renderWithState(AskPanel, { subject: SUBJECT, node: NODE, quote: QUOTE, hostKit: fakeKit() }, frame())
     .replace(/\s+/g, ' ').trim();
   assert.ok(text.includes(TEXT), 'chip 上没写原文：' + text);
   assert.ok(text.includes('来源：小节「绑定」 · demo/1-变量.md'), text);
@@ -428,7 +428,7 @@ test('#106 chip 界面：原文 + 来源小节在，点开看全文的入口在�
   resetHookState();
   setHookState(frame());
   let tree = null;
-  try { tree = AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, host: fakeKit() }); } finally { resetHookState(); }
+  try { tree = AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, hostKit: fakeKit() }); } finally { resetHookState(); }
   assert.equal(findByProp(tree, 'data-proto', 'qa-quote-toggle').length, 1, '没有「点开看原文」的入口');
   assert.equal(findByProp(tree, 'data-proto', 'qa-quote-clear').length, 1, '没有「删掉」的入口');
   // 默认收起：chip 是输入框上方的附件，不该一上来就吃掉正文高度
@@ -447,7 +447,7 @@ test('#106 删除：点一下删掉，草稿里那颗跟着撤掉，学生照样
   let tree = null;
   try {
     tree = AskPanel({
-      subject: SUBJECT, node: NODE, quote: QUOTE, host: fakeKit(),
+      subject: SUBJECT, node: NODE, quote: QUOTE, hostKit: fakeKit(),
       onQuoteClear: () => cleared.push(true),
     });
     drainEffects();                      // 插入引用 + 订阅草稿
@@ -473,7 +473,7 @@ test('#106 提交即让位：草稿里那颗没了（消息真送出去了）就
   resetHookState();
   setHookState(frame({ sessionId: 'qa-1', reference: slot.reference }));
   try {
-    AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, host: fakeKit(), onQuoteClear: () => cleared.push(true) });
+    AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, hostKit: fakeKit(), onQuoteClear: () => cleared.push(true) });
     drainEffects();
   } finally { resetHookState(); }
 
@@ -492,7 +492,7 @@ test('#106 提交没成功（草稿被还原）：chip 回来，引用留着—�
   resetHookState();
   setHookState(frame({ sessionId: 'qa-1', reference: slot.reference }));
   try {
-    AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, host: fakeKit(), onQuoteClear: () => cleared.push(true) });
+    AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, hostKit: fakeKit(), onQuoteClear: () => cleared.push(true) });
     drainEffects();
   } finally { resetHookState(); }
 
