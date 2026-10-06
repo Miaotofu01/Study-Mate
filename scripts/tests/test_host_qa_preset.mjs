@@ -125,6 +125,9 @@ test('答疑模式与学习模式并列：id/名/order 各自独立，插件行�
   assert.ok(persona.config.prefix.includes('就地答疑'), 'persona 要写明它是阅读端的就地答疑');
   assert.ok(persona.config.prefix.includes('__STUDYMATE_SKILLS__/local-qa'),
     'persona 要写明按这一份规范答');
+  // #104 验收第 3 条：越界那一步点名写在 **persona** 上（不只写在 local-qa 的 SKILL.md 里）
+  assert.ok(persona.config.prefix.includes('这值得单独讲') && persona.config.prefix.includes('总控'),
+    'persona 要写明「问题超出这一段时明说这值得单独讲、让他回会话找总控」');
 
   const skills = rows.find(row => row.id === 'skill-filesystem');
   assert.equal(skills.config.includeDefaultRoots, false);
