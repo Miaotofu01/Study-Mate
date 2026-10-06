@@ -18,7 +18,7 @@
      · **`cache-control: no-store`**：与配图路由同一口径。这些文件随包发、版本由包决定，
        不在这里做缓存协商；`rev` 那套是宿主给 `/plugins` 的，不是我们的。
      · **注册走 `connectionCtx.effect`**：注册是**有主的**副作用，插件卸载时各自拆各自的。
-       注册约定与 `registerAttemptRoutes` / `registerAskRoute` 逐字相同：收外层 ctx、
+       注册约定与 `registerAttemptRoutes` / `registerAskSessionRoute` 逐字相同：收外层 ctx、
        自己 `inject(['connection'])`（见 `lib/attempts-route.ts` 的说明）。
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -60,7 +60,7 @@ function handleMathAsset(rel: string, contentType: string): () => Promise<Respon
 /**
  * 把公式资源路由挂到插件上。
  *
- * 与 `registerAttemptRoutes` / `registerAskRoute` 同一种姿势：收**外层 ctx**、自己
+ * 与 `registerAttemptRoutes` / `registerAskSessionRoute` 同一种姿势：收**外层 ctx**、自己
  * `inject(['connection'])`，connection 就绪才注册、缺了就不挂；挂不上就是公式退化成 TeX
  * 原文（降级可读，不白屏），插件其余部分照常。
  */

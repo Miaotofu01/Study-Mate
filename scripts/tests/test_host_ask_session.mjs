@@ -1,7 +1,8 @@
 /* 验收 #105 · 建答疑会话：宿主半那条路由 + 标题的拼法与识别（`lib/ask/session.ts`）
    ────────────────────────────────────────────────────────────────────────
    这条套件走 #102 Testing Decisions 的第二条缝：**宿主半 + 假 ctx**（先例
-   `test_host_ask_route.mjs`、`test_host_qa_preset.mjs`）。真宿主的 `agentPresets.mount` 与
+   `test_host_qa_preset.mjs`、`test_skill_visibility.mjs`；#79 那条 `test_host_ask_route.mjs`
+   已随 #107 退役）。真宿主的 `agentPresets.mount` 与
    `agents.create` 认不认这条调用序列，只有在真 DSH 里才证得了（spec 已接受这个口径）；这里
    钉的是我们能钉的那一半：
 
@@ -24,7 +25,7 @@ import assert from 'node:assert/strict';
 
 import {
   ASK_SESSION_PREFIX, ASK_SESSION_SEP, QA_AGENT_PRESET, QA_SESSION_PATH,
-  isAskSessionTitle, openAskSession, registerAskRoute, titleForAskSession,
+  isAskSessionTitle, openAskSession, registerAskSessionRoute, titleForAskSession,
 } from '../../lib/ask/index.ts';
 
 /* ── 临时工作区 ────────────────────────────────────────────────────────── */
@@ -274,9 +275,9 @@ before(() => {
 
 /**
  * 假 ctx：`inject(['connection'])` 立刻回调，`effect` 立刻执行（与宿主同一时机）。
- * 只注册建会话那条路由——`/ask` 那条由 `test_host_ask_route.mjs` 守着（#107 退役）。
+ * 问答域现在只注册建会话这一条路由（旧 `/ask` 那条已由 #107 退役）。
  */
-function fakeCtx({ host = fakeHost(), registerAsk = false } = {}) {
+function fakeCtx({ host = fakeHost() } = {}) {
   const routes = [];
   const child = {
     connection: { fetch: { register: (route) => { routes.push(route); return route; } } },
@@ -291,14 +292,13 @@ function fakeCtx({ host = fakeHost(), registerAsk = false } = {}) {
     agentPresets: host.agentPresets,
     inject: (names, handler) => { assert.deepEqual(names, ['connection']); handler(child); },
   };
-  if (registerAsk) return { ctx, routes, child };
   return { ctx, routes, child };
 }
 
 test('#105 路由：POST /api/studymate/qa/session 挂在 /api/studymate 命名空间下', async () => {
   const host = fakeHost();
-  // 只挂建会话那条：直接调它的注册入口（registerAskRoute 会连 `/ask` 一起挂，那条这里不验）
-  const { registerAskSessionRoute } = await import('../../lib/ask/session.ts');
+  // 问答域唯一的注册入口（#107 之后它只挂这一条路由；「旧路由没注册」由
+  // `test_ask_retirement.mjs` 从注册表那一侧断言）
   const { ctx, routes } = fakeCtx({ host });
   registerAskSessionRoute(ctx);
 
@@ -368,10 +368,12 @@ test('#105 路由：坏请求体 400、没工作区 500、没模型 503——每
   assert.equal(noModel.calls.create.length, 0, '没有模型却把会话建出来了');
 });
 
-test('#105 注册入口：registerAskRoute 把两条路由一起挂上（bin/dsh-plugin.ts 那一行不动）', () => {
+test('#105/#107 注册入口：问答域的出口只挂建会话这一条路由（bin/dsh-plugin.ts 那一行调的就是它）', () => {
   const host = fakeHost();
   const { ctx, routes } = fakeCtx({ host });
-  registerAskRoute(ctx);
+  registerAskSessionRoute(ctx);
   const paths = routes.map((route) => route.path).sort();
-  assert.deepEqual(paths, ['/api/studymate/ask', QA_SESSION_PATH].sort());
+  assert.deepEqual(paths, [QA_SESSION_PATH]);
+  // 旧路由（#107 退役）一条都不许回来
+  assert.equal(paths.includes('/api/studymate/ask'), false);
 });

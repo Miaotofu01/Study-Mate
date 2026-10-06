@@ -1,7 +1,7 @@
 /* 验收 #104 · 「答疑模式」预设与只读取课件工具（`preset/qa/**`、`lib/tools/{qa-preset,lesson-read}.ts`）
    ────────────────────────────────────────────────────────────────────────
-   这条套件走 #102 Testing Decisions 的第二条缝：**宿主半 + 假 ctx**（`test_host_ask_route.mjs`、
-   `test_skill_visibility.mjs`、`test_preset_install.mjs` 的先例）。真宿主的 `agentPresets.mount`
+   这条套件走 #102 Testing Decisions 的第二条缝：**宿主半 + 假 ctx**（`test_skill_visibility.mjs`、
+   `test_preset_install.mjs`、`test_host_ask_session.mjs` 的先例）。真宿主的 `agentPresets.mount`
    与 `tools.restrict` 认不认这条配置，只有在真 DSH 里才证得了——那一条**不进默认门禁**
    （spec 的 Testing Decisions 已接受这个口径）；这里钉的是我们能钉的那一半：
 

@@ -1,9 +1,10 @@
 /* 阅读端 HTTP 路由的**错误信封**（`lib/route-envelope.ts`）——形状、词表、两端一致。
    ────────────────────────────────────────────────────────────────────────
    这条套件守的是「Host 半与阅读端之间那份没人写下来的契约」。收编前它是两套：
-   `ask` 回 `{available, ok, error:{code, message}}`，`attempts` / `lab` / `reference` /
-   `library` 回 `{error:'<字符串码>', message}`（`library` 那条更离谱：`error` 里放的是一整句
-   给人看的话）。客户端要按两种形状解析同一种东西，而**任何文档都没写过这个形状**。
+   `ask` 回 `{available, ok, error:{code, message}}`（那条路由已由 #107 退役），
+   `attempts` / `lab` / `reference` / `library` 回 `{error:'<字符串码>', message}`（`library`
+   那条更离谱：`error` 里放的是一整句给人看的话）。客户端要按两种形状解析同一种东西，而
+   **任何文档都没写过这个形状**。
 
    三件事分开验：
      1. **形状**：每条路由真跑一次失败路径，回执必须是 `{ ok:false, error:{ code, message } }`，

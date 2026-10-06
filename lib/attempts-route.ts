@@ -19,7 +19,7 @@
        `attempts` + `version` 就地重读，不必再跑一趟。
      · 路由注册也走 `connectionCtx.effect`：注册是**有主的**副作用，插件卸载时各自拆各自的
        （与 bin/dsh-plugin.ts 里另外那几条路由同一口径）。
-     · 注册约定与 `registerAskRoute` / `registerTaskRoute` 逐字相同：**收外层 ctx、自己
+     · 注册约定与 `registerAskSessionRoute` / `registerTaskRoute` 逐字相同：**收外层 ctx、自己
        `inject(['connection'])`**。原来这里收的是注入后的 `connectionCtx`、由 bin 那边注入，
        四条路由因此有两种姿势——同一个插件里「挂一条路由」不该有两套写法。
    ───────────────────────────────────────────────────────────────────────── */
@@ -56,7 +56,7 @@ const NO_WORKSPACE = '没找到学习工作区：~/.dsh/studymate-config.yaml �
 /**
  * 把作答写入端点挂到插件上。
  *
- * 与 `registerAskRoute` / `registerTaskRoute` 同一种姿势：收**外层 ctx**、自己
+ * 与 `registerAskSessionRoute` / `registerTaskRoute` 同一种姿势：收**外层 ctx**、自己
  * `inject(['connection'])`，`connection` 就绪才注册、缺了就不挂（headless / 更老的宿主），
  * 挂不上就是这一个功能不可用，插件其余部分照常。注册是**有主的**副作用，所以走
  * `connectionCtx.effect`，卸载时各自拆各自的。

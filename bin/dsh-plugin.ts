@@ -244,9 +244,10 @@ export async function apply(ctx: PluginContext): Promise<void> {
   // studymate_lab_run 共用一份实现，这里也只挂一行。
   import('../lib/lab/route.ts').then((module) => module.registerLabRoute(ctx), (error) => { console.warn(`StudyMate：实验代跑路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
 
-  // 问答面板（#79）：POST /api/studymate/ask —— 阅读端就地调模型，不经过总控。
-  // 具体实现在 lib/ask/**，这个文件不认识它的形状（与上面两条同一种姿势）。
-  void import('../lib/ask/index.ts').then(({ registerAskRoute }) => registerAskRoute(ctx)).catch((error) => { console.warn(`StudyMate：问答路由挂不上。${error instanceof Error ? error.message : String(error)}`); });
+  // 答疑会话（#105）：POST /api/studymate/qa/session —— 阅读端请宿主半按「答疑模式」预设建一条
+  // 真会话。问答域现在只有这一条路由：#107 把「面板自己调模型」那条旧路由（POST /api/studymate/ask）
+  // 与它那份上下文组装一并退役了。具体实现在 lib/ask/**，这个文件不认识它的形状（与上面两条同一种姿势）。
+  void import('../lib/ask/index.ts').then(({ registerAskSessionRoute }) => registerAskSessionRoute(ctx)).catch((error) => { console.warn(`StudyMate：答疑会话路由挂不上。${error instanceof Error ? error.message : String(error)}`); });
 
   // 公式排版的离线资源（#91）：GET /api/studymate/math/… —— 随包的 KaTeX dist，页面确实出现
   // 数学式时阅读端才来取。清单、MIME 与边界判据在 lib/math.ts，注册在 lib/math-route.ts

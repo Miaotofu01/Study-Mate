@@ -102,10 +102,9 @@ const groups = {
       'scripts/tests/test_validators_progress_subject.mjs',
       'scripts/tests/test_validators_handoff.mjs',
       'scripts/tests/test_rules_pure.mjs',
-      // 纯函数域的判据：写入栅栏（幂等台账 + 版本比较）、题库题型与字段、误解字段定型、
-      // 问答面板的请求体（#79：上下文只带当前课件 / 选中文本 / 共享记忆，不背会话）
+      // 纯函数域的判据：写入栅栏（幂等台账 + 版本比较）、题库题型与字段、误解字段定型。
+      // #107 退役了「问答面板的请求体」那一半（`test_core_ask_context.mjs` 随 `lib/core/ask.ts` 一起走）。
       'scripts/tests/test_core_fence_questions.mjs',
-      'scripts/tests/test_core_ask_context.mjs',
       'scripts/tests/test_core_coverage_floor.mjs',
       // 阅读端（lib/client.js）的契约：token 对比度达 WCAG AA（亮暗两套）、
       // 动效四档与 prefers-reduced-motion、首次引导定位几何（纯函数，node:vm 里跑）
@@ -155,14 +154,18 @@ const groups = {
       // 不许覆盖新作答）、版本冲突的重读与重来一次、自评走同一条路、界面文案不再说
       // 「只在内存里作答」。夹具同上（client_harness.mjs）。
       'scripts/tests/test_client_attempt_fence.mjs',
-      // #79：问答面板接模型。面板那一半在 Node 里点它的按钮、看它发的 POST（fetch 是假货）；
-      // Host 那一半用**注入的假 llm** 证明链路通（真模型调用要花额度，门禁里不跑）。
+      // #105/#79：问答面板不再自己调模型，它请宿主半建一条真会话——面板那一半在 Node 里点
+      // 它的按钮、看它发的 POST（fetch 是假货）；Host 那一半改了策略：旧路由与旧上下文组装
+      // 已由 #107 退役，`test_host_ask_route.mjs` 随之删除。
       'scripts/tests/test_client_ask_panel.mjs',
-      'scripts/tests/test_host_ask_route.mjs',
       // #105：问答面板改成宿主的一条真会话。建会话只能走宿主半（客户端 sessions.create 把
       // agentPreset 静默丢掉），所以这条钉的是「按答疑预设建、带 cwd、标题拼法与识别、共享
       // 记忆只注入一次、没有模型就不建会话」。先例同上（假 ctx）。
       'scripts/tests/test_host_ask_session.mjs',
+      // #107 的验收面（三条硬事实）：旧路由没注册（登记表 + 请求它是明确的 404）、客户端里
+      // 没有发往旧路由的 POST 与那份上下文组装、新会话链路跑一遍工作区逐字节不变且其余
+      // 写入方（讲解反馈）照旧写得进去。
+      'scripts/tests/test_ask_retirement.mjs',
       // #92：选中正文冻成一条**留得住的引用**（文本 + 来源锚点）。捕获那一下的判据在 Node 里
       // 用假 DOM 逐个喂（含各种「读到空选区」的触发方式，都不得清掉已存在的引用）。真鼠标拖拽
       // 那一条在 --browser 组。
@@ -268,7 +271,8 @@ const groups = {
       // 出在「document 级 mouseup 读实时选区、判定失败就清空」——点输入框会让浏览器把选区
       // 折叠成空。所以这里用 CDP 的 Input.dispatchMouseEvent 做真鼠标拖拽（harness 没有
       // 选区/拖拽助手，套件自己补 dragSelect/clickAt），验「选中 → 打开问答 → 点输入框/打字/
-      // 切 tab 之后引用仍在」，以及提交时请求体里带的原文与来源锚点。
+      // 切 tab 之后引用仍在」。#106 起提交那段走引用来源的 codec（`ref` 原样进消息，不再是
+      // 面板往请求体里塞原文），#107 退役了旧路由，这一套钉的就是 chip 那条真浏览器链路。
       'browser/ask_quote_test.mjs',
     ],
   },

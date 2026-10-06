@@ -134,7 +134,7 @@ export async function runRouteRequest(body: unknown): Promise<Response> {
 /**
  * 把这条路由挂到插件上。
  *
- * 与 `registerAskRoute` / `registerAttemptRoutes` / `registerTaskRoute` 同一种姿势：收**外层
+ * 与 `registerAskSessionRoute` / `registerAttemptRoutes` / `registerTaskRoute` 同一种姿势：收**外层
  * ctx**、自己 `inject(['connection'])`，`connection` 就绪才注册、缺了就不挂（headless / 更老
  * 的宿主）——挂不上就是「学生点不了跑一次」这一个功能不可用，插件其余部分照常。
  */

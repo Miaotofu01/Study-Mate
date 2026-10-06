@@ -161,7 +161,7 @@ ${hostTokenCss()}</style>
 async function startHost(workspace) {
   const labRoutes = [];
   const attemptRoutes = [];
-  // 注册约定：收外层 ctx、自己 inject(['connection'])（与 registerAskRoute 同一姿势）
+  // 注册约定：收外层 ctx、自己 inject(['connection'])（与 registerAskSessionRoute 同一姿势）
   const fakeOuter = (sink) => ({
     inject: (names, handler) => handler({
       connection: { fetch: { register: (route) => { sink.push(route); return () => {}; } } },
