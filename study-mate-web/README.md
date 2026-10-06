@@ -1,61 +1,58 @@
 # StudyMate Web
 
-StudyMate 的独立 Web 前端与运行时。当前进度：**阶段 1–3、全功能复现队列 A~J、K 系列工具化改造（K0–K3）、第二轮与第三轮 UI 杂项轮、以及第八轮（建课链正确性 + chat 动作工具 + 「我的课程」）全部完成**（课程图谱、learn-with-doing 闭环、模型提供商与附件体系、工作区同构与发现（含**会话级工作区绑定**）、提示词分层、记录与记忆写侧；生产侧：节点产出、建课链、采图、方向探索与质检工单，已经真实 LLM 冒烟验证；工具化：agent 循环、只读/写工具、工具卡与审计落盘、**思维链与用量透传**、**科目关联会话的产课/评估动作工具**；UI：新对话关联行、推理档位下拉、课程页右栏分段切换与科目总览、侧边栏折叠成图标轨、消息操作条（编辑＝截断重发 / 删除整轮）、「中间过程」折叠区与右栏「上下文窗口」栏、**会话级模型与档位**、**工具卡常显 + 聊天右栏图谱 + 「我的课程」首页**），当前版本见文末「版本」一节。
-
-- 后端：FastAPI + 多协议 LLM 适配层 + SSE 流式 + 课程工作区（YAML）
-- 前端：Next.js 16 + React 19 + Tailwind + cytoscape 图谱
-- 测试：Playwright E2E（后端确定性 fixture 模式，无需真实 API Key）+ vitest 组件测试（分支逻辑下沉，无需后端）+ 按需的探索 agent 测试（见「探索测试」一节）
+- **是什么**：StudyMate 的独立 Web 前端与运行时——后端 FastAPI（多协议 LLM 适配层 + SSE 流式 + YAML 课程工作区），前端 Next.js 16 + React 19 + Tailwind + cytoscape；测试为 Playwright E2E（确定性 fixture，无需真实 API Key）+ vitest 组件测试 + 按需探索 agent。
+- **已完成**：阶段 1–3、全功能复现队列 A~J、K 系列工具化改造（K0–K3）与第二 / 三 / 八轮 UI 收尾全部落地——课程图谱、learn-with-doing 闭环、模型提供商与附件体系、工作区同构与发现（含会话级工作区绑定）、提示词分层、记录与记忆写侧，以及生产侧（节点产出 / 建课链 / 采图 / 方向探索 / 质检工单）与工具化 agent 循环；生产侧已真实 LLM 冒烟验证。
+- **版本指针**：当前版本见文末「版本」一节。
 
 ## 目录结构
 
 ```
 study-mate-web/
-├── start-web.bat              # 一键启动（双击即可；源码比构建新时会自动重新构建）
-├── stop-web.bat               # 一键停止（双击即可；连服务窗口与残留孤儿进程一起收掉）
-├── tools/studymate-web.ps1    # 启动器助手：构建新鲜度判定 + 按端口停止服务（纯 ASCII）
-├── data/                      # 运行时数据（settings、sessions、drafts、audit、uploads、exports）
+├── start-web.bat / stop-web.bat   # 一键启动 / 停止（GBK + CRLF）
+├── tools/studymate-web.ps1        # 启动器助手：构建新鲜度判定 + 按端口停服（纯 ASCII）
+├── data/                          # 运行时数据（settings、sessions、drafts、audit、uploads、exports）
 ├── backend/
 │   ├── app/
-│   │   ├── main.py            # 入口（lifespan：建工作区目录、上传清扫）
-│   │   ├── config.py          # settings v3 读写（providers[] + active + system_prompt）
-│   │   ├── models.py          # Pydantic 模型
-│   │   ├── storage.py         # 文件型会话存储（消息可带附件元数据）
-│   │   ├── llm.py             # 统一 LLM 适配层（三格式 + 工具声明/流式 tool_call 聚合 + stream_turn）
-│   │   ├── agent.py           # 工具化 agent loop runner（预算/降级/重复提醒/事件回吐）
-│   │   ├── tools.py           # 工具注册表 + 沙箱边界（读写根 allow-list、写前 canonicalize）
-│   │   ├── audit.py           # 编排审计 data/audit/*.jsonl（派工值/回复/工具调用，失败不清除）
-│   │   ├── multimodal.py      # 视觉能力判定、图片注入/占位、错误码剔除重试
-│   │   ├── doc_extract.py     # 附件文档解析（pdf/docx/xlsx/pptx/epub/文本类）
-│   │   ├── curriculum_store.py# 课程仓储层（<WS>/.learning/subjects/<slug>/*.yaml）
-│   │   ├── workspace.py       # 工作区发现（复用上游 learn_workspace()）+ 配置写回
-│   │   ├── workspace_ctx.py   # 请求级工作区绑定（会话级工作区的唯一收口点，见 curriculum_store.workspace_dir()）
-│   │   ├── prompts.py         # 提示词分层：persona + 按链路注入 .dsh/skills/<名>/SKILL.md
-│   │   ├── roles.py           # 角色派工基建（SKILL 全文注入 + envelope 落盘/搬位 + 归属映射）
-│   │   ├── produce.py         # 产课链编排（派工 → 渲染 → 检查 → 打回 → 工单）
-│   │   ├── build.py           # 建课链编排（大纲 + 采图并行 → 门禁 → 落盘）
-│   │   ├── draft.py           # 建课草稿区 + 落点确认（promote）
-│   │   ├── image_scout.py     # 采图（纯后端爬虫）
-│   │   ├── tickets.py         # 质检工单存储与分组
-│   │   ├── memory.py          # 跨科目共享记忆 MEMORY.md（读侧 + 确认后增量写）
-│   │   ├── misconceptions.py  # 概念本双落点存储
-│   │   ├── records.py         # 评估/小结/学习记录落盘（front matter + jsonschema 校验）
-│   │   └── routers/           # chat（SSE+课程联动+附件+开场切片+工具事件）、courses、uploads、settings、
-│   │                          # workspace、lessons、misconceptions、practice、records、memory、export、generate、production
-│   ├── tests/                 # pytest 后端单测（隔离环境 + fixture 后端，见「后端单测」）
-│   ├── requirements-dev.txt   # 测试依赖（pytest / httpx）
-│   └── seed/                  # 示例科目（供 E2E fixture 与建课演示；启动不再自动种入）
+│   │   ├── main.py                # 入口（lifespan：建工作区目录、上传清扫）
+│   │   ├── config.py              # settings v3 读写（providers[] + active + system_prompt）
+│   │   ├── models.py              # Pydantic 模型
+│   │   ├── storage.py             # 文件型会话存储（消息可带附件元数据）
+│   │   ├── llm.py                 # 统一 LLM 适配层（三格式 + 工具声明/流式 tool_call + stream_turn）
+│   │   ├── agent.py               # 工具化 agent loop runner（预算/降级/重复提醒/事件回吐）
+│   │   ├── tools.py               # 工具注册表 + 沙箱边界（读写根 allow-list）
+│   │   ├── audit.py               # 编排审计 data/audit/*.jsonl
+│   │   ├── concurrency.py         # 进程内并发写拒绝注册表（reject-only 键锁 + 票键租约）
+│   │   ├── multimodal.py          # 视觉能力判定、图片注入/占位、错误码剔除重试
+│   │   ├── doc_extract.py         # 附件文档解析（pdf/docx/xlsx/pptx/epub/文本类）
+│   │   ├── curriculum_store.py    # 课程仓储层（<WS>/.learning/subjects/<slug>/*.yaml）
+│   │   ├── workspace.py           # 工作区发现（复用上游 learn_workspace()）+ 配置写回
+│   │   ├── workspace_ctx.py       # 请求级工作区绑定（会话级工作区的唯一收口点）
+│   │   ├── prompts.py             # 提示词分层：persona + 按链路注入 .dsh/skills/<名>/SKILL.md
+│   │   ├── roles.py               # 角色派工基建（SKILL 全文注入 + envelope 落盘/搬位）
+│   │   ├── produce.py             # 产课链编排（派工 → 渲染 → 检查 → 打回 → 工单）
+│   │   ├── build.py               # 建课链编排（大纲 + 采图并行 → 门禁 → 落盘）
+│   │   ├── draft.py               # 建课草稿区 + 落点确认（promote）
+│   │   ├── image_scout.py         # 采图（纯后端爬虫）
+│   │   ├── tickets.py             # 质检工单存储与分组
+│   │   ├── memory.py              # 跨科目共享记忆 MEMORY.md（读侧 + 确认后增量写）
+│   │   ├── misconceptions.py      # 概念本双落点存储
+│   │   ├── records.py             # 评估/小结/学习记录落盘（front matter + jsonschema 校验）
+│   │   └── routers/               # chat、courses、uploads、settings、workspace、workspace_files、lessons、
+│   │                              # misconceptions、practice、records、memory、export、generate、production
+│   ├── tests/                     # pytest 后端单测（隔离环境 + fixture 后端）
+│   ├── requirements-dev.txt       # 测试依赖（pytest / httpx；参考）
+│   ├── requirements.lock.txt      # runtime 依赖锁（uv universal + hash）
+│   ├── requirements-dev.lock.txt  # dev superset 依赖锁（pip --require-hashes 可单装）
+│   └── seed/                      # 示例科目（供 E2E fixture 与建课演示；启动不再自动种入）
 └── frontend/
-    ├── app/            # /chat、/courses、/misconceptions、/lesson、/generate、/settings/*（含 settings/theme、settings/workspace）
-    ├── components/     # 聊天（ChatView/Composer/RightSidebar/ModelSelector）、RightRail（可折叠可拖拽的右侧边栏
-    │                   # 外壳，聊天页与课程图谱页共用）、图谱、概念本、课件、InspectionDialog（质检工单）、
-    │                   # MemoryDialog 与 WorkspaceOnboarding（入口已移除、悬空保留）、
-    │                   # 设置（settings/ProvidersView、settings/ModelEditDialog、settings/ThemeView、
-    │                   # settings/WorkspaceView、SystemPromptView、AboutView）
-    ├── lib/            # api 客户端、SSE 解析、workspace 全局上下文（会话级工作区 + 科目选中态 + 按会话的草稿缓存）、useResizable
-    ├── public/         # 站点资产（icon-192.png 品牌图标，供标签页与侧边栏使用）
+    ├── app/            # /chat、/courses、/misconceptions、/lesson、/generate、/settings/*
+    ├── components/     # 聊天、RightRail（可折叠可拖拽的右栏外壳）、图谱、概念本、课件、
+    │                   # InspectionDialog、MemoryDialog 与 WorkspaceOnboarding（悬空保留）、设置
+    ├── lib/            # api 客户端、SSE 解析、chatStream（按 session 持有流）、workspace 全局上下文（会话级工作区 + 科目选中态）、useResizable
+    ├── public/         # 站点资产（icon-192.png 品牌图标）
     ├── tests/e2e/      # Playwright 关键旅程
-    ├── tests/component/# vitest 组件测试（分支逻辑下沉，见「组件测试」）
-    ├── tests/explorer/ # 探索 agent harness（目标库见《探索测试指南》）
+    ├── tests/component/# vitest 组件测试
+    ├── tests/explorer/ # 探索 agent harness
     ├── vitest.config.ts
     └── playwright.config.ts
 ```
@@ -64,22 +61,15 @@ study-mate-web/
 
 ### 方式一：一键启动（推荐）
 
-双击 `start-web.bat`。首次运行自动创建虚拟环境并安装依赖；此后每次启动会先比对
-「前端源码时间 vs 上次构建时间」，**源码更新过就自动重新构建**（约 1~2 分钟），
-避免出现"重启了却看不到改动"——生产模式下 `.next` 是构建期快照，`next start` 不会
-重新编译，所以只重启进程是看不到源码改动的。随后拉起后端（8101）+ 前端（3800），
-就绪后打开浏览器并自动关闭启动器窗口。
+双击 `start-web.bat`：首次运行自动创建虚拟环境并安装依赖；此后每次启动比对「前端源码时间 vs
+上次构建时间」，**源码更新过就自动重新构建**（约 1~2 分钟；生产模式下 `.next` 是构建期快照，
+`next start` 不重新编译）。随后拉起后端（8101）+ 前端（3800），就绪后打开浏览器并自动关闭启动器窗口。
 
-- 服务跑在各自的「StudyMate 后端」「StudyMate 前端」窗口里，**关掉哪个窗口就停哪个服务**；
-  启动器自己的窗口关掉不影响服务。
-- **一键全停：双击 `stop-web.bat`**（等同 `start-web.bat stop`）。它按端口找到监听进程，
-  连同服务窗口与残留孤儿进程一起结束——进程被强杀（任务管理器结束任务等）留下的孤儿
-  也能清掉，这类孤儿会让端口一直被占、浏览器连到旧实例。
-- 启动前预检 8101 / 3800：已被占用时不重复启动，而是报出占用 PID 与停止方式，
-  避免新旧实例重叠。
-- 可选参数：`start-web.bat dev` 强制开发模式（热编译、跳过构建）；`restart` 先停再启；
-  `stop` 停止；`help` 帮助。
-- 端口可用环境变量覆盖：`SM_WEB_BACKEND_PORT` / `SM_WEB_FRONTEND_PORT`。
+- 服务跑在各自的「StudyMate 后端」「StudyMate 前端」窗口里，**关掉窗口就停对应服务**；启动器窗口关掉不影响服务。
+- **一键全停：双击 `stop-web.bat`**（等同 `start-web.bat stop`）：按端口找到监听进程，连同服务窗口与残留孤儿进程一起结束。
+- 启动前预检 8101 / 3800：已占用则报出占用 PID 与停止方式，不重复启动，避免新旧实例重叠。
+- 可选参数：`dev` 强制开发模式（热编译、跳过构建）、`restart` 先停再启、`stop` 停止、`help` 帮助。
+- 端口可用 `SM_WEB_BACKEND_PORT` / `SM_WEB_FRONTEND_PORT` 覆盖。
 
 启动器由 `start-web.bat`、`stop-web.bat`（GBK + CRLF）与 `tools/studymate-web.ps1`
 （构建新鲜度判定与停止逻辑，纯 ASCII）组成。
@@ -105,110 +95,40 @@ npm run dev          # http://127.0.0.1:3800
 npm run build && npx next start -p 3801
 ```
 
-前端通过 Next.js rewrites 把 `/api/*` 同源代理到后端（环境变量
-`BACKEND_PORT` / `BACKEND_ORIGIN` 可覆盖后端地址）。注意：Next 16 生产构建会在
-`next build` 时把代理目标固化进 `.next/routes-manifest.json`，`next start` 运行期
-设置这两个变量不生效（`next dev` 是运行期读取）；改后端端口时生产模式需重新 build，
-默认 8101 不受影响。
+前端通过 Next.js rewrites 把 `/api/*` 同源代理到后端（`BACKEND_PORT` / `BACKEND_ORIGIN`
+可覆盖后端地址）。注意：Next 16 生产构建在 `next build` 时把代理目标固化进
+`.next/routes-manifest.json`，`next start` 运行期设这两个变量不生效（`next dev` 运行期读取）；
+改后端端口时生产模式需重新 build，默认 8101 不受影响。同理，**改完前端源码须重新
+`npm run build` 再 `next start`**，否则伺服的是上次构建快照（`next dev` 每次访问现编译，不受影响）。
 
-手动跑生产模式还有一条：**改完前端源码要重新 `npm run build` 再 `next start`**，
-否则伺服的一直是上次构建的快照（"重启了却看不到改动"就是这个原因）；`next dev`
-则每次访问现编译，不受影响。
+## 功能规格（PRD 为唯一出处）
 
-## 工作区
+本 README 只保留运行时与仓库本身的说明；功能行为的唯一出处是
+[StudyMate-Web_PRD.md](StudyMate-Web_PRD.md)，逐条以 PRD 对应章节为准。
 
-Web 与插件共用同一套工作区与发现规则，布局同构：`<工作区>/.learning/subjects/<slug>/`
-（科目 yaml、课件、评估记录、学习记录、会话摘要都在这一个科目目录下）。Web **不再自动种入示例科目**——
-默认工作区可能正是插件在用的目录，示例只保留在 `backend/seed/` 供 E2E 与建课演示使用。
+- **工作区与发现**：布局同构 `<工作区>/.learning/subjects/<slug>/`，发现复用上游 `learn_workspace()`（Web 不实现第二份规则），设置页可查看 / 改选，新对话可绑定会话级工作区。→ PRD §9、§5.1
+- **模型配置**：多提供商（激活制 + 启用开关）、三种 API 格式（OpenAI 兼容 / Responses / Anthropic）、模型级推理档位与最大输出、视觉能力判定与错误码剔除、系统提示词；`LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 可覆盖当前使用提供商。→ PRD §1–§3、§6
+- **聊天页与右侧边栏**：`/chat` 两态、新对话「科目 + 工作区」关联行、聊天页与课程图谱页共用的可折叠可拖拽右栏。→ PRD §5.1–§5.4
+- **消息操作与「中间过程」**：复制 / 编辑＝截断重发 / 删除整轮，助手名称栏，思维链与工具调用落库回放。→ PRD §5.5
+- **会话流生命周期与有序工具卡（已实施）**：切换会话 / 离开 `/chat` 不打断在飞回复，仅显式停止且只中止当前会话；助手消息按 SSE 顺序记录 `parts`（工具结果原位更新；前端仅合并相邻同类 text/reasoning，notice 独立），**思维链按片段各自折叠、工具卡按流位置常显**，旧消息无 `parts` 回落旧布局；重载最多轮询约 10s、超时给可重试同步错误，不承诺硬刷新续跑。→ PRD §5.6
+- **长任务可见性与时长上限**：建课 / 产课编排进度快照与单次墙钟上限（聊天一轮 300s、建课产课派工 1800s，可用 `STUDYMATE_CHAT_MAX_SECONDS` / `STUDYMATE_ORCH_MAX_SECONDS` 覆盖）。→ PRD §13.1
+- **附件**：输入框左侧单一 📎 入口（点选 / 拖拽 / 粘贴），受理图片与常见文档，后端解析为文本注入上下文，存储于 `data/uploads/`。→ PRD §4
 
-- **发现优先级**（复用上游 `scripts/gen_home.py::learn_workspace()`，Web 不实现第二份规则）：
-  显式 `STUDYMATE_WORKSPACE` > `LEARN_WORKSPACE` > `STUDYMATE_CONFIG`（默认
-  `$DSH_HOME/studymate-config.yaml`）里的 `workspace` 字段 > 插件默认 `~/StudyMate`。
-- **设置页「工作区」子页**：查看当前路径、来源、科目数与配置文件位置；可改选目录——
-  写进 `studymate-config.yaml` 的 `workspace` 键（保留注释与其它键），保存后立即生效、无需重启。
-- **新对话内的关联行**：`/chat` 新对话态的输入框上方有「关联科目 + 工作区」两个并排下拉（发出第一条消息后即隐藏）。
-  工作区默认选「默认工作区」（= 当前发现路径），候选为发现路径 / 插件默认 / 环境变量覆盖；选中后该会话**绑定**到该工作区
-  （科目列表跟着切换，会话内的一切科目读写都在它自己的工作区里）。绑定要求目录已存在。
-- 工作区目录按需创建；科目为空时课程页显示空态，走 `/generate` 建课。
+## 课程工作区
 
-## 配置模型
+课程数据是 Study-Mate 静态工作区格式，与插件 `.learning` 布局同构：`<工作区>/.learning/subjects/<slug>/`
+下的 `subject.yaml` + `curriculum.yaml` + `progress.yaml`（发现规则见上「工作区与发现」）。各子系统规格见 PRD 对应章节：
 
-设置页为二级界面：左侧导航（**模型提供商** / 系统提示词 / **工作区** / 关于），右侧内容区。
-
-### 模型提供商
-
-- **多提供商列表 + 激活制**：预设四种（DeepSeek / SiliconFlow / DashScope / OpenAI）不可删除但全部字段可改、可"恢复默认"；可添加多个自定义提供商，可删。提供商带**启用开关**，停用后不能作为当前使用、其模型也不再出现在聊天侧的模型选择里。
-- 每个提供商配置：名称、Base URL、API Key（**回填已保存的密钥**，以密码点显示、可切换明文；不会把密钥从界面上"吞掉"）、**API 格式**（三选一：OpenAI 兼容 Chat Completions / OpenAI Responses / Anthropic Messages）、模型列表。
-- 模型列表为**只读摘要行**：模型名 + 徽标（上下文窗口 / 模态 / 档位名如 `high`）+ 四个操作（**测试** / **编辑** / **删除** / 启用开关）；"＋ 添加模型"打开编辑弹窗。
-- **模型编辑弹窗**（字段口径对齐 ZCode）：基础区 = 模型 ID、显示名、**输入模态复选框组（文本 / 图片 / 视频 / PDF；未配置过的模型默认勾选「文本」）**、**最大输出 Token**、**上下文长度**；**高级折叠区** = 推理档位的**有序 chip 编辑器**（可增删改与排序）+ 默认档位（**启用推理时预置 `disabled / enabled` 两档、默认档位取最高档**）+ 能力声明（**工具调用默认对所有模型开启**（2026-10-04），界面为只读提示、无开关；上游拒绝 tools 时自动回落纯文本；JSON Schema 输出 / 原生联网搜索两个开关仅落盘与展示）。**全部人工填写，不提供自动探测（无"智能配置"）**，也没有模型级「启用」开关。最大输出 Token 与上下文长度**留空即用兜底默认值**（不再预填进输入框——这样"没声明"和"显式声明这个值"在落盘后仍能区分；上下文长度的兜底值同时是右栏「上下文窗口」栏的分母）。
-- **编辑即生效**：提供商页**没有「保存」按钮**——所有改动防抖自动落盘，头部只给"保存中… / 已保存"提示；**连接测试入口是模型行上的「测试」**（按该行模型发起，显示耗时或上游错误）；清空输入框时会回落使用该提供商已保存的 Key，不会误报"缺少 API Key"。
-- 聊天侧"提供商 / 模型"快捷选择器位于**输入框内底部右侧**（紧邻发送按钮）；**推理档位是它右侧的独立下拉**（只显示档位名，不带「思考 · 」前缀；当前模型没有档位时隐藏，见下）。
-- **选择的作用域分两种（2026-10-04）**：**新对话态**切换写全局默认；**已有会话内**切换只写这个会话的绑定（刷新/换会话回看仍是它，不动全局默认）——该会话的聊天、小结、评估都跑在绑定的模型上；绑定失效（提供商停用/删除、模型被移除）时回落到当前默认模型并给一条提示，绑到没配 API Key 的提供商时输入框如实禁用。
-- 也可用环境变量 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 覆盖当前使用提供商的对应字段（优先级最高，不写盘）。
-- 旧配置在首次加载时自动迁移（单提供商 → 多提供商；旧的 `视觉覆盖`/`思考档位` → 输入模态/推理档位），API Key 不丢失，迁移幂等不再重写。
-
-### 三种 API 格式
-
-聊天（流式）与判分 / 评估 / 小结 / 科目生成（非流式）全部经统一适配层：OpenAI 兼容
-请求 `{base}/chat/completions`；Responses 请求 `{base}/responses`（系统提示词走
-instructions）；Anthropic 请求 `{base}/v1/messages`（`x-api-key` 头、system 独立参数、
-`max_tokens` 默认 4096）。JSON 输出模式在 Anthropic 下以提示词约束替代。
-
-### 推理档位与最大输出（模型级能力）
-
-档位表里有**两类取值**：`low/medium/high/max` 这类是**推理档位**（原样映射到协议的 effort 参数）；`disabled/enabled`、`off/on`、`关闭/开启` 这类是**思考开关**——「开」映射到默认档（medium），「关」完全不发思考参数（把 `enabled` 当档位名发出去会被网关 400）。自由档位名照发（给自定义网关留口子），Anthropic 认不出的档位名不发思考参数而不是报错。
-
-模型可声明一组**有序推理档位**（默认 `off / low / medium / high`，可在模型编辑弹窗里自由增删改与排序，
-例如换成 `off / high / max`）以及**最大输出 Token**。档位由统一适配层翻译为各协议参数：Chat Completions 走
-`reasoning_effort`，Responses 走 `reasoning.effort`，Anthropic 走 `thinking: {type: enabled,
-budget_tokens}`（并把 `max_tokens` 抬到预算之上）。**模型未启用推理、档位列表为空、或档位为 `off` 时
-不发送任何思考参数**，其余调用与未启用时完全一致；Responses / Anthropic 在开启推理时不发送
-`temperature`。最大输出 Token 非空时作为该模型的输出上限（Anthropic 的 `max_tokens` 等），为空沿用默认值。
-
-### 视觉能力与自动剔除
-
-- 图片附件按模型视觉能力注入：支持则按 API 格式转为对应图片块；不支持则替换为"[图片：<文件名> —— 当前模型不支持图片输入，已剔除]"文本占位，并以内联提示告知。
-- 视觉能力判定：模型配置了**输入模态**就以其中的"图片"项为准（显式配置压过内置表）；**未配置模态**时按内置模型前缀表判断。模态里的"视频 / PDF"目前只落盘与展示。
-- 若带图请求被上游以模态相关错误拒绝，系统自动剔除图片重试一次并提示；已知视觉模型不降级，真实错误原样暴露。
-- 视频 / 音频附件当前一律按占位处理，不实际发送。
-
-## 右侧边栏
-
-聊天页与课程图谱页共用一个可折叠的右侧边栏：**可拖拽调宽**（宽度按页面分别持久化到 localStorage）、
-**折叠带宽度过渡动画**（尊重系统"减少动态效果"偏好），收起时内容保持挂载（`inert` + `aria-hidden`），
-不会因为折叠丢掉区段状态。
-
-- 聊天页：右侧边栏装**上下文窗口栏**（最上：当前模型 + 最近一轮 prompt tokens / 模型上下文长度与占用百分比）、**科目「图谱 / 大纲」区**（仅科目关联会话出现，默认大纲，点节点跳 `/courses?subject=<slug>&node=<id>`）、**附件区**（术语表 / 本地资料 / 学习记录 / 会话摘要，点击新标签页打开；按该会话绑定的工作区读取）
-  与会话信息（消息数 / 创建时间 / 关联科目），折叠按钮在顶栏最右。**科目关联与"生成小结"不在右栏**——关联在输入区上方的关联行里
-  （只在新对话态出现）；「生成小结」与聊天侧「沉淀记忆」入口**暂时悬空**（后端保留，待重新接线）。
-- 课程图谱页：不带 `?subject=` 时是**「我的课程」首页**（只内嵌工作区主页 iframe、无右栏）；带 `?subject=` 时**主区 = 科目头部 + 节点详情，右栏顶部「图谱（默认）/ 大纲」分段切换**（切换不重建画布，画布右下角有「重置视口」）。
-
-## 消息操作与「中间过程」
-
-每条消息悬停（或键盘聚焦）时露出操作条：
-
-- **用户消息**：**复制**、**编辑**。编辑是"从这句重新生成"——气泡就地变编辑框，原文可改、**原附件默认保留且可逐个移除、也能追加新附件**，发送后服务端**先截断该条之后的全部内容再重新生成**（因此该点之后的问答会被丢弃，提交前有一句提示）。
-- **助手消息**：**复制**、**记入概念本**、**删除本轮**。删除会**把这一轮的提问与回复成对删掉**，按钮就地变成「删除？删除 / 取消」的内联二次确认（不用弹窗）。
-- **收口标记不露出**：建课会话的内部标记（`<!--INTERVIEW_RESULT-->`）在落库与渲染时都会被剥掉，历史消息也不露出 XML（模型习惯性加的首尾空行同样清掉）。
-- **助手名称栏**：每条助手消息上方显示产出它的模型（「提供商 / 模型」），历史会话显示当时落库的模型，不是当前模型。
-- **「中间过程」折叠区**（默认收起）：承载**思维链**与本轮提示（绑定 / 图片降级 / 重试）；流式期间表头显示「正在思考… / 正在调用工具…」，结束后显示「中间过程 · 思考 · N 次工具调用」。**工具调用卡已移出折叠区、常显在消息体里**（第八轮），思维链与工具调用都随消息**落库**，刷新或换会话回看时仍在；面板在既无思维链又无提示时整块不渲染。
-
-输入栏底部一行：左侧是附件按钮，**右侧是模型选择器 + 推理档位下拉 + 发送按钮**（档位只显示档位名）。
-
-## 长任务不会"假死"
-
-建课与产课是长任务（实测大纲派工单轮就要 126 秒纯思考、整条建课 10 分钟量级），所以补了两件配套的事：
-
-- **看得见在干活**：编排期间每几秒刷新一次进度——建课卡片显示「大纲 · 第 N 轮 · 已等待 Ns · 已调用 M 次工具（最近 xxx）· 已思考 Kk 字」，产课面板显示同一行。思维链**不**逐条转发（单轮几千条，转发会把流打爆），只发「快照」。
-- **不会无限等**：除轮数预算外还有单次时长上限——普通聊天一轮 **300 秒**、建课/产课单次派工 **1800 秒**；**含产课/评估工具（`produce_lesson` / `assess_node`）的聊天回合同样用 1800 秒**（工具执行在每轮计时之外，单节点产课实测可达约 700 秒）。到点用现有内容收尾并提示「（单轮超过 Ns 上限，用现有内容收尾。）」。可用 `STUDYMATE_CHAT_MAX_SECONDS` / `STUDYMATE_ORCH_MAX_SECONDS` 覆盖。
-
-## 附件
-
-聊天输入框左侧单一 📎 入口（文件与图片统一），支持点选、拖拽、粘贴；仅附件、无文字也可发送。
-
-- 受理：`image/*`（SVG 归文档类）+ 文本类（md / txt / csv / json / xml / 常见源码）+ pdf / docx / xlsx / pptx / epub；单附件 ≤20MB，单条消息 ≤10 个。
-- 文档在后端解析为文本（"附件：<文件名>"标题块拼在消息原文后进入上下文）：pdf 用 pymupdf（缺则回退 pypdf），docx / xlsx / pptx / epub 各有专用解析，文本类多编码回退解码；单附件提取上限 2 万字符、单消息合计 6 万，超限截断；解析失败以占位提示，不阻断发送。
-- 上传存储于 `data/uploads/`；删除会话时连带清理其上传文件。
+- **提示词分层**：persona + 按链路注入 `.dsh/skills/<名>/SKILL.md` 全文，缺失即 503。→ PRD §10
+- **课程 API 与状态机**：课程 CRUD、大纲写回校验、节点进度状态机（非法流转 409）；评估通过为权威置位并写学习记录。→ PRD §11
+- **开场状态切片**：首条消息且已关联科目时注入共享记忆 + 最近误解 / 学习记录 / 评估记录，并按「每轮以『下一步』收尾」节奏。→ PRD §11
+- **课程页 `/courses`**：不带 `?subject=` 是「我的课程」（内嵌工作区主页 iframe），带参数是科目图谱页；产课 / 评估改由聊天 agent 工具发起。→ PRD §5.4、§13
+- **课件与判分**：`/lesson` iframe 挂载课件，页内选择题由上游 quiz.js 判分，开放题「判分 lite」强制引用作答原文证据。→ PRD §2、§13
+- **附件区**：聊天页右栏列出术语表 / 本地资料 / 学习记录 / 会话摘要，按会话绑定的工作区读取。→ PRD §11
+- **概念本**：`/misconceptions` 双落点 CRUD（`progress.misconceptions[]` + `misconceptions.yaml`），节点详情与 Chat 消息均可一键记入。→ PRD §5.5
+- **评估与小结**：评估由 agent 工具生成 front matter 记录（jsonschema 校验）并置位；小结落 `sessions/<日期>.md`、同日按段追加（入口当前悬空）。→ PRD §11
+- **共享记忆（MEMORY.md）**：后端建议 → 用户逐条确认 → 增量插入对应分节（去重）；当前仅保留评估通过后的入口。→ PRD §12
+- **静态导出 / 科目生成**：导出为整科目拷贝 + 子进程 `gen_home.py` 主页；生成走五项向导 → LLM 草稿 → `check_curriculum.py` 门禁。→ PRD §13
 
 ## 后端单测
 
@@ -221,11 +141,14 @@ cd backend
 .venv/Scripts/python.exe -m pytest tests             # Windows；Linux/macOS 用 .venv/bin/python
 ```
 
-覆盖本轮新增的系统层行为：工作区发现三态/校验/写回与回滚、技能规范注入与缺失 503、开场状态切片
-（含 canonical 误解源）、评估联升与掌握度「保留或上调」、学习记录落盘、摘要同日多段追加、
-共享记忆建议/写入/去重/入参校验、**工具化 agent 循环**（三格式 tools wire 映射 / 流式 tool_call 聚合 /
-轮次预算与降级 / 工具沙箱边界 / 审计落盘 / 建课·产课工具循环 / **科目关联会话的 `produce_lesson`·`assess_node` 动作工具**）、**消息级操作**（编辑重发截断与附件复用 /
-删除整轮 / 思维链·工具·用量落库）、**推理档位取值兼容**（开关值 vs 档位值）、**会话级模型绑定**（PATCH 校验 / 解析不出的回落）、**建课链正确性**（schema 内联 / 门禁解析空判失败 / 草稿同名去重 / promote 自动关联 / 主页服务）。当前 **152 条通过 + 1 条 skip**（skip 为默认跳过的真实 LLM 冒烟）。
+**依赖锁定**：`requirements.lock.txt`（runtime，hash `a7f39ff6…`）与 `requirements-dev.lock.txt`
+（dev superset，hash `478de396…`）由 **uv 0.11.14 universal + hash** 生成；已在本机
+**`pip --require-hashes` 安装 + `pip check` 通过（Windows / Python 3.13.11）**。本地开发用 `backend/.venv`
+未改动；**Linux 端尚未实装、CI 未在远端执行**。
+
+覆盖系统层行为：工作区发现与写回、技能规范注入、开场状态切片、评估联升与学习记录、共享记忆、工具化 agent 循环、
+消息级操作、推理档位兼容、会话级模型绑定、建课链正确性等。用例条数以 `pytest tests` 输出为准；唯一 skip 是
+`tests/test_smoke_real_llm.py::test_tool_loop_against_real_provider`（`SMOKE_REAL_LLM!=1` 门控）。
 
 **真实 LLM 冒烟（默认跳过）**：`tests/test_smoke_real_llm.py` 真连一次配置渠道的工具循环——
 设 `SMOKE_REAL_LLM=1` 才跑（`SMOKE_MODEL` 钉死模型、`SMOKE_SETTINGS` 换设置路径）；口径为串行不并发：
@@ -244,18 +167,30 @@ npx playwright install chromium   # 首次
 npm run test:e2e                  # 自动拉起后端(8290, fixture) + 前端 dev(3810) 并跑关键旅程
 ```
 
-覆盖（62 条通过 + 3 条 skip，0 失败）：聊天发送与流式回复（含「下一步」收尾锚点）、附件上传与消息渲染、输入框草稿按会话缓存、对话壳层（顶栏内联重命名 + 右侧边栏折叠与拖拽）、**新对话「科目 + 工作区」关联行与会话级工作区绑定**（`new-session-association.spec.ts`）、**消息操作与「中间过程」折叠**（`message-actions.spec.ts`：助手名称栏 / 上下文窗口栏 / 思维链折叠（工具卡常显在消息体）/ 编辑截断重发 / 删除整轮）、**会话级模型与档位**（`session-model.spec.ts`：会话内切换只绑本会话 / 新对话态仍写全局默认 / 后端确实用绑定模型跑该轮）、**左侧边栏折叠成图标轨**（`sidebar-collapse.spec.ts`）、**工具化 agent 循环的工具卡常显**（`tool-cards.spec.ts`）、**会话 agent 工具产课/评估**（`produce-tool.spec.ts` / `assess-tool.spec.ts`）、概念本增删与筛选、**「我的课程」首页与课程页**（`courses-home-embed.spec.ts`：不带 `?subject=` 只内嵌主页、带参数仍是图谱页；聊天右栏科目图谱区 `chat-subject-graph.spec.ts`；图谱/大纲分段切换；科目绑定锁定；**科目状态与进度总览**）、评估与状态流转（**含实验课联升与学习记录落盘**）、静态导出、提供商配置与模型行四操作、模型编辑弹窗（模态复选框 / 最大输出 Token / 高级档位编辑器）、**输入区推理档位下拉**、**工作区设置查看与切换**、**附件区清单与原文可读**、**评估通过后的沉淀记忆入口 → 逐条确认写入**、暗色模式持久化。3 条 skip 是「生成小结」与聊天侧「沉淀记忆」用例——这两个入口 2026-10-04 起悬空，后端与组件都保留（接回入口后摘掉 `test.skip` 即恢复）。fixture 模式只影响测试进程，未设该变量时后端行为不变。
+运行口径：E2E / 探索各用独立 `distDir`（`STUDYMATE_NEXT_DIST`：E2E=`.next-e2e`、探索=`.next-explorer`，默认 `.next`），
+避免与本地 dev 争用构建目录；**这是目录级隔离，不是完全文件副本隔离**——`next-env.d.ts` / `tsconfig` 仍会被 Next 改写。
+后端命令按平台取 venv python（见 [E2E 测试流程](StudyMate-Web_E2E测试流程.md) §5.1）。
+
+覆盖聊天发送与流式回复、附件上传与渲染、对话壳层、新对话关联行与会话级工作区绑定、消息操作与「中间过程」、
+会话级模型与档位、工具卡与 agent 工具产课 / 评估、概念本、课程页、评估流转、静态导出、提供商与模型编辑、
+工作区设置、附件区、暗色模式等关键旅程（含会话流生命周期 `chat-stream-lifecycle.spec.ts`、任务卡
+`production-task.spec.ts`、展示原文 `display-content.spec.ts`、旧工单恢复 `legacy-ticket-recovery.spec.ts` 等）。
+**本轮定稿：E2E 88 = 85 passed + 3 skipped（0 failed）**，其中渲染矩阵 **8（light 4 / dark 4）**；3 条 skip 是
+「生成小结」与聊天侧「沉淀记忆」用例（这两个入口 2026-10-04 起悬空，接回后摘掉 `test.skip` 即恢复）。
+fixture 模式只影响测试进程，未设该变量时后端行为不变。
 
 ## 组件测试
 
-vitest + Testing Library（jsdom），把旅程级 E2E 射程外的状态分支（空 key / 空模型列表 / 无科目 prefill）下沉到组件层，**无需后端与 fixture**：
+vitest + Testing Library（jsdom），把旅程级 E2E 射程外的状态分支（空 key / 空模型列表 / 无科目 prefill）
+下沉到组件层，**无需后端与 fixture**：
 
 ```bash
 cd frontend
 npm run test:component            # 全部组件用例（tests/component/）
 ```
 
-组件层与 E2E、后端 pytest 同为本地跑口径，不进根 `npm test` 门禁（当前 **20 条**）。用例明细见 [StudyMate-Web_E2E测试流程.md](StudyMate-Web_E2E测试流程.md) §2.3 P4。
+组件层与 E2E、后端 pytest 同为本地跑口径，不进根 `npm test` 门禁（条数以 `npm run test:component`
+输出为准）。用例明细见 [StudyMate-Web_E2E测试流程.md](StudyMate-Web_E2E测试流程.md) §2.3 P4。
 
 ## 探索测试（按需）
 
@@ -266,45 +201,34 @@ cd frontend
 EXPLORER_GOAL=tests/explorer/goals/g5-canonical-misconception.md npm run explore
 ```
 
-用法、目标编写规范与已知边界见 [StudyMate-Web_探索测试指南.md](StudyMate-Web_探索测试指南.md)。
+用法、目标编写规范与已知边界见 [StudyMate-Web_探索测试指南.md](docs/StudyMate-Web_探索测试指南.md)。
 
-## 课程工作区
+## 部署边界（本机优先，勿默认公网）
 
-课程数据是 Study-Mate 静态工作区格式，与插件 `.learning` 布局同构：`<工作区>/.learning/subjects/<slug>/`
-下的 `subject.yaml` + `curriculum.yaml` + `progress.yaml`（发现规则见「工作区」一节）。
+本运行时按**本机 / 本地信任**设计：后端与前端默认监听本机（前端由 Next 以 `0.0.0.0` 绑定），
+**没有账号与鉴权**，CORS 为通配；工作区可通过设置页或 `?workspace=` 指向**任意已存在的绝对目录**，
+课件 / 主页的资源路由也按该信任模型只读服务。
 
-- **提示词分层**：默认 persona（主教练口径，可在设置页改）+ 后端按链路注入
-  `.dsh/skills/<名>/SKILL.md` 全文——对话注入 `learning-system` + `local-qa`，评估注入
-  `practice-evaluator` + `evidence-check` + `record-keeping`，小结注入 `record-keeping`，
-  判分注入 `practice-evaluator` + `evidence-check`；技能规范缺失时该次调用明确 503，不静默降级。
-- **课程 API 与状态机**：课程 CRUD、大纲写回校验、节点进度状态机
-  （未开始 → 学习中 → 初步理解 → 能独立应用 → 已通过项目验证，任意非初始可转
-  "需要复习"；非法流转 409），progress.yaml 覆盖 curriculum 初始快照（与上游口径一致）。
-  评估通过是权威置位：实验课通过时该节点与 `prerequisites` 里的被验收节点一起置
-  "已通过项目验证"，并写一条学习记录（`learning-records/`）。
-- **开场状态切片**：会话首条消息且已关联科目时，自动注入共享记忆（`MEMORY.md` 分节，超长截断）+
-  最近 5 条误解 + 最近 3 条学习记录 + 最近 3 条评估记录；提示词层要求会话按总控规范的
-  "每轮以「下一步」收尾"节奏（提示词行为，真实质量留真实-Key 冒烟，E2E 只守住呈现链路）。
-- **课程页 `/courses`**：不带 `?subject=` 是**「我的课程」**（内嵌工作区主页 iframe，无右栏）；带 `?subject=` 是科目图谱页——科目头部 + cytoscape 图谱 + 节点详情（状态流转、掌握度、笔记、实验节点 lab 状态、"打开课件"、"记入概念本"、工单角标）。**原节点页「产出此课」「申请评估」「问 Study Mate」三个按钮已删除**：产课与评估改在聊天里让 agent 调 `produce_lesson` / `assess_node` 工具（见「消息操作与「中间过程」」与「长任务不会"假死"」）。
-- **课件与判分**：`/lesson` 页 iframe 零改动挂载已有课件（页内选择题由上游 quiz.js 判分）；
-  开放题"判分 lite"强制引用作答原文证据；工作区级共享资源（KaTeX/主题）由
-  `/api/courses/assets/*` 兜底，课件页内零断链。
-- **附件区**：聊天页右侧边栏列出当前科目的术语表（`GLOSSARY.md`）、本地资料（`reference/`）、
-  学习记录与会话摘要，点击新标签页打开原文件。
-- **概念本**：`/misconceptions` 双落点 CRUD（`progress.misconceptions[]` + `misconceptions.yaml`），
-  节点详情与 Chat 消息均可一键记入。
-- **评估与小结**：评估改由会话 agent 工具 `assess_node`（附学习者作答原文）生成 front matter 记录（jsonschema 按仓库 `schemas/` 校验），通过后置位并写学习记录；Chat"生成小结"落盘 `sessions/<日期>.md`，**同日多次小结按段追加**不覆盖（小结入口当前悬空）。
-- **共享记忆（MEMORY.md）**：三个入口落到同一套确认流程——Chat 右侧边栏「沉淀记忆」（随时手动）、
-  小结结果区的「沉淀记忆（N 条建议）」（会话结束时用小结已产出的 `memory_updates` 预填）、
-  评估通过后的「沉淀记忆」（从会话提炼）。后端给出建议条目后，用户逐条勾选/改分节/改内容再确认，
-  **增量插进 `.learning/MEMORY.md` 对应分节**（不整篇重写，重复条目自动去重）。
-- **静态导出**：整科目拷贝 + 子进程调用上游 `scripts/gen_home.py` 生成静态主页，
-  通过上游门禁校验。
-- **科目生成**：五项向导 → LLM 草稿 → 子进程 `check_curriculum.py` 当门（PASS 才收）。
+因此**不要把它直接暴露到公网，也不要在不可信网络上开放端口**：能访问该 API 的人可能读到
+**当前进程可读的任意本机文件**（不只是学习数据）。
+
+**维护者已裁定（2026-10-05）**：本运行时按「本机个人使用」定位——即**每个使用者各自在本机单人使用**
+（**不是"仅维护者自用"**），且该定位**不等于放弃工程质量保障**；本轮**不新增鉴权 / 来源白名单 /
+监听绑定改造，也不新增多租户 / 账号身份体系**——故上述边界即当前预期范围，不宣称已具备公网 /
+多用户部署能力。若要对外或多用户使用，须另行拍板并先补齐这些能力（决策留痕见
+[Web_CHANGE.md](Web_CHANGE.md)，安全边界事实见 `docs/archive/审查报告-2026-10-05.md`）。
+工程质量保障方面，已落地**最小 ESLint**（flat config）与**独立 Web CI**（Node24 / Py3.13，覆盖
+pytest / lint / 组件 / build + **少量 E2E smoke**——**CI 只跑 smoke，不是 full E2E 回归**）与
+**uv universal + hash 依赖锁**（`pip --require-hashes` 安装 + `pip check` 已通过）。**本轮已完成定稿**：
+最终门禁全过（后端 pytest 408 passed / 1 skipped、组件 98 passed · 14 文件、E2E 88 = 85 passed + 3 skipped、
+CI smoke 5 passed、lint 0 errors / 51 warnings、`tsc` / `build` / `compileall` / `import` / 根 `npm test` 全部 exit 0）。
+**唯一剩余：CI / lock 远端未 push、未在 GitHub 执行**（待维护者授权 commit + push）——故**不写远端通过**；
+完整快照见[E2E 测试流程](StudyMate-Web_E2E测试流程.md) 顶部与 `Web_CHANGE.md`「最终验证收尾」，
+规划见[开发与计划](StudyMate-Web_开发与计划.md) §5。
 
 ## 版本
 
-- 当前版本：**0.6.0-beta**。
+- 当前版本：**0.7.0-beta**。
 - StudyMate Web 遵循语义化版本控制；该版本号**仅标识 StudyMate Web 本身**（前后端一体），
   与上游项目 `@yunmiao/studymate` 的版本相互独立。
 - 版本号唯一记录处：本节与代码内版本常量（`frontend/package.json`、后端 `app/main.py`、

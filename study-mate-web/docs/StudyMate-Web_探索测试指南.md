@@ -35,6 +35,7 @@ EXPLORER_GOAL=tests/explorer/goals/g5-canonical-misconception.md npm run explore
 ```
 
 - 自动拉起 fixture 后端（8290）+ 前端 dev（3810），复用 E2E 的 globalSetup **每轮重建种子工作区**，探索跑在确定性世界上；拉起前有"世界预检"（侧边栏须见种子科目），不符即响亮失败，不静默探索错误世界。
+- **构建目录与后端命令口径（2026-10-05 审查轮）**：探索 dev server 用独立 `distDir`（`STUDYMATE_NEXT_DIST=.next-explorer`），与开发者本地 `npm run dev`（默认 `.next`）及 E2E（`.next-e2e`）隔离；后端命令按平台取 venv python（`tests/e2e/constants.ts` 的 `BACKEND_PYTHON`：Windows `.venv/Scripts/python.exe` / POSIX `.venv/bin/python`）。注意 `distDir` 仅**目录级隔离**，`next-env.d.ts` / `tsconfig` 仍会被 Next 改写。
 - LLM 配置在 `frontend/tests/explorer/.env`（**已被 gitignore**，从 `.env.example` 复制）：`EXPLORER_LLM_BASE_URL` / `EXPLORER_LLM_API_KEY` / `EXPLORER_LLM_MODEL`。默认 `step-5-preview`，求快可换 `step-3.7-flash`。`max_tokens` 固定 32768（推理 token 计入 completion，给小了 content 为空）。
 - 一次一个目标；成本量级：单目标约 1–5 分钟、5–20 步。
 - 试跑顺序建议：**先跑正路基线**（g5 记误解 / g6 建课 / g7 产课），基线不过先修 harness，再跑 adverse（g1 / g2 / g8 / g10）与需要 `seed` 前置的目标（g9）。
@@ -104,8 +105,10 @@ max_walls: 3
 - **别把预期结论写死进目标**：目标让 agent 观察并如实报告，不诱导它寻找指定问题。
 - **渲染/视觉目标必须要求视觉确认**：aria 快照包含闭合状态下 `<select>` 的全部 option，agent 会"从快照读到选项"而从未真正打开下拉——措辞不要求视觉确认就会得到假通过（g4 实证）。
 - **路径用占位符**：目标文件随仓库跟踪，不写死本机绝对路径。可用 `{{FILES_DIR}}`（`tests/explorer/files/`，附件样例）、`{{WORKSPACE_DIR}}`（e2e 种子工作区）、`{{EMPTY_WS}}`（e2e 数据目录下的空目录）、`{{DATA_DIR}}`；引擎展开为**正斜杠**绝对路径（Windows 反斜杠会让 LLM 产出非法 JSON 转义）。
-- **`seed:` 前置世界**：少数界面（质检工单）在纯 fixture 日程里不会自然出现，用 front matter 的 `seed: <name>` 把 `seeds/<name>.json` 落到后端数据目录（如 `seed: tickets` → `data/e2e-data/tickets.json`）。
+- **`seed:` 前置世界**：少数界面（质检工单）在纯 fixture 日程里不会自然出现，用 front matter 的 `seed: <name>` 把 `seeds/<name>.json` 落到后端数据目录（如 `seed: tickets` → `data/e2e-data/tickets.json`）。**（2026-10-05 本轮）工单 seed loader 在装载时给「非 draft、缺 `workspace`」的种子单补上 E2E 工作区**，使其显示为**正常工单**（否则按 legacy 规则会判为 unknown「待归属」）；**不改静态 json 里的绝对路径**，只在落盘到 e2e 数据目录时补。g9 目标里旧的「放弃本次」按钮文案同步改为「放弃工单」。
 - **附件目标用 `setfiles` 动作**：📎 点开会弹系统文件框、agent 操作不了；用 `{"type":"setfiles","value":"<绝对路径>"}` 模拟选好文件（多个用 `;` 分隔）。
+
+> **本轮同步说明（2026-10-05）**：以上为配合 legacy 工单归属恢复与 seed loader 的**最终行为同步**；**本轮未跑真实探索**（无新试跑结论/分级），是否执行由维护者按需决定。
 
 ## 6. 已知边界（试点实证，2026-10-02）
 

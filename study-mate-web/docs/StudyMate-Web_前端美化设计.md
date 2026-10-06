@@ -295,17 +295,7 @@ mask-image: linear-gradient(to bottom, transparent 0px, #000 24px, #000 calc(100
 
 ## 九、 现有实现与 E2E 测试契约兼容清单
 
-为确保全量 48 条 E2E 测试及后续探索测试 100% 保持通过，所有视觉改造必须严格保留以下核心选择器与语义契约：
-
-| 模块 | 必须严格保留的 `data-testid` / 选择器 | 兼容性保障措施 |
-| :--- | :--- | :--- |
-| **顶部状态栏** | `data-testid="chat-topbar"`, `data-testid="chat-title"` | 顶栏外观优化，但容器与标题属性名原样保留 |
-| **输入框组件** | `data-testid="composer"`, `data-testid="discovery-starter"` | 输入框无论内部如何分层，外层容器属性与建课探索按钮标记完全不变 |
-| **右侧栏** | `data-testid="chat-right-sidebar"`, `data-testid="chat-attachments-area"`, `data-testid="chat-records-area"` | 侧栏展开折叠与子区域容器标识严格保留 |
-| **课程图谱** | `data-testid="course-node-detail"`, `data-testid="node-status-badge"`, `data-testid="node-next-statuses"`, `data-testid="assess-result"`, `data-testid="graph-node-${id}"` | 节点列表隐藏辅助无障碍元素与详情栏 `div.w-80.border-l` 结构或 testid 兼容 |
-| **记忆面板** | `data-testid="memory-dialog"`, `data-testid="memory-entry-assess"`, `data-testid="memory-empty"`, `data-testid="memory-result"` | 弹窗无论如何加毛玻璃与动画，所有状态选择器与按钮标记原样直通 |
-| **质检工单** | `data-testid="node-ticket-entry"`, `data-testid="inspection-dialog"`, `data-testid="inspection-overview"`, `data-testid="inspection-artifact"`, `data-testid="inspection-editor"`, `data-testid="inspection-save"`, `data-testid="inspection-abandon"`, `data-testid="inspection-closed"` | 工单模态框核心按钮与状态容器保持不变 |
-| **工作区/设置** | `data-testid="workspace-settings"`, `data-testid="workspace-onboarding"` | 工作区引导与设置项标记原样保留 |
+所有视觉改造必须严格保留现有核心选择器与语义契约，不得破坏 E2E 与探索测试；完整的选择器 / `data-testid` 清单及维护约定以《StudyMate-Web_E2E测试流程.md》为准。
 
 ---
 

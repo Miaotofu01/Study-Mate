@@ -57,3 +57,12 @@
 
 后端 8101 · 前端 dev 3800 / 生产 3801 · E2E 用 8290 + 3810。Next 16 生产构建会把代理目标
 固化进构建产物（详见根 README 与本目录 README 的说明）。
+
+## 代码发现（codebase-memory-mcp）
+
+<!-- codebase-memory-mcp:start -->
+本项目在 ZCode 项目级 `.zcode/config.json` 注册了 codebase-memory-mcp（仅本仓库生效）。
+做代码检索、调用链追踪、架构查询时，优先用其图谱工具（`search_graph`、`trace_path`、
+`get_code_snippet`、`query_graph`、`search_code`）而非 grep/逐文件读；
+若项目尚未建索引，先跑 `index_repository`。
+<!-- codebase-memory-mcp:end -->

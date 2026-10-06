@@ -2,7 +2,7 @@
 
 > **性质**：设计类。描述子项目 [`study-mate-web/`](../../study-mate-web/) 与上游（插件、生成器、规格）之间的**接口面与不变量**；不复述功能。
 > 功能现状见子项目 [PRD](../../study-mate-web/StudyMate-Web_PRD.md)，架构与队列见[开发与计划](../../study-mate-web/StudyMate-Web_开发与计划.md)，用例映射见 [E2E 测试流程](../../study-mate-web/StudyMate-Web_E2E测试流程.md)。
-> 状态随 `0.5.0-beta` 的实现现状书写；**边界一变就改这一份**。
+> 状态随 `0.7.0-beta` 的实现现状书写；**边界一变就改这一份**。
 
 ## 一、一句话边界
 
@@ -24,7 +24,7 @@ Web 运行时是上游引擎的**第二个前台**：读同一套 `.learning` �
 ## 三、不做什么
 
 - 不改 `.dsh/skills/**`、`scripts/**`、`templates/**`、`schemas/**`——**上游脚本只复用不重写**是硬规矩。
-- 不参与插件的构建与发布链：`npm run build:plugin` 等只处理上游源；Web 的版本号（`0.5.0-beta`）与上游 tag、CHANGELOG 无关。
+- 不参与插件的构建与发布链：`npm run build:plugin` 等只处理上游源；Web 的版本号（`0.7.0-beta`）与上游 tag、CHANGELOG 无关。
 - 不替代插件的宿主路径（DSH / Antigravity / Codex），只是**另一种前台**。
 - 不引入第二份规格：Web 侧不重写课件语法、角色规则或状态口径，只执行上游那一份。
 
@@ -51,16 +51,16 @@ Web 运行时是上游引擎的**第二个前台**：读同一套 `.learning` �
 | 后端单测 | `backend/.venv/Scripts/python.exe -m pytest tests` | 自带隔离运行时；含 1 条 `SMOKE_REAL_LLM` 门控冒烟 |
 | 旅程级 E2E | `cd frontend && npm run test:e2e` | Playwright + 后端 fixture，**不需要真实 API Key** |
 | 组件测试 | `cd frontend && npm run test:component` | vitest，分支逻辑下沉，不进上游门禁 |
-| 探索测试 | `cd frontend && npm run explore` | 按需触发，见[探索测试指南](../../study-mate-web/StudyMate-Web_探索测试指南.md) |
+| 探索测试 | `cd frontend && npm run explore` | 按需触发，见[探索测试指南](../../study-mate-web/docs/StudyMate-Web_探索测试指南.md) |
 
 上游那条门禁（`npm test`）**不覆盖子项目**，两边各自跑、互不阻塞。
 
 ## 七、已知边界与不在范围内
 
-- **仅本机单机**：无账号、无鉴权、无多用户隔离，服务只绑 `127.0.0.1`。
+- **仅本机单机**：无账号、无鉴权、无多用户隔离；后端只绑 `127.0.0.1`，前端由 Next 绑定 `0.0.0.0`（本机信任模型，勿暴露公网）。
 - **lab 沙箱是子进程级**（隔离目录 + 超时 + 进程树终止），不是容器级强隔离。
 - 真实模型冒烟只覆盖本机已配置的渠道；`anthropic` 与 `openai_responses` 两种格式的真实流式尚未验证。
-- 仍有两处要人工：评估点判定、误解落盘（见开发与计划的 backlog）。
+- 仍需人工一处：评估点判定；**误解落盘**已按 P1 修复（未通过题按题映射、全通过不落条目），不再算人工项。
 - 前端生产构建是**快照**：改源码后要重新 `npm run build` 才生效（`start-web.bat` 已自动处理；手动起生产模式需自己 rebuild）。
 
 ## 八、指针

@@ -97,15 +97,15 @@
 ## 5. 产课链 `produce.py::run_produce`
 
 1. 前置：`audit.bind("produce-<slug>-<node_id>")`；**顺序门**（已有 `.md` 数量与节点位次不符 → error，上游检查器要求课件编号连续）。
-2. **实验课**：只出题——一次派工出「说明页 `lessons/NNNN-<id>.md` + 实操任务树 `lab/`」，说明页相对路径必须命中四位零填充命名，否则 error（带交付摘要诊断）。**实验课不派讲解**。
-3. **非实验课**：`stage 讲解` → 派工 `produce_content` → 写盘校验 → `stage 出题` → 派工 `produce_quiz`。
+2. **实验课**：只出题——一次派工出「说明页 `lessons/NNNN-<id>.md` + 实操任务树 `lab/`」，说明页相对路径必须命中四位零填充命名，否则 error（带交付摘要诊断）。**实验课不派讲解**。lab 交付 required = `lab/<NNNN>-stage/README.md` + `lab/solutions/<NNNN>-stage/README.md` + `lab/README.md`，**缺一不 promote**。
+3. **非实验课**：`stage 讲解` → 派工 `produce_content` → 写盘校验 → `stage 出题` → 派工 `produce_quiz`。**`kind=实操` 的 lab 整套归出题**（`lab/<NNNN>-stage/README.md` + `lab/solutions/<NNNN>-stage/README.md` + `lab/README.md`，保留原总表并增补本课），**缺一不 promote**；内容文件的 lab 入口链为 `../lab/<NNNN>-stage/README.md`。
 4. `render_and_check`：`render_lesson.py` → `check_lesson.py`，各自 `stage 渲染/检查`。
-5. **打回轮**（≤2）：按 problems 的 owner 重派（`讲解` → 重派内容；出题受锚点影响跟着重派；`总控` 类只补共享资源后重查一次即 break）；每轮发 `retry{round, owners, problems}`。
+5. **打回轮**（修复派工 ≤ `MAX_RETRIES`=2）：按 problems 的 owner 重派（`讲解` → 重派内容；出题受锚点影响跟着重派）；**纯总控归属只补共享资源后发 `stage 总控复检` 复检一次，不计入修复派工轮、也不谎报"2 轮"**；耗尽 `error` 带 `code=quality_check_failed` / `repair_rounds` / `rechecks` / `ticket_id`；每轮发 `retry{round, owners, problems}`。
 6. 仍不过 → `kind=produce` 工单 + `handoff` + `error`。
-7. **派工分流** `dispatch`：fixture → 工厂 envelope；真实模型 → **K3 工具循环** `_role_tool_loop`（`PRODUCE_TOOLS`：`write_deliver_file` 落 `.stage/<角色>/deliver/`、`run_check` 落盘后跑渲染+检查回喂；**同样带墙钟上限与进度心跳**）；`files` 为空则回落单次派工。
+7. **派工分流** `dispatch`：fixture → 工厂 envelope；真实模型 → **K3 工具循环** `_role_tool_loop`（`PRODUCE_TOOLS`：`write_deliver_file` 落 `.stage/<角色>/deliver/`、`run_check` 落盘后跑渲染+检查回喂；**同样带墙钟上限与进度心跳**）；`files` 为空则回落单次派工。**回落 / 直连的备用角色带 `execution_mode`（`tools` / `fallback` / `single_call`）与 `fallback_reason`/`max_seconds`/`elapsed_s`/`message`，按真实 start/done/error 呈现——envelope 返回只表示这次调用有回复，不等于自检通过**（保留原始失败、不刷屏、不虚构过程）。**既有产物复用**：本轮该角色**无新文件** 且 `regenerate=false` 且本次 ctx `check_passed` 且该角色 required 目标（出题 `*.quiz.json` / 其余 `*.md`）**存在可读非空** → 接受复用、不再派工；`regenerate` 布尔默认 `false`、`true` 强制重做、**且 `true` 须显式 `node_id`（bool 严格校验）**；**强制重做（检查打回重派轮）与工单 retry 禁复用**；quiz / ticket 交付同 gate required、**非 UTF-8 不复用**。真实 timeout 落角色终态、**任务非 running 隐藏当前阶段**、本地停止 roles 同终止。
 8. **工单两动作**：`recheck`（只重跑渲染+检查）与 `retry`（重派）。**`retry` 的产课路径已改走 `dispatch()`（内部即 `_role_tool_loop`）**（第八轮 #25），与实时产课同能力；`kind=build` 的 `retry` 仍走单次派工。
 
-> **新入口（第八轮）**：产课不再从课程页节点发起，而是聊天里 agent 调 `produce_lesson`（`tools.py::_tool_produce_lesson`）。它按大纲顺序取节点（不传 `node_id` = 第一个没有课件的节点），真跑整条 `run_produce`，把 stage/retry/done/progress 转成中文 `notice` 回吐（**progress 节流 ~10s**）。因为工具执行在 agent 每轮 `asyncio.wait_for` 之外，含产课/评估工具的聊天回合墙钟改用 `ORCH_MAX_SECONDS`（1800s）而不是 `CHAT_MAX_SECONDS`（300s）——单节点产课实测可达 ~700s，沿用 300s 会让工具返回后的下一轮顶到 deadline 被判降级收尾。
+> **新入口（第八轮）**：产课不再从课程页节点发起，而是聊天里 agent 调 `produce_lesson`（`tools.py::_tool_produce_lesson`）。它按大纲顺序取节点（不传 `node_id` = **按大纲顺序第一个尚无课件的节点**，**不沿用会话注入的节点聚焦**），真跑整条 `run_produce`，把 stage/retry/done/progress 转成中文 `notice` 回吐（**progress 节流 ~10s**）。因为工具执行在 agent 每轮 `asyncio.wait_for` 之外，含产课/评估工具的聊天回合墙钟改用 `ORCH_MAX_SECONDS`（1800s）而不是 `CHAT_MAX_SECONDS`（300s）——单节点产课实测可达 ~700s，沿用 300s 会让工具返回后的下一轮顶到 deadline 被判降级收尾。
 
 ## 6. 产物速查：看到什么 = 走到哪
 
@@ -138,7 +138,14 @@
 - **大纲门禁反复打回同一类错（节点 id 非法 / edge 缺 reason / realworld 类型错）**：先确认 `build.py::curriculum_values` 是否真把 `schemas/curriculum.schema.json` 全文内联（`_curriculum_schema_text()`，文件缺失时回落一句提示而不炸）。**已修**：沙箱读根只有草稿目录、模型读不到仓库根 schema，此前只能盲猜；内联全文 + 硬约束速览后才可达。若仍打回，逐条对比 problems 与内联里的约束描述。
 - **采图秒完 0 张、stage 显示「采图 · 跳过（无参考资料）」**：**正常**——从零建的草稿没有 `RESOURCES.md`，采图没有 URL 可抓 ⇒ 结构性空转。文案已改（done 事件带 `skipped/reason`）避免误导；**是否恢复主动检索（让资源清单非空）本体待拍板**，见 §8 与《开发与计划》主动检索议程。
 - **建完课会话没关联到新科目**：检查 `POST /api/drafts/<slug>/promote` 请求体有没有带 `session_id`（前端 `promoteDraftToWorkspace` 会带）。**已做**：落点成功后后端把触发会话绑到新科目；会话不存在时静默跳过、promote 本身照常成功。没关联时聊天里不会出现产课/评估工具。
-- **聊天里产课**：agent 调 `produce_lesson`，**按大纲顺序**（跳跃节点会被顺序门 error），不传 `node_id` 即取第一个未产出节点；含产课/评估工具的回合墙钟走 `ORCH_MAX_SECONDS`（1800s，单节点实测可达 ~700s）。过程只发 transient `notice`（progress 节流 ~10s）、**不落 stage 卡**，刷新后看不到过程；工具执行成果反映在磁盘产物与工具卡结果里。
+- **聊天里产课**：agent 调 `produce_lesson`，**按大纲顺序**（跳跃节点会被顺序门 error），不传 `node_id` 即取**按大纲顺序第一个尚无课件的节点**（**不沿用会话节点聚焦**）；含产课/评估工具的回合墙钟走 `ORCH_MAX_SECONDS`（1800s，单节点实测可达 ~700s）。过程只发 transient `notice`（progress 节流 ~10s）、**不落 stage 卡**，刷新后看不到过程；工具执行成果反映在磁盘产物与工具卡结果里。回落 / 直连的备用角色在任务卡上如实标 `execution_mode`（`fallback` / `single_call`）并展示 `fallback_reason` / `max_seconds` / `elapsed_s` / `message`，按真实 start / done / error；**envelope 返回≠自检通过**，不刷屏、不虚构过程。
+
+**本轮（2026-10-06 错误终态 / 检查器 / lab）新补四条：**
+
+- **检查器把代码示例误报缺资源（已修）**：`check_lesson.py` 原用正则扫 `href/src`，`<pre>/<code>` 里转义的教学示例（`&lt;img src=…&gt;`）会被当成真实引用 ⇒ 误报缺资源。现改用 `RefScanner(HTMLParser)` **只取真实元素**的 `href/src`，**真实缺资源仍拦**；属脚本自身修复，**不是 Web 第二份引擎、不绕过检查**。旧 HTML 只读检查 OK（有 warnings）**≠ 重产通过**。
+- **实操 lab 缺交付（已修）**：`kind=实操` 的 lab 整套先前不在 required 里 ⇒ 交付缺 lab 仍可能 promote，随后 `check_lesson` 按 kind 阻断并误打回。现 `required_artifacts` 一并 gate `lab/<NNNN>-stage/README.md` + `lab/solutions/<NNNN>-stage/README.md` + `lab/README.md`，**缺一 `_write_and_promote` 返回 None、不 promote**。
+- **打回次数与错误详情**：`repair_rounds` / `rechecks` 分开，**总控复检不占派工轮、不再谎报 2 轮**；失败 / 超时 / 中断统一 `ErrorInfo`，任务卡 `error` 用 `ErrorNotice` 红卡渲染（`danger` / `neutral`），聊天消息同样持久化 `error` + `stream_state`。
+- **真实重产（本轮实测）**：两会话经**浏览器 UI 编辑重发**（web `1c3bad7657b7` index6、Git `cc886d4641a1` index28）均以上游 **503 `system_memory_overloaded`** 失败（turn `e9731d08f43942468359d779fa406901` / `f6083744eef7470eb1600078b13a24ad`），**未成功重产**，待上游恢复；红卡已浏览器展开核验（`real-web-503.png` / `real-git-503.png`）。
 
 ## 8. 待拍板与已知不一致（以代码为准）
 
