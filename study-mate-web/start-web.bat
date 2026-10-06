@@ -229,7 +229,7 @@ echo [错误] 后端依赖安装失败：请检查网络后重新运行。
 goto :fail_end
 
 :fail_npm
-echo [错误] 前端依赖安装失败：请确认已安装 Node.js 18+ 并检查网络。
+echo [错误] 前端依赖安装失败：请确认已安装 Node.js 20.9+ 并检查网络。
 goto :fail_end
 
 :fail_build

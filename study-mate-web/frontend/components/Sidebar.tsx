@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
+  ChevronDown,
+  ChevronRight,
   GraduationCap,
   Loader2,
   MessagesSquare,
@@ -39,6 +41,10 @@ const SIDEBAR_MAX_WIDTH = 420;
 const SIDEBAR_COLLAPSED_KEY = "studymate-sidebar-collapsed";
 const SIDEBAR_COLLAPSED_WIDTH = 60;
 
+// 会话列表默认可见条数（2026-10-05 拍板①取 5）：更多历史收进「展开历史会话」，
+// 防止会话条目过多把下方的科目区挤出可视范围
+const SESSION_VISIBLE_COUNT = 5;
+
 type Theme = "light" | "dark";
 
 export function Sidebar() {
@@ -49,6 +55,7 @@ export function Sidebar() {
     subjects,
     activeSessionId,
     currentSubjectSlug,
+    runningSessionId,
     setCurrentSubjectSlug,
     newSession,
     openSession,
@@ -68,6 +75,10 @@ export function Sidebar() {
 
   const [theme, setTheme] = useState<Theme | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  // 区块折叠与会话历史展开都是界面态：不持久化，每次进来回到「收起历史」的默认形态
+  const [sessionsOpen, setSessionsOpen] = useState(true);
+  const [subjectsOpen, setSubjectsOpen] = useState(true);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [showSubjectForm, setShowSubjectForm] = useState(false);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -118,6 +129,17 @@ export function Sidebar() {
 
   // 科目选中态只在课程页出现（其他页面不表达"在看哪门科目"）
   const onCourses = pathname.startsWith("/courses");
+
+  // 会话可见列表：收起时只显示最近 N 条；活动会话即使排在 N 条之外也强制保留
+  // （选中态不藏，否则「正在看的会话」会消失在展开按钮后面）
+  const visibleSessions = useMemo(() => {
+    if (historyExpanded) return sessions;
+    const top = sessions.slice(0, SESSION_VISIBLE_COUNT);
+    const active = activeSessionId ? sessions.find((s) => s.id === activeSessionId) : null;
+    if (active && !top.some((s) => s.id === active.id)) top.push(active);
+    return top;
+  }, [sessions, historyExpanded, activeSessionId]);
+  const hiddenSessionCount = historyExpanded ? 0 : sessions.length - visibleSessions.length;
 
   const handleNewSession = () => {
     newSession();
@@ -282,7 +304,19 @@ export function Sidebar() {
         {/* 会话 */}
         <div className="mt-3">
           <div className="mb-1.5 flex items-center justify-between px-2">
-            <span className="text-[11px] font-medium tracking-wide uppercase text-[var(--foreground)]/45">会话</span>
+            <button
+              onClick={() => setSessionsOpen((v) => !v)}
+              aria-expanded={sessionsOpen}
+              className="flex min-w-0 items-center gap-0.5 rounded-md py-0.5 text-[11px] font-medium tracking-wide uppercase text-[var(--foreground)]/45 transition-colors hover:text-[var(--foreground)]/80"
+              title={sessionsOpen ? "收起会话列表" : "展开会话列表"}
+            >
+              {sessionsOpen ? (
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+              )}
+              会话
+            </button>
             <button
               onClick={handleNewSession}
               className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--foreground)]/60 transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
@@ -293,64 +327,110 @@ export function Sidebar() {
             </button>
           </div>
 
-          <div className="flex flex-col gap-0.5">
-            {sessions.length === 0 && (
-              <p className="px-2 py-2 text-xs text-[var(--foreground)]/40">暂无会话</p>
-            )}
-            {sessions.map((s) => (
-              <div
-                key={s.id}
-                className={clsx(
-                  "group flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm transition-colors",
-                  activeSessionId === s.id
-                    ? "bg-brand/10 font-medium text-brand"
-                    : "text-[var(--foreground)]/80 hover:bg-[var(--muted)]/60 hover:text-[var(--foreground)]",
+          {sessionsOpen && (
+            <>
+              <div className="flex flex-col gap-0.5">
+                {sessions.length === 0 && (
+                  <p className="px-2 py-2 text-xs text-[var(--foreground)]/40">暂无会话</p>
                 )}
-                onClick={() => handleOpenSession(s.id)}
-              >
-                <span className="min-w-0 flex-1 truncate">{s.title || "未命名会话"}</span>
+                {visibleSessions.map((s) => (
+                  <div
+                    key={s.id}
+                    className={clsx(
+                      "group flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm transition-colors",
+                      activeSessionId === s.id
+                        ? "bg-brand/10 font-medium text-brand"
+                        : "text-[var(--foreground)]/80 hover:bg-[var(--muted)]/60 hover:text-[var(--foreground)]",
+                    )}
+                    onClick={() => handleOpenSession(s.id)}
+                  >
+                    {/* 正在产出回复 / 跑编排的会话：条目左侧转圈（2026-10-05 补充拍板） */}
+                    {runningSessionId === s.id && (
+                      <Loader2
+                        data-testid="session-running"
+                        className="h-3 w-3 shrink-0 animate-spin text-brand"
+                        aria-label="会话运行中"
+                      />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">{s.title || "未命名会话"}</span>
 
-                {s.subject_slug && (
-                  <span
-                    className="shrink-0 truncate rounded px-1.5 py-0.5 text-[10px] bg-[var(--surface-card)] text-[var(--foreground)]/60 border border-[var(--border)]/50"
-                    style={{ maxWidth: "4.5rem" }}
-                    title={subjectName(s.subject_slug)}
-                  >
-                    {subjectName(s.subject_slug)}
-                  </span>
-                )}
+                    {s.subject_slug && (
+                      <span
+                        className="shrink-0 truncate rounded px-1.5 py-0.5 text-[10px] bg-[var(--surface-card)] text-[var(--foreground)]/60 border border-[var(--border)]/50"
+                        style={{ maxWidth: "4.5rem" }}
+                        title={subjectName(s.subject_slug)}
+                      >
+                        {subjectName(s.subject_slug)}
+                      </span>
+                    )}
 
-                <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handleRename(s.id, s.title);
-                    }}
-                    className="rounded p-1 opacity-60 transition-opacity hover:opacity-100"
-                    title="重命名"
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handleDelete(s.id, s.title);
-                    }}
-                    className="rounded p-1 opacity-60 transition-opacity hover:opacity-100 hover:text-red-500"
-                    title="删除"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </span>
+                    <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleRename(s.id, s.title);
+                        }}
+                        className="rounded p-1 opacity-60 transition-opacity hover:opacity-100"
+                        title="重命名"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDelete(s.id, s.title);
+                        }}
+                        className="rounded p-1 opacity-60 transition-opacity hover:opacity-100 hover:text-red-500"
+                        title="删除"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+
+              {/* 历史会话：默认隐藏第 N 条之后的条目，展开按钮查看全部（防止挤压科目区） */}
+              {hiddenSessionCount > 0 && (
+                <button
+                  data-testid="session-history-expand"
+                  onClick={() => setHistoryExpanded(true)}
+                  className="mt-1 flex w-full items-center gap-1 rounded-lg px-2 py-1 text-left text-xs text-[var(--foreground)]/55 transition-colors hover:bg-[var(--muted)]/60 hover:text-[var(--foreground)]"
+                >
+                  <ChevronRight className="h-3 w-3 shrink-0" />
+                  展开历史会话（还有 {hiddenSessionCount} 条）
+                </button>
+              )}
+              {historyExpanded && sessions.length > SESSION_VISIBLE_COUNT && (
+                <button
+                  data-testid="session-history-collapse"
+                  onClick={() => setHistoryExpanded(false)}
+                  className="mt-1 flex w-full items-center gap-1 rounded-lg px-2 py-1 text-left text-xs text-[var(--foreground)]/55 transition-colors hover:bg-[var(--muted)]/60 hover:text-[var(--foreground)]"
+                >
+                  <ChevronDown className="h-3 w-3 shrink-0" />
+                  收起历史会话
+                </button>
+              )}
+            </>
+          )}
         </div>
 
         {/* 科目 */}
         <div className="mt-5">
           <div className="mb-1.5 flex items-center justify-between px-2">
-            <span className="text-[11px] font-medium tracking-wide uppercase text-[var(--foreground)]/45">科目</span>
+            <button
+              onClick={() => setSubjectsOpen((v) => !v)}
+              aria-expanded={subjectsOpen}
+              className="flex min-w-0 items-center gap-0.5 rounded-md py-0.5 text-[11px] font-medium tracking-wide uppercase text-[var(--foreground)]/45 transition-colors hover:text-[var(--foreground)]/80"
+              title={subjectsOpen ? "收起科目列表" : "展开科目列表"}
+            >
+              {subjectsOpen ? (
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+              )}
+              科目
+            </button>
             <button
               onClick={() => {
                 setShowSubjectForm((v) => !v);
@@ -364,6 +444,8 @@ export function Sidebar() {
             </button>
           </div>
 
+          {subjectsOpen && (
+            <>
           {showSubjectForm && (
             <div
               className="mb-2 flex flex-col gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-3 shadow-xs"
@@ -444,6 +526,8 @@ export function Sidebar() {
               );
             })}
           </div>
+            </>
+          )}
         </div>
       </div>
 

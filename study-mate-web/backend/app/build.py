@@ -21,6 +21,7 @@ from . import audit
 from . import curriculum_store as cs
 from . import draft as draft_svc
 from . import image_scout, roles, tickets as tickets_svc
+from . import workspace_ctx
 from .config import REPO_ROOT, SCHEMAS_DIR, SCRIPTS_DIR
 from .produce import fixture_curriculum_envelope, is_draft
 
@@ -223,7 +224,10 @@ async def run_build(slug: str, provider: dict[str, Any], emit: Emit) -> None:
         draft_svc.save_draft_curriculum(slug, data)
         progress = draft_svc.draft_progress(slug)
         first = next((n for n in data.get("nodes") or [] if isinstance(n, dict) and n.get("id")), None)
-        progress["nodes"] = {first["id"]: {"status": "学习中", "mastery": 0}} if first else {}
+        # 只补默认首节点，不覆盖已有进度：重跑建课/重试不得把已推进的节点状态清空。
+        nodes_progress = progress.setdefault("nodes", {})
+        if first:
+            nodes_progress.setdefault(first["id"], {"status": "学习中", "mastery": 0})
         progress.setdefault("project", {})["current"] = str(interview.get("project") or "")
         draft_svc.save_draft_progress(slug, progress)
         await emit({"event": "stage", "stage": "落盘", "status": "done"})
@@ -251,7 +255,7 @@ async def _curriculum_tool_loop(
     from . import prompts
     from . import tools as tools_svc
 
-    system_text, missing = prompts.inject_role("generate")
+    system_text, missing = prompts.inject_role("generate", tools_enabled=True)
     if missing:
         await emit({"event": "error", "message": f"角色技能规范缺失：{'、'.join(missing)}"})
         return None
@@ -269,10 +273,16 @@ async def _curriculum_tool_loop(
     async def on_event(event: dict[str, Any]) -> None:
         name = str(event.get("name") or "")
         if event["type"] == "tool_call" and name == "submit_curriculum":
-            await emit({"event": "stage", "stage": "门禁", "status": "start"})
+            # 循环内自检（模型提交即跑、拿报错自修）；后端收尾还会强制跑一次真门禁，
+            # 两者在事件流里区分：这里是「大纲自检」。
+            await emit({"event": "stage", "stage": "大纲自检", "status": "start"})
         elif event["type"] == "tool_result" and name == "submit_curriculum":
             await emit(
-                {"event": "stage", "stage": "门禁", "status": "done" if not event.get("is_error") else "fail"}
+                {
+                    "event": "stage",
+                    "stage": "大纲自检",
+                    "status": "done" if not event.get("is_error") else "fail",
+                }
             )
 
     outcome = await agent_svc.run_agent(
@@ -313,12 +323,12 @@ async def _curriculum_chain(
         if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
             await emit({"event": "error", "message": "大纲派工没有交回课程 JSON（data 键）"})
             return None
-        await emit({"event": "stage", "stage": "门禁", "status": "start"})
+        await emit({"event": "stage", "stage": "交付检查", "status": "start"})
         problems = await run_curriculum_gate(data)
         if not problems:
-            await emit({"event": "stage", "stage": "门禁", "status": "done"})
+            await emit({"event": "stage", "stage": "交付检查", "status": "done"})
             return data
-        await emit({"event": "stage", "stage": "门禁", "status": "fail", "problems": problems})
+        await emit({"event": "stage", "stage": "交付检查", "status": "fail", "problems": problems})
         if round_no == MAX_RETRIES:
             ticket = tickets_svc.create_ticket(
                 kind="build",
@@ -327,6 +337,8 @@ async def _curriculum_chain(
                 base_label="draft" if is_draft(base) else "workspace",
                 problems=problems,
                 artifacts=["curriculum.yaml"],
+                # 建课工单记录本次建课所属工作区（promote 的落点就是这个工作区）。
+                workspace=str(workspace_ctx.resolve()),
             )
             await emit({"event": "handoff", "ticket": ticket})
             await emit(

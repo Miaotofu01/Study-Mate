@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   AlertCircle,
+  BookOpen,
   Brain,
   Check,
   CheckCircle2,
@@ -27,20 +29,26 @@ import {
 import clsx from "clsx";
 import Markdown from "./Markdown";
 import { Composer } from "./Composer";
+import { ErrorNotice } from "./ErrorNotice";
 import { InspectionDialog } from "./InspectionDialog";
+import { ProductionTaskCard, lessonHref } from "./ProductionTaskCard";
 import { RightRail } from "./RightRail";
 import { RightSidebar } from "./RightSidebar";
-import { activeModelOf } from "./ModelSelector";
-import { api, buildDraft, streamChat } from "@/lib/api";
+import { activeModelOf, effectiveActiveOf } from "./ModelSelector";
+import { api, buildDraft, normalizeError } from "@/lib/api";
+import { forgetChatRun, getChatRun, recoverChatRun, retryChatSync, startChatRun, stopChatRun, subscribeChatRuns } from "@/lib/chatStream";
 import type { OrchestrationProgress } from "@/lib/api";
 import { contextWindowOf } from "@/lib/contextWindow";
-import { cleanAssistantText, formatFileSize } from "@/lib/format";
+import { cleanAssistantParts, cleanAssistantText, formatFileSize } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import type {
   AppSettings,
+  AssessmentOutcome,
   AttachmentKind,
   ChatMessage,
+  ErrorInfo,
   GraphNode,
+  LessonLink,
   MessageAttachment,
   SessionActive,
   ToolActivity,
@@ -63,10 +71,12 @@ const GREETINGS: Record<"morning" | "afternoon" | "evening", string[]> = {
 };
 
 const STARTERS = ["讲解一个概念", "出几道练习题", "按我的课程进度继续", "帮我制定学习计划"];
-// 建课会话入口（§5.1 F 行）：建课会话注入 learning-system + learning-discovery，探索与盘问同会话
+// 方向探索入口（§5.1 F 行）：2026-10-05 拍板③后只负责把这句话填进输入框；发出后由
+// 智能体经 start_course_interview 工具把会话切入建课盘问（普通会话可中途进入建课会话），
+// 前端不再直接以 interview 模式开会话。
 const DISCOVERY_STARTER = "不知道学什么，帮我选方向";
 // 建课完成后的一键开课：不发新端点，走普通聊天把「产出第一课」交给智能体的 produce_lesson 工具
-const FIRST_LESSON_PROMPT = "开始第一课：请按大纲顺序产出第一个节点，并告诉我产到哪了";
+const FIRST_LESSON_PROMPT = "开始第一课";
 
 // 右侧边栏宽度：默认 256px（原 w-64），可拖拽范围 200–480px，键与课程页互不干扰
 const RIGHT_SIDEBAR_WIDTH_KEY = "studymate-chat-right-sidebar-width";
@@ -110,6 +120,15 @@ function pickGreeting(): string {
   return group[Math.floor(Math.random() * group.length)];
 }
 
+/**
+ * 用户消息的展示原文（R7）：有 display_content 就显示/编辑它（可能是空串），
+ * 否则回落 content（旧消息）。复制 / 气泡 / 编辑框 / 概念本 / regenerate 都走这里，
+ * 助手消息不适用（仍用 content / cleanAssistantText）。
+ */
+function userDisplayText(msg: Pick<ChatMessage, "content" | "display_content">): string {
+  return msg.display_content ?? msg.content;
+}
+
 export function ChatView() {
   const {
     sessions,
@@ -124,6 +143,8 @@ export function ChatView() {
     setActiveSubject,
     loadedSession,
     clearLoadedSession,
+    openSession,
+    setBuildingSessionId,
     refreshSessions,
     refreshSubjects,
     renameSession,
@@ -134,7 +155,7 @@ export function ChatView() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorInfo | string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [greeting, setGreeting] = useState("你好");
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -163,6 +184,9 @@ export function ChatView() {
   const [sessionActive, setSessionActive] = useState<SessionActive | null>(null);
   // 建课编排的实时进度（后端每几秒一份快照）：长时间派工时"在干活"要看得见
   const [buildProgress, setBuildProgress] = useState<OrchestrationProgress | null>(null);
+  // 服务端刚为本轮新建的会话 id（用于让草稿迁移只发生在"真新会话"，手动切历史会话不迁移）。
+  // 必须与 setSessionId 同批更新，hook 才能在同一次 render 里看到标记。
+  const [adoptedNewDraftId, setAdoptedNewDraftId] = useState<string | null>(null);
 
   const handleCopyMessage = useCallback((index: number, text: string) => {
     void navigator.clipboard.writeText(text);
@@ -179,7 +203,8 @@ export function ChatView() {
     });
   }, []);
 
-  const abortRef = useRef<AbortController | null>(null);
+  const viewEpochRef = useRef(0);
+  const mountedRef = useRef(true);
   const orchestrationAbortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // 流式自动跟随：仅当用户本来就在底部附近时才贴底；一旦向上翻就停止跟随
@@ -189,12 +214,28 @@ export function ChatView() {
   const rightOpenRef = useRef(rightOpen);
   rightOpenRef.current = rightOpen;
   const renameCommitRef = useRef(false);
+  // Composer 的填充句柄：开场选项把文本填进输入框（不直接发送，2026-10-05 拍板③）
+  const composerFillRef = useRef<{ fill: (text: string) => void } | null>(null);
+
+  // 会话同步门锁：编辑/删除/发送都依赖「本地消息与服务端 1:1」。编排结束会回灌服务端消息；
+  // 回灌进行中或失败期间禁用危险的消息操作（含发送），避免在错位状态下传下标。
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const unsynced = syncing || syncError !== null;
+  const unsyncedRef = useRef(false);
+  unsyncedRef.current = unsynced;
+  // 消息变更纪元：载入会话 / 新建对话 / 发送 / 建课 / 删除都会 bump。
+  // 回灌在 await 返回后若纪元已变（有更新的消息变更），则作废这份可能过时的服务端快照。
+  const mutationEpochRef = useRef(0);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
 
   const hasMessages = messages.length > 0;
 
   // 名称栏与右栏用量栏共用：生效的「提供商 / 模型」与上下文长度。
-  // 会话绑定了模型就用会话的（2026-10-04：模型按会话持久化），否则用全局默认。
-  const effectiveActive = sessionActive ?? settings?.active ?? null;
+  // 会话绑定可用就用会话的，绑定失效（提供商被删/停用、模型被移除）则回落全局默认——
+  // 与后端 get_session_provider 同为「完全可用才生效」，避免显示失效绑定/误禁用输入。
+  const effectiveActive = effectiveActiveOf(settings, sessionActive);
   const activeModelLabel = useMemo(() => {
     if (!settings || !effectiveActive) return null;
     const entry = settings.providers.find((p) => p.id === effectiveActive.provider_id);
@@ -260,6 +301,38 @@ export function ChatView() {
     void refreshSubjects();
   }, [refreshSessions, refreshSubjects]);
 
+  // 挂载恢复（2026-10-05 拍板④）：从其他页面回到 /chat 时 ChatView 会重挂载，
+  // 本地 sessionId/messages 归零，而 WorkspaceProvider 里的 activeSessionId 还指着
+  // 原会话——不恢复就会出现「侧栏高亮旧会话、主区却是新对话空态」的断连。
+  // 这里挂载时主动重开活动会话；会话已被删除则静默失败（拍板：不做兜底）。
+  const restoredOnMountRef = useRef(false);
+  useEffect(() => {
+    if (restoredOnMountRef.current) return;
+    restoredOnMountRef.current = true;
+    if (activeSessionId === null || loadedSession !== null) return;
+    void openSession(activeSessionId).catch(() => undefined);
+  }, [activeSessionId, loadedSession, openSession]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const restoreRun = (initial = false) => {
+      const run = getChatRun(sessionIdRef.current);
+      if (!run || (initial && sessionIdRef.current === null && !run.streaming)) return;
+      setMessages(run.messages);
+      setUsage(run.usage);
+      setStreaming(run.streaming);
+      setSyncing(run.syncing);
+      setSyncError(run.syncError);
+      setError(run.error);
+    };
+    restoreRun(true);
+    const unsubscribe = subscribeChatRuns(restoreRun);
+    return () => {
+      mountedRef.current = false;
+      unsubscribe();
+    };
+  }, []);
+
   // 选中科目后拉取该科目的节点列表（用于节点下拉）
   useEffect(() => {
     if (!activeSubjectSlug) {
@@ -283,20 +356,38 @@ export function ChatView() {
   // 消费打开的历史会话：替换消息与会话 id，并恢复科目/节点上下文
   useEffect(() => {
     if (!loadedSession) return;
-    abortRef.current?.abort();
+    viewEpochRef.current += 1;
+    sessionIdRef.current = loadedSession.meta.id;
+    if (loadedSession.streaming && !getChatRun(loadedSession.meta.id)) {
+      recoverChatRun(loadedSession.meta.id, loadedSession.messages, loadedSession.meta.usage ?? null);
+    }
+    let live = getChatRun(loadedSession.meta.id);
+    const completedError = live?.error ?? null;
+    if (live && !live.streaming && !live.syncing && !live.syncError) {
+      forgetChatRun(loadedSession.meta.id);
+      if (!loadedSession.streaming) live = null;
+    }
     orchestrationAbortRef.current?.abort();
     setBuilding(false);
+    // 换会话是有更新的消息变更：作废在飞的回灌，并清掉同步错误锁
+    mutationEpochRef.current += 1;
+    setSyncing(false);
+    setSyncError(null);
+    // 历史会话由服务端已存在：不设草稿迁移标记（手动点开历史会话绝不能把 __new__ 草稿迁进来）
+    setAdoptedNewDraftId(null);
     // 首屏/切会话一律从底部开始（与「用户手动上翻」区分开）
     stickToBottomRef.current = true;
     setActiveSessionId(loadedSession.meta.id);
     setSessionId(loadedSession.meta.id);
-    setMessages(loadedSession.messages);
-    setError(null);
+    setMessages(live?.messages ?? loadedSession.messages);
+    setError(live?.error ?? completedError);
     setNotice(null);
-    setStreaming(false);
+    setStreaming(live?.streaming ?? false);
+    setSyncing(live?.syncing ?? false);
+    setSyncError(live?.syncError ?? null);
     setEditingIndex(null);
     setConfirmDeleteIndex(null);
-    setUsage(loadedSession.meta.usage ?? null);
+    setUsage(live?.usage ?? loadedSession.meta.usage ?? null);
     // 恢复该会话绑定的模型/档位（新对话态下为 null = 跟随全局默认）
     setSessionActive(loadedSession.meta.active ?? null);
     setActiveSubject(loadedSession.meta.subject_slug, loadedSession.meta.node_id);
@@ -308,9 +399,16 @@ export function ChatView() {
   // activeSessionId 变为 null（新对话/删除当前会话）时清空本地消息
   useEffect(() => {
     if (activeSessionId !== null) return;
-    abortRef.current?.abort();
+    viewEpochRef.current += 1;
+    sessionIdRef.current = null;
+    forgetChatRun(null);
     orchestrationAbortRef.current?.abort();
     setBuilding(false);
+    mutationEpochRef.current += 1;
+    setSyncing(false);
+    setSyncError(null);
+    // 新对话回到干净槽位：清掉旧迁移标记
+    setAdoptedNewDraftId(null);
     // 新对话回到贴底跟随
     stickToBottomRef.current = true;
     setSessionId(null);
@@ -345,15 +443,60 @@ export function ChatView() {
     setMessages((prev) => [...prev, message as ChatMessage]);
   }, []);
 
+  // 编排/对话结束后以服务端消息回灌本地：本地只追加的临时卡（⚙ 开始卡等）会让可编辑/
+  // 可删除消息的本地下标与服务端错位（开发与计划 §消息级操作 1:1 不变式）；后端也可能在
+  // SSE 之外补写消息（interview 收口提示/解析失败卡），统一用回灌对齐。
+  // 守卫：会话没切走、且期间没有更新的消息变更（纪元未变），否则丢弃过时快照。
+  const resyncMessages = useCallback(
+    async (target: string | null, options: { keepLocalWhenSame?: boolean } = {}) => {
+      if (!target || sessionIdRef.current !== target) return;
+      if (getChatRun(target)?.syncError) {
+        await retryChatSync(target);
+        return;
+      }
+      const epoch = mutationEpochRef.current;
+      const localCount = messagesRef.current.length;
+      setSyncing(true);
+      setSyncError(null);
+      try {
+        const data = await api.getSession(target);
+        if (sessionIdRef.current !== target || mutationEpochRef.current !== epoch) {
+          setSyncing(false);
+          return;
+        }
+        // 对话轮的常规回灌：长度没变就保留本地（保住只在前端呈现的 notices，避免无谓重渲染）
+        if (!options.keepLocalWhenSame || data.messages.length !== localCount) {
+          forgetChatRun(target);
+          setMessages(data.messages);
+          setUsage(data.usage ?? null);
+        }
+        setSyncing(false);
+      } catch (err: unknown) {
+        if (sessionIdRef.current !== target || mutationEpochRef.current !== epoch) {
+          setSyncing(false);
+          return;
+        }
+        setSyncError(err instanceof Error ? err.message : String(err));
+        setSyncing(false);
+      }
+    },
+    [],
+  );
+
   const handleSend = useCallback(
     (
       text: string,
       attachments: OutgoingAttachment[] = [],
       opts: { mode?: "chat" | "interview"; fixtureScenario?: string; replaceFrom?: number } = {},
     ) => {
+      // 未同步（回灌中/失败）时不发送：避免与服务端消息错位、或让新消息被过时的回灌快照覆盖
+      const currentRun = getChatRun(sessionId);
+      if (unsyncedRef.current || currentRun?.streaming || currentRun?.syncing || currentRun?.syncError) return;
       setError(null);
       setNotice(null);
       setStreaming(true);
+      // 新消息 = 有更新的消息变更，作废在飞的回灌
+      mutationEpochRef.current += 1;
 
       const metas: MessageAttachment[] = attachments.map((a) => ({
         id: a.id,
@@ -362,158 +505,37 @@ export function ChatView() {
         size: a.size,
       }));
 
-      // 乐观地先显示用户消息和一个空的 assistant 占位。
-      // 编辑重发（replaceFrom）时先截断该下标起的本地消息——与后端 truncate 对齐。
-      setMessages((prev) => {
-        const base = opts.replaceFrom === undefined ? prev : prev.slice(0, opts.replaceFrom);
-        return [
-          ...base,
-          metas.length > 0 ? { role: "user", content: text, attachments: metas } : { role: "user", content: text },
-          { role: "assistant", content: "" },
-        ];
-      });
-
-      const controller = new AbortController();
-      abortRef.current = controller;
-      let assistantBuffer = "";
-
-      const patchAssistant = (patch: (c: string) => string) => {
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          // kind 卡（编排播报）不吃聊天 delta
-          if (last && last.role === "assistant" && !last.kind) {
-            next[next.length - 1] = { ...last, content: patch(last.content) };
-          }
-          return next;
-        });
-      };
-
-      // 工具卡（K0）：挂在最后一条 assistant 占位上，随流式更新
-      const patchTools = (patch: (tools: ToolActivity[]) => ToolActivity[]) => {
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last && last.role === "assistant" && !last.kind) {
-            next[next.length - 1] = { ...last, tools: patch(last.tools ?? []) };
-          }
-          return next;
-        });
-      };
-
-      // 思维链增量与生效用量都挂在最后一条 assistant 占位上（与 tools 同处「中间过程」）
-      const patchReasoning = (piece: string) => {
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last && last.role === "assistant" && !last.kind) {
-            next[next.length - 1] = { ...last, reasoning: (last.reasoning ?? "") + piece };
-          }
-          return next;
-        });
-      };
-
-      // SSE 提示（绑定/图片降级/重试）：收进当前消息的「中间过程」折叠区，不再单独挂横幅
-      const appendNoticeToMessage = (message: string) => {
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last && last.role === "assistant" && !last.kind) {
-            next[next.length - 1] = { ...last, notices: [...(last.notices ?? []), message] };
-          }
-          return next;
-        });
-      };
-
-      streamChat(
-        text,
+      const viewEpoch = viewEpochRef.current;
+      startChatRun({
         sessionId,
-        {
-          onSession: (id) => {
-            setSessionId(id);
-            setActiveSessionId(id);
-            // 新对话晋升为已有会话：沿用当前折叠态并落盘，后续切回时保持一致
-            writeRightOpen(id, rightOpenRef.current);
-          },
-          onDelta: (piece) => {
-            assistantBuffer += piece;
-            patchAssistant((c) => c + piece);
-          },
-          onReasoning: (piece) => patchReasoning(piece),
-          onNotice: (message) => appendNoticeToMessage(message),
-          onUsage: (next) => setUsage(next),
-          onToolCall: ({ id, name, arguments: args }) => {
-            patchTools((tools) => [
-              ...tools,
-              { id, name, arguments: args, status: "running" },
-            ]);
-          },
-          onToolResult: ({ id, name, content, is_error }) => {
-            patchTools((tools) => {
-              const index = tools.findIndex((tool) => tool.id === id);
-              const resolved: ToolActivity = {
-                id,
-                name,
-                arguments: index >= 0 ? tools[index].arguments : "",
-                status: is_error ? "error" : "done",
-                result: content,
-                isError: is_error,
-              };
-              if (index < 0) return [...tools, resolved];
-              const next = [...tools];
-              next[index] = { ...next[index], ...resolved };
-              return next;
-            });
-          },
-          onConfirm: (payload) => {
-            // 盘问收口：后端已建草稿并持久化确认卡，本地同步追加
-            appendKindMessage({
-              role: "assistant",
-              content: `盘问完成，已为「${payload.name}」建好草稿。确认后开始建课编排。`,
-              kind: "build_confirm",
-              slug: payload.slug,
-            });
-            void refreshSessions();
-          },
-          onDone: () => {
-            setStreaming(false);
-            void refreshSessions();
-          },
-          onError: (msg) => {
-            setError(msg);
-            // 空回复且报错时移除占位气泡
-            if (!assistantBuffer) {
-              setMessages((prev) => {
-                const next = [...prev];
-                const last = next[next.length - 1];
-                if (last && last.role === "assistant" && !last.content) next.pop();
-                return next;
-              });
-            }
-            setStreaming(false);
-            void refreshSessions();
-          },
+        messages: messagesRef.current,
+        text,
+        attachments: metas.length ? metas : undefined,
+        usage,
+        model: activeModelLabel ?? undefined,
+        onSession: (id) => {
+          void refreshSessions();
+          // 新会话分配 id 时可能已经切走；后台流不能把用户拉回原会话。
+          if (!mountedRef.current || viewEpochRef.current !== viewEpoch) return;
+          sessionIdRef.current = id;
+          setSessionId(id);
+          setActiveSessionId(id);
+          if (sessionId === null) setAdoptedNewDraftId(id);
+          writeRightOpen(id, rightOpenRef.current);
         },
-        {
-          // 建课会话不带科目关联（键整体省略，后端 mode 保持 interview）
+        onSettled: () => { void refreshSessions(); },
+        options: {
           subjectSlug: opts.mode === "interview" ? undefined : activeSubjectSlug,
           nodeId: opts.mode === "interview" ? undefined : activeNodeId,
-          // 会话级工作区：仅新建会话时生效
           workspace: activeWorkspace,
           attachments: attachments.map((a) => a.id),
           mode: opts.mode ?? null,
-          // E2E 专用：fixture 模式下按请求选固定流场景（建课会话用 interview 场景拿收口标记）
           fixtureScenario: opts.fixtureScenario ?? (opts.mode === "interview" ? "interview" : null),
-          // 编辑重发：服务端据此先截断旧消息再追加（普通发送不带该键）
           replaceFrom: opts.replaceFrom,
-          signal: controller.signal,
         },
-      ).catch((err) => {
-        if (err.name !== "AbortError") setError(String(err));
-        setStreaming(false);
       });
     },
-    [sessionId, activeSubjectSlug, activeNodeId, activeWorkspace, setActiveSessionId, refreshSessions, appendKindMessage],
+    [sessionId, activeSubjectSlug, activeNodeId, activeWorkspace, usage, activeModelLabel, setActiveSessionId, refreshSessions],
   );
 
   // 建课 done 卡上的「开始第一课」：不发新端点，复用普通发送路径，让智能体用 produce_lesson 工具产出
@@ -525,18 +547,30 @@ export function ChatView() {
   const startBuild = useCallback(
     (slug: string) => {
       if (building) return;
+      forgetChatRun(sessionId);
       setBuilding(true);
+      // 建课编排也算「会话在跑」：侧栏条目转圈（2026-10-05 补充拍板）
+      setBuildingSessionId(sessionId);
       setBuildProgress(null);
       setError(null);
+      // 建课开始 = 有更新的消息变更，作废在飞的回灌
+      mutationEpochRef.current += 1;
       const orchestrationController = new AbortController();
       orchestrationAbortRef.current = orchestrationController;
+      // 本次编排落到哪个会话（新建会话时由 onSession 补上）：回灌与错误卡的归属判据
+      let activeId: string | null = sessionId;
       const mark = (content: string, kind: ChatMessage["kind"]) => appendKindMessage({ role: "assistant", content, kind });
       mark("⚙ 开始建课编排：大纲与采图并行…", "stage");
       buildDraft(slug, {
         onSession: (id) => {
+          activeId = id;
+          sessionIdRef.current = id;
+          // 新对话态直接进建课：编排会话在这里才拿到 id，转圈跟着改挂
+          setBuildingSessionId(id);
           if (!sessionId) {
             setSessionId(id);
             setActiveSessionId(id);
+            setAdoptedNewDraftId(id);
             writeRightOpen(id, rightOpenRef.current);
           }
         },
@@ -572,15 +606,25 @@ export function ChatView() {
           void refreshSessions();
         },
         onError: (message) => {
-          mark(message, "error");
+          mark(normalizeError(message)?.summary ?? "建课失败", "error");
           void refreshSessions();
         },
-      }, sessionId, orchestrationController.signal).finally(() => {
-        setBuilding(false);
-        setBuildProgress(null);
-      });
+      }, sessionId, orchestrationController.signal)
+        .catch((err: unknown) => {
+          // 中止（切会话/点停止）不算失败，不回写错误卡；网络/协议失败且仍在本会话才提示
+          if ((err as Error)?.name === "AbortError") return;
+          if (sessionIdRef.current !== activeId) return;
+          mark(String(err), "error");
+        })
+        .finally(() => {
+          setBuilding(false);
+          setBuildingSessionId(null);
+          setBuildProgress(null);
+          // 编排结束（成功/失败/取消）都以服务端消息为准回灌：本地临时卡不占可操作下标
+          void resyncMessages(activeId);
+        });
     },
-    [building, sessionId, appendKindMessage, refreshSubjects, refreshSessions],
+    [building, sessionId, appendKindMessage, setBuildingSessionId, refreshSubjects, refreshSessions, resyncMessages],
   );
 
   // 落点确认：草稿整体搬进学习工作区；带上会话 id（后端据此写 subject_slug）
@@ -591,23 +635,41 @@ export function ChatView() {
       try {
         const res = await api.promoteDraft(slug, sessionId);
         setNotice(`已落盘到工作区：${res.subject_dir}`);
-        appendKindMessage({ role: "assistant", content: `✅ 落点确认完成，科目「${slug}」已进入工作区。`, kind: "done" });
+        // 落点确认的可见反馈走 banner + done 卡 promote 按钮翻成「已进入工作区」；
+        // 不再追加本地-only 完成卡（它会占用可操作消息下标与服务端错位）。
         void refreshSubjects();
         // 会话的科目关联由后端在 promote 时落库，这里刷新本地列表并选中新科目
         void refreshSessions();
         setActiveSubject(slug);
+        // 以服务端消息为准回灌（本地 === 服务端，编辑/删除下标才对得上）
+        await resyncMessages(sessionId);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setPromoting(false);
       }
     },
-    [appendKindMessage, refreshSubjects, refreshSessions, sessionId, setActiveSubject],
+    [refreshSubjects, refreshSessions, sessionId, setActiveSubject, resyncMessages],
   );
 
   const handleStop = () => {
-    abortRef.current?.abort();
-    setStreaming(false);
+    // 聊天流与建课编排各持一个控制器：停止按钮对两者都要生效（建课中绝不能点了没反应）
+    stopChatRun(sessionIdRef.current);
+    orchestrationAbortRef.current?.abort();
+    setBuilding(false);
+    setBuildProgress(null);
+    // 纯空占位（一个字都没吐就停）会让本地比服务端多一条，导致后续下标错位：回灌对齐
+    const tail = messagesRef.current[messagesRef.current.length - 1];
+    if (
+      !getChatRun(sessionIdRef.current) &&
+      tail &&
+      tail.role === "assistant" &&
+      !tail.content &&
+      !tail.reasoning &&
+      !(tail.tools && tail.tools.length > 0)
+    ) {
+      void resyncMessages(sessionIdRef.current, { keepLocalWhenSame: true });
+    }
   };
 
   // 编辑重发：从该下标截断（本地 + 服务端），用编辑后的文本与附件重新生成回复。
@@ -627,6 +689,9 @@ export function ChatView() {
       setConfirmDeleteIndex(null);
       try {
         const res = await api.deleteTurn(sessionId, index);
+        // 删除是有更新的消息变更：作废在飞的回灌，再用服务端返回的消息对齐
+        mutationEpochRef.current += 1;
+        forgetChatRun(sessionId);
         setMessages(res.messages);
         void refreshSessions();
       } catch (err) {
@@ -641,7 +706,8 @@ export function ChatView() {
       let question = "";
       for (let i = index - 1; i >= 0; i--) {
         if (messages[i]?.role === "user") {
-          question = messages[i].content;
+          // 记入概念本用展示原文（无附件/旧消息回落 content）
+          question = userDisplayText(messages[i]);
           break;
         }
       }
@@ -758,7 +824,7 @@ export function ChatView() {
                     {STARTERS.map((s) => (
                       <button
                         key={s}
-                        onClick={() => handleSend(s)}
+                        onClick={() => composerFillRef.current?.fill(s)}
                         className="rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-4 py-2 text-sm text-[var(--foreground)]/85 shadow-xs transition-all hover:border-brand/40 hover:bg-[var(--muted)]/60 hover:text-[var(--foreground)]"
                       >
                         {s}
@@ -766,9 +832,9 @@ export function ChatView() {
                     ))}
                     <button
                       data-testid="discovery-starter"
-                      onClick={() => handleSend(DISCOVERY_STARTER, [], { mode: "interview" })}
+                      onClick={() => composerFillRef.current?.fill(DISCOVERY_STARTER)}
                       className="rounded-full border border-brand/40 bg-brand/5 px-4 py-2 text-sm font-medium text-brand shadow-xs transition-all hover:bg-brand/10"
-                      title="进入建课会话：先聊方向，盘问结束后建课"
+                      title="填入输入框：发出后教练会把会话切入建课盘问"
                     >
                       {DISCOVERY_STARTER}
                     </button>
@@ -804,8 +870,11 @@ export function ChatView() {
                   const showCursor = !msg.content && isStreamingHere && !msg.reasoning;
                   const isEditing = editingIndex === i;
                   const deleting = confirmDeleteIndex === i;
-                  // 展示/复制/记入概念本统一用清洗后的文本：剥掉盘问收口标记、去掉首尾空行
-                  const clean = isUser ? msg.content : cleanAssistantText(msg.content);
+                  // 展示/复制/记入概念本统一用清洗后的文本：用户消息用展示原文（R7），
+                  // 助手消息剥掉盘问收口标记、去掉首尾空行
+                  const clean = isUser
+                    ? userDisplayText(msg)
+                    : cleanAssistantText(msg.content);
                   return (
                     <div
                       key={i}
@@ -845,38 +914,25 @@ export function ChatView() {
                             {msg.model ?? activeModelLabel ?? "StudyMate"}
                           </div>
                         )}
-                        {/* 中间过程折叠区：只留思维链 + 本轮提示，默认收起；工具卡已移出，常显 */}
-                        {!isUser && (
-                          <ProcessPanel
-                            reasoning={msg.reasoning}
-                            tools={msg.tools}
-                            notices={msg.notices}
-                            streaming={isStreamingHere}
-                          />
+                        {!isUser && <AssistantMessageBody message={msg} streaming={isStreamingHere} />}
+                        {!isUser && (msg.error || msg.stream_state === "error" || msg.stream_state === "interrupted") && (
+                          <ErrorNotice error={msg.error ?? normalizeError(msg.stopped_reason === "user_stop" ? {
+                            code: "user_stopped", phase: "finalize", summary: "已停止本轮回复。", retryable: false,
+                            status: null, upstream_code: null, stopped_reason: "user_stop",
+                          } : "回复异常结束，已保留收到的内容。")} />
                         )}
-                        {/* 工具调用卡：不再藏在折叠区里，流式期间与回放都直接可见 */}
-                        {!isUser && msg.tools && msg.tools.length > 0 && <ToolCards tools={msg.tools} />}
                         {isEditing ? (
                           <UserMessageEditor
-                            initialText={msg.content}
+                            initialText={userDisplayText(msg)}
                             initialAttachments={msg.attachments ?? []}
                             sessionId={sessionId}
                             onSubmit={(text, attachments) => submitEdit(i, text, attachments)}
                             onCancel={() => setEditingIndex(null)}
                           />
-                        ) : clean ? (
-                          isUser ? (
-                            <div className="max-w-[85%] rounded-2xl bg-brand px-4 py-2.5 text-sm text-white shadow-xs [&_a]:text-white [&_a]:underline [&_code]:bg-black/20 [&_pre]:bg-black/30">
-                              <Markdown content={clean} />
-                            </div>
-                          ) : (
-                            <div className="relative">
-                              <Markdown content={clean} />
-                              {isStreamingHere && (
-                                <span className="ml-1 inline-block h-4 w-1.5 align-middle rounded-xs bg-brand animate-pulse" />
-                              )}
-                            </div>
-                          )
+                        ) : isUser && clean ? (
+                          <div className="max-w-[85%] rounded-2xl bg-brand px-4 py-2.5 text-sm text-white shadow-xs [&_a]:text-white [&_a]:underline [&_code]:bg-black/20 [&_pre]:bg-black/30">
+                            <Markdown content={clean} />
+                          </div>
                         ) : null}
 
                         {/* 消息操作条：用户=复制/编辑（小图标），助手=复制/记入概念本/删除本轮 */}
@@ -904,7 +960,7 @@ export function ChatView() {
                                 <IconAction
                                   title="编辑：从这条消息重新生成"
                                   testId="user-message-edit"
-                                  disabled={streaming}
+                                  disabled={streaming || building || unsynced}
                                   onClick={() => {
                                     setConfirmDeleteIndex(null);
                                     setEditingIndex(i);
@@ -968,7 +1024,7 @@ export function ChatView() {
                                 <button
                                   type="button"
                                   data-testid="turn-delete"
-                                  disabled={!sessionId || streaming}
+                                  disabled={!sessionId || streaming || building || unsynced}
                                   onClick={() => setConfirmDeleteIndex(i)}
                                   className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--foreground)]/50 hover:bg-red-500/10 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-red-400"
                                   title="删除本轮（用户提问与这条回复一起删）"
@@ -1037,10 +1093,28 @@ export function ChatView() {
                 </div>
               )}
 
-              {error && (
-                <div className="mt-5 flex items-start gap-2 rounded-xl border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+              {error && !messages.some((message) => message.error) && (
+                <ErrorNotice error={normalizeError(error)} />
+              )}
+
+              {/* 回灌失败：消息已可能与服务端错位，暂停发送/编辑/删除直到重试成功 */}
+              {syncError && (
+                <div
+                  data-testid="chat-sync-error"
+                  className="mt-5 flex items-start gap-2 rounded-xl border border-amber-400/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400"
+                >
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{error}</span>
+                  <span className="min-w-0 flex-1">
+                    会话同步失败：{syncError}（为避免误删/下标错位，消息操作已暂停）
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void resyncMessages(sessionIdRef.current)}
+                    className="shrink-0 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-amber-500/10"
+                    style={{ borderColor: "var(--border)" }}
+                  >
+                    重试
+                  </button>
                 </div>
               )}
             </div>
@@ -1107,13 +1181,22 @@ export function ChatView() {
 
           <Composer
             streaming={streaming || building}
-            disabled={hasKey === false}
+            disabled={hasKey === false || unsynced}
+            disabledHint={
+              syncError
+                ? "会话未同步，请先在上方重试同步"
+                : unsynced
+                  ? "正在同步会话…"
+                  : undefined
+            }
             elevated={!hasMessages}
             sessionId={sessionId}
             settings={settings}
             onUpdated={setSettings}
             sessionActive={sessionActive}
             onSessionActiveChange={setSessionActive}
+            adoptNewDraftInto={adoptedNewDraftId}
+            fillHandle={composerFillRef}
             onSend={handleSend}
             onStop={handleStop}
           />
@@ -1163,11 +1246,13 @@ export function ChatView() {
         />
       </RightRail>
 
-      {/* 质检工单（handoff 卡入口） */}
+      {/* 质检工单（handoff 卡入口）：带上会话工作区，归属判定才不会回落到默认猜 */}
       {inspectionTicketId && (
         <InspectionDialog
+          key={inspectionTicketId}
           ticketId={inspectionTicketId}
           sessionId={sessionId}
+          workspace={activeWorkspace}
           onClose={() => setInspectionTicketId(null)}
         />
       )}
@@ -1288,6 +1373,7 @@ function KindMessageCard({
     );
   }
   const isError = kind === "error";
+  if (isError) return <div data-testid="orchestration-error"><ErrorNotice text={content} /></div>;
   return (
     <div
       data-testid={isError ? "orchestration-error" : "orchestration-stage"}
@@ -1329,6 +1415,147 @@ function IconAction({
       {children}
     </button>
   );
+}
+
+/** 产课成功入口：常显打开课件（链接只来自服务端结构化 lesson，不解析模型文本/猜路径）。 */
+function LessonLinkButton({ lesson }: { lesson: LessonLink }) {
+  return (
+    <Link
+      data-testid="open-lesson"
+      href={lessonHref(lesson)}
+      className="flex w-fit items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-light"
+      title={lesson.title}
+    >
+      <BookOpen className="h-3.5 w-3.5" />
+      打开课件
+    </Link>
+  );
+}
+
+/**
+ * 评估工具的系统落盘状态：写盘成功/失败由后端结构化 assessment 决定。
+ * 模型可以口头说「已通过」，但只要 status=failed，这里必须显示未保存、未启动后台修复。
+ */
+function AssessmentStatus({ outcome }: { outcome: AssessmentOutcome }) {
+  const failed = outcome.status === "failed";
+  const meta: string[] = [];
+  if (outcome.verdict) meta.push(`判定：${outcome.verdict}`);
+  if (typeof outcome.mastery === "number") meta.push(`掌握度：${outcome.mastery}`);
+  if (typeof outcome.progress_updated === "boolean") {
+    meta.push(outcome.progress_updated ? "进度已置位" : "进度未置位");
+  }
+  return (
+    <div
+      data-testid="assessment-status"
+      data-status={outcome.status}
+      className={clsx(
+        "flex w-fit flex-col gap-0.5 rounded-lg border px-2.5 py-1.5 text-xs",
+        failed
+          ? "border-red-300/60 bg-red-500/10 text-red-600 dark:text-red-400"
+          : "border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+      )}
+    >
+      <div className="flex items-center gap-1.5 font-medium">
+        {failed ? (
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+        ) : (
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+        )}
+        {failed ? "评估失败，未保存，未启动后台修复" : "评估记录已保存"}
+      </div>
+      {failed
+        ? outcome.error && <div className="opacity-80">{outcome.error}</div>
+        : meta.length > 0 && <div className="opacity-80">{meta.join(" · ")}</div>}
+    </div>
+  );
+}
+
+/**
+ * 单个工具的视图分发：产课任务 → 任务卡（父 produce 工具一卡）；评估/产课成功 → 常显系统状态
+ * 与课件入口；其余工具回落旧 ToolCards。旧消息没有 task 时行为不变。
+ */
+function ToolActivityView({ tool }: { tool: ToolActivity }) {
+  const task = tool.task;
+  const lesson = tool.lesson ?? task?.lesson;
+  const lessonReady =
+    Boolean(lesson) && (task ? task.status === "done" : tool.status === "done" && !tool.isError);
+  return (
+    <div data-testid="tool-activity" data-tool-id={tool.id} className="flex min-w-0 flex-col gap-1.5">
+      {task ? (
+        <ProductionTaskCard task={task} lesson={lessonReady ? lesson : undefined} />
+      ) : (
+        <>
+          <ToolCards tools={[tool]} />
+          {lessonReady && lesson ? <LessonLinkButton lesson={lesson} /> : null}
+        </>
+      )}
+      {tool.assessment ? <AssessmentStatus outcome={tool.assessment} /> : null}
+    </div>
+  );
+}
+
+function AssistantMessageBody({ message, streaming }: { message: ChatMessage; streaming: boolean }) {
+  const parts = cleanAssistantParts(message.parts ?? []);
+  if (!message.parts?.length) {
+    return <>
+      <ProcessPanel reasoning={message.reasoning} tools={message.tools} notices={message.notices} streaming={streaming} />
+      {message.tools?.length ? (
+        <div className="mb-2 flex flex-col gap-1.5">
+          {message.tools.map((tool) => <ToolActivityView key={tool.id} tool={tool} />)}
+        </div>
+      ) : null}
+      {message.content && <Markdown content={cleanAssistantText(message.content)} />}
+    </>;
+  }
+  const orderedNotices = new Set(parts.flatMap((part) => part.type === "notice" ? [part.text] : []));
+  const remainingNotices = message.notices?.filter((notice) => !orderedNotices.has(notice));
+  const nodes: React.ReactNode[] = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    if (part.type === "notice") {
+      // 相邻 notice 合成一个折叠面板；遇到 text/tool/reasoning 即断组，不串到另一侧。
+      const group: string[] = [];
+      let cursor = index;
+      while (cursor < parts.length && parts[cursor].type === "notice") {
+        group.push((parts[cursor] as { type: "notice"; text: string }).text);
+        cursor += 1;
+      }
+      nodes.push(
+        <div key={`notice-${index}`} data-part-type="notice">
+          <ProcessPanel notices={group} streaming={streaming && cursor === parts.length} />
+        </div>,
+      );
+      index = cursor - 1;
+      continue;
+    }
+    const active = streaming && index === parts.length - 1;
+    if (part.type === "tool") {
+      const tool = message.tools?.find((item) => item.id === part.tool_id);
+      nodes.push(tool ? <div key={index} data-part-type="tool"><ToolActivityView tool={tool} /></div> : null);
+      continue;
+    }
+    if (part.type === "text") {
+      const text = cleanAssistantText(part.text);
+      nodes.push(text ? <div key={index} data-part-type="text"><Markdown content={text} /></div> : null);
+      continue;
+    }
+    nodes.push(
+      <div key={index} data-part-type={part.type}>
+        <ProcessPanel reasoning={part.type === "reasoning" ? part.text : undefined} streaming={active} />
+      </div>,
+    );
+  }
+  return <div data-testid="assistant-parts" className="flex flex-col gap-2">
+    {nodes}
+    {remainingNotices?.length ? <ProcessPanel notices={remainingNotices} streaming={false} /> : null}
+    {streaming && message.content && (
+      <Loader2
+        data-testid="assistant-streaming"
+        className="mt-1 h-4 w-4 shrink-0 animate-spin text-brand"
+        aria-label="正在输出"
+      />
+    )}
+  </div>;
 }
 
 /**
@@ -1456,8 +1683,11 @@ function UserMessageEditor({
   };
 
   const submit = () => {
+    // 与 Composer.canSend 同口径：正文非空或仍有附件即可发送；纯附件（空正文）保持
+    // display_content 为空的语义，重发时不回落成附件提取块。
+    if (uploading > 0) return;
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed && attachments.length === 0) return;
     onSubmit(trimmed, attachments);
   };
 
@@ -1556,7 +1786,7 @@ function UserMessageEditor({
             type="button"
             data-testid="message-edit-submit"
             onClick={submit}
-            disabled={!text.trim() || uploading > 0}
+            disabled={(!text.trim() && attachments.length === 0) || uploading > 0}
             className="rounded-lg bg-brand px-3 py-1 text-[11px] font-medium text-white transition-colors hover:bg-brand-light disabled:opacity-40"
           >
             发送
@@ -1575,14 +1805,14 @@ function ToolCards({ tools }: { tools: ToolActivity[] }) {
         <details
           key={tool.id}
           data-testid="tool-card"
-          className="rounded-lg border px-2.5 py-1.5 text-xs"
-          style={{ borderColor: "var(--border)", background: "var(--muted)" }}
+          className={clsx("rounded-lg border px-2.5 py-1.5 text-xs", tool.status === "error" && "border-red-400/50 bg-red-500/10 text-red-700 dark:text-red-300")}
+          style={tool.status === "error" ? undefined : { borderColor: "var(--border)", background: "var(--muted)" }}
         >
           <summary className="flex cursor-pointer list-none items-center gap-1.5">
             {tool.status === "running" ? (
               <Loader2 className="h-3 w-3 shrink-0 animate-spin text-brand" />
             ) : tool.status === "error" ? (
-              <AlertCircle className="h-3 w-3 shrink-0 text-amber-500" />
+              <AlertCircle className="h-3 w-3 shrink-0 text-red-500" />
             ) : (
               <Wrench className="h-3 w-3 shrink-0 text-emerald-500" />
             )}

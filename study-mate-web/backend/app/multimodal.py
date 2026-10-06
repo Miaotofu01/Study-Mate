@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
@@ -230,6 +231,9 @@ async def prime_stream(
     except Exception as exc:
         if not should_degrade_to_text(exc, model, messages):
             raise
+        # 被放弃的首个生成器持有已打开的上游流/连接：先关掉再重试，别等 GC
+        with contextlib.suppress(Exception):
+            await generator.aclose()
         generator = make_stream(strip_image_parts(messages))
         try:
             first = await generator.__anext__()

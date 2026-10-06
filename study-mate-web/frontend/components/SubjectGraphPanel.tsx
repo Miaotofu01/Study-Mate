@@ -5,6 +5,7 @@ import cytoscape from "cytoscape";
 import clsx from "clsx";
 import { AlertCircle, Loader2, Maximize2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useSplitRatio } from "@/lib/useResizable";
 import type { CourseDetail, GraphNode, NodeStatus } from "@/lib/types";
 
 // 「图谱 / 大纲」可复用面板：课程页右栏与聊天页右栏共用同一份实现。
@@ -107,7 +108,64 @@ export interface SubjectGraphPanelProps {
   onClearSelection?: () => void;
   /** 外部改了节点数据（如在节点详情里存了进度）时 +1，让面板重新拉一次课程数据 */
   refreshKey?: number;
+  /**
+   * 布局（2026-10-05 拍板②）：
+   * - "segmented"（默认）：图谱 / 大纲分段切换，同屏只显示其一（课程页右栏）；
+   * - "stacked"：大纲在上、图谱在下同屏双栏，中间手柄拖拽调占比（聊天右栏），
+   *   占比持久化到 `splitStorageKey`。
+   */
+  layout?: "segmented" | "stacked";
+  /** stacked 布局的占比持久化键（每处双栏面板各自独立） */
+  splitStorageKey?: string;
   /** className for the wrapper; the panel must fill available width/height */
+}
+
+/** 大纲列表（按学习顺序，状态着色，点击选中）：分段与双栏两种布局共用 */
+function OutlineRows({
+  nodes,
+  selectedNodeId,
+  onSelect,
+}: {
+  nodes: GraphNode[];
+  selectedNodeId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <>
+      {nodes.map((n) => {
+        const active = n.id === selectedNodeId;
+        return (
+          <button
+            key={n.id}
+            data-testid={`outline-node-${n.id}`}
+            onClick={() => onSelect(n.id)}
+            className={clsx(
+              "flex w-full items-center gap-2 px-4 py-2 text-left text-sm transition-colors",
+              active ? "bg-brand/10" : "hover:bg-[var(--muted)]",
+            )}
+          >
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ background: STATUS_FILL[n.status] ?? "#9aa5a1" }}
+              title={n.status}
+            />
+            <span className={clsx("min-w-0 flex-1 truncate", active && "font-medium text-brand")}>
+              {n.index}. {n.title}
+            </span>
+            <span
+              className="shrink-0 rounded px-1 py-0.5 text-[10px] text-white"
+              style={{ background: KIND_FILL[n.kind] ?? "#6b7280" }}
+            >
+              {n.kind}
+            </span>
+            <span className="w-10 shrink-0 text-right text-[11px] opacity-50">
+              {Math.round(n.mastery * 100)}%
+            </span>
+          </button>
+        );
+      })}
+    </>
+  );
 }
 
 export function SubjectGraphPanel({
@@ -118,12 +176,17 @@ export function SubjectGraphPanel({
   onSelectNode,
   onClearSelection,
   refreshKey = 0,
+  layout = "segmented",
+  splitStorageKey = "studymate-subject-graph-split",
 }: SubjectGraphPanelProps): JSX.Element {
   const [course, setCourse] = useState<CourseDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 分段视图：课程页默认图谱，聊天右栏默认大纲（由 defaultView 指定）
+  // 分段视图：课程页默认图谱，聊天右栏默认大纲（由 defaultView 指定）；双栏布局不使用
   const [railView, setRailView] = useState<"graph" | "outline">(defaultView);
+  // 双栏布局：上栏（大纲）占比拖拽与持久化
+  const split = useSplitRatio({ storageKey: splitStorageKey, defaultRatio: 50 });
+  const stacked = layout === "stacked";
 
   // 画布容器用 state 承载（而不是 useRef）：getCourse 可能先于容器挂载返回——那一提交里
   // elements 已经非空但容器还没挂载，ref 型依赖不会触发 effect 重跑，图谱就永远建不出来。
@@ -265,115 +328,136 @@ export function SubjectGraphPanel({
 
   return (
     <div className="flex h-full w-full min-w-0 flex-col">
-      {/* 分段切换：图谱 / 大纲 */}
-      <div
-        role="group"
-        aria-label="课程右栏视图切换"
-        className="inline-flex shrink-0 gap-1 border-b px-3 py-2"
-        style={{ borderColor: "var(--border)" }}
-      >
-        <button
-          data-testid="rail-view-graph"
-          onClick={() => setRailView("graph")}
-          aria-pressed={railView === "graph"}
-          className={clsx(
-            "rounded-md px-3 py-1 text-xs transition-colors",
-            railView === "graph"
-              ? "bg-brand/10 font-medium text-brand"
-              : "opacity-70 hover:bg-[var(--muted)] hover:opacity-100",
-          )}
+      {/* 分段切换：图谱 / 大纲（仅分段布局；双栏布局两视图同屏，无需切换） */}
+      {!stacked && (
+        <div
+          role="group"
+          aria-label="课程右栏视图切换"
+          className="inline-flex shrink-0 gap-1 border-b px-3 py-2"
+          style={{ borderColor: "var(--border)" }}
         >
-          图谱
-        </button>
-        <button
-          data-testid="rail-view-outline"
-          onClick={() => setRailView("outline")}
-          aria-pressed={railView === "outline"}
-          className={clsx(
-            "rounded-md px-3 py-1 text-xs transition-colors",
-            railView === "outline"
-              ? "bg-brand/10 font-medium text-brand"
-              : "opacity-70 hover:bg-[var(--muted)] hover:opacity-100",
-          )}
-        >
-          大纲
-        </button>
-      </div>
+          <button
+            data-testid="rail-view-graph"
+            onClick={() => setRailView("graph")}
+            aria-pressed={railView === "graph"}
+            className={clsx(
+              "rounded-md px-3 py-1 text-xs transition-colors",
+              railView === "graph"
+                ? "bg-brand/10 font-medium text-brand"
+                : "opacity-70 hover:bg-[var(--muted)] hover:opacity-100",
+            )}
+          >
+            图谱
+          </button>
+          <button
+            data-testid="rail-view-outline"
+            onClick={() => setRailView("outline")}
+            aria-pressed={railView === "outline"}
+            className={clsx(
+              "rounded-md px-3 py-1 text-xs transition-colors",
+              railView === "outline"
+                ? "bg-brand/10 font-medium text-brand"
+                : "opacity-70 hover:bg-[var(--muted)] hover:opacity-100",
+            )}
+          >
+            大纲
+          </button>
+        </div>
+      )}
 
       {/* 分段内容：两个视图都常驻挂载，用 hidden（display:none）切换，避免画布销毁重建 */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        {/* 图谱视图：画布 + 右下角重置视口按钮 + sr-only 节点按钮 */}
-        <div
-          className={clsx(
-            "relative h-full w-full bg-dot-matrix bg-[var(--surface-canvas)]",
-            railView !== "graph" && "hidden",
-          )}
-        >
-          <div
-            ref={setGraphContainer}
-            data-testid="course-graph-canvas"
-            className="h-full w-full"
-          />
-          <button
-            onClick={resetViewport}
-            className="absolute bottom-3 right-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg border bg-[var(--background)]/80 opacity-70 transition-opacity hover:bg-[var(--muted)] hover:opacity-100"
-            style={{ borderColor: "var(--border)" }}
-            title="重置视口"
-          >
-            <Maximize2 className="h-4 w-4" />
-          </button>
-          <div className="sr-only" role="group" aria-label="节点列表">
-            {nodes.map((n) => (
+        {stacked ? (
+          /* 双栏（2026-10-05 拍板②）：大纲在上、图谱在下，中间手柄拖拽调占比。
+             画布尺寸随手柄拖动变化，靠已有的 ResizeObserver 触发 cy.resize()+fit。 */
+          <div ref={split.containerRef} className="flex h-full min-h-0 flex-col">
+            <div
+              data-testid="course-outline"
+              className="min-h-0 overflow-y-auto py-1.5"
+              style={{ flexBasis: `${split.ratio}%`, flexGrow: 0, flexShrink: 0 }}
+            >
+              <OutlineRows nodes={nodes} selectedNodeId={selectedNodeId} onSelect={selectNode} />
+            </div>
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="调整大纲与图谱占比"
+              title="拖动调整大纲与图谱占比"
+              onMouseDown={split.startResize}
+              className={clsx(
+                "relative z-10 h-1.5 shrink-0 cursor-row-resize transition-colors",
+                split.resizing ? "bg-brand/30" : "bg-transparent hover:bg-brand/20",
+              )}
+            />
+            <div className="relative min-h-0 flex-1 bg-dot-matrix bg-[var(--surface-canvas)]">
+              <div ref={setGraphContainer} data-testid="course-graph-canvas" className="h-full w-full" />
               <button
-                key={n.id}
-                data-testid={`graph-node-${n.id}`}
-                aria-label={`图谱节点 ${n.index}`}
-                onClick={() => selectNode(n.id)}
+                onClick={resetViewport}
+                className="absolute bottom-3 right-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg border bg-[var(--background)]/80 opacity-70 transition-opacity hover:bg-[var(--muted)] hover:opacity-100"
+                style={{ borderColor: "var(--border)" }}
+                title="重置视口"
               >
-                {n.index}. {n.title}
+                <Maximize2 className="h-4 w-4" />
               </button>
-            ))}
+              <div className="sr-only" role="group" aria-label="节点列表">
+                {nodes.map((n) => (
+                  <button
+                    key={n.id}
+                    data-testid={`graph-node-${n.id}`}
+                    aria-label={`图谱节点 ${n.index}`}
+                    onClick={() => selectNode(n.id)}
+                  >
+                    {n.index}. {n.title}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
-
-        {/* 大纲视图：按学习顺序，状态着色，点击选中节点 */}
-        <div
-          data-testid="course-outline"
-          className={clsx("h-full overflow-y-auto py-1.5", railView !== "outline" && "hidden")}
-        >
-          {nodes.map((n) => {
-            const active = n.id === selectedNodeId;
-            return (
+        ) : (
+          <>
+            {/* 图谱视图：画布 + 右下角重置视口按钮 + sr-only 节点按钮 */}
+            <div
+              className={clsx(
+                "relative h-full w-full bg-dot-matrix bg-[var(--surface-canvas)]",
+                railView !== "graph" && "hidden",
+              )}
+            >
+              <div
+                ref={setGraphContainer}
+                data-testid="course-graph-canvas"
+                className="h-full w-full"
+              />
               <button
-                key={n.id}
-                data-testid={`outline-node-${n.id}`}
-                onClick={() => selectNode(n.id)}
-                className={clsx(
-                  "flex w-full items-center gap-2 px-4 py-2 text-left text-sm transition-colors",
-                  active ? "bg-brand/10" : "hover:bg-[var(--muted)]",
-                )}
+                onClick={resetViewport}
+                className="absolute bottom-3 right-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg border bg-[var(--background)]/80 opacity-70 transition-opacity hover:bg-[var(--muted)] hover:opacity-100"
+                style={{ borderColor: "var(--border)" }}
+                title="重置视口"
               >
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: STATUS_FILL[n.status] ?? "#9aa5a1" }}
-                  title={n.status}
-                />
-                <span className={clsx("min-w-0 flex-1 truncate", active && "font-medium text-brand")}>
-                  {n.index}. {n.title}
-                </span>
-                <span
-                  className="shrink-0 rounded px-1 py-0.5 text-[10px] text-white"
-                  style={{ background: KIND_FILL[n.kind] ?? "#6b7280" }}
-                >
-                  {n.kind}
-                </span>
-                <span className="w-10 shrink-0 text-right text-[11px] opacity-50">
-                  {Math.round(n.mastery * 100)}%
-                </span>
+                <Maximize2 className="h-4 w-4" />
               </button>
-            );
-          })}
-        </div>
+              <div className="sr-only" role="group" aria-label="节点列表">
+                {nodes.map((n) => (
+                  <button
+                    key={n.id}
+                    data-testid={`graph-node-${n.id}`}
+                    aria-label={`图谱节点 ${n.index}`}
+                    onClick={() => selectNode(n.id)}
+                  >
+                    {n.index}. {n.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 大纲视图：按学习顺序，状态着色，点击选中节点 */}
+            <div
+              data-testid="course-outline"
+              className={clsx("h-full overflow-y-auto py-1.5", railView !== "outline" && "hidden")}
+            >
+              <OutlineRows nodes={nodes} selectedNodeId={selectedNodeId} onSelect={selectNode} />
+            </div>
+          </>
+        )}
 
         {/* 加载 / 错误浮层：保持画布与大纲常驻挂载 */}
         {loading && (

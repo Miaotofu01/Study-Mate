@@ -7,17 +7,21 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ipaddress
 import json
 import logging
 import os
 import re
-from collections.abc import AsyncGenerator
+import time
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from openai import AsyncOpenAI
+from openai import APIStatusError, AsyncOpenAI
+
+from . import errors
 
 try:
     import httpx
@@ -35,6 +39,11 @@ REQUEST_TIMEOUT = float(os.getenv("STUDYMATE_LLM_TIMEOUT", "900.0") or 900.0)
 # 个人中转网关（new-api 一类）会间歇性返回 401/空响应/读超时：每个请求整体重试
 # 少量次数，只对"连接已建立但上游不稳"的失败类型重试，写盘型副作用不存在所以安全。
 LLM_RETRIES = max(1, int(os.getenv("STUDYMATE_LLM_RETRIES", "3") or 3))
+# 单次 chat_once 的**总时限**（绝对 deadline，覆盖全部重试与退避）。per-read 的
+# REQUEST_TIMEOUT 只在"网关每 899s 吐一个字节"时永不触发（实测有会话静默 2h38m）；
+# 轮数预算也封不住"一次调用本身跑很久"。默认 300s，`STUDYMATE_LLM_MAX_SECONDS` 可覆盖；
+# 建课/产课等长派工由调用方显式传 max_seconds（实测单次可达 694s，owner 给 1800s）。
+MAX_SECONDS = float(os.getenv("STUDYMATE_LLM_MAX_SECONDS", "300") or 300.0)
 TEMPERATURE = 0.2
 _ERROR_TEXT_LIMIT = 2000
 # 档位表里有两类取值（2026-10-04 维护者指出）：`low/medium/high/max` 是**推理档位**，
@@ -58,11 +67,47 @@ class ProviderTransientError(RuntimeError):
     """上游瞬时失败（鉴权抖动 / 读超时 / 空响应）：值得整体重试。"""
 
 
+class LLMDeadlineExceeded(RuntimeError):
+    """单次调用总时限用尽（绝对 deadline 覆盖全部重试）：不再重试，立即收尾。
+
+    故意不是 ProviderTransientError：超时若被外层当成瞬时失败，就会"每次重试再给
+    一整个时限"，把单次调用无限延长——这正是总时限要堵死的路径。
+    """
+
+
+# 网关抖动状态下值得重试的 HTTP 码（401 是 new-api 一类网关的鉴权抖动，见模块注释）
+_TRANSIENT_STATUS = frozenset({401, 408, 409, 425, 429, 500, 502, 503, 504, 522, 524})
+
+
+def _status_of(exc: "ProviderError") -> int | None:
+    """取 ProviderError 的 HTTP 状态码：优先结构化属性，回落字符串里的 `HTTP NNN`。"""
+    status = getattr(exc, "status", None)
+    if isinstance(status, int) and not isinstance(status, bool):
+        return status
+    match = re.match(r"HTTP (\d{3})", str(exc))
+    return int(match.group(1)) if match else None
+
+
 def _is_transient(exc: Exception) -> bool:
-    """网关的鉴权抖动（同一把 key 时好时坏）、读超时、空响应按瞬时失败重试。"""
+    """网关的鉴权抖动（同一把 key 时好时坏）、读超时、空响应按瞬时失败重试。
+
+    openai SDK 抛的是具名子类（APITimeoutError / AuthenticationError…）；responses 与
+    anthropic 协议走裸 httpx，抛 TimeoutException / TransportError，或由本模块包成
+    ProviderError——三处都要认，避免"只有 openai_chat 才会重试"的协议差异。
+    """
     name = type(exc).__name__
     if name in ("APITimeoutError", "TimeoutError", "APIConnectionError", "InternalServerError", "AuthenticationError"):
         return True
+    if isinstance(exc, APIStatusError):
+        # SDK 各状态子类（RateLimitError 429 / ConflictError 409 …）统一按状态码判定，
+        # 与 ProviderError 同口径，别让"哪个渠道走 SDK"决定能不能重试。
+        return exc.status_code in _TRANSIENT_STATUS
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, ProviderError):
+        return _status_of(exc) in _TRANSIENT_STATUS
     return isinstance(exc, ProviderTransientError)
 
 
@@ -129,7 +174,45 @@ def _max_output_limit(provider: dict[str, Any]) -> int | None:
 
 
 class ProviderError(RuntimeError):
-    """上游返回错误（含状态码与响应体摘要）。"""
+    """上游返回错误（含状态码与响应体摘要）。
+
+    兼容旧构造 `ProviderError("HTTP 503: ...")`：status 从字符串解析；新增结构化
+    `status` / `code`（error.code 原文）供 ErrorInfo 规范化，`retryable=False` 可显式
+    禁止重试（如测试注入的确定性失败）。
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        code: str | None = None,
+        upstream_code: str | None = None,
+        retryable: bool | None = None,
+    ) -> None:
+        super().__init__(message)
+        match = re.match(r"HTTP (\d{3})", message or "")
+        self.status = status if isinstance(status, int) else (
+            int(match.group(1)) if match else None
+        )
+        self.code = code
+        self.upstream_code = upstream_code
+        self.retryable = retryable
+
+
+# 只有"上游不接受 tools"这一类请求错误值得去掉 tools 再试一次：400/404/422。
+# 鉴权（401）、限流（429）、服务端（5xx）等即使重发也不该剥工具——那会白白多打一次网关，
+# 且掩盖了真正的瞬时失败（应交给 _is_transient 整体重试）。
+_TOOLS_REJECT_STATUS = frozenset({400, 404, 422})
+
+
+def _is_tools_rejection(exc: Exception) -> bool:
+    """判定异常是否属于"tools 参数被上游拒绝"，可按状态码统一识别两种异常来源。"""
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in _TOOLS_REJECT_STATUS
+    if isinstance(exc, ProviderError):
+        return _status_of(exc) in _TOOLS_REJECT_STATUS
+    return False
 
 
 def _loopback_mounts(base_url: str) -> dict[str, None] | None:
@@ -188,6 +271,20 @@ def build_client(provider: dict[str, Any]) -> AsyncOpenAI:
         max_retries=0,
         http_client=httpx.AsyncClient(timeout=REQUEST_TIMEOUT, mounts=mounts),
     )
+
+
+async def _close_quietly(client: Any) -> None:
+    """关闭本次调用自建的客户端。
+
+    openai_chat 路径的 `build_client` 每轮都新建连接池；loopback 网关下传入的是裸
+    `httpx.AsyncClient`（没有 `__del__` 兜底），不显式关闭会在长会话里持续泄漏 fd。
+    用 try/finally 而非 `async with`，是为了兼容测试里注入的假 client（只需有 `chat`）。
+    """
+    close = getattr(client, "close", None)
+    if close is None:
+        return
+    with contextlib.suppress(Exception):
+        await close()
 
 
 def _text_of_content(content: Any) -> str:
@@ -277,6 +374,21 @@ def _delta_field(delta: Any, key: str) -> str:
         if isinstance(extra, dict):
             value = extra.get(key)
     return str(value) if value else ""
+
+
+def _delta_text(value: Any) -> str:
+    """把 delta.content 归一成字符串。
+
+    正常是 str；个别网关把 content 作为 parts 列表返回（`[{"type":"text","text":...}]`）。
+    直接 `str(list)` 会得到 Python repr，破坏结构化 JSON／正文，所以统一在这里拍平。
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "".join(
+            str(part.get("text", "")) for part in value if isinstance(part, dict)
+        )
+    return "" if value is None else str(value)
 
 
 def _usage_payload(usage: Any) -> dict[str, int] | None:
@@ -418,10 +530,33 @@ def _error_body(response: httpx.Response) -> str:
     return f"HTTP {response.status_code}: {response.text[:_ERROR_TEXT_LIMIT]}"
 
 
+def _upstream_code_of(body: str) -> str | None:
+    """抓上游错误体里的 error.code / error.type（如 system_memory_overloaded）。"""
+    match = re.search(r'"code"\s*:\s*"([^"]{1,120})"', body)
+    if match:
+        return match.group(1)
+    match = re.search(r'"type"\s*:\s*"([^"]{1,120})"', body)
+    return match.group(1) if match else None
+
+
+def _provider_error(message: str, *, status: int | None = None) -> ProviderError:
+    """构造带结构化状态的 ProviderError：从 `HTTP NNN` 与 body 里的 code 解析。"""
+    body = str(message or "")
+    match = re.match(r"HTTP (\d{3})", body)
+    resolved = status if isinstance(status, int) else (int(match.group(1)) if match else None)
+    return ProviderError(
+        body[:_ERROR_TEXT_LIMIT], status=resolved, upstream_code=_upstream_code_of(body)
+    )
+
+
 async def _raise_for_status(response: httpx.Response) -> None:
     if response.status_code >= 400:
         body = (await response.aread()).decode("utf-8", errors="replace")
-        raise ProviderError(f"HTTP {response.status_code}: {body[:_ERROR_TEXT_LIMIT]}")
+        raise ProviderError(
+            f"HTTP {response.status_code}: {body[:_ERROR_TEXT_LIMIT]}",
+            status=response.status_code,
+            upstream_code=_upstream_code_of(body),
+        )
 
 
 async def _iter_sse(response: httpx.Response) -> AsyncGenerator[tuple[str, dict[str, Any]], None]:
@@ -454,7 +589,6 @@ async def _stream_openai_chat(
     provider: dict[str, Any],
     messages: list[dict[str, Any]],
 ) -> AsyncGenerator[str, None]:
-    client = build_client(provider)
     kwargs: dict[str, Any] = {}
     limit = _max_output_limit(provider)
     if limit is not None:
@@ -462,18 +596,31 @@ async def _stream_openai_chat(
     effort = _openai_reasoning_effort(provider)
     if effort:
         kwargs["extra_body"] = {"reasoning_effort": effort}
-    stream = await client.chat.completions.create(
-        model=provider.get("model") or "",
-        messages=_openai_wire_messages(messages),  # type: ignore[arg-type]
-        stream=True,
-        **kwargs,
-    )
-    async for chunk in stream:
-        if not chunk.choices:
-            continue
-        delta = chunk.choices[0].delta
-        if delta.content:
-            yield delta.content
+    client = build_client(provider)
+    saw_chunk = False
+    finished = False
+    try:
+        stream = await client.chat.completions.create(
+            model=provider.get("model") or "",
+            messages=_openai_wire_messages(messages),  # type: ignore[arg-type]
+            stream=True,
+            **kwargs,
+        )
+        async for chunk in stream:
+            saw_chunk = True
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            if getattr(choice, "finish_reason", None):
+                finished = True
+            delta = choice.delta
+            text = _delta_text(delta.content)
+            if text:
+                yield text
+        if saw_chunk and not finished:
+            raise errors.UpstreamEOFError("上游流未正常结束（缺少 finish 标记）")
+    finally:
+        await _close_quietly(client)
 
 
 async def _chat_openai_chat(
@@ -494,19 +641,22 @@ async def _chat_openai_chat(
     # 走流式再聚合：部分中转网关对长非流式请求有 ~120s 硬超时（HTTP 524），
     # 流式增量不受该窗口限制；语义等价（仍拿到完整文本），长产出（课件/题库）必需。
     chunks: list[str] = []
-    stream = await client.chat.completions.create(
-        model=provider.get("model") or "",
-        messages=_openai_wire_messages(messages),  # type: ignore[arg-type]
-        temperature=TEMPERATURE,
-        stream=True,
-        **kwargs,
-    )
-    async for chunk in stream:
-        for choice in chunk.choices or []:
-            delta = getattr(choice, "delta", None)
-            text = getattr(delta, "content", None) if delta is not None else None
-            if text:
-                chunks.append(str(text))
+    try:
+        stream = await client.chat.completions.create(
+            model=provider.get("model") or "",
+            messages=_openai_wire_messages(messages),  # type: ignore[arg-type]
+            temperature=TEMPERATURE,
+            stream=True,
+            **kwargs,
+        )
+        async for chunk in stream:
+            for choice in chunk.choices or []:
+                delta = getattr(choice, "delta", None)
+                text = _delta_text(getattr(delta, "content", None)) if delta is not None else ""
+                if text:
+                    chunks.append(text)
+    finally:
+        await _close_quietly(client)
     return "".join(chunks)
 
 
@@ -619,7 +769,7 @@ async def _stream_openai_responses(
                     if piece:
                         yield piece
                 elif event_type in ("error", "response.failed"):
-                    raise ProviderError(json.dumps(data, ensure_ascii=False)[:_ERROR_TEXT_LIMIT])
+                    raise _provider_error(json.dumps(data, ensure_ascii=False))
 
 
 async def _chat_openai_responses(
@@ -638,14 +788,35 @@ async def _chat_openai_responses(
             json=payload,
         )
     if response.status_code >= 400:
-        raise ProviderError(_error_body(response))
+        raise ProviderError(
+            _error_body(response),
+            status=response.status_code,
+            upstream_code=_upstream_code_of(response.text),
+        )
     data = response.json()
     if data.get("error"):
-        raise ProviderError(json.dumps(data["error"], ensure_ascii=False)[:_ERROR_TEXT_LIMIT])
+        raise _provider_error(json.dumps(data["error"], ensure_ascii=False))
     return _responses_output_text(data)
 
 
 # ---------- anthropic：{base}/v1/messages，system 独立参数，JSON 模式走提示词约束 ----------
+
+
+def _merge_adjacent_roles(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """合并相邻同角色消息：Anthropic 要求 user/assistant 交替。
+
+    agent 的 WRAPUP/IDLE/打转提醒以 role:user 追加在 tool_result 之后，会形成
+    「user(tool_result) + user(提示)」连续两条；严格 Claude 模型直接 400
+    `messages: roles must alternate`。合并只在角色相同时发生，tool_result 仍在最前。
+    """
+    merged: list[dict[str, Any]] = []
+    for message in messages:
+        content = list(message.get("content") or [])
+        if merged and merged[-1]["role"] == message["role"]:
+            merged[-1]["content"] = list(merged[-1]["content"]) + content
+        else:
+            merged.append({"role": message["role"], "content": content})
+    return merged
 
 
 def _anthropic_payload(
@@ -728,6 +899,7 @@ def _anthropic_payload(
             blocks = [{"type": "text", "text": ""}]
         payload_messages.append({"role": role, "content": blocks})
     flush_results()
+    payload_messages = _merge_adjacent_roles(payload_messages)
     payload: dict[str, Any] = {
         "model": provider.get("model") or "",
         "max_tokens": _max_output_limit(provider) or DEFAULT_MAX_TOKENS,
@@ -772,9 +944,7 @@ async def _stream_anthropic(
                     if delta.get("type") == "text_delta" and delta.get("text"):
                         yield str(delta["text"])
                 elif event_type == "error":
-                    raise ProviderError(
-                        json.dumps(data.get("error") or data, ensure_ascii=False)[:_ERROR_TEXT_LIMIT]
-                    )
+                    raise _provider_error(json.dumps(data.get("error") or data, ensure_ascii=False))
 
 
 async def _chat_anthropic(
@@ -793,7 +963,11 @@ async def _chat_anthropic(
             json=payload,
         )
     if response.status_code >= 400:
-        raise ProviderError(_error_body(response))
+        raise ProviderError(
+            _error_body(response),
+            status=response.status_code,
+            upstream_code=_upstream_code_of(response.text),
+        )
     data = response.json()
     return "".join(
         part.get("text", "")
@@ -824,41 +998,53 @@ async def _openai_chat_turn(
         kwargs["tool_choice"] = tool_choice or "auto"
     accumulator = ToolCallAccumulator()
     usage: dict[str, int] | None = None
-    stream = await client.chat.completions.create(
-        model=provider.get("model") or "",
-        messages=_openai_wire_messages(messages),  # type: ignore[arg-type]
-        temperature=TEMPERATURE,
-        stream=True,
-        **kwargs,
-    )
-    async for chunk in stream:
-        # 网关（new-api 一类）默认在末块带 usage：不主动发 stream_options，
-        # 免得某些上游不认这个参数；见到就收，见不到就没有用量事件。
-        chunk_usage = _usage_payload(getattr(chunk, "usage", None))
-        if chunk_usage is not None:
-            usage = chunk_usage
-        for choice in chunk.choices or []:
-            delta = getattr(choice, "delta", None)
-            if delta is None:
-                continue
-            # 思维链与正文分开：DeepSeek 系网关用 reasoning_content，个别用 reasoning
-            reasoning = _delta_field(delta, "reasoning_content") or _delta_field(delta, "reasoning")
-            if reasoning:
-                yield {"type": "reasoning", "content": reasoning}
-            text = getattr(delta, "content", None)
-            if text:
-                yield {"type": "text", "content": str(text)}
-            for call in getattr(delta, "tool_calls", None) or []:
-                function = getattr(call, "function", None)
-                accumulator.push(
-                    int(getattr(call, "index", 0) or 0),
-                    id=getattr(call, "id", None),
-                    name=getattr(function, "name", None) if function is not None else None,
-                    arguments_delta=(
-                        (getattr(function, "arguments", None) or "") if function is not None else ""
-                    ),
-                )
-    calls = [call for call in accumulator.finalize() if call["name"]]
+    saw_chunk = False
+    finished = False
+    try:
+        stream = await client.chat.completions.create(
+            model=provider.get("model") or "",
+            messages=_openai_wire_messages(messages),  # type: ignore[arg-type]
+            temperature=TEMPERATURE,
+            stream=True,
+            **kwargs,
+        )
+        async for chunk in stream:
+            saw_chunk = True
+            # 网关（new-api 一类）默认在末块带 usage：不主动发 stream_options，
+            # 免得某些上游不认这个参数；见到就收，见不到就没有用量事件。
+            chunk_usage = _usage_payload(getattr(chunk, "usage", None))
+            if chunk_usage is not None:
+                usage = chunk_usage
+            for choice in chunk.choices or []:
+                if getattr(choice, "finish_reason", None):
+                    finished = True
+                delta = getattr(choice, "delta", None)
+                if delta is None:
+                    continue
+                # 思维链与正文分开：DeepSeek 系网关用 reasoning_content，个别用 reasoning
+                reasoning = _delta_field(delta, "reasoning_content") or _delta_field(delta, "reasoning")
+                if reasoning:
+                    yield {"type": "reasoning", "content": reasoning}
+                text = _delta_text(getattr(delta, "content", None))
+                if text:
+                    yield {"type": "text", "content": text}
+                for call in getattr(delta, "tool_calls", None) or []:
+                    function = getattr(call, "function", None)
+                    accumulator.push(
+                        int(getattr(call, "index", 0) or 0),
+                        id=getattr(call, "id", None),
+                        name=getattr(function, "name", None) if function is not None else None,
+                        arguments_delta=(
+                            (getattr(function, "arguments", None) or "") if function is not None else ""
+                        ),
+                    )
+        if saw_chunk and not finished:
+            # 有数据但缺 finish 标记：连接在半途被掐断，别当成正常结束
+            raise errors.UpstreamEOFError("上游流未正常结束（缺少 finish 标记）")
+    finally:
+        await _close_quietly(client)
+    # tools 被停用（强制收尾轮）时不得执行模型仍吐出的 tool_calls，否则绕开"只能出文本"约束
+    calls = [call for call in accumulator.finalize() if call["name"]] if tools else []
     if calls:
         yield {"type": "tool_calls", "tool_calls": calls}
     if usage is not None:
@@ -878,6 +1064,8 @@ async def _openai_responses_turn(
     by_item: dict[str, int] = {}
     next_index = 0
     usage: dict[str, int] | None = None
+    saw_event = False
+    terminated = False
     async with _raw_client(provider) as client:
         async with client.stream(
             "POST",
@@ -887,6 +1075,7 @@ async def _openai_responses_turn(
         ) as response:
             await _raise_for_status(response)
             async for event_type, data in _iter_sse(response):
+                saw_event = True
                 if event_type == "response.output_text.delta":
                     piece = str(data.get("delta") or "")
                     if piece:
@@ -923,11 +1112,14 @@ async def _openai_responses_turn(
                                 arguments_full=item.get("arguments"),
                             )
                 elif event_type == "response.completed":
+                    terminated = True
                     payload_obj = data.get("response") or {}
                     usage = _usage_payload(payload_obj.get("usage")) or usage
                 elif event_type in ("error", "response.failed"):
-                    raise ProviderError(json.dumps(data, ensure_ascii=False)[:_ERROR_TEXT_LIMIT])
-    calls = [call for call in accumulator.finalize() if call["name"]]
+                    raise _provider_error(json.dumps(data, ensure_ascii=False))
+    if saw_event and not terminated:
+        raise errors.UpstreamEOFError("responses 流未正常结束（缺少 response.completed）")
+    calls = [call for call in accumulator.finalize() if call["name"]] if tools else []
     if calls:
         yield {"type": "tool_calls", "tool_calls": calls}
     if usage is not None:
@@ -946,6 +1138,8 @@ async def _anthropic_turn(
     payload["stream"] = True
     accumulator = ToolCallAccumulator()
     usage: dict[str, int] = {}
+    saw_event = False
+    terminated = False
     async with _raw_client(provider) as client:
         async with client.stream(
             "POST",
@@ -955,6 +1149,7 @@ async def _anthropic_turn(
         ) as response:
             await _raise_for_status(response)
             async for event_type, data in _iter_sse(response):
+                saw_event = True
                 if event_type == "message_start":
                     started = _usage_payload((data.get("message") or {}).get("usage"))
                     if started is not None:
@@ -980,11 +1175,13 @@ async def _anthropic_turn(
                     merged = _usage_payload(data.get("usage"))
                     if merged is not None:
                         usage["output_tokens"] = merged["completion_tokens"]
+                elif event_type == "message_stop":
+                    terminated = True
                 elif event_type == "error":
-                    raise ProviderError(
-                        json.dumps(data.get("error") or data, ensure_ascii=False)[:_ERROR_TEXT_LIMIT]
-                    )
-    calls = [call for call in accumulator.finalize() if call["name"]]
+                    raise _provider_error(json.dumps(data.get("error") or data, ensure_ascii=False))
+    if saw_event and not terminated:
+        raise errors.UpstreamEOFError("anthropic 流未正常结束（缺少 message_stop）")
+    calls = [call for call in accumulator.finalize() if call["name"]] if tools else []
     if calls:
         yield {"type": "tool_calls", "tool_calls": calls}
     final_usage = _usage_payload(usage) if usage else None
@@ -1037,10 +1234,10 @@ async def stream_turn(
                 emitted = True
                 yield event
             return
-        except ProviderError as exc:
-            # tools 参数被上游拒绝（一句 400 措辞各异）→ 回落纯文本一次，保证工具声明
-            # 本身不打挂整个请求；已吐出内容则不回落（避免重复输出）。
-            if emitted:
+        except (ProviderError, APIStatusError) as exc:
+            # 只有"上游不接受 tools"（400/404/422）才去掉 tools 再试一次：一句措辞各异的
+            # 请求错误值得救；401/429/5xx 等原样抛，交给上层瞬时重试，别浪费一次剥工具调用。
+            if emitted or not _is_tools_rejection(exc):
                 raise
             logger.warning("tools 参数被上游拒绝，回落纯文本调用：%s", exc)
             await asyncio.sleep(0.5)
@@ -1164,17 +1361,17 @@ def _fixture_chat(fixture_kind: str | None) -> str:
             "    kind: 概念\n"
             "    answer: 会话中未作答\n"
             "    verdict: 部分通过\n"
+            "    topic: 分层模型解决的问题\n"
             "    note: 提到了封装但没说清首部的作用，差一步\n"
             "  - q: 举一个封装在真实请求里的例子\n"
             "    kind: 证据核验\n"
             "    answer: 会话中未作答\n"
             "    verdict: 不通过\n"
+            "    topic: 封装在真实请求里的体现\n"
             "    note: 作答里引用不出对应证据\n"
             "mastery: 0.4\n"
             "verdict: 通过\n"
             "next: 复习首部与载荷的区别后重新评估本节\n"
-            "misconceptions:\n"
-            "  - 把 OSI 七层当成实际实现\n"
             "---\n"
         )
     if fixture_kind == "summary":
@@ -1250,17 +1447,54 @@ async def stream_chat(
         yield piece
 
 
+async def _await_within_deadline(
+    make_awaitable: Callable[[], Awaitable[Any]], deadline: float | None, limit: float
+) -> Any:
+    """等待一次尝试，但不越过绝对 deadline；越过即取消并抛 LLMDeadlineExceeded。
+
+    asyncio.wait_for 超时会取消内层协程，内层 `try/finally` 仍会 await 关闭自建客户端，
+    因此取消路径不泄漏连接。deadline 为 None 表示不限时（max_seconds<=0）。
+    """
+    if deadline is None:
+        return await make_awaitable()
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise LLMDeadlineExceeded(f"单次调用超过 {limit:.0f}s 总时限")
+    try:
+        return await asyncio.wait_for(make_awaitable(), timeout=remaining)
+    except asyncio.TimeoutError:
+        raise LLMDeadlineExceeded(f"单次调用超过 {limit:.0f}s 总时限") from None
+
+
+async def _sleep_within_deadline(delay: float, deadline: float | None, limit: float) -> None:
+    """退避 sleep 也受总时限约束：剩余不足只睡到 deadline，睡满即抛（不再重试）。"""
+    if deadline is None:
+        await asyncio.sleep(delay)
+        return
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise LLMDeadlineExceeded(f"单次调用超过 {limit:.0f}s 总时限")
+    await asyncio.sleep(min(delay, remaining))
+    if time.monotonic() >= deadline:
+        raise LLMDeadlineExceeded(f"单次调用超过 {limit:.0f}s 总时限")
+
+
 async def chat_once(
     provider: dict[str, Any],
     messages: list[dict[str, Any]],
     json_mode: bool = False,
     fixture_kind: str | None = None,
+    max_seconds: float | None = None,
 ) -> str:
     """非流式调用，temperature 0.2；json_mode 按协议启用结构化输出。
 
     fixture_kind 仅在 fixture 模式下生效，决定返回哪类 canned 内容；
     非 fixture 模式下该参数被忽略。网关瞬时失败（鉴权抖动/读超时/空响应）
     整体重试 LLM_RETRIES 次；某一格式持续失败仍抛原异常。
+
+    max_seconds 覆盖本次调用的**总时限**（默认 MAX_SECONDS，即
+    `STUDYMATE_LLM_MAX_SECONDS`）：绝对 deadline 覆盖全部重试与退避，到点抛
+    LLMDeadlineExceeded 且不再重试。<=0 表示不限时。建课/产课长派工传 1800。
     """
     if is_fixture_mode():
         return _fixture_chat(fixture_kind)
@@ -1272,20 +1506,28 @@ async def chat_once(
         "openai_responses": _chat_openai_responses,
         "anthropic": _chat_anthropic,
     }
+    limit = MAX_SECONDS if max_seconds is None else float(max_seconds)
+    deadline = time.monotonic() + limit if limit > 0 else None
+    call = dispatched[api_format]
     last: Exception | None = None
     for attempt in range(LLM_RETRIES):
         try:
-            text = await dispatched[api_format](provider, messages, json_mode)
+            text = await _await_within_deadline(
+                lambda: call(provider, messages, json_mode), deadline, limit
+            )
+        except LLMDeadlineExceeded:
+            # 总时限用尽：绝不再进重试——否则每次重试再给一整个时限，等于无限延长
+            raise
         except Exception as exc:  # noqa: BLE001 - 只对瞬时失败重试，其余抛出
             if not _is_transient(exc) or attempt == LLM_RETRIES - 1:
                 raise
             last = exc
-            await asyncio.sleep(1.5 * (attempt + 1))
+            await _sleep_within_deadline(1.5 * (attempt + 1), deadline, limit)
             continue
         if not text.strip():
             if attempt == LLM_RETRIES - 1:
                 raise ProviderTransientError("上游返回空响应")
-            await asyncio.sleep(1.5 * (attempt + 1))
+            await _sleep_within_deadline(1.5 * (attempt + 1), deadline, limit)
             continue
         return text
     raise ProviderTransientError(str(last) if last else "上游调用失败")

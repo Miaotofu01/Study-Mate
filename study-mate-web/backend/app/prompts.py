@@ -35,6 +35,17 @@ INTERVIEW_ADAPTION = (
     "输出标记前先用一句话向学习者复述将要建课的结论，标记之后不要再输出任何其他内容。"
 )
 
+# 建课收口阶段（用户明确确认建课后的那一轮）的补充口径：本轮不跑工具、只做纯最终输出。
+INTERVIEW_FINALIZE_PROMPT = (
+    "【建课收口阶段】学习者已确认建课，本轮不再调用任何工具，只输出最终收口结论。"
+    "只整理对话里**已经确认**的信息（科目名、目的、程度目标、前置基础、配套项目、实验载体）；"
+    "任何关键值缺失或仍含糊时，不要凭空创建或替学习者假设："
+    "在回复里明确追问缺失的那一项，并在信息补齐前不要输出收口标记。"
+    "信息齐全时，在回复末尾原样输出收口标记"
+    " `<!--INTERVIEW_RESULT-->{JSON}<!--/INTERVIEW_RESULT-->`（六个键），"
+    "标记之前先用一句话复述结论，标记之后不要再输出任何其他内容。"
+)
+
 # 生产角色派工（无工具单次调用）的运行环境适配：与 chat 的适配声明分开，各说各的边界。
 ROLE_DISPATCH_ADAPTION = (
     "【运行环境适配】本调用是 StudyMate Web 运行时的一次角色派工：你是被派出的角色子代理，"
@@ -48,6 +59,43 @@ ROLE_DISPATCH_ADAPTION = (
     "规范要求正文报告的判断性内容（摘要、锚点题型清单、Gaps、建议）放 `report` 对象。"
     "除该 JSON 外不要输出任何其他文字。"
 )
+
+# 工具循环版角色派工适配（tools_enabled=True）：角色在 run_agent 工具循环里跑，有真实文件工具。
+# 交付改为「write_deliver_file 逐份落盘 + run_check 自检」，不再要求 JSON envelope（否则会低效回退）。
+ROLE_TOOL_LOOP_ADAPTION = (
+    "【运行环境适配】本调用是 StudyMate Web 运行时的一次角色派工，运行在**工具循环**里："
+    "你有文件工具，规范中「读文件」「按路径读」照常按工具执行——"
+    "用 read_course_file / list_workspace 读取工作区资料，"
+    "用 write_deliver_file 逐份把产物写入规范要求的最终相对路径，"
+    "再用 run_check 把交付落到科目目录并自检；自检报错就按报错修正后重写，直到通过。"
+    "产物必须经 write_deliver_file 落盘并经 run_check 自检，"
+    "不要输出 JSON envelope、不要在正文里内联文件全文；"
+    "规范要求交回的结构化数据（如课程大纲 JSON）用 write_deliver_file 落成对应文件。"
+    "**交付判定（重要）**：若规范要求的产物已存在于工作区、且你本轮用 run_check 复核通过，"
+    "可以不重写，直接结束并在汇报里说明（总控会接受这份已核验的交付）；"
+    "收到【本轮为强制重做】时，必须用 write_deliver_file 重新交付完整产物，不得沿用旧文件。"
+    "规范里说明「此时属预期」的自检报错（如内容角色的题库/锚点类报错，题还没出）按规范处理，"
+    "不要为了过自检删改交付、也不要补 empty_reason。"
+    "完成后只输出一段简短交付汇报（写了哪些文件、自检结果），不要再输出大段正文。"
+    "输入值已由总控内联在最后的用户消息里；内联值里没有的信息写进汇报交回总控，不要凭记忆补、不要虚构来源。"
+)
+
+# 建课（generate）工具循环版：注册工具不同（submit_curriculum 等），不能套产课的写交付文案。
+ROLE_BUILD_TOOL_LOOP_ADAPTION = (
+    "【运行环境适配】本调用是 StudyMate Web 运行时的一次角色派工，运行在**工具循环**里："
+    "你有文件工具，规范中「读文件」「按路径读」照常按工具执行——"
+    "用 read_course_file / list_workspace 读取工作区资料，"
+    "用 submit_curriculum 提交课程大纲（nodes/edges）；后端会立即跑门禁并把报错原文返回，"
+    "按报错逐条修正后重新提交，直到通过。"
+    "大纲必须经 submit_curriculum 提交，不要输出 JSON envelope、不要把大纲内联在正文里。"
+    "通过后只输出一段简短交付汇报（大纲设计要点、门禁结果），不要再输出大段正文。"
+    "输入值已由总控内联在最后的用户消息里；内联值里没有的信息写进汇报交回总控，不要凭记忆补、不要虚构来源。"
+)
+
+# route → 工具循环适配：按各链路实际注册的工具写明可用工具与交付方式。
+ROLE_TOOL_LOOP_ADAPTIONS: dict[str, str] = {
+    "generate": ROLE_BUILD_TOOL_LOOP_ADAPTION,
+}
 
 SKILL_ROUTES: dict[str, list[str]] = {
     "chat": ["local-qa"],
@@ -99,8 +147,13 @@ def inject_interview() -> tuple[str, list[str]]:
     return text + "\n\n" + INTERVIEW_ADAPTION, []
 
 
-def inject_role(route: str) -> tuple[str, list[str]]:
-    """生产角色派工：角色规范全文 + 派工适配声明（envelope 交付）。"""
+def inject_role(route: str, tools_enabled: bool = False) -> tuple[str, list[str]]:
+    """生产角色派工：角色规范全文 + 派工适配声明。
+
+    tools_enabled=False（默认，无工具单次 dispatch_role）：交付走 JSON envelope 适配；
+    tools_enabled=True（run_agent 工具循环里的角色）：交付走 write_deliver_file + run_check，
+    不要求 JSON envelope。技能全文两种形态都不裁剪。
+    """
     parts: list[str] = []
     missing: list[str] = []
     for name in SKILL_ROUTES.get(route, []):
@@ -111,4 +164,8 @@ def inject_role(route: str) -> tuple[str, list[str]]:
         parts.append(f'<skill name="{name}">\n{text}\n</skill>')
     if missing:
         return "", missing
-    return ROLE_DISPATCH_ADAPTION + "\n\n" + "\n\n".join(parts), missing
+    if tools_enabled:
+        adaption = ROLE_TOOL_LOOP_ADAPTIONS.get(route, ROLE_TOOL_LOOP_ADAPTION)
+    else:
+        adaption = ROLE_DISPATCH_ADAPTION
+    return adaption + "\n\n" + "\n\n".join(parts), missing

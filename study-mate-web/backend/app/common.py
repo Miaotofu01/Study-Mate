@@ -39,7 +39,9 @@ def require_subject(slug: str) -> dict[str, Any]:
 
 
 def require_node(slug: str, node_id: str) -> tuple[dict[str, Any], int]:
-    """返回 (节点, 1 基位次)；节点不存在 404。"""
+    """返回 (节点, 1 基位次)；节点不存在 404。slug 先过白名单，非法一律 404 且不触盘。"""
+    if not cs.is_valid_slug(slug):
+        raise HTTPException(404, f"科目不存在：{slug}")
     curriculum = cs.get_curriculum(slug) or {}
     nodes = [node for node in (curriculum.get("nodes") or []) if isinstance(node, dict)]
     for index, node in enumerate(nodes, start=1):

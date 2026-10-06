@@ -10,8 +10,9 @@ from .. import memory as memory_svc
 from .. import prompts
 from .. import storage
 from .. import workspace_ctx
-from ..common import require_provider
+from ..common import optional_workspace, require_provider
 from ..llm import chat_once, extract_json
+from .courses import bound_workspace
 from .records import _format_messages
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
@@ -40,13 +41,15 @@ class MemorySuggestRequest(BaseModel):
 
 
 @router.get("")
-def get_memory() -> dict[str, Any]:
-    return {
-        "path": str(memory_svc.memory_path()),
-        "exists": memory_svc.memory_path().is_file(),
-        "content": memory_svc.read_memory(),
-        "sections": memory_svc.SECTIONS,
-    }
+def get_memory(workspace: str | None = None) -> dict[str, Any]:
+    with bound_workspace(workspace):
+        path = memory_svc.memory_path()
+        return {
+            "path": str(path),
+            "exists": path.is_file(),
+            "content": memory_svc.read_memory(),
+            "sections": memory_svc.SECTIONS,
+        }
 
 
 @router.post("/suggest")
@@ -110,7 +113,9 @@ def _confirm_updates(payload: MemoryConfirmRequest) -> dict[str, Any]:
 
 
 @router.post("/confirm")
-def confirm_updates(payload: MemoryConfirmRequest) -> dict[str, Any]:
+def confirm_updates(
+    payload: MemoryConfirmRequest, workspace: str | None = None
+) -> dict[str, Any]:
     if not payload.entries:
         raise HTTPException(422, "没有要写入的记忆条目")
     for entry in payload.entries:
@@ -121,6 +126,14 @@ def confirm_updates(payload: MemoryConfirmRequest) -> dict[str, Any]:
             raise HTTPException(422, "记忆内容不能为空")
         if any(ch in content for ch in "\r\n") or len(content) > 200:
             raise HTTPException(422, "记忆内容必须是一句话：不含换行、200 字以内")
-    # 会话级工作区：带 session_id 时写到该会话绑定的工作区；没带维持全局（旧行为）
-    with workspace_ctx.bind(storage.session_workspace(payload.session_id)):
+    # 会话级工作区：带 session_id 时写到该会话绑定的工作区；会话不存在直接 404，
+    # 不再静默回落到全局默认工作区（否则"建议取自 A 工作区、写入却落到 B 工作区"）。
+    target = optional_workspace(workspace)
+    if payload.session_id:
+        session = storage.get_session(payload.session_id)
+        if session is None:
+            raise HTTPException(404, f"会话不存在：{payload.session_id}")
+        if session.get("workspace"):
+            target = session["workspace"]
+    with workspace_ctx.bind(target):
         return _confirm_updates(payload)

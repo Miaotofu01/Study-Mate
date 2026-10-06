@@ -8,7 +8,7 @@ import { useWorkspace } from "@/lib/workspace";
 
 export function GenerateWizard() {
   const router = useRouter();
-  const { refreshSubjects } = useWorkspace();
+  const { refreshSubjects, activeWorkspace } = useWorkspace();
 
   // E2E 水合标记：页面其余部分全是 SSR 静态内容，测试需要一个“React 已接管”的信号
   const [hydrated, setHydrated] = useState(false);
@@ -44,14 +44,17 @@ export function GenerateWizard() {
     setError(null);
     setProblems(null);
     try {
-      const res = await api.generateCourse({
-        name: trimmed.name,
-        purpose: trimmed.purpose,
-        level: trimmed.level,
-        background: trimmed.background,
-        project: trimmed.project || undefined,
-        carrier: trimmed.carrier || undefined,
-      });
+      const res = await api.generateCourse(
+        {
+          name: trimmed.name,
+          purpose: trimmed.purpose,
+          level: trimmed.level,
+          background: trimmed.background,
+          project: trimmed.project || undefined,
+          carrier: trimmed.carrier || undefined,
+        },
+        activeWorkspace,
+      );
       await refreshSubjects();
       router.push(`/courses?subject=${encodeURIComponent(res.summary.slug)}`);
     } catch (err) {

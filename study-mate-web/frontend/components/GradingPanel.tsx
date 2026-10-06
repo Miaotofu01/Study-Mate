@@ -10,10 +10,12 @@ import type { GradeResult, QuizItem } from "@/lib/types";
 interface GradingPanelProps {
   slug: string;
   nodeId: string;
+  /** 会话级工作区（null = 默认）：题目读取与判分都落到它 */
+  workspace: string | null;
   onClose: () => void;
 }
 
-export function GradingPanel({ slug, nodeId, onClose }: GradingPanelProps) {
+export function GradingPanel({ slug, nodeId, workspace, onClose }: GradingPanelProps) {
   const [items, setItems] = useState<QuizItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [wide, setWide] = useState(false);
@@ -26,7 +28,7 @@ export function GradingPanel({ slug, nodeId, onClose }: GradingPanelProps) {
   useEffect(() => {
     let alive = true;
     api
-      .getQuiz(slug, nodeId)
+      .getQuiz(slug, nodeId, workspace)
       .then((res) => {
         if (alive) setItems(res.items);
       })
@@ -36,7 +38,7 @@ export function GradingPanel({ slug, nodeId, onClose }: GradingPanelProps) {
     return () => {
       alive = false;
     };
-  }, [slug, nodeId]);
+  }, [slug, nodeId, workspace]);
 
   const submitGrade = async (idx: number, item: QuizItem) => {
     const answer = (answers[idx] ?? "").trim();
@@ -44,12 +46,17 @@ export function GradingPanel({ slug, nodeId, onClose }: GradingPanelProps) {
     setBusy((prev) => ({ ...prev, [idx]: true }));
     setErrors((prev) => ({ ...prev, [idx]: "" }));
     try {
-      const res = await api.gradeAnswer(slug, nodeId, {
-        question: item.q,
-        criteria: item.criteria ?? "",
-        answer,
-        reference_answer: item.answer,
-      });
+      const res = await api.gradeAnswer(
+        slug,
+        nodeId,
+        {
+          question: item.q,
+          criteria: item.criteria ?? "",
+          answer,
+          reference_answer: item.answer,
+        },
+        workspace,
+      );
       setResults((prev) => ({ ...prev, [idx]: res }));
     } catch (err) {
       setErrors((prev) => ({

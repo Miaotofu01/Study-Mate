@@ -30,6 +30,10 @@ const config: Config = {
       },
       boxShadow: {
         raised: "var(--shadow-raised)",
+        // Tailwind v3 的最小档是 shadow-sm，没有 v4 才引入的 shadow-xs；组件里已在用
+        // shadow-xs（Composer/ChatView/GradingPanel/Sidebar/ThemeView），v3 下它是空类。
+        // 这里补一个与 card 同色系（rgba 0.05）的最小投影，语义等同 v4 的 shadow-xs。
+        xs: "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
         card: "0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05)",
         floating: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
       },

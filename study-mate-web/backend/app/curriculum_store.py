@@ -4,9 +4,16 @@
 """
 from __future__ import annotations
 
+import contextlib
+import logging
+import os
 import re
 import shutil
+import threading
+import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -14,6 +21,8 @@ from typing import Any
 import yaml
 
 from . import workspace_ctx
+
+logger = logging.getLogger(__name__)
 
 NODE_STATUSES = [
     "未开始",
@@ -41,6 +50,11 @@ TRANSITIONS: dict[str, list[str]] = {
 }
 DONE_STATUSES = {"能独立应用", "已通过项目验证"}
 
+# 课程 YAML 是"整文件读改写"：并发读者撞上非原子写会解析到半个文件，并发写者会
+# 各读一份旧内容、后写覆盖先写（丢更新）。所有文件 IO 走这把可重入锁；写侧再配
+# 临时文件 + os.replace 原子替换，保证读者看到的永远是完整快照（与 storage._WRITE_LOCK 同口径）。
+_data_lock = threading.RLock()
+
 def workspace_dir() -> Path:
     # 会话级上下文收口点：bundle 了 ContextVar 绑定就用它，否则回到全局发现
     return workspace_ctx.resolve()
@@ -59,17 +73,55 @@ def _yaml_path(slug: str, name: str) -> Path:
 
 
 def _read_yaml(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    with path.open("r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
-    return data if isinstance(data, dict) else None
+    with _data_lock:
+        if not path.exists():
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                data = yaml.safe_load(fh)
+        except (OSError, UnicodeError, yaml.YAMLError) as exc:
+            # 单个文件坏掉（历史遗留 / 外部改动 / 写入中途崩溃）不该让整门科目乃至
+            # 科目列表 500；跳过并留痕，与 storage.list_sessions 跳过坏会话同口径。
+            logger.warning("读取 YAML 失败，按缺失处理：%s（%s: %s）", path, type(exc).__name__, exc)
+            return None
+        return data if isinstance(data, dict) else None
 
 
 def _write_yaml(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        yaml.safe_dump(data, fh, allow_unicode=True, sort_keys=False)
+    """原子落盘：先写同目录临时文件、再 os.replace（读侧永远看不到半个文件）。"""
+    payload = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+    with _data_lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex[:8]}.tmp")
+        try:
+            tmp.write_text(payload, encoding="utf-8")
+            for attempt in range(6):
+                try:
+                    os.replace(tmp, path)
+                    break
+                except PermissionError:
+                    # Windows：目标正被读侧打开（或被杀软/索引器扫描）时会短暂拒绝替换，
+                    # 退避重试；重试耗尽再抛，别把它吞掉。
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.02 * (attempt + 1))
+        finally:
+            if tmp.exists():
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
+
+
+@contextmanager
+def progress_transaction(slug: str) -> Iterator[dict[str, Any]]:
+    """进度文件的读-改-写事务：整段持锁，块内对 data 的改动在正常退出时一次写回。
+
+    块内抛异常则不写盘（校验失败不回退出半个状态）。并发调用按到达顺序串行，
+    不会互相覆盖（否则两个并发请求各读一份旧内容，后写覆盖先写）。
+    """
+    with _data_lock:
+        data = get_progress(slug)
+        yield data
+        save_progress(slug, data)
 
 
 def ensure_workspace() -> None:

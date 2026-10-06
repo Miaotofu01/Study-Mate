@@ -15,10 +15,14 @@ active.thinking 迁移为 reasoning_variant；迁移对行为无感。
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import shutil
+import threading
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +41,11 @@ API_FORMATS = ("openai_chat", "openai_responses", "anthropic")
 INPUT_MODALITIES = ("text", "image", "video", "pdf")
 LEGACY_VISION_MODES = ("auto", "on", "off")
 LEGACY_REASONING_VARIANTS = ("off", "low", "medium", "high")
+
+# settings.json 的整文件读改写与 storage 同源问题（并发半写 / 崩溃截断会解析失败，
+# 而 load_settings 几乎每个请求都调）：读、写、读-改-写都走这把可重入锁，写用
+# 临时文件 + os.replace 原子替换。
+_SETTINGS_LOCK = threading.RLock()
 
 PRESET_PROVIDERS: dict[str, dict[str, str]] = {
     "deepseek": {
@@ -234,19 +243,37 @@ def ensure_dirs() -> None:
 
 
 def load_settings() -> dict[str, Any]:
-    """读取设置；文件缺失写入默认值，旧结构原地迁移写回。"""
+    """读取设置；文件缺失写入默认值，旧结构原地迁移写回，坏文件隔离后回落默认。"""
     ensure_dirs()
+    with _SETTINGS_LOCK:
+        return _load_settings_locked()
+
+
+def _load_settings_locked() -> dict[str, Any]:
     if not SETTINGS_PATH.exists():
         settings = default_settings()
         save_settings(settings)
         return settings
 
-    with SETTINGS_PATH.open("r", encoding="utf-8") as fh:
-        settings = json.load(fh)
+    try:
+        raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        # 不静默覆盖：先把坏文件另存为证据，再回落默认（应用可用，原文件可人工恢复）
+        return _reset_settings_to_defaults()
+    if not isinstance(raw, dict):
+        return _reset_settings_to_defaults()
 
-    if "providers" not in settings and "provider" in settings:
-        settings = _migrate_v1(settings)
+    if "providers" not in raw and "provider" in raw:
+        raw = _migrate_v1(raw)
+    settings, shape_changed = _normalize_settings_shape(raw)
+    if settings is None:
+        # providers 等顶层字段形状不可用：隔离原文后回落默认
+        return _reset_settings_to_defaults()
+    if shape_changed:
+        # 合法 JSON 但形状有坏项：隔离原文，写回收敛后的版本（合法项不丢）
+        _backup_settings_file()
         save_settings(settings)
+
     settings.setdefault("providers", [])
     settings.setdefault("active", {})
     settings.setdefault("system_prompt", DEFAULT_SYSTEM_PROMPT)
@@ -258,10 +285,104 @@ def load_settings() -> dict[str, Any]:
     return settings
 
 
+def _normalize_settings_shape(
+    settings: dict[str, Any],
+) -> tuple[dict[str, Any] | None, bool]:
+    """把「合法 JSON 但字段形状不对」的设置收敛成可用形状。
+
+    providers 非 list（且非缺省/None）视为顶层不可用，返回 None 交由调用方隔离原文后
+    回落默认；是 list 时非 dict 项、非 list 的 models 逐项剔除/置空，**合法 provider 原样
+    保留**——不因单个坏项丢掉整份可恢复配置。返回 (settings|None, 是否有改动)。
+    """
+    changed = False
+    providers = settings.get("providers")
+    if providers is None:
+        providers = []
+    elif not isinstance(providers, list):
+        return None, False
+    clean_providers: list[dict[str, Any]] = []
+    for provider in providers:
+        if not isinstance(provider, dict):
+            changed = True
+            continue
+        models = provider.get("models")
+        if models is not None and not isinstance(models, list):
+            provider = {**provider, "models": []}
+            changed = True
+        clean_providers.append(provider)
+    if len(clean_providers) != len(providers):
+        changed = True
+    active = settings.get("active")
+    if active is None:
+        active = {}
+    elif not isinstance(active, dict):
+        active = {}
+        changed = True
+    prompt = settings.get("system_prompt")
+    if prompt is None:
+        prompt = DEFAULT_SYSTEM_PROMPT
+    elif not isinstance(prompt, str):
+        prompt = DEFAULT_SYSTEM_PROMPT
+        changed = True
+    normalized = dict(settings)
+    normalized["providers"] = clean_providers
+    normalized["active"] = active
+    normalized["system_prompt"] = prompt
+    return normalized, changed
+
+
+def _reset_settings_to_defaults() -> dict[str, Any]:
+    _backup_settings_file()
+    settings = default_settings()
+    save_settings(settings)
+    return settings
+
+
+def _backup_settings_file() -> Path:
+    """把当前 settings.json 复制为 `settings.json.corrupt-<时间>-<pid>` 作为证据。
+
+    只复制不删除：调用方随后的写入会覆盖原文件，而证据原件已留存。复制失败直接抛
+    （宁可让调用方看到可控错误，也不覆盖唯一证据）。
+    """
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    base = SETTINGS_PATH.with_name(f"{SETTINGS_PATH.name}.corrupt-{stamp}-{os.getpid()}")
+    candidate = base
+    suffix = 0
+    while candidate.exists():
+        suffix += 1
+        candidate = base.with_name(f"{base.name}-{suffix}")
+    shutil.copy2(SETTINGS_PATH, candidate)
+    return candidate
+
+
+def mutate_settings(
+    mutator: Callable[[dict[str, Any]], dict[str, Any] | None]
+) -> dict[str, Any]:
+    """锁内完成读-改-写：并发 PUT / 迁移不会互相覆盖。mutator 返回 None 表示不改。"""
+    with _SETTINGS_LOCK:
+        current = _load_settings_locked()
+        updated = mutator(current)
+        if updated is None:
+            return current
+        save_settings(updated)
+        return updated
+
+
 def save_settings(settings: dict[str, Any]) -> None:
+    """原子写：同目录临时文件 + os.replace；失败原样抛出，不吞 OSError。"""
     ensure_dirs()
-    with SETTINGS_PATH.open("w", encoding="utf-8") as fh:
-        json.dump(settings, fh, ensure_ascii=False, indent=2)
+    payload = json.dumps(settings, ensure_ascii=False, indent=2)
+    with _SETTINGS_LOCK:
+        tmp = SETTINGS_PATH.with_name(
+            f".{SETTINGS_PATH.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        try:
+            tmp.write_text(payload, encoding="utf-8")
+            os.replace(tmp, SETTINGS_PATH)
+        finally:
+            if tmp.exists():
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
 
 
 def _model_field(entries: list[dict[str, Any]], model: str, key: str, default: Any) -> Any:

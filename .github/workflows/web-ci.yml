@@ -1,0 +1,122 @@
+name: Web checks
+
+# study-mate-web 子项目的独立检查。与根的 Checks（npm test）**互不影响**：
+# 根 job 语义不动，这里只跑 Web 运行时的后端测试与前端 lint/组件/构建/E2E 冒烟。
+#
+# 触发路径包含 Web 自身，以及它运行时复用/依赖的仓库根资源：
+#   - scripts/**  ：后端子进程调用 check_curriculum.py、gen_home.py（上游脚本零重写）
+#   - schemas/**  ：课程/进度的数据合同
+#   - templates/**：课件渲染
+#   - .dsh/skills/**、examples/**：提示词与 E2E 种子课件（examples/.learning 被 global-setup 复制）
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'study-mate-web/**'
+      - 'scripts/**'
+      - 'schemas/**'
+      - 'templates/**'
+      - '.dsh/skills/**'
+      - 'examples/**'
+      - '.github/workflows/web-ci.yml'
+  pull_request:
+    paths:
+      - 'study-mate-web/**'
+      - 'scripts/**'
+      - 'schemas/**'
+      - 'templates/**'
+      - '.dsh/skills/**'
+      - 'examples/**'
+      - '.github/workflows/web-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web lint, component, build, backend and E2E smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: study-mate-web/frontend/package-lock.json
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            study-mate-web/backend/requirements.lock.txt
+            study-mate-web/backend/requirements-dev.lock.txt
+
+      - name: Install frontend dependencies
+        working-directory: study-mate-web/frontend
+        run: npm ci
+
+      - name: Install backend dependencies
+        working-directory: study-mate-web/backend
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          # 锁由 uv --universal --generate-hashes 生成（见 scripts/lock_backend_deps.py）：
+          # 同一份带 hash 的锁在 Windows 本地与 Ubuntu 都能装（平台差异走环境 markers）。
+          # dev 锁已用运行时锁 requirements.lock.txt 做约束，两边版本一致，单装即覆盖 pytest。
+          .venv/bin/python -m pip install --require-hashes -r requirements-dev.lock.txt
+
+      # 测试夹具自带隔离（conftest 用临时 DATA_DIR/WORKSPACE，且强制 E2E_FIXTURE），
+      # 不读生产 data/，不设 SMOKE_REAL_LLM，因此不会外呼模型。
+      - name: Backend tests and syntax check
+        working-directory: study-mate-web/backend
+        run: |
+          .venv/bin/python -m pytest tests
+          .venv/bin/python -m compileall app
+
+      - name: Frontend lint
+        working-directory: study-mate-web/frontend
+        run: npm run lint
+
+      - name: Frontend component tests
+        working-directory: study-mate-web/frontend
+        run: npm run test:component
+
+      - name: Frontend production build
+        working-directory: study-mate-web/frontend
+        run: npm run build
+
+      # playwright.config.ts 的 Desktop Chrome 设备无 channel，用 Playwright 自带 Chromium；
+      # 系统依赖装不上时 webServer 起不来。这里显式装 chromium（含 --with-deps）。
+      - name: Install Playwright Chromium
+        working-directory: study-mate-web/frontend
+        run: npx playwright install --with-deps chromium
+
+      # 最小 E2E 冒烟：chat-basic + courses 两条稳定用例，跑在 fixture 后端上（无需真实 key）。
+      - name: E2E smoke
+        working-directory: study-mate-web/frontend
+        run: npm run test:e2e:smoke
+
+      # 失败只传前端测试产物（trace/screenshot 在 test-results/），不打包 study-mate-web/data
+      # 或前端 tests/explorer/.env。
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-e2e-results-${{ github.run_attempt }}
+          path: study-mate-web/frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -162,8 +162,12 @@ def _attr_width(info: dict[str, str]) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _assert_public_url(url: str) -> None:
-    """SSRF 收敛：只允许 http/https，主机解析后拒绝私网/回环/链路本地/保留地址。"""
+async def _assert_public_url(url: str) -> None:
+    """SSRF 收敛：只允许 http/https，主机解析后拒绝私网/回环/链路本地/保留地址。
+
+    DNS 解析用 `asyncio.to_thread`：`socket.getaddrinfo` 是阻塞系统调用，直接在事件
+    循环里跑会冻住同一进程的其它 SSE 流（与采图并发的正是大纲派工）。网络策略不变。
+    """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError(f"只允许 http/https：{url}")
@@ -171,7 +175,9 @@ def _assert_public_url(url: str) -> None:
     if not host:
         raise ValueError(f"URL 缺主机名：{url}")
     try:
-        infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+        infos = await asyncio.to_thread(
+            socket.getaddrinfo, host, parsed.port or (443 if parsed.scheme == "https" else 80)
+        )
     except socket.gaierror as exc:
         raise ValueError(f"主机解析失败：{host}") from exc
     for info in infos:
@@ -205,7 +211,7 @@ async def _get_with_redirects(
     current = url
     response = None
     for _ in range(MAX_REDIRECTS + 1):
-        _assert_public_url(current)
+        await _assert_public_url(current)
         await throttle.wait(site)
         response = await client.get(current)
         if response.is_redirect:
@@ -231,7 +237,7 @@ async def _allowed(
     parser: RobotFileParser | None = RobotFileParser()
     try:
         robots_url = f"{_site_base(page_url)}/robots.txt"
-        _assert_public_url(robots_url)
+        await _assert_public_url(robots_url)
         await throttle.wait(site)
         response = await client.get(robots_url)
         if response.status_code >= 400 or response.is_redirect:
@@ -459,7 +465,7 @@ async def _download_image(
     """下载位图：SSRF 校验 + robots + 限速 + 手动重定向；失败返回 None。"""
     current = image_url
     for _ in range(MAX_REDIRECTS + 1):
-        _assert_public_url(current)
+        await _assert_public_url(current)
         if urlparse(current).path.lower().endswith(".pdf"):
             return None
         if not await _allowed(client, current, robots_cache, throttle):

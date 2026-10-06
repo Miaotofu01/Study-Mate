@@ -18,8 +18,11 @@ import re
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+
+import yaml
 
 from . import audit
 from . import curriculum_store as cs
@@ -34,6 +37,11 @@ DISPATCH_OWNERS = {
     "produce_quiz": "出题",
     "produce_experiment": "出题",
 }
+# 强制重做口径：工具循环与单次回落共用同一份文案（措辞不绑具体工具/交付形态）。
+FORCED_REDO_NOTE = (
+    "\n\n【本轮为强制重做】必须重新生成并交付完整产物，"
+    "不得以已存在的旧文件代替；旧文件不算本轮交付。"
+)
 Event = dict[str, Any]
 Emit = Callable[[Event], Awaitable[None]]
 
@@ -43,8 +51,92 @@ def lesson_rel(index: int, node_id: str, ext: str) -> str:
     return f"lessons/{int(index):04d}-{node_id}.{ext}"
 
 
+def _seq(index: int) -> str:
+    """课件编号（4 位零填充），与 lesson_rel / lab 目录同源。"""
+    return f"{int(index):04d}"
+
+
+def lab_rel(index: int, name: str = "README.md") -> str:
+    """实操/实验的 lab 任务相对路径：`lab/<NNNN>-stage/<name>`。
+
+    序号与课件同源（lessons/0002-… → lab/0002-stage/…）；`check_lesson` 的
+    `check_lab_artifacts` 按 `<科目>/lab/<本课编号>-*/` 判任务文件、`lab/solutions/`
+    判参考解，这里沿用既有 fixture 路径，不另造命名。
+    """
+    return f"lab/{_seq(index)}-stage/{name}"
+
+
+def lab_solution_rel(index: int, name: str = "README.md") -> str:
+    """实操/实验的参考解相对路径：`lab/solutions/<NNNN>-stage/<name>`（与任务分开放）。"""
+    return f"lab/solutions/{_seq(index)}-stage/{name}"
+
+
+def lab_entry_link(index: int) -> str:
+    """课件内容文件里指向 lab 入口的相对链接（从 lessons/ 出发）。"""
+    return f"../lab/{_seq(index)}-stage/README.md"
+
+
+def required_artifacts(
+    route: str, index: int, node_id: str, kind: str = "概念"
+) -> tuple[str, ...]:
+    """本条派工路由必须交付的目标产物（本节点、本角色自己的文件）。
+
+    只用于「接受既有交付」的保守判定：路径由 index+node_id 唯一确定，天然排除
+    其它节点/其它角色的文件；出题路由只认它自己的题库（内容文件由讲解路由负责）。
+
+    `kind` 决定 lab 是否随本路由交付：`实操` 的整套 lab（任务/材料 + 参考解）归
+    出题（practice-evaluator 是 lab 唯一 owner，见文件归属表），`实验` 的实操任务
+    同样归实验材料派工。缺一份 `check_lesson` 就按 kind 阻断，故必须一并 gate。
+    """
+    if route == "produce_quiz":
+        required = [lesson_rel(index, node_id, "quiz.json")]
+        if kind == "实操":
+            required.append(lab_rel(index))
+            required.append(lab_solution_rel(index))
+            required.append("lab/README.md")
+        return tuple(required)
+    if route == "produce_experiment" and kind == "实验":
+        return (lesson_rel(index, node_id, "md"), lab_rel(index), lab_solution_rel(index), "lab/README.md")
+    return (lesson_rel(index, node_id, "md"),)
+
+
+def _read_existing_delivery(base: Path, required: tuple[str, ...]) -> list[dict[str, str]] | None:
+    """保守读取 base 下 required 每一份产物（存在、可读、非空），任一不满足返回 None。
+
+    只在「本轮 run_check 通过 + 本轮没有新交付」时用作既有交付，绝不凭文件存在放行：
+    调用方还必须确认 check_passed 与 regenerate=False。
+    """
+    if not required:
+        return None
+    from .tools import SandboxError, safe_write_target
+
+    files: list[dict[str, str]] = []
+    for relative in required:
+        try:
+            target = safe_write_target(base, relative)
+            if not target.is_file():
+                return None
+            content = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError, SandboxError):
+            # 读不到 / 不是 UTF-8 ⇒ 不可复用（宁可回落重做，也不把坏文件当交付）。
+            return None
+        if not content.strip():
+            return None
+        files.append({"path": relative, "content": content})
+    return files
+
+
 def is_draft(base: Path) -> bool:
     return base.parent.name == draft_svc.DRAFTS_DIR.name
+
+
+def workspace_of_subject(base: Path) -> Path:
+    """<WS>/.learning/subjects/<slug> → <WS>（工单归属用）。
+
+    注意与 `ensure_subject_assets` 的共享层 `base.parent.parent`（= <WS>/.learning）
+    区分：工件目录是三层父级，别混用。
+    """
+    return base.parent.parent.parent
 
 
 def _relativize(path: str, base: Path) -> str:
@@ -90,6 +182,10 @@ def _owner_of_problem(problem: dict[str, str]) -> str:
     其余按产物路径映射，.html 前缀的报错再从消息正文里找被引用的产物路径。"""
     message = str(problem.get("message") or "")
     if re.search(r"题库|quiz", message, re.IGNORECASE):
+        return "出题"
+    if "缺少实操引用" in message:
+        return "讲解"
+    if re.search(r"lab[/\\]|实操任务|参考答案", message, re.IGNORECASE):
         return "出题"
     path = str(problem.get("path") or "")
     owner = roles.owner_of(path)
@@ -157,15 +253,35 @@ def ensure_subject_assets(base: Path) -> None:
 # ---------- 基目录感知的读写（草稿或工作区科目） ----------
 
 
+def _read_base_yaml(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+    except (OSError, yaml.YAMLError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _curriculum_of(base: Path, slug: str) -> list[dict[str, Any]]:
-    curriculum = (
-        draft_svc.draft_curriculum(slug) if is_draft(base) else cs.get_curriculum(slug)
-    )
+    # 工作区科目一律按 base 直接读盘：不依赖 workspace_ctx 的全局发现，工单重试才能
+    # 落在该工单真实归属的工作区（而不是当前请求绑定/默认工作区）。
+    if is_draft(base):
+        curriculum = draft_svc.draft_curriculum(slug)
+    else:
+        curriculum = _read_base_yaml(base / "curriculum.yaml")
     return [n for n in ((curriculum or {}).get("nodes") or []) if isinstance(n, dict)]
 
 
 def _progress_of(base: Path, slug: str) -> dict[str, Any]:
-    return draft_svc.draft_progress(slug) if is_draft(base) else cs.get_progress(slug)
+    if is_draft(base):
+        return draft_svc.draft_progress(slug)
+    data = _read_base_yaml(base / "progress.yaml")
+    data.setdefault("nodes", {})
+    data.setdefault("misconceptions", [])
+    data.setdefault("project", {"current": ""})
+    return data
 
 
 def _glossary_text(base: Path) -> str:
@@ -243,6 +359,21 @@ def _prerequisite_summary(base: Path, slug: str, node: dict[str, Any]) -> str:
     return "\n".join(lines) or "（无前置节点）"
 
 
+def _lab_delivery_values(base: Path, index: int) -> str:
+    overview = base / "lab" / "README.md"
+    previous = overview.read_text(encoding="utf-8") if overview.is_file() else "（尚未建立）"
+    return "\n".join([
+        "【实操材料交付（本轮必需，不得只交题库）】",
+        f"载体：{_carrier(base)}；沿用该载体，不要求学生换工具。",
+        f"任务入口：{lab_rel(index)}；参考解：{lab_solution_rel(index)}。",
+        "必须交付 lab/README.md 整份，保留原有任务表并加入本课任务与卡壳顺序。",
+        "任务入口包含教程、留白任务、自查步骤与可验证的验收条件；配套源文件、断言与依赖描述按载体实际需要交付。",
+        "参考解与任务分开放；不要伪造测试执行结果或把完整答案放入学生留白任务。",
+        "以下为原 lab/README.md（只增补本课，不删除已有任务）：",
+        previous,
+    ])
+
+
 def content_values(base: Path, slug: str, node: dict[str, Any], index: int) -> str:
     """讲解派工值：节点字段逐字 + 前置摘要 + 使命/术语/资源清单 + reference/ 原文 + 图片索引。"""
     return "\n".join(
@@ -250,6 +381,11 @@ def content_values(base: Path, slug: str, node: dict[str, Any], index: int) -> s
             "【本课任务】把下面的节点讲成一节课，产出「课件内容文件」。",
             *_node_block(node),
             f"【课件内容文件相对路径（files[0].path 用它）】{lesson_rel(index, str(node['id']), 'md')}",
+            (
+                f"【实操入口】正文必须含 [开始实操]({lab_entry_link(index)})。"
+                "你只负责入口及讲解；实操任务与参考解由出题角色随后交付，不因暂缺材料删除入口。"
+                if node.get("kind") == "实操" else ""
+            ),
             "",
             "【前置节点摘要（总控生成）】",
             _prerequisite_summary(base, slug, node),
@@ -281,6 +417,7 @@ def quiz_values(base: Path, slug: str, node: dict[str, Any], index: int, content
             *_node_block(node),
             f"【实验载体】{_carrier(base)}",
             f"【题目文件相对路径（files[0].path 用它）】{lesson_rel(index, str(node['id']), 'quiz.json')}",
+            _lab_delivery_values(base, index) if node.get("kind") == "实操" else "",
             "",
             "【课件内容文件全文（锚点从中读，题库键逐字对应；内容一个字不改）】",
             content,
@@ -296,7 +433,8 @@ def experiment_values(base: Path, slug: str, node: dict[str, Any], index: int) -
             "【本课任务】为实验节点一次出齐材料（时机一 · 实验任务）：实验说明页与实操任务。",
             *_node_block(node),
             f"【实验说明页相对路径（files[0].path 用它）】{lesson_rel(index, str(node['id']), 'md')}",
-            "【实操任务相对路径】lab/<NNNN>-<主题>/…（按规范交付格式整棵树）",
+            f"【实操入口】说明页必须含 [开始实操]({lab_entry_link(index)})。",
+            _lab_delivery_values(base, index),
             f"【被验收节点】{'、'.join(node.get('prerequisites') or []) or '无'}",
             f"【项目目标】{(progress.get('project') or {}).get('current') or '以科目使命为准'}",
             "",
@@ -381,6 +519,7 @@ def fixture_quiz_envelope(values: str) -> dict[str, Any]:
                 "content": "# 参考解\n\n按任务清单逐步实现即可；运行结果与自查项一致。\n",
             }
         )
+        files.append({"path": "lab/README.md", "content": f"# 实操任务\n\n- [本课任务]({seq}-stage/README.md)\n\n卡壳时先检查环境，再按任务自查。\n"})
     return {"files": files, "report": {"summary": ["fixture 题库"]}}
 
 
@@ -403,6 +542,8 @@ def fixture_experiment_envelope(values: str) -> dict[str, Any]:
         "files": [
             {"path": page_path, "content": content},
             {"path": f"lab/{seq}-stage/README.md", "content": task},
+            {"path": f"lab/solutions/{seq}-stage/README.md", "content": "# 参考解\n\n逐项核对阶段目标与验收证据。\n"},
+            {"path": "lab/README.md", "content": f"# 实验任务\n\n- [本课任务]({seq}-stage/README.md)\n\n卡壳时按任务自查清单排查。\n"},
         ],
         "report": {"summary": ["fixture 实验材料"]},
     }
@@ -427,21 +568,29 @@ async def _role_tool_loop(
     node_id: str,
     index: int,
     stage_dir: Path,
+    required: tuple[str, ...] = (),
+    regenerate: bool = False,
 ) -> dict[str, Any] | None:
     """K3：角色用写工具交付产物，并用 run_check 在循环内自查自修。
 
     返回 envelope 等价体（files 来自写工具）；没有任何交付（循环耗尽/降级）返回
     None，由调用方回落既有单次派工链（保留兜底）。
+
+    接受既有交付（2026-10-05 修真实事故）：角色发现规范要求的产物已存在、本轮用
+    run_check 复核通过、且未重写（零新文件）时，保守接受这份已核验的**本节点**
+    交付（`_read_existing_delivery` 逐份校验存在且非空），不再误判「未交付」而回落。
+    regenerate=True（强制重做）时禁用该接受，必须 write_deliver_file 重写新交付。
     """
     from . import agent as agent_svc
     from . import prompts
     from . import tools as tools_svc
 
-    system_text, missing = prompts.inject_role(route)
+    system_text, missing = prompts.inject_role(route, tools_enabled=True)
     if missing:
         await emit({"event": "error", "message": f"角色技能规范缺失：{'、'.join(missing)}"})
         return None
     owner = DISPATCH_OWNERS.get(route, "总控")
+    role_id = f"{route}:{uuid.uuid4().hex[:8]}"
     ctx = tools_svc.ToolContext(
         read_roots=[base],
         write_roots=[],
@@ -454,22 +603,73 @@ async def _role_tool_loop(
             "files": [],
         },
     )
+    user_values = values
+    if regenerate:
+        user_values += FORCED_REDO_NOTE
     messages = [
         {"role": "system", "content": system_text},
-        {"role": "user", "content": values},
+        {"role": "user", "content": user_values},
     ]
     audit.record("dispatch", route=route, loop="tools", values=values)
+    await emit({"event": "role_start", "role_id": role_id, "role": owner, "route": route})
 
     async def on_progress(snapshot: dict[str, Any]) -> None:
         """进度快照 → SSE progress：编排面板显示「第 N 轮 · 已等待 Ns」。"""
-        await emit({"event": "progress", "stage": owner, **snapshot})
+        await emit({"event": "progress", "stage": owner, "role_id": role_id, **snapshot})
 
     async def on_event(event: dict[str, Any]) -> None:
-        if event["type"] == "tool_call" and event.get("name") == "run_check":
-            await emit({"event": "stage", "stage": "检查", "status": "start"})
-        elif event["type"] == "tool_result" and event.get("name") == "run_check":
+        """角色内事件按角色回放：文本/思维链/工具活动带上 role_id 进入父任务快照。
+
+        工具循环里 run_check 是**角色自检**（拿报错自修），与总控收尾的真渲染/检查
+        区分：这里标「交付自检」，最终 render_and_check 仍是「渲染」「检查」。
+        """
+        etype = str(event.get("type") or "")
+        name = str(event.get("name") or "")
+        if etype == "tool_call":
             await emit(
-                {"event": "stage", "stage": "检查", "status": "done" if not event.get("is_error") else "fail"}
+                {
+                    "event": "role_event",
+                    "role_id": role_id,
+                    "role": owner,
+                    "type": "tool_call",
+                    "name": name,
+                    "id": str(event.get("id") or ""),
+                    "arguments": str(event.get("arguments") or ""),
+                }
+            )
+            if name == "run_check":
+                await emit({"event": "stage", "stage": "交付自检", "status": "start"})
+        elif etype == "tool_result":
+            is_error = bool(event.get("is_error"))
+            await emit(
+                {
+                    "event": "role_event",
+                    "role_id": role_id,
+                    "role": owner,
+                    "type": "tool_result",
+                    "name": name,
+                    "id": str(event.get("id") or ""),
+                    "content": str(event.get("content") or ""),
+                    "is_error": is_error,
+                }
+            )
+            if name == "run_check":
+                await emit(
+                    {
+                        "event": "stage",
+                        "stage": "交付自检",
+                        "status": "fail" if is_error else "done",
+                    }
+                )
+        elif etype in ("text", "reasoning"):
+            await emit(
+                {
+                    "event": "role_event",
+                    "role_id": role_id,
+                    "role": owner,
+                    "type": etype,
+                    "content": str(event.get("content") or ""),
+                }
             )
 
     outcome = await agent_svc.run_agent(
@@ -483,9 +683,43 @@ async def _role_tool_loop(
         on_progress=on_progress,
     )
     files = ctx.state.get("files") or []
+    if not files and required and not regenerate and ctx.state.get("check_passed"):
+        # 保守接受：本轮 run_check 真通过 + 目标产物（本节点/本角色）已在盘且非空。
+        existing = _read_existing_delivery(base, required)
+        if existing is not None:
+            audit.record(
+                "produce_loop_existing_accepted",
+                route=route,
+                node_id=node_id,
+                paths=[item["path"] for item in existing],
+            )
+            await emit(
+                {
+                    "event": "role_end",
+                    "role_id": role_id,
+                    "role": owner,
+                    "status": "done",
+                    "message": "已有产物经本轮检查通过，未重写",
+                }
+            )
+            return {
+                "files": existing,
+                "report": {"summary": ["已有产物经本轮检查通过，未重写"]},
+            }
     if not files:
         audit.record("produce_loop_no_files", route=route, degraded=outcome.degraded)
+        # 回落到单次派工：无增量可回放，只明确角色终态，不假造过程。
+        await emit(
+            {
+                "event": "role_end",
+                "role_id": role_id,
+                "role": owner,
+                "status": "error",
+                "message": "角色工具循环未交付，回落单次派工",
+            }
+        )
         return None
+    await emit({"event": "role_end", "role_id": role_id, "role": owner, "status": "done"})
     return {"files": files, "report": {"summary": [f"{owner} 工具循环交付"]}}
 
 
@@ -500,29 +734,105 @@ async def dispatch(
     node_id: str | None = None,
     index: int = 0,
     stage_dir: Path | None = None,
+    regenerate: bool = False,
+    kind: str = "概念",
 ) -> dict[str, Any] | None:
     """返回 envelope；失败已 emit error 并返回 None。"""
-    from .llm import is_fixture_mode, supports_tools
+    from .llm import LLMDeadlineExceeded, is_fixture_mode, supports_tools
 
+    owner = DISPATCH_OWNERS.get(route, "总控")
     if is_fixture_mode():
-        return factory(values)
+        role_id = f"{route}:{uuid.uuid4().hex[:8]}"
+        await emit({"event": "role_start", "role_id": role_id, "role": owner, "route": route})
+        envelope = factory(values)
+        await emit({"event": "role_end", "role_id": role_id, "role": owner, "status": "done"})
+        return envelope
     # 工具调用默认对所有配置的模型开启（2026-10-04）：真实模型优先走角色工具循环，
     # 循环无交付（耗尽/降级）时回落下面的单次派工链兜底。
+    loop_fallback = False
     if supports_tools(provider) and base is not None and node_id and stage_dir is not None:
         loop_env = await _role_tool_loop(
-            provider, route, values, emit, base=base, node_id=node_id, index=index, stage_dir=stage_dir
+            provider,
+            route,
+            values,
+            emit,
+            base=base,
+            node_id=str(node_id),
+            index=index,
+            stage_dir=stage_dir,
+            required=required_artifacts(route, index, str(node_id), kind),
+            regenerate=regenerate,
         )
         if loop_env is not None:
             return loop_env
-    owner = DISPATCH_OWNERS.get(route, "总控")
+        loop_fallback = True
+    if regenerate:
+        # 强制重做口径同样带进单次回落派工值，避免回落路径以旧文件充当交付。
+        values = values + FORCED_REDO_NOTE
+    from .agent import ORCH_MAX_SECONDS
+
     last_error: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
+        role_id = f"{route}:{uuid.uuid4().hex[:8]}"
+        start_event: dict[str, Any] = {
+            "event": "role_start",
+            "role_id": role_id,
+            "role": owner,
+            "route": route,
+            "round": attempt,
+            "execution_mode": "fallback" if loop_fallback else "single_call",
+        }
+        if loop_fallback:
+            # 工具循环零交付后的备用单次派工：给 UI 可观测的模式/原因/墙钟。
+            start_event["fallback_reason"] = "角色工具循环未交付"
+            start_event["max_seconds"] = ORCH_MAX_SECONDS
+        await emit(start_event)
+        if loop_fallback:
+            await emit({"event": "stage", "stage": "备用派工", "status": "start"})
         try:
-            return await roles.dispatch_role(provider, route, values, fixture_kind=route)
+            envelope = await roles.dispatch_role(provider, route, values, fixture_kind=route)
+            await emit({"event": "role_end", "role_id": role_id, "role": owner, "status": "done"})
+            if loop_fallback:
+                await emit({"event": "stage", "stage": "备用派工", "status": "done"})
+            return envelope
+        except LLMDeadlineExceeded as exc:
+            # 单次派工是确定性超时：重试不会成功，直接以准确的超时终态收尾。
+            await emit(
+                {
+                    "event": "role_end",
+                    "role_id": role_id,
+                    "role": owner,
+                    "status": "timeout",
+                    "message": f"{owner}备用派工超时：{exc}",
+                }
+            )
+            if loop_fallback:
+                await emit(
+                    {"event": "stage", "stage": "备用派工", "status": "fail", "message": "备用派工超时"}
+                )
+            # 机器可读的失败类型：编排方按 code/type 判定终态 timeout，不做字符串匹配。
+            await emit(
+                {
+                    "event": "error",
+                    "message": f"{owner}备用派工超时：{exc}",
+                    "code": "role_timeout",
+                    "type": "timeout",
+                }
+            )
+            return None
         except ValueError as exc:
             # 契约失败（模型偶发畸形 JSON）同样按"规格是权威"原值重派：
             # 偶发畸形重滚一次多半就好（实测复派即合规），耗尽再转人工。
             last_error = exc
+            await emit(
+                {
+                    "event": "role_end",
+                    "role_id": role_id,
+                    "role": owner,
+                    "status": "error",
+                    "message": str(exc),
+                }
+            )
             if attempt >= MAX_RETRIES:
                 break
             await emit(
@@ -541,6 +851,15 @@ async def dispatch(
                     ],
                 }
             )
+    if loop_fallback:
+        await emit(
+            {
+                "event": "stage",
+                "stage": "备用派工",
+                "status": "fail",
+                "message": "备用派工多次交付不合规",
+            }
+        )
     await emit(
         {
             "event": "error",
@@ -551,10 +870,26 @@ async def dispatch(
 
 
 async def _write_and_promote(
-    stage_dir: Path, base: Path, envelope: dict[str, Any]
+    stage_dir: Path,
+    base: Path,
+    envelope: dict[str, Any],
+    required: tuple[str, ...] = (),
 ) -> list[str] | None:
-    files = roles.envelope_files(envelope)
+    """把交付逐字落盘并搬正式位；缺必需产物则**不搬任何文件**（避免杂散文件污染科目目录）。
+
+    过去先 promote 全部文件再让调用方校验期望产物：路径写错时杂散文件已落入科目
+    目录，污染 lessons/*.md 计数，把按大纲顺序产课的顺序门永久卡死。这里在写盘前
+    先校验 required 齐全，不齐直接返回 None（信封解析失败同样返回 None，由调用方
+    用交付摘要报错）。
+    """
+    try:
+        files = roles.envelope_files(envelope)
+    except ValueError:
+        return None
     if not files:
+        return None
+    paths = {item["path"] for item in files}
+    if any(path not in paths for path in required):
         return None
     roles.write_deliver(stage_dir, files)
     return roles.promote_deliver(stage_dir, base, files)
@@ -581,13 +916,30 @@ def _delivered_digest(envelope: dict[str, Any]) -> str:
 # ---------- 渲染 + 检查 ----------
 
 
+def _unparsed_problem(stage: str, code: int, output: str) -> list[dict[str, str]]:
+    """非零退出但解析不出问题时，把原始输出折成一条可操作问题（对齐 build 门禁兜底）。
+
+    检查器/渲染器可能以 traceback 或非 `FAIL ...`/`文件:行` 格式失败；没有这条兜底
+    会生成 problems=[] 的打回与工单，学习者拿不到任何证据，复检还会被误判通过。
+    """
+    raw = (output or "").strip() or "（无输出）"
+    return [
+        {
+            "path": f"（{stage}）",
+            "line": "",
+            "message": f"{stage}退出码 {code}，但未能解析出问题；原始输出（截断）：{raw[:800]}",
+            "owner": "总控",
+        }
+    ]
+
+
 async def render_and_check(
     base: Path, node_id: str, index: int, emit: Emit
 ) -> tuple[bool, list[dict[str, str]]]:
     await emit({"event": "stage", "stage": "渲染", "status": "start"})
     code, output = await _run_script([str(SCRIPTS_DIR / "render_lesson.py"), str(base), node_id])
     if code != 0:
-        problems = parse_problems(output, base)
+        problems = parse_problems(output, base) or _unparsed_problem("渲染", code, output)
         await emit({"event": "stage", "stage": "渲染", "status": "fail", "problems": problems})
         return False, problems
     await emit({"event": "stage", "stage": "渲染", "status": "done"})
@@ -605,7 +957,7 @@ async def render_and_check(
         ]
     )
     if code != 0:
-        problems = parse_problems(output, base)
+        problems = parse_problems(output, base) or _unparsed_problem("检查", code, output)
         await emit({"event": "stage", "stage": "检查", "status": "fail", "problems": problems})
         return False, problems
     await emit({"event": "stage", "stage": "检查", "status": "done"})
@@ -628,8 +980,13 @@ async def run_produce(
     node_id: str,
     provider: dict[str, Any],
     emit: Emit,
+    *,
+    regenerate: bool = False,
 ) -> None:
-    """产课链。事件：stage / retry / handoff / done / error。"""
+    """产课链。事件：stage / retry / handoff / done / error。
+
+    `regenerate=True`（工具层显式强制重做）时，讲解/出题角色不得以既有产物充当本轮交付。
+    """
     audit.bind(f"produce-{slug}-{node_id}")
     nodes = _curriculum_of(base, slug)
     node = next((n for n in nodes if n.get("id") == node_id), None)
@@ -650,7 +1007,9 @@ async def run_produce(
         )
         return
     kind = str(node.get("kind") or "概念")
-    stage_root = base / ".stage"
+    # 每次产课独立暂存目录：同节点并发（重复点按/多标签页）不再共享 .stage/<角色>，
+    # 收尾也不再 rmtree 整个 .stage 而误删另一路在飞的交付。
+    stage_root = base / ".stage" / f"{node_id}-{uuid.uuid4().hex[:8]}"
 
     try:
         ensure_subject_assets(base)
@@ -666,11 +1025,15 @@ async def run_produce(
             env = await dispatch(
                 provider, "produce_experiment", values, fixture_experiment_envelope, emit,
                 base=base, node_id=node_id, index=index, stage_dir=stage_root,
+                regenerate=regenerate, kind=kind,
             )
             if env is None:
                 return
-            moved = await _write_and_promote(stage_root / "practice-evaluator", base, env)
             page_rel = lesson_rel(index, node_id, "md")
+            moved = await _write_and_promote(
+                stage_root / "practice-evaluator", base, env,
+                required=required_artifacts("produce_experiment", index, node_id, kind),
+            )
             if moved is None or page_rel not in moved:
                 await emit(
                     {
@@ -688,10 +1051,13 @@ async def run_produce(
             env = await dispatch(
                 provider, "produce_content", values, fixture_content_envelope, emit,
                 base=base, node_id=node_id, index=index, stage_dir=stage_root,
+                regenerate=regenerate, kind=kind,
             )
             if env is None:
                 return
-            moved = await _write_and_promote(stage_root / "learning-coach", base, env)
+            moved = await _write_and_promote(
+                stage_root / "learning-coach", base, env, required=(content_rel,)
+            )
             if moved is None or content_rel not in moved:
                 await emit(
                     {
@@ -714,12 +1080,22 @@ async def run_produce(
                 node_id=node_id,
                 index=index,
                 stage_dir=stage_root,
+                regenerate=regenerate, kind=kind,
             )
             if env is None:
                 return
-            moved = await _write_and_promote(stage_root / "practice-evaluator", base, env)
-            if moved is None:
-                await emit({"event": "error", "message": f"出题交付为空——{_delivered_digest(env)}"})
+            quiz_rel = lesson_rel(index, node_id, "quiz.json")
+            moved = await _write_and_promote(
+                stage_root / "practice-evaluator", base, env,
+                required=required_artifacts("produce_quiz", index, node_id, kind),
+            )
+            if moved is None or quiz_rel not in moved:
+                await emit(
+                    {
+                        "event": "error",
+                        "message": f"出题交付里没有题库文件（相对路径不符）——{_delivered_digest(env)}",
+                    }
+                )
                 return
             await emit({"event": "stage", "stage": "出题", "status": "done", "artifacts": moved})
 
@@ -729,17 +1105,20 @@ async def run_produce(
         ok, problems = await render_and_check(base, node_id, index, emit)
         problems = with_kind(problems)
         round_no = 0
+        rechecks = 0
         while not ok and round_no < MAX_RETRIES:
-            round_no += 1
             owners = sorted({str(p.get("owner") or "总控") for p in problems})
             ensure_subject_assets(base)
-            await emit({"event": "retry", "round": round_no, "owners": owners, "problems": problems})
-
-            if owners == ["总控"]:
-                # 纯总控归属（组件缺失类）：补组件后重查一次，仍不过直接转人工，不空烧轮次
+            if not any(owner in ("讲解", "出题") for owner in owners):
+                rechecks += 1
+                await emit({"event": "stage", "stage": "总控复检", "status": "start",
+                            "message": "补齐公共资源后复检，未派工修改课件"})
                 ok, problems = await render_and_check(base, node_id, index, emit)
                 problems = with_kind(problems)
+                await emit({"event": "stage", "stage": "总控复检", "status": "done" if ok else "fail"})
                 break
+            round_no += 1
+            await emit({"event": "retry", "round": round_no, "owners": owners, "problems": problems})
 
             if kind != "实验" and "讲解" in owners:
                 evidence = content_values(base, slug, node, index)
@@ -752,10 +1131,22 @@ async def run_produce(
                 env = await dispatch(
                     provider, "produce_content", evidence, fixture_content_envelope, emit,
                     base=base, node_id=node_id, index=index, stage_dir=stage_root,
+                    regenerate=True, kind=kind,
                 )
                 if env is None:
                     return
-                await _write_and_promote(stage_root / "learning-coach", base, env)
+                moved = await _write_and_promote(
+                    stage_root / "learning-coach", base, env,
+                    required=required_artifacts("produce_content", index, node_id),
+                )
+                if moved is None:
+                    await emit(
+                        {
+                            "event": "error",
+                            "message": f"讲解重派交付里没有课件内容文件——{_delivered_digest(env)}",
+                        }
+                    )
+                    return
 
             # 内容重写会动锚点，出题必须跟着重派；只有出题归属的问题时单独重派
             quiz_needed = "出题" in owners or (kind != "实验" and "讲解" in owners)
@@ -779,10 +1170,22 @@ async def run_produce(
                 env = await dispatch(
                     provider, route, evidence, factory, emit,
                     base=base, node_id=node_id, index=index, stage_dir=stage_root,
+                    regenerate=True, kind=kind,
                 )
                 if env is None:
                     return
-                await _write_and_promote(stage_root / "practice-evaluator", base, env)
+                moved = await _write_and_promote(
+                    stage_root / "practice-evaluator", base, env,
+                    required=required_artifacts(route, index, node_id, kind),
+                )
+                if moved is None:
+                    await emit(
+                        {
+                            "event": "error",
+                            "message": f"{DISPATCH_OWNERS.get(route, '出题')}重派交付里没有目标产物——{_delivered_digest(env)}",
+                        }
+                    )
+                    return
 
             ok, problems = await render_and_check(base, node_id, index, emit)
             problems = with_kind(problems)
@@ -799,12 +1202,15 @@ async def run_produce(
                 base_label="draft" if is_draft(base) else "workspace",
                 problems=problems,
                 artifacts=artifacts,
+                workspace=None if is_draft(base) else str(workspace_of_subject(base).resolve()),
             )
             await emit({"event": "handoff", "ticket": ticket})
             await emit(
                 {
                     "event": "error",
-                    "message": f"质检打回 {MAX_RETRIES} 轮仍未通过，已转人工（工单 {ticket['id']}）。",
+                    "message": f"质检未通过（修复派工 {round_no} 轮，总控复检 {rechecks} 次），已转人工（工单 {ticket['id']}）。",
+                    "code": "quality_check_failed", "problems": problems,
+                    "repair_rounds": round_no, "rechecks": rechecks, "ticket_id": ticket["id"],
                 }
             )
             return
@@ -815,6 +1221,10 @@ async def run_produce(
         await emit({"event": "done", "node_id": node_id, "artifacts": artifacts})
     finally:
         roles.clear_stage(stage_root)
+        try:
+            stage_root.parent.rmdir()  # 只在本路暂存用完后清理空的 .stage 父目录
+        except OSError:
+            pass
 
 
 def _experiment_brief_fallback(node: dict[str, Any]) -> str:
@@ -839,6 +1249,7 @@ async def run_ticket_recheck(ticket_id: str, emit: Emit) -> None:
             await emit({"event": "error", "message": "草稿大纲缺失，无法复检"})
             return
         problems = await build_gate(curriculum)
+        ok = not problems
     else:
         node_id = str(ticket.get("node_id") or "")
         nodes = _curriculum_of(base, str(ticket["slug"]))
@@ -847,10 +1258,10 @@ async def run_ticket_recheck(ticket_id: str, emit: Emit) -> None:
             await emit({"event": "error", "message": f"节点不存在：{node_id}"})
             return
         ensure_subject_assets(base)
+        # 判定只看 ok：非零退出但解析不出问题时 render_and_check 已回填兜底问题；
+        # 不能再用 `if problems:` 判定，否则 problems 为空会被误判「复检通过」关单。
         ok, problems = await render_and_check(base, node_id, nodes.index(node) + 1, emit)
-        if ok:
-            problems = []
-    if problems:
+    if not ok:
         tickets_svc.update_ticket(ticket_id, status="待处理", problems=problems)
         await emit({"event": "error", "message": f"复检未通过，仍有 {len(problems)} 处问题（已回填工单）。"})
         return
@@ -877,12 +1288,25 @@ async def run_ticket_retry(
     tickets_svc.update_ticket(ticket_id, status="重试中", retries=int(ticket.get("retries", 0)) + 1)
     slug = str(ticket["slug"])
     base = tickets_svc.ticket_dir_base(ticket)
-    stage_root = base / ".stage"
+    # 每次重试独立暂存目录：并发/连续重试不共享 .stage/<角色>，收尾也不误删别的在飞交付。
+    stage_root = base / ".stage" / ticket_id
     hint_block = f"\n\n【学习者补充说明】{hint}" if hint else ""
+
+    async def _park(message: str | None = None) -> None:
+        """放弃本次重试：状态回置「待处理」（不再是卡死的「重试中」）。"""
+        tickets_svc.update_ticket(ticket_id, status="待处理")
+        if message:
+            await emit({"event": "error", "message": message})
+
     try:
         if ticket.get("kind") == "build":
             from .build import curriculum_values, interview_of, run_curriculum_gate as build_gate
 
+            if draft_svc.get_draft(slug) is None:
+                # 草稿已被落点/删除：绝不 save_draft_curriculum 复活幽灵草稿（否则
+                # 报告「重试通过」而真实工作区科目纹丝不动）。留待处理供用户复检/放弃。
+                await _park(f"草稿已不存在（可能已落点确认）：{slug}。请改用「重新检查」或放弃本次。")
+                return
             values = curriculum_values(base, interview_of(base))
             values += "\n\n【上一稿门禁报错（逐条原文，改到没有为止）】\n" + _evidence_block(
                 ticket.get("problems") or []
@@ -893,11 +1317,11 @@ async def run_ticket_retry(
                 try:
                     envelope = await roles.dispatch_role(provider, "generate", values, fixture_kind="generate")
                 except ValueError as exc:
-                    await emit({"event": "error", "message": str(exc)})
+                    await _park(str(exc))
                     return
             data = envelope.get("data") if isinstance(envelope, dict) else None
             if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
-                await emit({"event": "error", "message": "大纲派工没有交回课程 JSON（data 键）"})
+                await _park("大纲派工没有交回课程 JSON（data 键）")
                 return
             problems = await build_gate(data)
             if problems:
@@ -910,11 +1334,16 @@ async def run_ticket_retry(
             nodes = _curriculum_of(base, slug)
             node = next((n for n in nodes if n.get("id") == node_id), None)
             if node is None:
-                await emit({"event": "error", "message": f"节点不存在：{node_id}"})
+                await _park(f"节点不存在：{node_id}")
                 return
             index = nodes.index(node) + 1
             kind = str(node.get("kind") or "概念")
-            owners = {str(p.get("owner") or "总控") for p in ticket.get("problems") or []}
+            retry_problems = [
+                {**p, "owner": problem_owner_for_node({**p, "owner": _owner_of_problem(p)}, kind)}
+                for p in ticket.get("problems") or []
+            ]
+            ticket = {**ticket, "problems": retry_problems}
+            owners = {str(p.get("owner") or "总控") for p in retry_problems}
             ensure_subject_assets(base)
 
             if kind != "实验" and "讲解" in owners:
@@ -928,10 +1357,19 @@ async def run_ticket_retry(
                 env = await dispatch(
                     provider, "produce_content", evidence, fixture_content_envelope, emit,
                     base=base, node_id=node_id, index=index, stage_dir=stage_root,
+                    regenerate=True, kind=kind,
                 )
                 if env is None:
+                    await _park()  # dispatch 已 emit error，这里只把状态从「重试中」拉回
                     return
-                await _write_and_promote(stage_root / "learning-coach", base, env)
+                moved = await _write_and_promote(
+                    stage_root / "learning-coach", base, env,
+                    required=required_artifacts("produce_content", index, node_id),
+                )
+                if moved is None:
+                    # 重派没有合法目标交付：不 promote 杂散文件，工单停留「待处理」，绝不假解决。
+                    await _park(f"讲解重派交付里没有课件内容文件——{_delivered_digest(env)}")
+                    return
 
             content_now = (
                 (base / lesson_rel(index, node_id, "md")).read_text(encoding="utf-8")
@@ -952,10 +1390,21 @@ async def run_ticket_retry(
             env = await dispatch(
                 provider, route, evidence, factory, emit,
                 base=base, node_id=node_id, index=index, stage_dir=stage_root,
+                regenerate=True, kind=kind,
             )
             if env is None:
+                await _park()
                 return
-            await _write_and_promote(stage_root / "practice-evaluator", base, env)
+            moved = await _write_and_promote(
+                stage_root / "practice-evaluator", base, env,
+                required=required_artifacts(route, index, node_id, kind),
+            )
+            if moved is None:
+                # 同上：缺目标产物的重派不算重试成功，工单停留「待处理」。
+                await _park(
+                    f"{DISPATCH_OWNERS.get(route, '出题')}重派交付里没有目标产物——{_delivered_digest(env)}"
+                )
+                return
 
             ok, problems = await render_and_check(base, node_id, index, emit)
             if not ok:
@@ -965,5 +1414,13 @@ async def run_ticket_retry(
 
         tickets_svc.update_ticket(ticket_id, status="已解决", problems=[])
         await emit({"event": "done", "stage": "retry", "message": "重试通过，工单已关闭。"})
+    except Exception:
+        # 任何未预期异常都不能把工单永久留在「重试中」；放回待处理再向上抛给 SSE 层
+        tickets_svc.update_ticket(ticket_id, status="待处理")
+        raise
     finally:
         roles.clear_stage(stage_root)
+        try:
+            stage_root.parent.rmdir()
+        except OSError:
+            pass

@@ -20,6 +20,8 @@ from fastapi.responses import JSONResponse
 
 from .. import curriculum_store as cs
 from .. import roles
+from .. import workspace_ctx
+from ..common import optional_workspace
 from ..config import REPO_ROOT, SCRIPTS_DIR
 from ..llm import is_fixture_mode
 from ..models import GenerateCourseRequest
@@ -70,7 +72,16 @@ def _gate_failure(problems: list[str]) -> JSONResponse:
 
 
 @router.post("/courses/generate")
-async def generate_course(payload: GenerateCourseRequest):
+async def generate_course(payload: GenerateCourseRequest, workspace: str | None = None):
+    """M4 向导：可选 `?workspace=` 指定落点工作区（不传则发现链的工作区）。"""
+    if workspace is None or not str(workspace).strip():
+        return await _generate_course_impl(payload)
+    # 只有显式传值才改绑定：未传时保留调用者已绑定的工作区，不 bind(None) 清掉它
+    with workspace_ctx.bind(optional_workspace(str(workspace))):
+        return await _generate_course_impl(payload)
+
+
+async def _generate_course_impl(payload: GenerateCourseRequest):
     name = payload.name.strip()
     purpose = payload.purpose.strip()
     level = payload.level.strip()

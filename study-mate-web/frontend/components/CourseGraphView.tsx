@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   AlertCircle,
+  AlertTriangle,
   Check,
   Copy,
   Download,
@@ -17,10 +18,17 @@ import {
 import { api } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { NodeDetail } from "./NodeDetail";
+import { InspectionDialog } from "./InspectionDialog";
 import { RightRail } from "./RightRail";
 import { SubjectGraphPanel } from "./SubjectGraphPanel";
 import { HomeEmbed } from "./HomeEmbed";
-import type { CourseDetail, ExportResult, GraphNode, SubjectStatus } from "@/lib/types";
+import type {
+  CourseDetail,
+  ExportResult,
+  GraphNode,
+  InspectionTicket,
+  SubjectStatus,
+} from "@/lib/types";
 
 // 右栏承载「大纲 / 图谱」分段切换（2026-10-04 再对调）：默认进图谱，主区只剩节点详情
 const GRAPH_WIDTH_KEY = "studymate-course-graph-width";
@@ -33,7 +41,7 @@ const SUBJECT_STATUSES: SubjectStatus[] = ["进行中", "暂停", "已完成"];
 
 export function CourseGraphView() {
   const searchParams = useSearchParams();
-  const { subjects, refreshSubjects, setCurrentSubjectSlug } = useWorkspace();
+  const { subjects, refreshSubjects, setCurrentSubjectSlug, activeWorkspace } = useWorkspace();
 
   const [subjectsReady, setSubjectsReady] = useState(false);
   const [course, setCourse] = useState<CourseDetail | null>(null);
@@ -81,7 +89,7 @@ export function CourseGraphView() {
       setStatusSaving(true);
       setStatusError(null);
       try {
-        await api.patchCourse(activeSlug, { status });
+        await api.patchCourse(activeSlug, { status }, activeWorkspace);
         setCourse((prev) => (prev ? { ...prev, subject: { ...prev.subject, status } } : prev));
         await refreshSubjects();
       } catch (err) {
@@ -90,7 +98,7 @@ export function CourseGraphView() {
         setStatusSaving(false);
       }
     },
-    [activeSlug, statusSaving, refreshSubjects],
+    [activeSlug, activeWorkspace, statusSaving, refreshSubjects],
   );
 
   // 拉取当前科目的课程图谱（主区头部与节点详情用；右栏图谱面板自带一份数据）
@@ -106,7 +114,7 @@ export function CourseGraphView() {
     setExportResult(null);
     setExportError(null);
     api
-      .getCourse(activeSlug)
+      .getCourse(activeSlug, activeWorkspace)
       .then((detail) => {
         if (alive) setCourse(detail);
       })
@@ -122,7 +130,7 @@ export function CourseGraphView() {
     return () => {
       alive = false;
     };
-  }, [activeSlug]);
+  }, [activeSlug, activeWorkspace]);
 
   // ?node= 预选：课程加载完成后选中该节点（仅消费一次）
   useEffect(() => {
@@ -169,14 +177,14 @@ export function CourseGraphView() {
     setExportError(null);
     setCopied(false);
     try {
-      const res = await api.exportCourse(activeSlug);
+      const res = await api.exportCourse(activeSlug, activeWorkspace);
       setExportResult(res);
     } catch (err) {
       setExportError(err instanceof Error ? err.message : String(err));
     } finally {
       setExporting(false);
     }
-  }, [activeSlug, exporting]);
+  }, [activeSlug, activeWorkspace, exporting]);
 
   const copyExportDir = useCallback(async () => {
     if (!exportResult) return;
@@ -199,14 +207,18 @@ export function CourseGraphView() {
 
   if (subjects.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-        <p className="text-sm opacity-60">还没有科目。</p>
-        <p className="text-xs opacity-40">
-          先在侧边栏「科目」区点击「+ 新科目」，或
-          <Link href="/generate" className="mx-1 text-brand hover:underline">
-            让 AI 生成一门科目
-          </Link>。
-        </p>
+      <div className="flex h-full flex-col">
+        {/* 无任何科目时也要能看到归属待确认的旧单（最小入口，不静默消失） */}
+        <PendingOwnershipEntry workspace={activeWorkspace} />
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
+          <p className="text-sm opacity-60">还没有科目。</p>
+          <p className="text-xs opacity-40">
+            先在侧边栏「科目」区点击「+ 新科目」，或
+            <Link href="/generate" className="mx-1 text-brand hover:underline">
+              让 AI 生成一门科目
+            </Link>。
+          </p>
+        </div>
       </div>
     );
   }
@@ -215,8 +227,12 @@ export function CourseGraphView() {
   // 空工作区（subjects.length === 0）优先于首页嵌入，走上面的「还没有科目…」提示。
   if (!requestedSlug) {
     return (
-      <div className="h-full w-full">
-        <HomeEmbed />
+      <div className="flex h-full flex-col">
+        {/* 默认主页顶上一条：归属待确认的旧单仍可达（旧单可能已无对应科目） */}
+        <PendingOwnershipEntry workspace={activeWorkspace} />
+        <div className="min-h-0 w-full flex-1">
+          <HomeEmbed workspace={activeWorkspace} />
+        </div>
       </div>
     );
   }
@@ -294,6 +310,8 @@ export function CourseGraphView() {
               导出静态工作区
             </button>
           )}
+          {/* 科目级工单入口：无 node 的旧单也能从这里进（不只节点角标） */}
+          {requestedSlug && <SubjectTicketEntry slug={requestedSlug} workspace={activeWorkspace} />}
         </div>
 
         {/* 导出结果 / 错误浮层 */}
@@ -376,6 +394,7 @@ export function CourseGraphView() {
                 <NodeDetail
                   slug={course.subject.slug}
                   node={selectedNode}
+                  workspace={activeWorkspace}
                   onSelectNode={selectNode}
                   onUpdated={handleUpdated}
                 />
@@ -403,6 +422,7 @@ export function CourseGraphView() {
       >
         <SubjectGraphPanel
           slug={requestedSlug}
+          workspace={activeWorkspace}
           selectedNodeId={selectedNodeId}
           onSelectNode={selectNode}
           onClearSelection={() => setSelectedNodeId(null)}
@@ -411,5 +431,192 @@ export function CourseGraphView() {
         />
       </RightRail>
     </div>
+  );
+}
+
+/**
+ * 科目级质检工单入口（最小可达，不做工单中心）。
+ *
+ * 目的：旧工单可能没有 node_id，不能只有 NodeDetail 节点角标一条路径。这里按科目 slug
+ * 列出 open 工单（含归属未知的旧单），点开复用同一个 InspectionDialog。
+ * 无工单时不显示，正常科目 UI 不变。
+ */
+function SubjectTicketEntry({ slug, workspace }: { slug: string; workspace: string | null }) {
+  const { workspaceCandidates } = useWorkspace();
+  const [open, setOpen] = useState(false);
+  const [tickets, setTickets] = useState<InspectionTicket[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [openTicketId, setOpenTicketId] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // 列表 scope：显式会话工作区优先，否则发现链默认候选；含未知参数让模糊旧单不被静默过滤
+  const scope = workspace ?? workspaceCandidates[0] ?? null;
+
+  useEffect(() => {
+    let alive = true;
+    // 科目级入口按 slug 收口：owned/legacy_draft + 本区确有同 slug 的可认领 unknown。
+    // include_unscoped 会绕过 slug，只留给全局「待归属」条。
+    api
+      .listTickets(slug, true, scope)
+      .then((list) => {
+        if (!alive) return;
+        setTickets(list);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (!alive) return;
+        setTickets(null);
+        setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [slug, scope, reloadKey]);
+
+  const count = tickets?.length ?? 0;
+  const hasEntry = error !== null || (tickets !== null && count > 0);
+  // 列表刷新后可能已无条目（如刚确认归属/放弃），但打开中的对话框必须留着
+  if (!hasEntry && !openTicketId) return null;
+
+  return (
+    <div className="relative shrink-0">
+      {hasEntry && (
+        <button
+          data-testid="subject-tickets-entry"
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1.5 rounded-lg border border-amber-400/50 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+          title="查看本科目的质检工单（含归属待确认的旧单）"
+        >
+          <AlertTriangle className="h-3.5 w-3.5" />
+          质检工单{error ? "（读取失败）" : ` ${count}`}
+        </button>
+      )}
+      {open && hasEntry && (
+        <div
+          data-testid="subject-tickets-list"
+          className="absolute right-0 top-9 z-20 flex w-80 flex-col gap-1 rounded-xl border bg-[var(--background)] p-2 text-xs shadow-lg"
+          style={{ borderColor: "var(--border)" }}
+        >
+          {error && (
+            <div className="flex items-center justify-between gap-2 text-red-500">
+              <span className="min-w-0 flex-1 break-all">读取失败：{error}</span>
+              <button
+                type="button"
+                onClick={() => setReloadKey((k) => k + 1)}
+                className="shrink-0 rounded border px-1.5 py-0.5"
+                style={{ borderColor: "var(--border)" }}
+              >
+                重试
+              </button>
+            </div>
+          )}
+          {tickets?.length === 0 && <span className="opacity-50">暂无待处理工单</span>}
+          {tickets?.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              data-testid="subject-ticket-item"
+              onClick={() => {
+                setOpenTicketId(t.id);
+                setOpen(false);
+              }}
+              className="flex flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left hover:bg-[var(--muted)]"
+            >
+              <span className="truncate font-medium">
+                {t.kind === "build" ? "建课大纲" : "单课产出"}
+                {t.node_id ? ` · ${t.node_id}` : " · 无节点"}
+              </span>
+              <span className="truncate opacity-60">
+                {t.id} · {t.status}
+                {t.workspace_ambiguous ? " · 归属待确认" : ""}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {openTicketId && (
+        <InspectionDialog
+          key={openTicketId}
+          ticketId={openTicketId}
+          workspace={workspace}
+          onClose={() => setOpenTicketId(null)}
+          onChanged={() => setReloadKey((k) => k + 1)}
+          onResolved={() => setReloadKey((k) => k + 1)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 「待归属」最小入口：不带 slug 读取归属未知（ambiguous）的 open 单，保证旧单即使
+ * 已无对应科目也不静默消失（默认主页 / 无科目页顶上一条）。不做工单中心。
+ */
+function PendingOwnershipEntry({ workspace }: { workspace: string | null }) {
+  const { workspaceCandidates } = useWorkspace();
+  const [tickets, setTickets] = useState<InspectionTicket[] | null>(null);
+  const [openTicketId, setOpenTicketId] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const scope = workspace ?? workspaceCandidates[0] ?? null;
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .listTickets(undefined, true, scope, true)
+      .then((list) => {
+        if (alive) setTickets(list.filter((t) => t.workspace_ambiguous));
+      })
+      .catch(() => {
+        if (alive) setTickets(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [scope, reloadKey]);
+
+  const hasItems = tickets !== null && tickets.length > 0;
+  // 放弃/确认后列表会刷新为空，但打开中的对话框必须留着（否则关闭时机错乱）
+  if (!hasItems && !openTicketId) return null;
+
+  return (
+    <>
+      {hasItems && (
+        <div
+          data-testid="pending-ownership-entry"
+          className="flex shrink-0 flex-wrap items-center gap-2 border-b border-amber-400/40 bg-amber-500/10 px-4 py-2 text-xs"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span className="shrink-0 font-medium text-amber-700 dark:text-amber-400">
+            有 {tickets.length} 张归属待确认的旧工单
+          </span>
+          <div className="flex min-w-0 flex-wrap gap-1.5">
+            {tickets.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                data-testid="pending-ownership-item"
+                onClick={() => setOpenTicketId(t.id)}
+                className="max-w-[16rem] truncate rounded-full border border-amber-400/50 px-2 py-0.5 hover:bg-amber-500/20"
+                title={`${t.slug}${t.node_id ? ` · ${t.node_id}` : ""}`}
+              >
+                {t.slug}
+                {t.node_id ? ` · ${t.node_id}` : ""}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {openTicketId && (
+        <InspectionDialog
+          key={openTicketId}
+          ticketId={openTicketId}
+          workspace={workspace}
+          onClose={() => setOpenTicketId(null)}
+          onChanged={() => setReloadKey((k) => k + 1)}
+          onResolved={() => setReloadKey((k) => k + 1)}
+        />
+      )}
+    </>
   );
 }

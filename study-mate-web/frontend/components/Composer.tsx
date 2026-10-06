@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import clsx from "clsx";
 import { Brain, Check, ChevronDown, FileText, Loader2, Paperclip, Send, Square, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatFileSize } from "@/lib/format";
 import { useChatDraft } from "@/lib/workspace";
-import { activeModelOf, modelVariant, modelVariants, ModelSelector } from "./ModelSelector";
+import { activeModelOf, effectiveActiveOf, modelVariant, modelVariants, ModelSelector } from "./ModelSelector";
 import type { AppSettings, AttachmentKind, SessionActive, UploadedAttachment } from "@/lib/types";
 
 const ACCEPT =
@@ -52,8 +52,8 @@ function ReasoningVariantSelector({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 生效三元组：会话绑定优先，否则全局默认（与 ModelSelector 同一口径）
-  const effective = settings ? sessionActive ?? settings.active : null;
+  // 生效三元组：会话绑定可用优先，绑定失效则回落全局默认（与 ModelSelector 同一口径）
+  const effective = settings ? effectiveActiveOf(settings, sessionActive) : null;
   const activeModel = settings && effective ? activeModelOf(settings, effective) : null;
   const variants = modelVariants(activeModel);
   const activeVariant = effective?.reasoning_variant || modelVariant(activeModel) || null;
@@ -158,6 +158,8 @@ function ReasoningVariantSelector({
 interface ComposerProps {
   streaming: boolean;
   disabled: boolean;
+  /** 禁用时的占位文案（如会话同步中/同步失败）；缺省回落到「请先到设置页配置模型」 */
+  disabledHint?: string;
   elevated?: boolean;
   sessionId?: string | null;
   settings: AppSettings | null;
@@ -165,29 +167,67 @@ interface ComposerProps {
   /** 会话绑定的模型/档位（null = 跟随全局默认；会话内切换只改这个会话） */
   sessionActive?: SessionActive | null;
   onSessionActiveChange?: (active: SessionActive) => void;
+  /**
+   * 服务端刚为本轮新建的会话 id（须与 sessionId 同批更新）：仅此情形才把「新对话」草稿
+   * 迁到该 id；手动点开历史会话传 null，避免草稿串会话。
+   */
+  adoptNewDraftInto?: string | null;
+  /**
+   * 外部填充句柄（2026-10-05 拍板③）：开场选项点击后把文本填进输入框而非直接发送。
+   * 父组件传一个 ref，Composer 在 effect 里把 fill 挂上去；fill 会聚焦输入框。
+   */
+  fillHandle?: RefObject<ComposerFillHandle | null>;
   onSend: (text: string, attachments: UploadedAttachment[]) => void;
   onStop: () => void;
+}
+
+export interface ComposerFillHandle {
+  /** 把文本填入输入框（走会话草稿缓存）并聚焦；不触发发送 */
+  fill: (text: string) => void;
 }
 
 export function Composer({
   streaming,
   disabled,
+  disabledHint,
   elevated = false,
   sessionId = null,
   settings,
   onUpdated,
   sessionActive = null,
   onSessionActiveChange,
+  adoptNewDraftInto = null,
+  fillHandle,
   onSend,
   onStop,
 }: ComposerProps) {
-  // 草稿按会话 id 缓存：切会话自动保存/载入，发送后清空
-  const { value, setValue, clearDraft } = useChatDraft(sessionId);
+  // 草稿按会话 id 缓存：切会话自动保存/载入，发送后清空。
+  // adoptNewDraftInto 只在「服务端为本轮新建会话」时非空，用于迁移流式期间新打的下一条草稿。
+  const { value, setValue, clearDraft } = useChatDraft(sessionId, adoptNewDraftInto);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 外部填充句柄：开场选项把文本写进当前会话的草稿槽并聚焦输入框（不发送）
+  useEffect(() => {
+    if (!fillHandle) return;
+    fillHandle.current = {
+      fill: (text: string) => {
+        setValue(text);
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.style.height = "auto";
+          el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+        }
+      },
+    };
+    return () => {
+      fillHandle.current = null;
+    };
+  }, [fillHandle, setValue]);
   const inflightRef = useRef(new Map<string, Promise<void>>());
   const pendingRef = useRef<PendingAttachment[]>([]);
   pendingRef.current = pending;
@@ -408,7 +448,7 @@ export function Composer({
               rows={elevated ? 2 : 1}
               placeholder={
                 disabled
-                  ? "请先到设置页配置模型"
+                  ? disabledHint ?? "请先到设置页配置模型"
                   : "给 StudyMate 发消息…（Enter 发送，Shift+Enter 换行）"
               }
               disabled={disabled}

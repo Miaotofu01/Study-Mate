@@ -50,7 +50,7 @@ const EMPTY_FORM: FormState = {
 
 export function MisconceptionsView() {
   const searchParams = useSearchParams();
-  const { subjects, misconceptionDraft, setMisconceptionDraft } = useWorkspace();
+  const { subjects, activeWorkspace, misconceptionDraft, setMisconceptionDraft } = useWorkspace();
 
   const [subjectSlug, setSubjectSlug] = useState(searchParams.get("subject") ?? "");
   const [importance, setImportance] = useState<MisconceptionImportance | "">("");
@@ -97,7 +97,7 @@ export function MisconceptionsView() {
     }
     let alive = true;
     api
-      .getCourse(subjectSlug)
+      .getCourse(subjectSlug, activeWorkspace)
       .then((detail) => {
         if (alive) setNodes(detail.graph.nodes);
       })
@@ -107,7 +107,7 @@ export function MisconceptionsView() {
     return () => {
       alive = false;
     };
-  }, [subjectSlug]);
+  }, [subjectSlug, activeWorkspace]);
 
   useEffect(() => {
     if (!subjectSlug) {
@@ -118,10 +118,14 @@ export function MisconceptionsView() {
     setLoading(true);
     setError(null);
     api
-      .listMisconceptions(subjectSlug, {
-        importance: importance || undefined,
-        node_id: nodeId || undefined,
-      })
+      .listMisconceptions(
+        subjectSlug,
+        {
+          importance: importance || undefined,
+          node_id: nodeId || undefined,
+        },
+        activeWorkspace,
+      )
       .then((res) => {
         if (alive) setItems(res.items);
       })
@@ -137,7 +141,7 @@ export function MisconceptionsView() {
     return () => {
       alive = false;
     };
-  }, [subjectSlug, importance, nodeId]);
+  }, [subjectSlug, importance, nodeId, activeWorkspace]);
 
   const openCreate = () => {
     setEditing(null);
@@ -181,30 +185,36 @@ export function MisconceptionsView() {
       setFormError("主题、问题、误解点、答案要点均为必填");
       return;
     }
+    const followUp = form.follow_up.trim();
     const payload: MisconceptionPayload = {
       topic,
       question,
       misunderstanding,
       answer_summary: answerSummary,
       importance: form.importance,
+      // 显式带上这两个可空字段：编辑时「清空待跟进 / 取消节点关联」要能落盘。
+      // 后端对省略的键按「保留旧值」处理，只传非空值会清不掉。
+      follow_up: followUp ? followUp : null,
+      node: form.node ? form.node : null,
     };
-    const followUp = form.follow_up.trim();
-    if (followUp) payload.follow_up = followUp;
-    if (form.node) payload.node = form.node;
 
     setSubmitting(true);
     setFormError(null);
     try {
       if (editing) {
-        await api.updateMisconception(subjectSlug, editing.id, payload);
+        await api.updateMisconception(subjectSlug, editing.id, payload, activeWorkspace);
       } else {
-        await api.createMisconception(subjectSlug, payload);
+        await api.createMisconception(subjectSlug, payload, activeWorkspace);
       }
       closeForm();
-      const res = await api.listMisconceptions(subjectSlug, {
-        importance: importance || undefined,
-        node_id: nodeId || undefined,
-      });
+      const res = await api.listMisconceptions(
+        subjectSlug,
+        {
+          importance: importance || undefined,
+          node_id: nodeId || undefined,
+        },
+        activeWorkspace,
+      );
       setItems(res.items);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : String(err));
@@ -217,7 +227,7 @@ export function MisconceptionsView() {
     if (!subjectSlug) return;
     if (!window.confirm(`删除概念「${item.topic}」？`)) return;
     try {
-      await api.deleteMisconception(subjectSlug, item.id);
+      await api.deleteMisconception(subjectSlug, item.id, activeWorkspace);
       setItems((prev) => prev.filter((i) => i.id !== item.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -353,7 +363,9 @@ export function MisconceptionsView() {
                 <span className="text-xs opacity-50">{item.date}</span>
                 {item.node && (
                   <Link
-                    href={`/courses?subject=${encodeURIComponent(subjectSlug)}&node=${encodeURIComponent(item.node)}`}
+                    href={`/courses?subject=${encodeURIComponent(subjectSlug)}&node=${encodeURIComponent(item.node)}${
+                      activeWorkspace ? `&workspace=${encodeURIComponent(activeWorkspace)}` : ""
+                    }`}
                     className="max-w-[10rem] truncate rounded px-1.5 py-0.5 text-[11px] hover:bg-[var(--muted)]"
                     style={{ background: "var(--muted)" }}
                     title={`在课程图谱中定位：${nodeName(item.node)}`}

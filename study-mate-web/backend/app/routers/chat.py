@@ -3,18 +3,23 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import json
 import re
 import shutil
+import time
+import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
 from .. import agent as agent_svc
-from .. import audit
+from .. import audit, errors
+from .. import concurrency
 from .. import curriculum_store as cs
 from .. import memory as memory_svc
 from .. import misconceptions as mc
@@ -42,15 +47,66 @@ from ..multimodal import (
     inject_images,
     prime_stream,
 )
-from .uploads import UPLOAD_ID_RE, classify_kind
+from .uploads import UPLOAD_ID_RE, classify_kind, safe_attachment_path
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
+@router.post("/sessions/{session_id}/stop")
+async def stop_session(session_id: str):
+    if storage.get_session(session_id) is None:
+        raise HTTPException(404, "会话不存在")
+    stopped = errors.request_stop(session_id, errors.active_turn(session_id))
+    return {"ok": True, "stop": stopped}
+
+
 MAX_ATTACHMENT_CHARS_TOTAL = 60000
+MAX_ATTACHMENTS_PER_MESSAGE = 10
+
+SESSION_BUSY_MESSAGE = "该会话正在处理上一轮回复或编排，请等待它结束、或先停止当前轮次后再发送。"
+SESSION_BUSY_EDIT_MESSAGE = "该会话正在处理上一轮回复或编排，暂不能编辑或删除消息；请先停止当前轮次。"
+
+# 中途 checkpoint：工具边界立即写，正文/思维链按这个间隔节流（真机写得别太碎）。
+CHECKPOINT_INTERVAL = 0.6
+# 静默期 SSE 注释心跳：让 send 失败把断开暴露出来，及时取消 runner 并释放会话租约。
+HEARTBEAT_INTERVAL = 3.0
+SSE_HEARTBEAT = ": ping\n\n"
+
+
+def _acquire_session(lease: concurrency.Lease, session_id: str, message: str) -> None:
+    """占用会话键并记进租约；已有在飞轮次则 409（不等待）。"""
+    key = concurrency.session_key(session_id)
+    try:
+        token = concurrency.acquire(key, message)
+    except concurrency.ConflictError as exc:
+        raise HTTPException(409, str(exc)) from None
+    lease.add(key, token)
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+async def _queue_get_heartbeat(
+    queue: asyncio.Queue[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """取一个事件；静默超时返回 None，让调用方补发 SSE 注释心跳。
+
+    用独立 Task + `asyncio.wait` 而非 `wait_for(queue.get())`：后者在内层 get 被取消
+    又恰好拿到事件的边界上有丢事件竞态（该事件会随取消一起丢掉）。无论超时还是外层被
+    取消（客户端断开），都在 finally 里取消并收殓未完成的 getter，避免留下悬挂的
+    `Queue.get` 任务。
+    """
+    getter = asyncio.ensure_future(queue.get())
+    try:
+        done, _ = await asyncio.wait({getter}, timeout=HEARTBEAT_INTERVAL)
+        if done:
+            return getter.result()
+        return None
+    finally:
+        if not getter.done():
+            getter.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await getter
 
 
 def _require_session(session_id: str) -> dict[str, Any]:
@@ -163,6 +219,105 @@ INTERVIEW_CLOSE_HINT = (
     "未收到建课收口标记：请再说一次「按上面的结论建课」，或继续回答教练的问题。"
 )
 
+# 建课收口阶段的显式判据（2026-10-05）：用户明确确认建课时进入——本轮工具面清空、
+# 只做纯最终输出。**只认完整明确命令**：整句 fullmatch 有限前缀 + 命令 + 句尾标点，
+# 任意前后文（"如何开始建课/我不想开始建课/有人建议开始建课/可以建课吗"）一律不触发。
+# 宁可漏判（继续盘问）也不误建课。
+_CONFIRM_COMMANDS = (
+    r"确认建课|按你说的(?:来)?建课|按上面的结论(?:来)?建课|按上面结论建课|"
+    r"开始建课|就这样建课|这就建课|可以建课|建课吧|那就建课"
+)
+_CONFIRM_PREFIX = r"(?:(?:好[的了]?|嗯|行|请|现在|那就|那|OK|ok)[，,]?\s*)?"
+_CONFIRM_TAIL = r"[！!。.，,~～\s]*"
+INTERVIEW_CONFIRM_RE = re.compile(
+    rf"^(?:{_CONFIRM_PREFIX})?(?:{_CONFIRM_COMMANDS}){_CONFIRM_TAIL}$"
+)
+# 辅助判据：收口提示之后的一句简短确认。用**有限词集合**（不是字符集合，任意字组合不算）。
+_SHORT_AFFIRM_WORDS = frozenset(
+    {"好", "好的", "行", "嗯", "对", "是", "是的", "可以", "没问题", "开始吧", "就这样", "就这样吧", "确认", "ok"}
+)
+_SHORT_AFFIRM_TAIL = "！!。.，,~～、 \t"
+# 收口阶段阶段状态提示（一轮一次，给出时限与可停止；不逐秒刷屏、不新增计时 UI）。
+INTERVIEW_FINALIZE_NOTICE_TEMPLATE = (
+    "（正在整理建课信息，最多等待约 {seconds:.0f}s；期间可随时停止。本轮不再调用工具。）"
+)
+
+
+def finalize_notice() -> str:
+    return INTERVIEW_FINALIZE_NOTICE_TEMPLATE.format(
+        seconds=agent_svc.INTERVIEW_FINALIZE_MAX_SECONDS
+    )
+
+
+# 收口必填字段与占位值：只凭 name 就建草稿会把盘问没问全的信息当成已确认。
+# 机械校验关键字段完整（不靠模型自述、不把模型创造值当用户已确认）。
+INTERVIEW_REQUIRED_FIELDS = ("name", "purpose", "level", "background")
+INTERVIEW_PLACEHOLDER_VALUES = frozenset(
+    {
+        "",
+        "未知",
+        "不详",
+        "待定",
+        "未提供",
+        "未说明",
+        "没提供",
+        "n/a",
+        "na",
+        "none",
+        "null",
+        "-",
+        "—",
+        "?",
+        "无",
+    }
+)
+
+
+def _interview_missing_fields(result: dict[str, Any]) -> list[str]:
+    """返回缺失/占位的必填字段名（空列表表示信息完整可建草稿）。
+
+    字段必须是**非空字符串**：list/dict/number 等非文本一律视为未提供
+    （str(dict) 不能把非文本当成已确认值）；"零基础" 这类明确字符串有效。
+    """
+    missing: list[str] = []
+    for key in INTERVIEW_REQUIRED_FIELDS:
+        value = result.get(key)
+        if not isinstance(value, str):
+            missing.append(key)
+            continue
+        text = value.strip()
+        if not text or text.lower() in INTERVIEW_PLACEHOLDER_VALUES:
+            missing.append(key)
+    return missing
+
+
+def _is_interview_finalize_phase(messages: list[dict[str, Any]], message: str) -> bool:
+    """本轮是否进入建课收口阶段（mode=interview 时由调用方再判）。
+
+    保守识别「完整明确命令」：整句 fullmatch 有限前缀 + 命令 + 句尾标点；任意前后文
+    （"如何开始建课/我不想开始建课/有人建议开始建课/可以建课吗"）都不触发。
+    漏判只是继续盘问，远好于误建课。
+    - 完整命令 ⇒ 收口。
+    - 简短确认（"好/可以/就这样"）的辅助判据：仅当上一助手是收口提示（无问号、含
+      「确认」且提「建课/开始」）时成立，不猜。
+    """
+    text = (message or "").strip()
+    if not text:
+        return False
+    if INTERVIEW_CONFIRM_RE.fullmatch(text):
+        return True
+    if text.strip(_SHORT_AFFIRM_TAIL) not in _SHORT_AFFIRM_WORDS:
+        return False
+    previous = next(
+        (msg for msg in reversed(messages) if msg.get("role") == "assistant"), None
+    )
+    if previous is None:
+        return False
+    prev_text = str(previous.get("content") or "")
+    if "？" in prev_text or "?" in prev_text:
+        return False
+    return "确认" in prev_text and ("建课" in prev_text or "开始" in prev_text)
+
 
 def _strip_interview_markers(text: str) -> str:
     """剥掉盘问收口标记再落库。
@@ -197,13 +352,40 @@ def _maybe_prompt_interview_close(session_id: str, reply: str) -> None:
     storage.add_message(session_id, "assistant", INTERVIEW_CLOSE_HINT, kind="error")
 
 
+# 任务快照的终态：到点必须立即 checkpoint（不能等 0.6s 节流），保证刷新即见终态。
+# timeout 与 done/error/interrupted 同为终态：到点不得再回落 running，刷新即见超时。
+_TERMINAL_TASK_STATUSES = ("done", "error", "timeout", "interrupted")
+
+
+def _task_is_terminal(task: Any) -> bool:
+    return isinstance(task, dict) and str(task.get("status") or "") in _TERMINAL_TASK_STATUSES
+
+
+def _tool_status_from_task(task: dict[str, Any]) -> str:
+    """任务状态 → 旧 ToolActivity.status（interrupted 归 error 供旧卡片兜底显示）。"""
+    status = str(task.get("status") or "")
+    if status == "done":
+        return "done"
+    if status == "running":
+        return "running"
+    return "error"
+
+
 def _accumulate_partial(bucket: dict[str, Any], event: dict[str, Any]) -> None:
-    """把已回吐的事件攒进兜底桶：客户端中途断开时靠它把已产出的内容落库。"""
+    """把已回吐的事件攒进兜底桶：客户端中途断开时靠它把已产出的内容落库。
+
+    同时按事件顺序维护 `bucket["parts"]`——这是回放时正文与工具卡交错的唯一依据。
+    """
+    _record_part(bucket.setdefault("parts", []), event)
     kind = str(event.get("type") or "")
     if kind == "text":
         bucket["text"].append(str(event.get("content") or ""))
     elif kind == "reasoning":
         bucket["reasoning"].append(str(event.get("content") or ""))
+    elif kind == "error":
+        bucket["error"] = {key: value for key, value in event.items() if key not in ("type", "message")}
+        if not bucket["error"].get("summary"):
+            bucket["error"] = errors.make("internal", phase="stream", summary=str(event.get("message") or "回复失败")).to_dict()
     elif kind == "notice":
         message = str(event.get("message") or "")
         if message:
@@ -217,6 +399,17 @@ def _accumulate_partial(bucket: dict[str, Any], event: dict[str, Any]) -> None:
                 "status": "running",
             }
         )
+    elif kind == "task_update":
+        # 只原位更新父工具卡的 task 快照：不 append parts、不产生 notice（高频进度刷新同一张卡）。
+        # 深复制避免后续事件/调用方继续修改同一 dict 污染已落库快照（快照可能很大）。
+        target = str(event.get("id") or "")
+        task = event.get("task")
+        if target and isinstance(task, dict):
+            for tool in bucket["tools"]:
+                if tool["id"] == target:
+                    tool["task"] = copy.deepcopy(task)
+                    tool["status"] = _tool_status_from_task(task)
+                    break
     elif kind == "tool_result":
         target = str(event.get("id") or "")
         for tool in bucket["tools"]:
@@ -228,6 +421,10 @@ def _accumulate_partial(bucket: dict[str, Any], event: dict[str, Any]) -> None:
                         "isError": bool(event.get("is_error")),
                     }
                 )
+                # 透传工具结构化元数据（task/lesson/assessment），供前端任务卡与系统状态卡。
+                for key in ("task", "lesson", "assessment"):
+                    if event.get(key) is not None:
+                        tool[key] = copy.deepcopy(event[key])
                 break
     elif kind == "usage":
         payload = event.get("usage")
@@ -235,32 +432,242 @@ def _accumulate_partial(bucket: dict[str, Any], event: dict[str, Any]) -> None:
             bucket["usage"] = payload
 
 
-def _persist_partial(session_id: str, bucket: dict[str, Any], model_label: str | None) -> None:
-    """兜底落库：保住流式期间已经吐出去的内容。
+PARTIAL_DISCONNECT_NOTICE = "（本轮输出过程中连接中断，这里只保存了已经产出的部分。）"
+PARTIAL_ERROR_NOTICE = "（本轮输出过程中出错，这里只保存了已经产出的部分。）"
+TOOL_INTERRUPTED_RESULT = "（本轮在工具返回前结束，未收到执行结果）"
 
-    正常路径在 `run_agent` 返回后统一落库；但客户端切会话/关页会让 Starlette 取消这个
-    迭代任务、进而 `task.cancel()` 掉 runner，那段落库代码就再也执行不到。真机现象是
-    「流式里看得见的回复，切一下会话就没了」（2026-10-04 维护者反馈）。
+_PART_TEXT_KINDS = ("text", "reasoning", "notice")
+
+
+def _record_part(parts: list[dict[str, Any]], event: dict[str, Any]) -> None:
+    """按事件顺序维护有序 parts（契约同前端 types）。
+
+    text/reasoning 与相邻同类合并；**notice 不合并**——每个 notice 事件独立成一个 part，
+    与 `notices` 数组逐条一一对应（前端按条匹配，合并会与 Set 去重后的剩余 notices 错位）。
+    `tool_call` 插入 `{type:'tool', tool_id}`，`tool_result`/`usage` 不新增 part
+    （工具结果只更新 `tools` 数组里的原条目）。
     """
+    kind = str(event.get("type") or "")
+    if kind == "tool_call":
+        parts.append({"type": "tool", "tool_id": str(event.get("id") or "")})
+        return
+    if kind not in _PART_TEXT_KINDS:
+        return
+    text = str(event.get("message") if kind == "notice" else event.get("content") or "")
+    if not text:
+        return
+    if kind in ("text", "reasoning") and parts and parts[-1].get("type") == kind:
+        parts[-1]["text"] = str(parts[-1].get("text") or "") + text
+    else:
+        parts.append({"type": kind, "text": text})
+
+
+def _bucket_has_output(bucket: dict[str, Any]) -> bool:
+    """有正文/思维链/工具才算产出；只有 notice 不建空助手消息。"""
+    return bool(
+        "".join(bucket.get("text") or []).strip()
+        or "".join(bucket.get("reasoning") or []).strip()
+        or bucket.get("tools")
+        or bucket.get("error")
+    )
+
+
+# 收口标记的展示清洗：与前端 format.ts 的 INTERVIEW_BLOCK 同口径（任意内容、非贪婪）。
+INTERVIEW_BLOCK_RE = re.compile(
+    r"<!--INTERVIEW_RESULT-->.*?<!--/INTERVIEW_RESULT-->", re.DOTALL
+)
+
+
+def _hidden_spans(merged: str) -> list[tuple[int, int]]:
+    """合并正文里的隐藏区间：完整标记块 + 首个未被覆盖的半截标记起至末尾（同前端）。"""
+    spans = [(match.start(), match.end()) for match in INTERVIEW_BLOCK_RE.finditer(merged)]
+
+    def covered(pos: int) -> bool:
+        return any(start <= pos < end for start, end in spans)
+
+    for pos in range(len(merged) - len(INTERVIEW_START) + 1):
+        if not covered(pos) and merged.startswith(INTERVIEW_START, pos):
+            spans.append((pos, len(merged)))
+            break
+    spans.sort()
+    return spans
+
+
+def _keep_outside(merged: str, start: int, end: int, hidden: list[tuple[int, int]]) -> str:
+    """取 [start, end) 内未被任何隐藏区间覆盖的部分（多段顺次拼接）。"""
+    out: list[str] = []
+    cursor = start
+    for hole_start, hole_end in hidden:
+        if hole_end <= cursor or hole_start >= end:
+            continue
+        if hole_start > cursor:
+            out.append(merged[cursor:hole_start])
+        cursor = max(cursor, hole_end)
+    if cursor < end:
+        out.append(merged[cursor:end])
+    return "".join(out)
+
+
+def _clean_text(text: str) -> str:
+    """单段正文清洗：剥标记 + 去首尾空白（与 `_strip_interview_markers` 口径一致）。"""
+    return _keep_outside(text, 0, len(text), _hidden_spans(text)).strip()
+
+
+def _clean_parts(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """保序片段清洗（对齐前端 format.ts cleanAssistantParts 的隐藏区间口径）。
+
+    与前端逐块 trim 的唯一区别：这里只对**合并全文**裁一次全局首尾空白并映射回原
+    span，保留片段之间（如 `' Hello '` / tool / `' world '`）的内部空白——存储不能丢
+    内部空白，否则模型历史与复制出的正文会被粘连成 `Helloworld`。清洗后为空的 text
+    片段丢弃，非 text 片段原位不动。结果满足 `join(text parts) == _clean_text(全文)`。
+    """
+    spans: dict[int, tuple[int, int]] = {}
+    merged = ""
+    for index, part in enumerate(parts):
+        if part.get("type") != "text":
+            continue
+        piece = str(part.get("text") or "")
+        spans[index] = (len(merged), len(merged) + len(piece))
+        merged += piece
+    hidden = _hidden_spans(merged)
+
+    def is_hidden(pos: int) -> bool:
+        return any(start <= pos < end for start, end in hidden)
+
+    kept = [pos for pos in range(len(merged)) if not is_hidden(pos)]
+    visible = "".join(merged[pos] for pos in kept)
+    left = len(visible) - len(visible.lstrip())
+    right = len(visible) - len(visible.rstrip())
+    if right:
+        kept = kept[: len(kept) - right]
+    if left:
+        kept = kept[left:]
+    keep_set = set(kept)
+
+    result: list[dict[str, Any]] = []
+    for index, part in enumerate(parts):
+        if part.get("type") != "text":
+            result.append(part)
+            continue
+        start, end = spans[index]
+        piece = "".join(merged[pos] for pos in range(start, end) if pos in keep_set)
+        if piece:
+            result.append({**part, "text": piece})
+    return result
+
+
+def _write_turn(
+    session_id: str,
+    bucket: dict[str, Any],
+    model_label: str | None,
+    *,
+    turn_id: str | None = None,
+    final_reason: str | None = None,
+    final: bool = False,
+) -> bool:
+    """把当前桶落进会话：turn_id 给定时原位 upsert，否则追加（兼容旧调用）。
+
+    这是正常落库与断开兜底的**唯一**来源——桶在 chat 的 emit 里同时看得见 run_agent
+    事件与 ToolContext.emit 的工具进度，`outcome` 看不到后者，因此不另用 outcome。
+
+    终态语义（写入助手消息的 `stream_state`）：
+    - final_reason="disconnect"：仍在 running 的工具标为中断，state=interrupted；
+    - final_reason="error"：state=error；
+    - final=True：正常结束，state=completed；
+    - 其余为中途 checkpoint，state=streaming。
+    无产出（只有 notice）时不建空助手消息，返回 False。
+    """
+    if final_reason == "disconnect" and turn_id and errors.consume_stop(session_id, turn_id):
+        final_reason = "user_stop"
+    if final_reason in ("disconnect", "user_stop"):
+        bucket["stopped_reason"] = final_reason
+        bucket["error"] = errors.make(
+            "user_stopped" if final_reason == "user_stop" else "upstream_transport",
+            phase="stream", summary="已停止本轮回复。" if final_reason == "user_stop" else "连接意外中断，回复未完成。",
+            stopped_reason=final_reason, request_id=turn_id,
+            retryable=final_reason != "user_stop",
+        ).to_dict()
+    if not _bucket_has_output(bucket):
+        return False
     text = "".join(bucket.get("text") or [])
     reasoning = "".join(bucket.get("reasoning") or [])
-    tools = bucket.get("tools") or []
+    tools = [dict(tool) for tool in (bucket.get("tools") or [])]
     notices = list(bucket.get("notices") or [])
-    if not (text.strip() or reasoning.strip() or tools):
-        return
-    notices.append("（本轮输出过程中连接中断，这里只保存了已经产出的部分。）")
+    parts = [dict(part) for part in (bucket.get("parts") or [])]
+    if final_reason is not None:
+        for tool in tools:
+            if tool.get("status") == "running":
+                tool["status"] = "error"
+                tool["isError"] = True
+                if not str(tool.get("result") or "").strip():
+                    tool["result"] = TOOL_INTERRUPTED_RESULT
+        if not bucket.get("error"):
+            notices.append(PARTIAL_DISCONNECT_NOTICE if final_reason == "disconnect" else PARTIAL_ERROR_NOTICE)
+    if final_reason in ("disconnect", "user_stop"):
+        stream_state = "interrupted"
+    elif final_reason == "error" or bucket.get("error"):
+        stream_state = "error"
+    elif final:
+        stream_state = "completed"
+    else:
+        stream_state = "streaming"
+    parts = _clean_parts(parts)
+    if not any(part.get("type") == "text" for part in parts) and text.strip():
+        # 兼容手工构造、未带 parts 的桶：补一个清洗后的 text part，保证正文不丢。
+        cleaned = _clean_text(text)
+        if cleaned:
+            parts = [{"type": "text", "text": cleaned}, *parts]
+    # 正文口径与前端 cleanAssistantText 一致；`_clean_parts` 只裁全局首尾，故
+    # `join(parts.text) == _clean_text(text)` 恒成立（内部边界空白保留在片段里）。
+    content = _clean_text(text)
+    fields: dict[str, Any] = {
+        "reasoning": reasoning or None,
+        "tools": tools or None,
+        "notices": notices or None,
+        "parts": parts or None,
+        "model": model_label,
+        "stream_state": stream_state,
+    }
+    if bucket.get("error"):
+        fields["error"] = {**bucket["error"], "request_id": turn_id}
+    if bucket.get("stopped_reason"):
+        fields["stopped_reason"] = bucket["stopped_reason"]
     try:
-        storage.add_message(
-            session_id,
-            "assistant",
-            _strip_interview_markers(text),
-            reasoning=reasoning or None,
-            tools=tools or None,
-            notices=notices,
-            model=model_label,
-        )
+        if turn_id:
+            storage.upsert_turn_message(session_id, turn_id, content=content, **fields)
+        else:
+            storage.add_message(session_id, "assistant", content, **fields)
     except KeyError:  # 会话被并发删掉：兜底失败不该再抛
-        return
+        return False
+    return True
+
+
+def _persist_partial(
+    session_id: str,
+    bucket: dict[str, Any],
+    model_label: str | None,
+    reason: str = "disconnect",
+    turn_id: str | None = None,
+) -> bool:
+    """兜底落库：保住流式期间已经吐出去的内容（终态覆盖同一 turn_id）。见 `_write_turn`。"""
+    return _write_turn(
+        session_id, bucket, model_label, turn_id=turn_id, final_reason=reason
+    )
+
+
+def _current_session_mode(session_id: str, fallback: str) -> str:
+    """按请求开始的同一条派生规则读「此刻」的会话模式。
+
+    agent 可在一轮对话中途经 `start_course_interview` 工具把会话切进建课模式：
+    收口判定若仍用请求开始时的 mode，本轮切模式 + 当场收口（一句话给足信息）就永远
+    解析不到。科目绑定优先级与请求开始时一致（绑了科目一律 chat）。
+    """
+    session = storage.get_session(session_id)
+    if session is None:
+        return fallback
+    if session.get("subject_slug"):
+        return "chat"
+    return str(session.get("mode") or fallback or "chat")
 
 
 def _handle_interview_result(session_id: str, reply: str) -> dict[str, Any] | None:
@@ -284,9 +691,19 @@ def _handle_interview_result(session_id: str, reply: str) -> dict[str, Any] | No
             kind="error",
         )
         return None
-    if not isinstance(result, dict) or not str(result.get("name") or "").strip():
+    if not isinstance(result, dict):
         storage.add_message(
-            session_id, "assistant", "盘问收口缺少科目名（name），无法建课。", kind="error"
+            session_id, "assistant", "盘问收口标记不是 JSON 对象，无法建课。", kind="error"
+        )
+        return None
+    missing = _interview_missing_fields(result)
+    if missing:
+        # 关键信息没问全就不建草稿：回错误提示要求补充（机械校验，不靠模型自述）。
+        storage.add_message(
+            session_id,
+            "assistant",
+            f"盘问收口缺少必要信息：{'、'.join(missing)}，请补充后再确认建课。",
+            kind="error",
         )
         return None
     from .. import draft as draft_svc
@@ -361,20 +778,24 @@ def _find_pending(file_id: str) -> Path | None:
     if not UPLOAD_ID_RE.fullmatch(file_id):
         return None
     for path in PENDING_UPLOADS_DIR.glob(f"{file_id}_*"):
-        if path.is_file():
+        if safe_attachment_path(path, PENDING_UPLOADS_DIR):
             return path
     return None
 
 
 def _find_in_session(session_id: str, file_id: str) -> Path | None:
     """会话已落盘的附件（编辑重发时保留原附件，文件不重复搬动）。"""
-    if not UPLOAD_ID_RE.fullmatch(file_id):
+    if not UPLOAD_ID_RE.fullmatch(file_id) or not storage.is_valid_session_id(session_id):
         return None
     session_dir = UPLOADS_DIR / session_id
-    if not session_dir.is_dir():
+    if (
+        session_dir.is_symlink()
+        or not storage.path_within(session_dir, UPLOADS_DIR)
+        or not session_dir.is_dir()
+    ):
         return None
     for path in session_dir.glob(f"{file_id}_*"):
-        if path.is_file():
+        if safe_attachment_path(path, session_dir):
             return path
     return None
 
@@ -390,23 +811,63 @@ def _attachment_meta(file_id: str, path: Path) -> dict[str, Any]:
     }
 
 
-def _move_attachments(session_id: str, attachment_ids: list[str]) -> list[dict[str, Any]]:
-    """解析被引用的附件：pending 里的移入 data/uploads/<session_id>/，已在本会话
-    目录里的原地复用（编辑重发保留原附件）。返回元数据（含内部寻址用的 _path）。"""
-    resolved: list[dict[str, Any]] = []
-    target_dir = UPLOADS_DIR / session_id
+def _validate_attachment_ids(attachment_ids: list[str]) -> None:
+    """发送前对附件数量/格式做纯校验（不触盘）；超限或非法一律 422。"""
+    if len(attachment_ids) > MAX_ATTACHMENTS_PER_MESSAGE:
+        raise HTTPException(
+            422,
+            f"单条消息附件数上限 {MAX_ATTACHMENTS_PER_MESSAGE} 个"
+            f"（当前 {len(attachment_ids)} 个）",
+        )
+    seen: set[str] = set()
+    for file_id in attachment_ids:
+        if not UPLOAD_ID_RE.fullmatch(file_id):
+            raise HTTPException(422, f"附件标识非法：{file_id}")
+        if file_id in seen:
+            raise HTTPException(422, f"附件标识重复：{file_id}")
+        seen.add(file_id)
+
+
+def _resolve_attachments(
+    session_id: str | None, attachment_ids: list[str]
+) -> list[tuple[str, Path]]:
+    """只读解析附件的落点：返回 [(id, path)]；任一失效即 422，不搬文件、不落消息。
+
+    在截断/建会话之前调用，保证「校验失败不产生半搬迁与幽灵消息」。
+    """
+    resolved: list[tuple[str, Path]] = []
+    missing: list[str] = []
     for file_id in attachment_ids:
         source = _find_pending(file_id)
-        if source is not None:
+        if source is None and session_id:
+            source = _find_in_session(session_id, file_id)
+        if source is None:
+            missing.append(file_id)
+        else:
+            resolved.append((file_id, source))
+    if missing:
+        raise HTTPException(
+            422, f"附件不存在或已过期：{'、'.join(missing)}，请重新上传后再发送。"
+        )
+    return resolved
+
+
+def _materialize_attachments(
+    session_id: str, resolved: list[tuple[str, Path]]
+) -> list[dict[str, Any]]:
+    """把已校验的附件落位：pending 的移入会话目录，已在本会话目录的原地复用
+    （编辑重发不重复搬运）。返回元数据（含内部寻址用的 _path）。"""
+    target_dir = UPLOADS_DIR / session_id
+    metas: list[dict[str, Any]] = []
+    for file_id, source in resolved:
+        if source.parent == target_dir:
+            target = source
+        else:
             target_dir.mkdir(parents=True, exist_ok=True)
             target = target_dir / source.name
             shutil.move(str(source), str(target))
-            resolved.append(_attachment_meta(file_id, target))
-            continue
-        reused = _find_in_session(session_id, file_id)
-        if reused is not None:
-            resolved.append(_attachment_meta(file_id, reused))
-    return resolved
+        metas.append(_attachment_meta(file_id, target))
+    return metas
 
 
 def _cleanup_attachments(
@@ -420,11 +881,19 @@ def _cleanup_attachments(
       会让后面那条消息的图片变 404。
     """
     session_dir = UPLOADS_DIR / session_id
-    if not session_dir.is_dir():
+    if (
+        not storage.is_valid_session_id(session_id)
+        or session_dir.is_symlink()
+        or not storage.path_within(session_dir, UPLOADS_DIR)
+        or not session_dir.is_dir()
+    ):
+        return
+    session = storage.get_session(session_id)
+    if session is None:
         return
     survivors = {
         str(attachment.get("id") or "")
-        for message in storage.get_session(session_id).get("messages") or []
+        for message in session.get("messages") or []
         for attachment in message.get("attachments") or []
     }
     for message in removed:
@@ -439,6 +908,9 @@ def _cleanup_attachments(
 
 def _attachment_block(attachment: dict[str, Any]) -> str:
     filename = str(attachment["filename"])
+    if attachment.get("kind") == "image":
+        # 图片走多模态注入（_load_images / inject_images），不属于文档解析，返回空块
+        return ""
     suffix = Path(filename).suffix.lower()
     if suffix in VIDEO_EXTENSIONS:
         return VIDEO_PLACEHOLDER.format(name=filename)
@@ -457,6 +929,8 @@ def _compose_effective_text(message: str, attachments: list[dict[str, Any]]) -> 
     used = 0
     for attachment in attachments:
         block = _attachment_block(attachment)
+        if not block:  # 图片：不进文本（由多模态注入承担）
+            continue
         if block.startswith("附件：") and attachment.get("kind") == "doc":
             title, _, body = block.partition("\n")
             remaining = MAX_ATTACHMENT_CHARS_TOTAL - used
@@ -507,13 +981,23 @@ def create_session(payload: NewSessionRequest) -> dict[str, Any]:
 
 @router.get("/sessions/{session_id}")
 def get_session(session_id: str) -> dict[str, Any]:
-    return _require_session(session_id)
+    session = _require_session(session_id)
+    # 前端停止后 poll 用：会话键仍被在飞轮次占用 ⇒ 仍在流式（即使还没有助手消息）。
+    session["streaming"] = concurrency.is_active(concurrency.session_key(session_id))
+    return session
 
 
 @router.delete("/sessions/{session_id}")
 def delete_session(session_id: str) -> dict[str, bool]:
     _require_session(session_id)
-    return {"ok": storage.delete_session(session_id)}
+    # 短作用域租约：完整覆盖删除操作，避免"检查后被在飞轮次追上"的竞态；
+    # 正常前端停止后会话键已释放，删除照常可用。
+    lease = concurrency.Lease()
+    try:
+        _acquire_session(lease, session_id, SESSION_BUSY_EDIT_MESSAGE)
+        return {"ok": storage.delete_session(session_id)}
+    finally:
+        lease.release()
 
 
 @router.patch("/sessions/{session_id}")
@@ -558,19 +1042,26 @@ def delete_turn(session_id: str, index: int) -> dict[str, Any]:
     用户消息配它后面紧邻的助手回复；助手消息配它前面紧邻的用户消息。两侧都不存在时
     只删这一条（例如流式中断留下的孤立助手占位）。附件随之清理。
     """
-    session = _require_session(session_id)
-    messages: list[dict[str, Any]] = session["messages"]
-    if index < 0 or index >= len(messages):
-        raise HTTPException(404, f"消息下标不存在：{index}")
-    role = messages[index].get("role")
-    targets = {index}
-    if role == "assistant" and index - 1 >= 0 and messages[index - 1].get("role") == "user":
-        targets.add(index - 1)
-    elif role == "user" and index + 1 < len(messages) and messages[index + 1].get("role") == "assistant":
-        targets.add(index + 1)
-    removed = storage.drop_messages(session_id, targets)
-    _cleanup_attachments(session_id, removed, keep_ids=set())
-    updated = storage.require_session(session_id)
+    # 删除整轮会破坏在飞轮次的数据：先占租约（短作用域，完整覆盖 storage 改动），
+    # 再在锁内重读会话、校验下标并按锁内快照算 targets——不能拿 acquire 前的旧快照。
+    lease = concurrency.Lease()
+    try:
+        _acquire_session(lease, session_id, SESSION_BUSY_EDIT_MESSAGE)
+        session = _require_session(session_id)
+        messages: list[dict[str, Any]] = session["messages"]
+        if index < 0 or index >= len(messages):
+            raise HTTPException(404, f"消息下标不存在：{index}")
+        role = messages[index].get("role")
+        targets = {index}
+        if role == "assistant" and index - 1 >= 0 and messages[index - 1].get("role") == "user":
+            targets.add(index - 1)
+        elif role == "user" and index + 1 < len(messages) and messages[index + 1].get("role") == "assistant":
+            targets.add(index + 1)
+        removed = storage.drop_messages(session_id, targets)
+        _cleanup_attachments(session_id, removed, keep_ids=set())
+        updated = storage.require_session(session_id)
+    finally:
+        lease.release()
     return {
         "ok": True,
         "deleted": sorted(targets),
@@ -580,6 +1071,16 @@ def delete_turn(session_id: str, index: int) -> dict[str, Any]:
 
 @router.post("/chat/stream")
 async def chat_stream(payload: ChatRequest):
+    try:
+        return await _chat_stream(payload)
+    except HTTPException as exc:
+        code = {503: "skills_missing", 409: "session_busy"}.get(exc.status_code, "invalid_request")
+        info = errors.make(code, phase="preflight", summary=str(exc.detail), detail=str(exc.detail),
+                           status=exc.status_code, retryable=exc.status_code in (409, 503)).to_dict()
+        return JSONResponse(status_code=exc.status_code, content={"detail": info["summary"], "error": info})
+
+
+async def _chat_stream(payload: ChatRequest):
     """SSE 流式对话。事件：session / delta / reasoning / notice / tool_call / tool_result
     / usage / confirm / done / error。
 
@@ -590,6 +1091,9 @@ async def chat_stream(payload: ChatRequest):
     # 技能规范先于一切副作用检查（缺失 503 时不建会话、不留消息）：
     # 模式先于会话定——已有会话看其 mode/科目联动，新会话看 payload.mode
     session_id = payload.session_id
+    if session_id and not storage.is_valid_session_id(session_id):
+        # 非法 ID（含 `..\settings` 这类路径穿越）一律 422，不触盘、不误当新会话
+        raise HTTPException(422, f"会话标识非法：{session_id}")
     existing = storage.get_session(session_id) if session_id else None
     if session_id and existing is None:
         session_id = None
@@ -627,383 +1131,553 @@ async def chat_stream(payload: ChatRequest):
         ws_candidate = str(optional_workspace(payload.workspace))
     ws_bound: str | None = ws_candidate
 
+    # 附件发送前完整校验（纯校验 + 只读解析）：超限/非法/失效 id 一律 422，
+    # 且发生在建会话/截断/搬文件之前——失败不留下空会话、半搬迁或幽灵消息。
+    _validate_attachment_ids(payload.attachment_ids)
+    resolved_attachments = _resolve_attachments(session_id, payload.attachment_ids)
+
+    # 一次请求一个租约：预返回异常 / SSE iterator-finally / background 三条释放路径
+    # 共享它（once + owner-token 校验，防 ABA 误释放新 owner）。
+    guard_lease = concurrency.Lease()
     if existing is not None:
-        session = existing
-    else:
-        session = storage.create_session(mode=mode, workspace=ws_bound)
-        session_id = session["id"]
-        session = storage.require_session(session_id)
+        _acquire_session(guard_lease, str(session_id), SESSION_BUSY_MESSAGE)
 
-    with workspace_ctx.bind(ws_bound):
-        # 编辑重发：先把被编辑的那条用户消息及其后的全部消息截断（它们会被新文本取代），
-        # 再追加新的用户消息。被截断消息的附件先清盘（仍要重发的原附件由 keep_ids 保留）。
-        if existing is not None and payload.replace_from is not None:
-            if int(payload.replace_from) < 0:
-                raise HTTPException(422, "replace_from 不能为负")
-            removed = storage.truncate_messages(session_id, int(payload.replace_from))
-            _cleanup_attachments(session_id, removed, keep_ids=set(payload.attachment_ids))
-            session = storage.require_session(session_id)
-
-        # 附件：pending 移入会话目录 → 组装有效文本 → 落库（含附件元数据）
-        attachments = _move_attachments(session_id, payload.attachment_ids)
-        # 附件文本提取是同步重活（PDF 解析上限 20MB）：挪到线程池，别堵住事件循环
-        # （堵住会让同一进程里其它 SSE 流、上传一起"卡住"）
-        effective_text = await asyncio.to_thread(
-            _compose_effective_text, payload.message, attachments
-        )
-        stored_attachments = [
-            {key: attachment[key] for key in ("id", "filename", "kind", "size")}
-            for attachment in attachments
-        ]
-        storage.add_message(
-            session_id, "user", effective_text, attachments=stored_attachments or None
-        )
-        session = storage.require_session(session_id)
-
-        # 课程联动（绑死语义，2026-10-04 拍板）：科目一经绑定不可更换（换科目=开新会话），
-        # 节点可在科目内随时切换；interview 会话不收科目关联（归属由盘问收口→草稿→落点确认自带）。
-        binding_notice: str | None = None
-        if "subject_slug" in payload.model_fields_set or "node_id" in payload.model_fields_set:
-            bound_slug = session.get("subject_slug")
-            if bound_slug:
-                if (
-                    "subject_slug" in payload.model_fields_set
-                    and payload.subject_slug
-                    and payload.subject_slug != bound_slug
-                ):
-                    binding_notice = "会话已绑定科目，更换科目请开新会话。"
-                node_id = None
-                if payload.node_id and _node_exists(str(bound_slug), payload.node_id):
-                    node_id = payload.node_id
-                if node_id != session.get("node_id"):
-                    storage.update_session(session_id, node_id=node_id)
-                context_slug: str | None = str(bound_slug)
-            elif (
-                mode == "interview"
-                and "subject_slug" in payload.model_fields_set
-                and payload.subject_slug
-            ):
-                binding_notice = "建课会话不关联已有科目：方向确认后自动建草稿，落点确认后归入工作区。"
-                context_slug = None
-            elif payload.subject_slug and cs.get_subject(payload.subject_slug) is not None:
-                node_id = payload.node_id if payload.node_id and _node_exists(
-                    payload.subject_slug, payload.node_id
-                ) else None
-                storage.update_session(session_id, subject_slug=payload.subject_slug, node_id=node_id)
-                context_slug = payload.subject_slug
-            else:
-                storage.update_session(session_id, subject_slug=None, node_id=None)
-                context_slug = None
-            session = storage.require_session(session_id)
+    async def _respond() -> StreamingResponse:
+        nonlocal session_id
+        if existing is not None:
+            session = existing
         else:
-            context_slug = session.get("subject_slug")
-        context_node = session.get("node_id")
-        if context_slug and not context_node:
-            context_node = _infer_focus_node(str(context_slug))
+            session = storage.create_session(mode=mode, workspace=ws_bound)
+            session_id = session["id"]
+            session = storage.require_session(session_id)
+            # 新会话拿到 id 后立刻占键：返回流之前就已经有守卫，后续同 id 请求直接 409。
+            _acquire_session(guard_lease, session_id, SESSION_BUSY_MESSAGE)
 
-        try:
-            course_context = _course_context(context_slug, context_node) if context_slug else None
-        except Exception:  # noqa: BLE001 - 课程上下文组装失败不阻断聊天
-            course_context = None
+        with workspace_ctx.bind(ws_bound):
+            # 编辑重发：先把被编辑的那条用户消息及其后的全部消息截断（它们会被新文本取代），
+            # 再追加新的用户消息。被截断消息的附件先清盘（仍要重发的原附件由 keep_ids 保留）。
+            if existing is not None and payload.replace_from is not None:
+                if int(payload.replace_from) < 0:
+                    raise HTTPException(422, "replace_from 不能为负")
+                removed = storage.truncate_messages(session_id, int(payload.replace_from))
+                _cleanup_attachments(session_id, removed, keep_ids=set(payload.attachment_ids))
+                session = storage.require_session(session_id)
 
-        opening: str | None = None
-        if context_slug and len(session["messages"]) == 1:
-            try:  # noqa: SIM105 - 开场切片组装失败同样不阻断聊天
-                opening = _opening_slice(context_slug)
-            except Exception:  # noqa: BLE001
-                opening = None
-
-        # K1/K2 工具化开关先算好：系统提示是否提示产课/评估工具，与工具上下文共用同一判据。
-        # 工具调用默认对所有配置的模型开启（2026-10-04）；fixture 模式仅在显式工具场景走循环。
-        fixture_tool = is_fixture_mode() and payload.fixture_scenario in agent_svc.FIXTURE_TOOL_SCENARIOS
-        use_tools = fixture_tool or (not is_fixture_mode() and supports_tools(provider))
-        # 只有绑定了科目的会话才开放产课/评估动作工具（未绑定会话不得凭空产课/评估）
-        offer_actions = use_tools and bool(context_slug)
-
-        # 历史重放纯文本；图片只注入当前（最后一条 user）消息
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": settings.get("system_prompt", "")}
-        ]
-        if skill_text:
-            messages.append({"role": "system", "content": skill_text})
-        if course_context:
-            messages.append({"role": "system", "content": course_context})
-        if opening:
-            messages.append({"role": "system", "content": opening})
-        if offer_actions:
-            # 一行动作提示，不注入技能全文（细节规范由模型按需 read_skill）
-            subject_name = (cs.get_subject(context_slug) or {}).get("name") or context_slug
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        f"【工具】本会话关联科目「{subject_name}」（{context_slug}）。"
-                        "要产课调用 produce_lesson（按大纲顺序，未指定节点则产出第一个未产出的节点）；"
-                        "要评估调用 assess_node（需学习者给出作答原文）。"
-                        "细节规范用 read_skill 按需读取（learning-coach / lesson-design / practice-evaluator）。"
-                    ),
-                }
+            # 附件落位（已在上方校验过）：pending 移入会话目录，已在本会话目录的原地复用
+            attachments = _materialize_attachments(session_id, resolved_attachments)
+            # 附件文本提取是同步重活（PDF 解析上限 20MB）：挪到线程池，别堵住事件循环
+            # （堵住会让同一进程里其它 SSE 流、上传一起"卡住"）
+            effective_text = await asyncio.to_thread(
+                _compose_effective_text, payload.message, attachments
             )
-        messages.extend(
-            {"role": item["role"], "content": item["content"]}
-            for item in session["messages"]
-        )
-
-        stage1_notice: str | None = None
-        images = _load_images(attachments)
-        if images and provider is not None:
-            stage1_notice = inject_images(
-                messages,
-                images,
-                str(provider.get("model") or ""),
-                str(provider.get("vision") or "auto"),
+            stored_attachments = [
+                {key: attachment[key] for key in ("id", "filename", "kind", "size")}
+                for attachment in attachments
+            ]
+            storage.add_message(
+                session_id,
+                "user",
+                effective_text,
+                # 展示文本与模型上下文文本分离（R7）：正文气泡/编辑框用原文，
+                # 附件提取文本仍只在 effective_text（LLM history content 不变）。
+                display_content=payload.message,
+                attachments=stored_attachments or None,
             )
+            session = storage.require_session(session_id)
 
-        # K1：工具化 chat（只读工具 read_course_file / list_workspace / read_skill）。
-        # 工具调用默认对所有配置的模型开启（2026-10-04）：真实模型一律走工具循环，上游
-        # 不接受 tools 时由 llm.stream_turn 自动回落纯文本一次。fixture 模式仅在显式工具
-        # 场景走循环，其余保持原有固定流（E2E 稳定）。
-        tool_schemas = (
-            tools_svc.schemas(
-                tools_svc.CHAT_TOOLS + (tools_svc.CHAT_ACTION_TOOLS if offer_actions else ())
-            )
-            if use_tools
-            else []
-        )
-        # 工具进度回吐通道（提前建好）：产课/评估工具经 ToolContext.state["emit"] 把进度转成 notice
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-        # 兜底桶：边发边攒。客户端中途断开时 runner 会被取消，正常路径的落库执行不到，
-        # 靠这个桶把已经流出去的内容抢救下来（见 _persist_partial）。
-        partial: dict[str, Any] = {
-            "text": [],
-            "reasoning": [],
-            "tools": [],
-            "notices": [],
-            "usage": None,
-        }
+            # 课程联动（绑死语义，2026-10-04 拍板）：科目一经绑定不可更换（换科目=开新会话），
+            # 节点可在科目内随时切换；interview 会话不收科目关联（归属由盘问收口→草稿→落点确认自带）。
+            binding_notice: str | None = None
+            if "subject_slug" in payload.model_fields_set or "node_id" in payload.model_fields_set:
+                bound_slug = session.get("subject_slug")
+                if bound_slug:
+                    if (
+                        "subject_slug" in payload.model_fields_set
+                        and payload.subject_slug
+                        and payload.subject_slug != bound_slug
+                    ):
+                        binding_notice = "会话已绑定科目，更换科目请开新会话。"
+                    node_id = None
+                    if payload.node_id and _node_exists(str(bound_slug), payload.node_id):
+                        node_id = payload.node_id
+                    if node_id != session.get("node_id"):
+                        storage.update_session(session_id, node_id=node_id)
+                    context_slug: str | None = str(bound_slug)
+                elif (
+                    mode == "interview"
+                    and "subject_slug" in payload.model_fields_set
+                    and payload.subject_slug
+                ):
+                    binding_notice = "建课会话不关联已有科目：方向确认后自动建草稿，落点确认后归入工作区。"
+                    context_slug = None
+                elif payload.subject_slug and cs.get_subject(payload.subject_slug) is not None:
+                    node_id = payload.node_id if payload.node_id and _node_exists(
+                        payload.subject_slug, payload.node_id
+                    ) else None
+                    storage.update_session(session_id, subject_slug=payload.subject_slug, node_id=node_id)
+                    context_slug = payload.subject_slug
+                else:
+                    storage.update_session(session_id, subject_slug=None, node_id=None)
+                    context_slug = None
+                session = storage.require_session(session_id)
+            else:
+                context_slug = session.get("subject_slug")
+            context_node = session.get("node_id")
+            if context_slug and not context_node:
+                context_node = _infer_focus_node(str(context_slug))
 
-        async def emit(event: dict[str, Any]) -> None:
-            _accumulate_partial(partial, event)
-            await queue.put(event)
-
-        if use_tools:
-            bound_subject = cs.get_subject(context_slug) if context_slug else None
-            read_roots = [cs.subject_dir(context_slug)] if context_slug else [cs.subjects_dir()]
-            tool_ctx = tools_svc.ToolContext(
-                read_roots=read_roots,
-                write_roots=[],
-                label=str(bound_subject.get("name")) if bound_subject else "工作区",
-                state={
-                    "session_id": session_id,
-                    "slug": context_slug,
-                    "node_id": context_node,
-                    "workspace": ws_bound,
-                    "emit": emit,
-                },
-            )
-            turn_source = (
-                agent_svc.fixture_turn_source(str(payload.fixture_scenario), payload.fixture_scenario)
-                if fixture_tool
-                else agent_svc.real_turn_source(provider, payload.fixture_scenario)  # type: ignore[arg-type]
-            )
-
-        async def _tool_event_source():
-            """工具化对话的队列驱动 SSE：agent 事件（text/tool_call/tool_result）转发并落审计。"""
-            yield _sse("session", {"session_id": session_id})
-
-            if model_fallback_notice:
-                yield _sse("notice", {"message": model_fallback_notice})
-
-            if binding_notice:
-                yield _sse("notice", {"message": binding_notice})
-
-            if not is_fixture_mode() and (provider is None or not provider.get("api_key")):
-                yield _sse("error", {"message": "尚未配置模型 API Key，请到 Settings 填写。"})
-                return
-
-            if stage1_notice:
-                yield _sse("notice", {"message": stage1_notice})
-
-            audit.bind(f"chat-{session_id}")
-            event_names = {
-                "text": "delta",
-                "reasoning": "reasoning",
-                "tool_call": "tool_call",
-                "tool_result": "tool_result",
-                "usage": "usage",
-                "notice": "notice",
-                "confirm": "confirm",
-                "error": "error",
-            }
-
-            async def runner() -> None:
-                persisted = False
-                try:
-                    # 开放产课/评估工具时必须给长墙钟：工具执行在每轮的 asyncio.wait_for 之外，
-                    # 一次产课可达数分钟；若沿用聊天 300s 上限，工具返回后下一轮会在循环顶部
-                    # 撞上已过期的 deadline，整轮被降级为 wallclock。聊天（无动作工具）仍用 300s。
-                    budget_seconds = (
-                        agent_svc.ORCH_MAX_SECONDS if offer_actions else agent_svc.CHAT_MAX_SECONDS
-                    )
-                    outcome = await agent_svc.run_agent(
-                        turn_source,
-                        messages,
-                        tool_ctx,
-                        emit,
-                        tool_schemas,
-                        max_seconds=budget_seconds,
-                        audit_meta={
-                            "kind": "chat",
-                            "session_id": session_id,
-                            "model": str(provider.get("model") or ""),
-                        },
-                    )
-                    reply = outcome.text
-                    if reply or outcome.reasoning or outcome.tools:
-                        storage.add_message(
-                            session_id,
-                            "assistant",
-                            _strip_interview_markers(reply),
-                            reasoning=outcome.reasoning or None,
-                            tools=outcome.tools or None,
-                            model=model_label,
-                        )
-                        persisted = True
-                    if outcome.usage:
-                        storage.update_session(session_id, usage=outcome.usage)
-                        await queue.put({"type": "usage", "usage": outcome.usage})
-                    if mode == "interview":
-                        confirm_event = _handle_interview_result(session_id, reply)
-                        if confirm_event is not None:
-                            await queue.put({"type": "confirm", **confirm_event})
-                    if outcome.degraded:
-                        await queue.put({"type": "notice", "message": "（本轮达到轮次/工具预算，已按现有信息作答。）"})
-                except asyncio.CancelledError:
-                    # 客户端断开（切会话 / 关页 / 点停止）：取消会跳过正常落库，
-                    # 先把已经流出去的内容抢救进会话，再让取消继续往上抛。
-                    if not persisted:
-                        _persist_partial(session_id, partial, model_label)
-                    raise
-                except Exception as exc:  # noqa: BLE001 - 统一转 SSE 错误事件
-                    if not persisted:
-                        _persist_partial(session_id, partial, model_label)
-                    await queue.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
-                finally:
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await queue.put({"type": "__end__"})
-
-            task = asyncio.create_task(runner())
             try:
-                while True:
-                    event = await queue.get()
-                    if event.get("type") == "__end__":
-                        break
-                    name = event_names.get(str(event.get("type")), "notice")
-                    yield _sse(name, {key: value for key, value in event.items() if key != "type"})
-            finally:
-                # 客户端断开时 Starlette 会取消这个迭代任务：**必须把 runner 一起取消**，
-                # 否则孤儿任务会继续打网关、烧 token，还可能往已被编辑截断的会话里追加
-                # "幽灵消息"（此前是 `await task`，取消时立刻抛 CancelledError，不等待也不取消）。
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-            yield _sse("done", {"session_id": session_id})
+                course_context = _course_context(context_slug, context_node) if context_slug else None
+            except Exception:  # noqa: BLE001 - 课程上下文组装失败不阻断聊天
+                course_context = None
 
-        async def tool_event_generator():
-            # SSE 由 StreamingResponse 在别的任务里迭代：这里重新挂绑定，
-            # 保证后续 agent 工具循环读取到的科目/工作区与该会话一致
-            with workspace_ctx.bind(ws_bound):
-                async for event in _tool_event_source():
-                    yield event
+            opening: str | None = None
+            if context_slug and len(session["messages"]) == 1:
+                try:  # noqa: SIM105 - 开场切片组装失败同样不阻断聊天
+                    opening = _opening_slice(context_slug)
+                except Exception:  # noqa: BLE001
+                    opening = None
 
-        async def _plain_event_source():
-            # 先把 session_id 发给前端（新建会话时前端需要）
-            yield _sse("session", {"session_id": session_id})
+            # K1/K2 工具化开关先算好：系统提示是否提示产课/评估工具，与工具上下文共用同一判据。
+            # 工具调用默认对所有配置的模型开启（2026-10-04）；fixture 模式仅在显式工具场景走循环。
+            fixture_tool = is_fixture_mode() and payload.fixture_scenario in agent_svc.FIXTURE_TOOL_SCENARIOS
+            use_tools = fixture_tool or (not is_fixture_mode() and supports_tools(provider))
+            # 只有绑定了科目的会话才开放产课/评估动作工具（未绑定会话不得凭空产课/评估）
+            offer_actions = use_tools and bool(context_slug)
+            # 建课收口阶段（显式判据）：interview 会话 + 用户明确确认建课 ⇒ 本轮工具面清空、
+            # 只做纯最终输出（预算 1 次 + 最多 1 修复）。一般盘问轮的只读工具保留不动。
+            finalize_phase = mode == "interview" and _is_interview_finalize_phase(
+                session["messages"], payload.message
+            )
 
-            if model_fallback_notice:
-                yield _sse("notice", {"message": model_fallback_notice})
-
-            if binding_notice:
-                yield _sse("notice", {"message": binding_notice})
-
-            if not is_fixture_mode() and (provider is None or not provider.get("api_key")):
-                yield _sse(
-                    "error",
-                    {"message": "尚未配置模型 API Key，请到 Settings 填写。"},
+            # 历史重放纯文本；图片只注入当前（最后一条 user）消息
+            messages: list[dict[str, Any]] = [
+                {"role": "system", "content": settings.get("system_prompt", "")}
+            ]
+            if skill_text:
+                messages.append({"role": "system", "content": skill_text})
+            if course_context:
+                messages.append({"role": "system", "content": course_context})
+            if opening:
+                messages.append({"role": "system", "content": opening})
+            if offer_actions:
+                # 一行动作提示，不注入技能全文（细节规范由模型按需 read_skill）
+                subject_name = (cs.get_subject(context_slug) or {}).get("name") or context_slug
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            f"【工具】本会话关联科目「{subject_name}」（{context_slug}）。"
+                            "要产课调用 produce_lesson（按大纲顺序，未指定节点则产出第一个未产出的节点）；"
+                            "要评估调用 assess_node（需学习者给出作答原文）。"
+                            "细节规范用 read_skill 按需读取（learning-coach / lesson-design / practice-evaluator）。"
+                            "工具状态是权威：产品/评估是否落盘只看工具返回的系统状态（task/lesson/assessment）；"
+                            "文字点评不等于评估落盘；没有成功任务时不得承诺后台修复或稍后完成。"
+                        ),
+                    }
                 )
-                return
+            if finalize_phase:
+                # 收口阶段的补充口径：只整理已确认信息，缺关键值必须追问，不得凭空创建。
+                messages.append(
+                    {"role": "system", "content": prompts.INTERVIEW_FINALIZE_PROMPT}
+                )
+            messages.extend(
+                {"role": item["role"], "content": item["content"]}
+                for item in session["messages"]
+            )
 
-            collected: list[str] = []
-            persisted = False
-            try:
+            stage1_notice: str | None = None
+            images = _load_images(attachments)
+            if images and provider is not None:
+                stage1_notice = inject_images(
+                    messages,
+                    images,
+                    str(provider.get("model") or ""),
+                    str(provider.get("vision") or "auto"),
+                )
+
+            # K1：工具化 chat（只读工具 read_course_file / list_workspace / read_skill）。
+            # 工具调用默认对所有配置的模型开启（2026-10-04）：真实模型一律走工具循环，上游
+            # 不接受 tools 时由 llm.stream_turn 自动回落纯文本一次。fixture 模式仅在显式工具
+            # 场景走循环，其余保持原有固定流（E2E 稳定）。
+            # 收口阶段本轮 schemas=[]（纯最终输出，不跑工具）；一般盘问轮只读工具照常。
+            tool_schemas = (
+                []
+                if finalize_phase
+                else (
+                    tools_svc.schemas(
+                        tools_svc.CHAT_TOOLS
+                        + (tools_svc.CHAT_ACTION_TOOLS if offer_actions else ())
+                    )
+                    if use_tools
+                    else []
+                )
+            )
+            # 工具进度回吐通道（提前建好）：产课/评估工具经 ToolContext.state["emit"] 把进度转成 notice
+            queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            # checkpoint/兜底桶：边发边攒，且是正常落库与断开兜底的唯一来源——它同时看得见
+            # run_agent 事件与 ToolContext.emit 的工具进度（outcome 看不到后者）。
+            partial: dict[str, Any] = {
+                "text": [],
+                "reasoning": [],
+                "tools": [],
+                "notices": [],
+                "parts": [],
+                "usage": None,
+            }
+            # 每轮助手回复固定一个 turn_id：checkpoint 与终态都按它原位 upsert，绝不重复 append。
+            turn_id = uuid.uuid4().hex
+            checkpoint_state: dict[str, float] = {"last": 0.0}
+
+            def checkpoint(kind: str, *, force: bool = False) -> None:
+                """中途 checkpoint：工具边界/notice 立即写，正文/思维链/任务快照按间隔节流。
+
+                任务快照终态由调用方以 force=True 传进来（立即落库，刷新即见终态）。
+                """
+                if not _bucket_has_output(partial):
+                    return
+                now = time.monotonic()
+                if (
+                    not force
+                    and kind in ("text", "reasoning", "task_update")
+                    and now - checkpoint_state["last"] < CHECKPOINT_INTERVAL
+                ):
+                    return
+                if _write_turn(session_id, partial, model_label, turn_id=turn_id):
+                    checkpoint_state["last"] = now
+
+            def record_notice(message: str) -> None:
+                """把直接 yield 的 preamble notice 也收进桶，保证落库 notice 与流一致。"""
+                _accumulate_partial(partial, {"type": "notice", "message": message})
+                checkpoint("notice", force=True)
+
+            async def emit(event: dict[str, Any]) -> None:
+                _accumulate_partial(partial, event)
+                kind = str(event.get("type") or "")
+                # task_update 的近似高频进度按 0.6s 节流；任务进终态立即 checkpoint。
+                checkpoint(
+                    kind,
+                    force=kind == "task_update" and _task_is_terminal(event.get("task")),
+                )
+                await queue.put(event)
+
+            if use_tools:
+                bound_subject = cs.get_subject(context_slug) if context_slug else None
+                read_roots = [cs.subject_dir(context_slug)] if context_slug else [cs.subjects_dir()]
+                tool_ctx = tools_svc.ToolContext(
+                    read_roots=read_roots,
+                    write_roots=[],
+                    label=str(bound_subject.get("name")) if bound_subject else "工作区",
+                    state={
+                        "session_id": session_id,
+                        "slug": context_slug,
+                        "node_id": context_node,
+                        "workspace": ws_bound,
+                        "emit": emit,
+                    },
+                )
+                turn_source = (
+                    agent_svc.fixture_turn_source(str(payload.fixture_scenario), payload.fixture_scenario)
+                    if fixture_tool
+                    else agent_svc.real_turn_source(provider, payload.fixture_scenario)  # type: ignore[arg-type]
+                )
+
+            async def _tool_event_source():
+                """工具化对话的队列驱动 SSE：agent 事件（text/tool_call/tool_result）转发并落审计。"""
+                yield _sse("session", {"session_id": session_id})
+
+                if model_fallback_notice:
+                    record_notice(model_fallback_notice)
+                    yield _sse("notice", {"message": model_fallback_notice})
+
+                if binding_notice:
+                    record_notice(binding_notice)
+                    yield _sse("notice", {"message": binding_notice})
+
+                if not is_fixture_mode() and (provider is None or not provider.get("api_key")):
+                    info = errors.make("no_api_key", phase="preflight", summary="尚未配置模型 API Key，请到 Settings 填写。", request_id=turn_id).to_dict()
+                    partial["error"] = info
+                    _write_turn(session_id, partial, model_label, turn_id=turn_id, final_reason="error")
+                    yield _sse("error", {"message": info["summary"], **info})
+                    return
+
                 if stage1_notice:
+                    record_notice(stage1_notice)
                     yield _sse("notice", {"message": stage1_notice})
 
-                def make_stream(items: list[dict[str, Any]]) -> AsyncGenerator[str, None]:
-                    return stream_chat(provider, items, fixture_scenario=payload.fixture_scenario)
+                if finalize_phase:
+                    # 阶段状态只在这一轮发一次（不是心跳刷屏），并落库供刷新后回放。
+                    notice = finalize_notice()
+                    record_notice(notice)
+                    yield _sse("notice", {"message": notice})
 
-                generator, first, retry_notice = await prime_stream(
-                    make_stream, messages, str(provider.get("model") or "")
-                )
-                if retry_notice:
-                    yield _sse("notice", {"message": retry_notice})
+                audit.bind(f"chat-{session_id}")
+                event_names = {
+                    "text": "delta",
+                    "reasoning": "reasoning",
+                    "tool_call": "tool_call",
+                    "tool_result": "tool_result",
+                    "task_update": "task_update",
+                    "usage": "usage",
+                    "notice": "notice",
+                    "confirm": "confirm",
+                    "error": "error",
+                }
 
-                piece = first
-                while piece is not None:
-                    collected.append(piece)
-                    yield _sse("delta", {"content": piece})
+                async def runner() -> None:
+                    persisted = False
                     try:
-                        piece = await generator.__anext__()
-                    except StopAsyncIteration:
-                        break
+                        # 开放产课/评估工具时必须给长墙钟：工具执行在每轮的 asyncio.wait_for 之外，
+                        # 一次产课可达数分钟；若沿用聊天 300s 上限，工具返回后下一轮会在循环顶部
+                        # 撞上已过期的 deadline，整轮被降级为 wallclock。聊天（无动作工具）仍用 300s。
+                        # 收口阶段只做纯最终输出，用更短的专用墙钟。
+                        budget_seconds = (
+                            agent_svc.INTERVIEW_FINALIZE_MAX_SECONDS
+                            if finalize_phase
+                            else (
+                                agent_svc.ORCH_MAX_SECONDS
+                                if offer_actions
+                                else agent_svc.CHAT_MAX_SECONDS
+                            )
+                        )
+                        outcome = await agent_svc.run_agent(
+                            turn_source,
+                            messages,
+                            tool_ctx,
+                            emit,
+                            tool_schemas,
+                            budget=(
+                                agent_svc.INTERVIEW_FINALIZE_BUDGET if finalize_phase else None
+                            ),
+                            max_seconds=budget_seconds,
+                            audit_meta={
+                                "kind": "chat",
+                                "turn_id": turn_id,
+                                "session_id": session_id,
+                                "model": str(provider.get("model") or ""),
+                            },
+                        )
+                        reply = outcome.text
+                        if outcome.error:
+                            partial["error"] = {**outcome.error, "request_id": turn_id}
+                        if outcome.stopped_reason:
+                            partial["stopped_reason"] = outcome.stopped_reason
+                        if outcome.degraded and not outcome.error:
+                            await emit({"type": "notice", "message": f"（本轮受控收尾：{outcome.stopped_reason or 'budget'}。）"})
+                        # 正常终态：把累积桶（含 emit 期间的 parts/notices/tools）原位写回同一
+                        # turn_id；桶里没产出就不建空助手消息。
+                        if _bucket_has_output(partial):
+                            _write_turn(
+                                session_id, partial, model_label, turn_id=turn_id, final=True
+                            )
+                            persisted = True
+                        if outcome.usage:
+                            storage.update_session(session_id, usage=outcome.usage)
+                            await queue.put({"type": "usage", "usage": outcome.usage})
+                        # 收口判定用「此刻」的会话模式：agent 本轮可能刚经工具切进建课模式
+                        if not outcome.error and _current_session_mode(session_id, mode) == "interview":
+                            confirm_event = _handle_interview_result(session_id, reply)
+                            if confirm_event is not None:
+                                await queue.put({"type": "confirm", **confirm_event})
+                    except asyncio.CancelledError:
+                        # 客户端断开（切会话 / 关页 / 点停止）：把已产出内容按同一 turn_id 落成
+                        # 中断终态（仍在 running 的工具标为中断），再让取消继续往上抛。
+                        if not persisted:
+                            _persist_partial(
+                                session_id, partial, model_label, reason="disconnect", turn_id=turn_id
+                            )
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - 统一转 SSE 错误事件
+                        info = errors.from_exception(exc, request_id=turn_id).to_dict()
+                        partial["error"] = info
+                        if not persisted:
+                            _persist_partial(
+                                session_id, partial, model_label, reason="error", turn_id=turn_id
+                            )
+                        await queue.put({"type": "error", "message": info["summary"], **info})
+                    finally:
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await queue.put({"type": "__end__"})
 
-                reply = "".join(collected)
-                storage.add_message(
-                    session_id, "assistant", _strip_interview_markers(reply), model=model_label
-                )
-                persisted = True
-                # fixture 模式没有真实网关：补一条假用量，让右栏用量栏在 E2E 里可断言
-                if is_fixture_mode():
-                    storage.update_session(session_id, usage=dict(agent_svc.FIXTURE_USAGE))
-                    yield _sse("usage", {"usage": dict(agent_svc.FIXTURE_USAGE)})
-                if mode == "interview":
-                    confirm_event = _handle_interview_result(session_id, reply)
-                    if confirm_event is not None:
-                        yield _sse("confirm", confirm_event)
+                task = asyncio.create_task(runner())
+                try:
+                    while True:
+                        event = await _queue_get_heartbeat(queue)
+                        if event is None:  # 静默期心跳：让断开及时触发取消与租约释放
+                            yield SSE_HEARTBEAT
+                            continue
+                        if event.get("type") == "__end__":
+                            break
+                        name = event_names.get(str(event.get("type")), "notice")
+                        yield _sse(name, {key: value for key, value in event.items() if key != "type"})
+                finally:
+                    # 客户端断开时 Starlette 会取消这个迭代任务：**必须把 runner 一起取消**，
+                    # 否则孤儿任务会继续打网关、烧 token，还可能往已被编辑截断的会话里追加
+                    # "幽灵消息"（此前是 `await task`，取消时立刻抛 CancelledError，不等待也不取消）。
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
                 yield _sse("done", {"session_id": session_id})
-            except Exception as exc:  # noqa: BLE001 - 统一转成 SSE 错误事件
-                if collected:
-                    storage.add_message(
-                        session_id,
-                        "assistant",
-                        _strip_interview_markers("".join(collected)),
-                        model=model_label,
-                    )
-                    persisted = True
-                yield _sse("error", {"message": f"{type(exc).__name__}: {exc}"})
-            finally:
-                # 客户端断开（切会话 / 关页）走的是取消或 GeneratorExit，上面两个分支都接不到
-                # ——`CancelledError` 继承自 BaseException，`except Exception` 抓不住。
-                # 这里把已经流出去的正文兜底落库，否则前端看得见的回复一切会话就没了。
-                if not persisted and collected:
-                    _persist_partial(
-                        session_id,
-                        {"text": collected, "reasoning": [], "tools": [], "notices": [], "usage": None},
-                        model_label,
-                    )
 
-        async def event_generator():
-            # 与工具化路径同理：迭代期重挂绑定，防止 ContextVar 丢失/跨请求泄漏
-            with workspace_ctx.bind(ws_bound):
-                async for event in _plain_event_source():
-                    yield event
+            async def tool_event_generator():
+                # SSE 由 StreamingResponse 在别的任务里迭代：这里重新挂绑定，
+                # 保证后续 agent 工具循环读取到的科目/工作区与该会话一致
+                with workspace_ctx.bind(ws_bound):
+                    errors.register_turn(session_id, turn_id)
+                    try:
+                        async for event in _tool_event_source():
+                            yield event
+                    finally:
+                        errors.clear_turn(session_id, turn_id)
 
-        return StreamingResponse(
-            tool_event_generator() if use_tools else event_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+            async def _plain_event_source():
+                # 先把 session_id 发给前端（新建会话时前端需要）
+                yield _sse("session", {"session_id": session_id})
+
+                if model_fallback_notice:
+                    record_notice(model_fallback_notice)
+                    yield _sse("notice", {"message": model_fallback_notice})
+
+                if binding_notice:
+                    record_notice(binding_notice)
+                    yield _sse("notice", {"message": binding_notice})
+
+                if finalize_phase:
+                    notice = finalize_notice()
+                    record_notice(notice)
+                    yield _sse("notice", {"message": notice})
+
+                if not is_fixture_mode() and (provider is None or not provider.get("api_key")):
+                    info = errors.make("no_api_key", phase="preflight", summary="尚未配置模型 API Key，请到 Settings 填写。", request_id=turn_id).to_dict()
+                    partial["error"] = info
+                    _write_turn(session_id, partial, model_label, turn_id=turn_id, final_reason="error")
+                    yield _sse("error", {"message": info["summary"], **info})
+                    return
+
+                events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+                persisted = False
+                stream_error: BaseException | None = None
+
+                async def produce() -> None:
+                    """把上游流搬进队列：正文/notice 逐条入队，结束/异常各发一个哨兵。
+
+                    放到独立任务里，SSE 侧才能一边等事件一边发心跳——上游静默读取期间
+                    也能让断开被及时检测到。
+                    """
+                    try:
+                        if stage1_notice:
+                            await events.put({"type": "notice", "message": stage1_notice})
+
+                        def make_stream(items: list[dict[str, Any]]) -> AsyncGenerator[str, None]:
+                            return stream_chat(provider, items, fixture_scenario=payload.fixture_scenario)
+
+                        generator, first, retry_notice = await prime_stream(
+                            make_stream, messages, str(provider.get("model") or "")
+                        )
+                        if retry_notice:
+                            await events.put({"type": "notice", "message": retry_notice})
+                        piece = first
+                        while piece is not None:
+                            await events.put({"type": "text", "content": piece})
+                            try:
+                                piece = await generator.__anext__()
+                            except StopAsyncIteration:
+                                break
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - 交给 SSE 侧统一转错误事件
+                        await events.put(
+                            {"type": "__error__", "exception": exc}
+                        )
+                    finally:
+                        with contextlib.suppress(asyncio.CancelledError, Exception):
+                            await events.put({"type": "__end__"})
+
+                task = asyncio.create_task(produce())
+                try:
+                    while True:
+                        event = await _queue_get_heartbeat(events)
+                        if event is None:
+                            yield SSE_HEARTBEAT
+                            continue
+                        kind = str(event.get("type") or "")
+                        if kind == "__end__":
+                            break
+                        if kind == "__error__":
+                            stream_error = event.get("exception") or RuntimeError("上游连接异常")
+                            break
+                        if kind == "notice":
+                            record_notice(str(event.get("message") or ""))
+                            yield _sse("notice", {"message": event.get("message")})
+                        else:
+                            _accumulate_partial(partial, event)
+                            checkpoint("text")
+                            yield _sse("delta", {"content": event.get("content")})
+                    if stream_error is not None:
+                        raise stream_error
+                    # 正常终态：同一 turn_id 原位写回（part 交错与正文一并落库）。
+                    if _bucket_has_output(partial):
+                        _write_turn(
+                            session_id, partial, model_label, turn_id=turn_id, final=True
+                        )
+                        persisted = True
+                    # fixture 模式没有真实网关：补一条假用量，让右栏用量栏在 E2E 里可断言
+                    if is_fixture_mode():
+                        storage.update_session(session_id, usage=dict(agent_svc.FIXTURE_USAGE))
+                        yield _sse("usage", {"usage": dict(agent_svc.FIXTURE_USAGE)})
+                    if mode == "interview":
+                        reply = "".join(partial.get("text") or [])
+                        confirm_event = _handle_interview_result(session_id, reply)
+                        if confirm_event is not None:
+                            yield _sse("confirm", confirm_event)
+                    yield _sse("done", {"session_id": session_id})
+                except Exception as exc:  # noqa: BLE001 - 统一转成 SSE 错误事件
+                    info = errors.from_exception(exc, request_id=turn_id).to_dict()
+                    partial["error"] = info
+                    if not persisted:
+                        _persist_partial(
+                            session_id, partial, model_label, reason="error", turn_id=turn_id
+                        )
+                        persisted = True
+                    yield _sse("error", {"message": info["summary"], **info})
+                finally:
+                    # 取消（切会话 / 关页 / 点停止）走 CancelledError/GeneratorExit，上面
+                    # 的 except 抓不到：先取消生产者，再把已产出内容落成中断终态。
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+                    if not persisted:
+                        _persist_partial(
+                            session_id, partial, model_label, reason="disconnect", turn_id=turn_id
+                        )
+
+            async def event_generator():
+                # 与工具化路径同理：迭代期重挂绑定，防止 ContextVar 丢失/跨请求泄漏
+                with workspace_ctx.bind(ws_bound):
+                    errors.register_turn(session_id, turn_id)
+                    try:
+                        async for event in _plain_event_source():
+                            yield event
+                    finally:
+                        errors.clear_turn(session_id, turn_id)
+
+            stream = tool_event_generator() if use_tools else event_generator()
+            return StreamingResponse(
+                # 守卫随流生命周期释放：正常结束 / 取消（前端停止、切会话、关页）/
+                # 异常都释放；guarded_stream 与 background 共享同一租约（once + token
+                # 校验），重复释放 no-op，也不会误释放之后的新 owner。
+                concurrency.guarded_stream(stream, guard_lease),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+                background=BackgroundTask(guard_lease.release),
+            )
+
+    try:
+        return await _respond()
+    except BaseException:
+        guard_lease.release()
+        raise

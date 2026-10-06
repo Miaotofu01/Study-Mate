@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  AssessmentOutcome,
   AssessPayload,
   AssessResponse,
   AttachmentsArea,
@@ -8,6 +9,8 @@ import type {
   CourseRecords,
   DraftDetail,
   DraftInfo,
+  ErrorInfo,
+  ErrorPhase,
   ExportResult,
   GenerateCoursePayload,
   GenerateCourseResponse,
@@ -17,12 +20,14 @@ import type {
   InspectionTicket,
   LabStatus,
   LessonInfo,
+  LessonLink,
   MemoryEntry,
   MisconceptionImportance,
   MisconceptionItem,
   MisconceptionPatch,
   MisconceptionPayload,
   NodeStatus,
+  ProductionTask,
   QuizItem,
   Session,
   SessionActive,
@@ -40,13 +45,104 @@ import type {
   WorkspaceInfo,
 } from "./types";
 
+/** 常见密钥/令牌形态：前端兜底脱敏（后端已先脱敏，这里防止旧后端或代理回显泄密）。 */
+const SECRET_PATTERNS: RegExp[] = [
+  /sk-[A-Za-z0-9_-]{6,}/g,
+  /(?:api[_-]?key|apikey|access[_-]?token|secret)["'\s:=]+[A-Za-z0-9._\-+/=]{8,}/gi,
+  /Bearer\s+[A-Za-z0-9._\-+/=]+/gi,
+];
+
+/** 复制诊断/展示前脱敏；再按需截断，不把密钥带进剪贴板。 */
+export function redactSecrets(text: string): string {
+  let out = text;
+  for (const re of SECRET_PATTERNS) out = out.replace(re, "[已脱敏]");
+  return out;
+}
+
+function clampText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/** 后端 summary/detail 的限长（前端兜底，避免旧后端或代理回显超长原文）。 */
+const SUMMARY_MAX = 200;
+const DETAIL_MAX = 1200;
+
+const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+/** 把任意输入（新 ErrorInfo / 旧字符串 / ApiError）规整成 ErrorInfo；空返回 null。 */
+export function normalizeError(
+  input: ErrorInfo | string | null | undefined,
+  phase: ErrorPhase = "stream",
+): ErrorInfo | null {
+  if (input == null) return null;
+  if (typeof input === "string") {
+    const summary = clampText(redactSecrets(input).trim(), SUMMARY_MAX);
+    if (!summary) return null;
+    return {
+      code: "legacy_error",
+      status: null,
+      upstream_code: null,
+      phase,
+      summary,
+      detail: clampText(redactSecrets(input), DETAIL_MAX),
+      retryable: false,
+      stopped_reason: null,
+      request_id: null,
+      source: null,
+      operation: null,
+    };
+  }
+  return coerceErrorInfo(input, phase);
+}
+
+/** 判断是否为一个已带 ErrorInfo 形状的对象（后端已定稿结构）。 */
+function isErrorInfoLike(value: unknown): value is Partial<ErrorInfo> {
+  if (!value || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return typeof obj.code === "string" || typeof obj.phase === "string";
+}
+
+/** 宽松收编后端 ErrorInfo：缺失字段给安全默认，summary/detail 兜底脱敏+限长。 */
+export function coerceErrorInfo(input: Partial<ErrorInfo>, fallbackPhase: ErrorPhase = "stream"): ErrorInfo {
+  const summary = clampText(redactSecrets(String(input.summary ?? "")).trim(), SUMMARY_MAX);
+  const rawDetail = input.detail == null ? "" : String(input.detail);
+  const detail = rawDetail ? clampText(redactSecrets(rawDetail), DETAIL_MAX) : null;
+  const status = typeof input.status === "number" ? input.status : null;
+  return {
+    code: typeof input.code === "string" && input.code ? clampText(redactSecrets(input.code), 120) : "unknown_error",
+    status,
+    upstream_code: input.upstream_code == null ? null : clampText(redactSecrets(String(input.upstream_code)), 120),
+    phase: (input.phase as ErrorPhase) ?? fallbackPhase,
+    summary: summary || "请求失败，请重试。",
+    detail,
+    retryable:
+      typeof input.retryable === "boolean"
+        ? input.retryable
+        : status != null && RETRYABLE_STATUSES.has(status),
+    stopped_reason: input.stopped_reason == null ? null : String(input.stopped_reason),
+    request_id: input.request_id == null ? null : clampText(redactSecrets(String(input.request_id)), 120),
+    source: input.source == null ? null : clampText(redactSecrets(String(input.source)), 120),
+    operation: input.operation == null ? null : clampText(redactSecrets(String(input.operation)), 120),
+  };
+}
+
 export class ApiError extends Error {
   readonly problems?: string[];
+  readonly status?: number;
+  readonly detail?: string;
+  readonly errorInfo?: ErrorInfo;
 
-  constructor(message: string, problems?: string[]) {
+  constructor(
+    message: string,
+    problems?: string[],
+    options: { status?: number; detail?: string; errorInfo?: ErrorInfo } = {},
+  ) {
     super(message);
     this.name = "ApiError";
     this.problems = problems;
+    this.status = options.status;
+    this.detail = options.detail;
+    this.errorInfo = options.errorInfo;
   }
 }
 
@@ -56,46 +152,112 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
-    const info = await errorInfo(res);
-    throw new ApiError(info.message, info.problems);
+    const info = await parseErrorResponse(res);
+    throw new ApiError(info.message, info.problems, {
+      status: res.status,
+      detail: info.error.detail ?? undefined,
+      errorInfo: info.error,
+    });
   }
   return res.json() as Promise<T>;
 }
 
-async function errorInfo(res: Response): Promise<{ message: string; problems?: string[] }> {
+interface ParsedError {
+  message: string;
+  problems?: string[];
+  error: ErrorInfo;
+}
+
+/**
+ * 解析非 2xx 响应：优先读后端定稿 `{detail: summary, error: ErrorInfo}`；
+ * 无 `error` 时（旧后端 / 代理 / 纯文本）合成一个 HTTP 错误 Info。
+ */
+async function parseErrorResponse(res: Response): Promise<ParsedError> {
+  let problems: string[] | undefined;
+  let fallbackSummary = `${res.status} ${res.statusText}`.trim();
+  let fallbackDetail: string | null = null;
   try {
     const body: unknown = await res.json();
     if (body && typeof body === "object") {
       const obj = body as Record<string, unknown>;
       if (Array.isArray(obj.problems) && obj.problems.length > 0) {
-        const problems = obj.problems.map((p) => String(p)).filter(Boolean);
-        if (problems.length) return { message: problems.join("；"), problems };
+        problems = obj.problems.map((p) => String(p)).filter(Boolean);
+        if (problems.length) fallbackSummary = problems.join("；");
+      }
+      if (isErrorInfoLike(obj.error)) {
+        const error = coerceErrorInfo({ ...(obj.error as Partial<ErrorInfo>), status: (obj.error as Partial<ErrorInfo>).status ?? res.status }, "request");
+        return { message: error.summary, problems, error };
       }
       if ("detail" in obj) {
         const detail: unknown = obj.detail;
-        if (typeof detail === "string" && detail) return { message: detail };
-        if (Array.isArray(detail)) {
+        if (typeof detail === "string" && detail) {
+          fallbackSummary = detail;
+          fallbackDetail = detail;
+        } else if (Array.isArray(detail)) {
           const msgs = detail
-            .map((item) => (item && typeof item === "object" && "msg" in item ? String((item as { msg: unknown }).msg) : String(item)))
+            .map((item) =>
+              item && typeof item === "object" && "msg" in item
+                ? String((item as { msg: unknown }).msg)
+                : String(item),
+            )
             .filter(Boolean);
-          if (msgs.length) return { message: msgs.join("；") };
+          if (msgs.length) {
+            fallbackSummary = msgs.join("；");
+            fallbackDetail = fallbackSummary;
+          }
         }
       }
     }
   } catch {
     // 响应体不是 JSON，退回 HTTP 状态文案
   }
-  return { message: `${res.status} ${res.statusText}` };
+  const error = coerceErrorInfo(
+    {
+      code: "upstream_http",
+      status: res.status,
+      upstream_code: null,
+      phase: "request",
+      summary: fallbackSummary,
+      detail: fallbackDetail,
+      retryable: RETRYABLE_STATUSES.has(res.status),
+    },
+    "request",
+  );
+  return { message: error.summary, problems, error };
 }
 
 async function errorMessage(res: Response): Promise<string> {
-  return (await errorInfo(res)).message;
+  return (await parseErrorResponse(res)).message;
 }
 
 async function rawFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
-  if (!res.ok) throw new ApiError(await errorMessage(res));
+  if (!res.ok) {
+    const info = await parseErrorResponse(res);
+    throw new ApiError(info.message, info.problems, { status: res.status, detail: info.error.detail ?? undefined, errorInfo: info.error });
+  }
   return res.json() as Promise<T>;
+}
+
+/**
+ * 把 SSE `event:error` 的平铺载荷收编为 ErrorInfo；兼容旧后端只带 `message` 的形态。
+ */
+export function coerceSseError(payload: Record<string, unknown>): ErrorInfo {
+  if (isErrorInfoLike(payload)) return coerceErrorInfo(payload as Partial<ErrorInfo>, "stream");
+  const message = typeof payload.message === "string" ? payload.message : "";
+  return (
+    normalizeError(message, "stream") ?? {
+      code: "unknown_error",
+      status: null,
+      upstream_code: null,
+      phase: "stream",
+      summary: "本轮发生未知错误。",
+      detail: null,
+      retryable: false,
+      stopped_reason: null,
+      request_id: null,
+    }
+  );
 }
 
 export interface CreateCoursePayload {
@@ -112,6 +274,41 @@ function withWorkspace(url: string, workspace: WorkspaceParam): string {
   if (!workspace) return url;
   const params = new URLSearchParams({ workspace });
   return `${url}${url.includes("?") ? "&" : "?"}${params.toString()}`;
+}
+
+/**
+ * 工作区路径 → URL-safe token（base64url，无填充）。
+ *
+ * 用途：iframe 里的课件/主页会对共享资源做相对引用（`../../../assets/...`、`.learning/assets/...`），
+ * 浏览器解析相对 URL 时会丢掉 query，所以 `?workspace=` 传不到子资源请求。把工作区编进路径前缀
+ * 后，嵌套引用解析出来仍带前缀，不依赖 Referer。
+ * 信任模型与 `?workspace=` 一致（本机单机）：后端解码后仍须校验目录存在且在根内。
+ */
+function toWorkspaceToken(path: string): string {
+  const bytes = new TextEncoder().encode(path);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * 工作区前缀只读资源根：`/api/workspace-files/<token>`；无 workspace 时返回 null（走旧默认工作区路由）。
+ * 后端 `/api/workspace-files/{token}/...` 系委托原 handler 的只读路由：
+ * - 课件/科目资源：`<base>/courses/{slug}/files/{rel}`（`../../../assets` 自然落到 `<base>/courses/assets/...`）
+ * - 工作区主页：`<base>/home/index.html`（显式 `index` 保住相对层级，`.learning/assets/...` 仍在 `home/` 下）
+ */
+export function workspaceFileBaseOf(workspace: WorkspaceParam): string | null {
+  if (!workspace) return null;
+  return `/api/workspace-files/${toWorkspaceToken(workspace)}`;
+}
+
+/** 把相对路径逐段编码（保留 `/` 分隔），供资源 URL 复用 */
+function encodeRelPath(relativePath: string): string {
+  return relativePath
+    .split("/")
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join("/");
 }
 
 export interface PatchCoursePayload {
@@ -155,7 +352,28 @@ export const api = {
       body: JSON.stringify({ active }),
     }),
   deleteSession: (id: string) =>
-    jsonFetch<{ ok: boolean }>(`/api/sessions/${id}`, { method: "DELETE" }),
+    jsonFetch<{ ok: boolean }>(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /**
+   * 登记“用户主动停止”意图（后端绑定 active turn_id，15s 内一次消费；无 active 轮返回 stop:false）。
+   * 限时等待，绝不无限阻塞：超时/异常一律返回 `{ok:false, stop:false}`，调用方仍应本地 abort。
+   */
+  stopSession: (id: string, timeoutMs = 1500): Promise<{ ok: boolean; stop: boolean }> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    return fetch(`/api/sessions/${encodeURIComponent(id)}/stop`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+      signal: controller.signal,
+      keepalive: true,
+    })
+      .then(async (res) =>
+        res.ok ? ((await res.json()) as { ok: boolean; stop?: boolean }) : { ok: false, stop: false },
+      )
+      .then((data) => ({ ok: Boolean(data.ok), stop: Boolean(data.stop) }))
+      .catch(() => ({ ok: false, stop: false }))
+      .finally(() => clearTimeout(timer));
+  },
   /** 删除整轮（index 指向该轮的用户消息或助手回复，服务端成对删掉） */
   deleteTurn: (id: string, index: number) =>
     jsonFetch<{ ok: boolean; deleted: number[]; messages: ChatMessage[] }>(
@@ -165,8 +383,8 @@ export const api = {
 
   listCourses: (workspace?: WorkspaceParam) =>
     jsonFetch<SubjectSummary[]>(withWorkspace("/api/courses", workspace)),
-  createCourse: (payload: CreateCoursePayload) =>
-    jsonFetch<SubjectSummary>("/api/courses", {
+  createCourse: (payload: CreateCoursePayload, workspace?: WorkspaceParam) =>
+    jsonFetch<SubjectSummary>(withWorkspace("/api/courses", workspace), {
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -174,79 +392,134 @@ export const api = {
     jsonFetch<CourseDetail>(
       withWorkspace(`/api/courses/${encodeURIComponent(slug)}`, workspace),
     ),
-  patchCourse: (slug: string, payload: PatchCoursePayload) =>
-    jsonFetch<SubjectSummary>(`/api/courses/${encodeURIComponent(slug)}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }),
-  deleteCourse: (slug: string) =>
-    jsonFetch<{ ok: boolean }>(`/api/courses/${encodeURIComponent(slug)}`, {
-      method: "DELETE",
-    }),
-  updateNodeProgress: (slug: string, nodeId: string, payload: NodeProgressPayload) =>
+  patchCourse: (slug: string, payload: PatchCoursePayload, workspace?: WorkspaceParam) =>
+    jsonFetch<SubjectSummary>(
+      withWorkspace(`/api/courses/${encodeURIComponent(slug)}`, workspace),
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    ),
+  deleteCourse: (slug: string, workspace?: WorkspaceParam) =>
+    jsonFetch<{ ok: boolean }>(
+      withWorkspace(`/api/courses/${encodeURIComponent(slug)}`, workspace),
+      {
+        method: "DELETE",
+      },
+    ),
+  updateNodeProgress: (
+    slug: string,
+    nodeId: string,
+    payload: NodeProgressPayload,
+    workspace?: WorkspaceParam,
+  ) =>
     jsonFetch<{ ok: boolean; node: GraphNode }>(
-      `/api/courses/${encodeURIComponent(slug)}/nodes/${encodeURIComponent(nodeId)}/progress`,
+      withWorkspace(
+        `/api/courses/${encodeURIComponent(slug)}/nodes/${encodeURIComponent(nodeId)}/progress`,
+        workspace,
+      ),
       { method: "PUT", body: JSON.stringify(payload) },
     ),
 
-  listMisconceptions: (slug: string, query: MisconceptionQuery = {}) => {
+  listMisconceptions: (slug: string, query: MisconceptionQuery = {}, workspace?: WorkspaceParam) => {
     const params = new URLSearchParams();
     if (query.importance) params.set("importance", query.importance);
     if (query.node_id) params.set("node_id", query.node_id);
     const qs = params.toString();
     return jsonFetch<{ items: MisconceptionItem[] }>(
-      `/api/courses/${encodeURIComponent(slug)}/misconceptions${qs ? `?${qs}` : ""}`,
+      withWorkspace(
+        `/api/courses/${encodeURIComponent(slug)}/misconceptions${qs ? `?${qs}` : ""}`,
+        workspace,
+      ),
     );
   },
-  createMisconception: (slug: string, payload: MisconceptionPayload) =>
+  createMisconception: (slug: string, payload: MisconceptionPayload, workspace?: WorkspaceParam) =>
     jsonFetch<{ item: MisconceptionItem }>(
-      `/api/courses/${encodeURIComponent(slug)}/misconceptions`,
+      withWorkspace(`/api/courses/${encodeURIComponent(slug)}/misconceptions`, workspace),
       { method: "POST", body: JSON.stringify(payload) },
     ),
-  updateMisconception: (slug: string, id: string, payload: MisconceptionPatch) =>
+  updateMisconception: (
+    slug: string,
+    id: string,
+    payload: MisconceptionPatch,
+    workspace?: WorkspaceParam,
+  ) =>
     jsonFetch<{ item: MisconceptionItem }>(
-      `/api/courses/${encodeURIComponent(slug)}/misconceptions/${encodeURIComponent(id)}`,
+      withWorkspace(
+        `/api/courses/${encodeURIComponent(slug)}/misconceptions/${encodeURIComponent(id)}`,
+        workspace,
+      ),
       { method: "PUT", body: JSON.stringify(payload) },
     ),
-  deleteMisconception: (slug: string, id: string) =>
+  deleteMisconception: (slug: string, id: string, workspace?: WorkspaceParam) =>
     jsonFetch<{ ok: boolean }>(
-      `/api/courses/${encodeURIComponent(slug)}/misconceptions/${encodeURIComponent(id)}`,
+      withWorkspace(
+        `/api/courses/${encodeURIComponent(slug)}/misconceptions/${encodeURIComponent(id)}`,
+        workspace,
+      ),
       { method: "DELETE" },
     ),
 
-  listLessons: (slug: string) =>
+  listLessons: (slug: string, workspace?: WorkspaceParam) =>
     jsonFetch<{ lessons: LessonInfo[] }>(
-      `/api/courses/${encodeURIComponent(slug)}/lessons`,
+      withWorkspace(`/api/courses/${encodeURIComponent(slug)}/lessons`, workspace),
     ),
-  getQuiz: (slug: string, nodeId: string) =>
+  getQuiz: (slug: string, nodeId: string, workspace?: WorkspaceParam) =>
     jsonFetch<{ items: QuizItem[] }>(
-      `/api/courses/${encodeURIComponent(slug)}/quiz/${encodeURIComponent(nodeId)}`,
+      withWorkspace(
+        `/api/courses/${encodeURIComponent(slug)}/quiz/${encodeURIComponent(nodeId)}`,
+        workspace,
+      ),
     ),
-  gradeAnswer: (slug: string, nodeId: string, payload: GradePayload) =>
+  gradeAnswer: (
+    slug: string,
+    nodeId: string,
+    payload: GradePayload,
+    workspace?: WorkspaceParam,
+  ) =>
     jsonFetch<GradeResult>(
-      `/api/courses/${encodeURIComponent(slug)}/nodes/${encodeURIComponent(nodeId)}/grade`,
+      withWorkspace(
+        `/api/courses/${encodeURIComponent(slug)}/nodes/${encodeURIComponent(nodeId)}/grade`,
+        workspace,
+      ),
       { method: "POST", body: JSON.stringify(payload) },
     ),
-  assessNode: (slug: string, nodeId: string, payload: AssessPayload) =>
+  assessNode: (
+    slug: string,
+    nodeId: string,
+    payload: AssessPayload,
+    workspace?: WorkspaceParam,
+  ) =>
     jsonFetch<AssessResponse>(
-      `/api/courses/${encodeURIComponent(slug)}/nodes/${encodeURIComponent(nodeId)}/assess`,
+      withWorkspace(
+        `/api/courses/${encodeURIComponent(slug)}/nodes/${encodeURIComponent(nodeId)}/assess`,
+        workspace,
+      ),
       { method: "POST", body: JSON.stringify(payload) },
     ),
-  listRecords: (slug: string) =>
-    jsonFetch<CourseRecords>(`/api/courses/${encodeURIComponent(slug)}/records`),
-  generateSessionSummary: (slug: string, sessionId: string) =>
+  listRecords: (slug: string, workspace?: WorkspaceParam) =>
+    jsonFetch<CourseRecords>(
+      withWorkspace(`/api/courses/${encodeURIComponent(slug)}/records`, workspace),
+    ),
+  generateSessionSummary: (slug: string, sessionId: string, workspace?: WorkspaceParam) =>
     jsonFetch<SummaryResponse>(
-      `/api/courses/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/summary`,
+      withWorkspace(
+        `/api/courses/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/summary`,
+        workspace,
+      ),
       { method: "POST", body: JSON.stringify({}) },
     ),
-  exportCourse: (slug: string) =>
-    jsonFetch<ExportResult>(`/api/courses/${encodeURIComponent(slug)}/export`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    }),
+  exportCourse: (slug: string, workspace?: WorkspaceParam) =>
+    jsonFetch<ExportResult>(
+      withWorkspace(`/api/courses/${encodeURIComponent(slug)}/export`, workspace),
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
 
-  generateCourse: (payload: GenerateCoursePayload) =>
-    jsonFetch<GenerateCourseResponse>("/api/courses/generate", {
+  generateCourse: (payload: GenerateCoursePayload, workspace?: WorkspaceParam) =>
+    jsonFetch<GenerateCourseResponse>(withWorkspace("/api/courses/generate", workspace), {
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -290,15 +563,16 @@ export const api = {
     jsonFetch<AttachmentsArea>(
       withWorkspace(`/api/courses/${encodeURIComponent(slug)}/attachments-area`, workspace),
     ),
-  courseFileUrl: (slug: string, relativePath: string, workspace?: WorkspaceParam) =>
-    withWorkspace(
-      `/api/courses/${encodeURIComponent(slug)}/files/${relativePath
-        .split("/")
-        .filter(Boolean)
-        .map((part) => encodeURIComponent(part))
-        .join("/")}`,
-      workspace,
-    ),
+  // 绑定工作区时走 `/api/workspace-files/<token>/courses/<slug>/files/...`：课件的嵌套相对引用
+  // （../../../assets 落在 <base>/courses/assets、../assets 落在本 slug 的 files/assets）都带前缀；
+  // 缺省保持旧的默认工作区路由。
+  workspaceFileBase: workspaceFileBaseOf,
+  courseFileUrl: (slug: string, relativePath: string, workspace?: WorkspaceParam) => {
+    const rel = encodeRelPath(relativePath);
+    const base = workspaceFileBaseOf(workspace);
+    if (base) return `${base}/courses/${encodeURIComponent(slug)}/files/${rel}`;
+    return `/api/courses/${encodeURIComponent(slug)}/files/${rel}`;
+  },
 
   // 记忆写侧：先建议后逐条确认
   suggestMemory: (sessionId: string) =>
@@ -316,26 +590,62 @@ export const api = {
 
   // ---------- 生产链（§5.1 C/D/工单） ----------
 
-  // 质检工单
-  listTickets: (slug?: string, openOnly = false) => {
+  // 质检工单（工单可能属于某个工作区；旧 ticket 无 workspace 时回落默认）
+  // includeUnscoped：额外列出归属未知（ambiguous）的单（后端保证不含 owned-other），
+  //   免得它们在列表里静默消失；绝不能为看见未知单把 workspace 猜成某个工作区去认领。
+  listTickets: (
+    slug?: string,
+    openOnly = false,
+    workspace?: WorkspaceParam,
+    includeUnscoped = false,
+  ) => {
     const params = new URLSearchParams();
     if (slug) params.set("slug", slug);
     if (openOnly) params.set("open_only", "true");
+    if (includeUnscoped) params.set("include_unscoped", "true");
     const qs = params.toString();
-    return jsonFetch<InspectionTicket[]>(`/api/tickets${qs ? `?${qs}` : ""}`);
+    return jsonFetch<InspectionTicket[]>(
+      withWorkspace(`/api/tickets${qs ? `?${qs}` : ""}`, workspace),
+    );
   },
-  getTicket: (id: string) =>
-    jsonFetch<TicketDetail>(`/api/tickets/${encodeURIComponent(id)}`),
-  quickEditTicketArtifact: (id: string, path: string, content: string) =>
-    jsonFetch<{ ok: boolean }>(`/api/tickets/${encodeURIComponent(id)}/artifact`, {
-      method: "PUT",
-      body: JSON.stringify({ path, content }),
-    }),
-  abandonTicket: (id: string) =>
-    jsonFetch<{ ok: boolean }>(`/api/tickets/${encodeURIComponent(id)}/abandon`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    }),
+  getTicket: (id: string, workspace?: WorkspaceParam) =>
+    jsonFetch<TicketDetail>(
+      withWorkspace(`/api/tickets/${encodeURIComponent(id)}`, workspace),
+    ),
+  /**
+   * 确认旧工单归属：用户选定/手输 workspace 后由服务端持久化，之后详情与写操作才按该归属放行。
+   * workspace 走请求体（不是 `?workspace=` scope），因为这一步正是在决定归属。
+   * 响应 {ok, ticket}；错误：无目录/科目/节点 422、draft/已归属别区重绑 409、相同归属幂等 200。
+   */
+  confirmTicketWorkspace: (id: string, workspace: string) =>
+    jsonFetch<{ ok: boolean; ticket: TicketDetail }>(
+      `/api/tickets/${encodeURIComponent(id)}/claim`,
+      {
+        method: "POST",
+        body: JSON.stringify({ workspace }),
+      },
+    ),
+  quickEditTicketArtifact: (
+    id: string,
+    path: string,
+    content: string,
+    workspace?: WorkspaceParam,
+  ) =>
+    jsonFetch<{ ok: boolean }>(
+      withWorkspace(`/api/tickets/${encodeURIComponent(id)}/artifact`, workspace),
+      {
+        method: "PUT",
+        body: JSON.stringify({ path, content }),
+      },
+    ),
+  abandonTicket: (id: string, workspace?: WorkspaceParam) =>
+    jsonFetch<{ ok: boolean }>(
+      withWorkspace(`/api/tickets/${encodeURIComponent(id)}/abandon`, workspace),
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
 
   // 草稿区（建课链 D）
   listDrafts: () => jsonFetch<DraftInfo[]>("/api/drafts"),
@@ -377,12 +687,34 @@ export interface StreamHandlers {
   onConfirm?: (payload: { slug: string; name: string }) => void;
   /** 工具化运行时（K0）：模型发起一次工具调用 */
   onToolCall?: (payload: { id: string; name: string; arguments: string }) => void;
-  /** 工具执行结果回吐（is_error 表示工具以错误文本回填，循环不中断） */
-  onToolResult?: (payload: { id: string; name: string; content: string; is_error: boolean }) => void;
+  /**
+   * 工具执行结果回吐（is_error 表示工具以错误文本回填，循环不中断）。
+   * task / lesson / assessment 是后端结构化透传的可选载荷（TOOL_METADATA_KEYS）：
+   * 产课终态 task、课件链接、评估落盘结果；前端只信这些字段，不解析 content 文本、不猜路径。
+   * 终态 task_update 丢失时，靠 tool_result.task 兜底把卡收成 done。
+   */
+  onToolResult?: (payload: {
+    id: string;
+    name: string;
+    content: string;
+    is_error: boolean;
+    task?: ProductionTask;
+    lesson?: LessonLink;
+    assessment?: AssessmentOutcome;
+  }) => void;
+  /**
+   * 产课任务快照（SSE `task_update`）：id 为父 tool_call id，task 为完整快照。
+   * 只更新对应 ToolActivity.task，不追加 message / parts；高频进度也只刷新同一张卡。
+   */
+  onTaskUpdate?: (payload: { id: string; task: ProductionTask }) => void;
   /** 本轮 LLM 用量（右栏「上下文窗口」栏） */
   onUsage?: (usage: Usage) => void;
   onDone?: (sessionId: string) => void;
-  onError?: (message: string) => void;
+  /**
+   * 本轮错误：新后端下发结构化 ErrorInfo，旧后端/旧调用点仍可能是字符串。
+   * 前端统一用 `normalizeError` 收编，调用方按 ErrorInfo 处理。
+   */
+  onError?: (error: ErrorInfo | string) => void;
 }
 
 /** 编排进度快照（后端 ProgressReporter 每几秒发一次）：用来证明"确实在工作" */
@@ -405,7 +737,7 @@ export interface OrchestrationHandlers {
   onRetry?: (payload: { round: number; owners: string[]; reason?: string }) => void;
   onHandoff?: (payload: { ticket: InspectionTicket }) => void;
   onDone?: (payload: { message?: string; slug?: string; stage?: string; artifacts?: string[] }) => void;
-  onError?: (message: string) => void;
+  onError?: (error: ErrorInfo | string) => void;
 }
 
 export interface StreamChatOptions {
@@ -465,7 +797,7 @@ export async function streamChat(
   });
 
   if (!res.ok) {
-    handlers.onError?.(await errorMessage(res));
+    handlers.onError?.((await parseErrorResponse(res)).error);
     return;
   }
 
@@ -481,7 +813,19 @@ export async function streamChat(
       handlers.onToolCall?.(payload as unknown as { id: string; name: string; arguments: string });
     else if (event === "tool_result")
       handlers.onToolResult?.(
-        payload as unknown as { id: string; name: string; content: string; is_error: boolean },
+        payload as unknown as {
+          id: string;
+          name: string;
+          content: string;
+          is_error: boolean;
+          task?: ProductionTask;
+          lesson?: LessonLink;
+          assessment?: AssessmentOutcome;
+        },
+      );
+    else if (event === "task_update")
+      handlers.onTaskUpdate?.(
+        payload as unknown as { id: string; task: ProductionTask },
       );
     else if (event === "usage") handlers.onUsage?.(payload.usage as Usage);
     else if (event === "confirm") handlers.onConfirm?.(payload as never);
@@ -490,10 +834,23 @@ export async function streamChat(
       handlers.onDone?.(payload.session_id as string);
     } else if (event === "error") {
       settled = true;
-      handlers.onError?.(payload.message as string);
+      handlers.onError?.(coerceSseError(payload));
     }
   });
-  if (!settled) handlers.onError?.("连接中断：本轮未正常结束，请重试。");
+  if (!settled) {
+    // 流自然结束却没等到 done/error：连接被截断（EOF）。给结构化 transport 错误，红色展示且可重试。
+    handlers.onError?.({
+      code: "eof",
+      status: null,
+      upstream_code: null,
+      phase: "stream",
+      summary: "连接中断：本轮未正常结束，请重试。",
+      detail: null,
+      retryable: true,
+      stopped_reason: null,
+      request_id: null,
+    });
+  }
 }
 
 /** 解析一条 SSE 事件流（fetch + ReadableStream）；事件名与载荷交给 sink。 */
@@ -538,7 +895,7 @@ export async function streamOrchestration(
     signal,
   });
   if (!res.ok) {
-    handlers.onError?.(await errorMessage(res));
+    handlers.onError?.((await parseErrorResponse(res)).error);
     return;
   }
   await consumeSSE(res, (event, payload) => {
@@ -548,7 +905,7 @@ export async function streamOrchestration(
     else if (event === "retry") handlers.onRetry?.(payload as never);
     else if (event === "handoff") handlers.onHandoff?.(payload as never);
     else if (event === "done") handlers.onDone?.(payload);
-    else if (event === "error") handlers.onError?.(String(payload.message));
+    else if (event === "error") handlers.onError?.(coerceSseError(payload));
     // finished / confirm 在编排流里忽略（confirm 仅 chat 流使用；progress 高频、不持久化）
   });
 }
@@ -586,10 +943,10 @@ export function buildDraft(
 export function retryTicket(
   id: string,
   handlers: OrchestrationHandlers,
-  options: { hint?: string; sessionId?: string | null } = {},
+  options: { hint?: string; sessionId?: string | null; workspace?: WorkspaceParam } = {},
 ): Promise<void> {
   return streamOrchestration(
-    `/api/tickets/${encodeURIComponent(id)}/retry`,
+    withWorkspace(`/api/tickets/${encodeURIComponent(id)}/retry`, options.workspace),
     { hint: options.hint ?? null, session_id: options.sessionId ?? null },
     handlers,
   );
@@ -600,9 +957,10 @@ export function recheckTicket(
   id: string,
   handlers: OrchestrationHandlers,
   sessionId?: string | null,
+  workspace?: WorkspaceParam,
 ): Promise<void> {
   return streamOrchestration(
-    `/api/tickets/${encodeURIComponent(id)}/recheck`,
+    withWorkspace(`/api/tickets/${encodeURIComponent(id)}/recheck`, workspace),
     { session_id: sessionId ?? null },
     handlers,
   );

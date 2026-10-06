@@ -5,10 +5,13 @@ import { Check, Loader2, Undo2 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { AppSettings } from "@/lib/types";
 
-// 与后端 config.py DEFAULT_SETTINGS.system_prompt 保持一致
+// 「恢复默认」的兜底文案：仅当后端 GET /api/settings 尚未返回 default_system_prompt 时使用。
+// 后端已提供该只读字段（AppSettings.default_system_prompt）时应以后端为准，避免前端硬编码
+// 第二份默认值与后端口径漂移；这里的内容必须与 backend/app/config.py 的 PERSONA_PROMPT 一致。
 export const DEFAULT_SYSTEM_PROMPT =
-  "你是 StudyMate 自学系统的主教练（学习模式），按 learning-system 技能规范调度学习流程。" +
-  "坚持 learn with doing：讲清概念后引导学习者动手练习，用通俗的语言和具体的例子解释知识。";
+  "你是 StudyMate 自学系统的主教练（学习模式），坚持 learn with doing：讲清概念后引导学习者动手练习，" +
+  "用通俗的语言和具体的例子解释知识。开场先按学习者近期状态报告上次学到哪、这次建议学什么；" +
+  "每轮回复的最后一行都按「**下一步**：<谁做什么> —— <怎么触发>」的格式给出下一步，别让学生停在那儿等。";
 
 export function SystemPromptView() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -66,6 +69,7 @@ export function SystemPromptView() {
   }
 
   const changed = value !== settings.system_prompt;
+  const defaultPrompt = settings.default_system_prompt ?? DEFAULT_SYSTEM_PROMPT;
 
   return (
     <div className="h-full px-6 py-8">
@@ -99,7 +103,7 @@ export function SystemPromptView() {
             {saved ? "已保存" : "保存"}
           </button>
           <button
-            onClick={() => setValue(DEFAULT_SYSTEM_PROMPT)}
+            onClick={() => setValue(defaultPrompt)}
             disabled={saving}
             className="flex items-center gap-1.5 rounded-xl border px-3.5 py-2.5 text-sm opacity-70 transition-colors hover:bg-[var(--muted)] hover:opacity-100 disabled:opacity-50"
             style={{ borderColor: "var(--border)" }}

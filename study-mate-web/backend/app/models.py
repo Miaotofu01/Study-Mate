@@ -270,6 +270,22 @@ class TicketQuickEditRequest(BaseModel):
     content: str
 
 
+class ClaimTicketRequest(BaseModel):
+    """认领旧工单：显式指定该工单归属的工作区（绝对路径）。
+
+    只写工单的 workspace 字段，不重写科目、不移动文件；目标必须是已存在、
+    确有同 slug 科目（有 node_id 时还要含该节点）的合法工作区。
+    """
+
+    workspace: str
+
+
+class AbandonTicketRequest(BaseModel):
+    """放弃工单：reason 可选，仅记录收口理由（不改课程产物、不改归属）。"""
+
+    reason: str | None = None
+
+
 class SubjectSummary(BaseModel):
     slug: str
     name: str

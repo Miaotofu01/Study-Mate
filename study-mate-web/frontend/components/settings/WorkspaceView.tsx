@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Check, FolderOpen, Loader2, Save } from "lucide-react";
 import { api } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace";
 import type { WorkspaceInfo } from "@/lib/types";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -15,6 +16,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 export function WorkspaceView() {
+  const { refreshWorkspaceCandidates } = useWorkspace();
   const [info, setInfo] = useState<WorkspaceInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -67,6 +69,8 @@ export function WorkspaceView() {
       setInfo(data);
       setInput(data.path);
       setSavedPath(data.path);
+      // 让会话关联行等处的候选工作区跟上新路径（候选只在 Provider 挂载时取一次）
+      void refreshWorkspaceCandidates();
       window.setTimeout(() => setSavedPath(null), 6000);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));

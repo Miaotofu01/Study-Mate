@@ -153,18 +153,23 @@ export function RightSidebar({
         {!usage && <span className="text-[10px] opacity-40">本轮结束后显示用量</span>}
       </div>
 
-      {/* 科目图谱 / 大纲：关联科目后出现。聊天右栏窄（200–480px），默认大纲视图，
-          点节点跳课程页定位（?subject=&node=），图谱视图仍可分段切换。 */}
+      {/* 科目图谱 / 大纲：关联科目后出现。同屏双栏（大纲在上、图谱在下，手柄调占比），
+          占满右栏选项卡以下的剩余空间（2026-10-05 拍板②：固定高度有问题）；点节点跳课程页
+          定位（?subject=&node=）。 */}
       {activeSubjectSlug && (
         <div
           data-testid="subject-graph-section"
-          className={clsx("h-80 shrink-0 border-b", activeTab !== "graph" && "hidden")}
+          className={clsx(
+            "flex min-h-0 flex-1 flex-col border-b",
+            activeTab !== "graph" && "hidden",
+          )}
           style={{ borderColor: "var(--border)" }}
         >
           <SubjectGraphPanel
             slug={activeSubjectSlug}
             workspace={activeWorkspace}
-            defaultView="outline"
+            layout="stacked"
+            splitStorageKey="studymate-chat-rail-graph-split"
             onSelectNode={(id) =>
               router.push(
                 `/courses?subject=${encodeURIComponent(activeSubjectSlug)}&node=${encodeURIComponent(id)}`,
@@ -221,24 +226,31 @@ interface AttachmentFile {
 /** 附件区：术语表 / 本地资料 / 学习记录 / 会话摘要，按科目目录扫描后经 /files/ 打开 */
 function AttachmentsAreaSection({ slug, workspace }: { slug: string; workspace: string | null }) {
   const [area, setArea] = useState<AttachmentsArea | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // 重试：拉取失败后不能停在「读取中…」假象里，给一条错误 + 重试入口
+  const [reloadKey, setReloadKey] = useState(0);
 
   // 右侧栏（RightRail）挂载、科目切换、会话工作区切换时各拉一次；先清空，避免用新 slug +
   // 旧文件名拼出脏链接
   useEffect(() => {
     let alive = true;
     setArea(null);
+    setError(null);
     api
       .getAttachmentsArea(slug, workspace)
       .then((res) => {
-        if (alive) setArea(res);
+        if (!alive) return;
+        setArea(res);
       })
-      .catch(() => {
-        if (alive) setArea(null);
+      .catch((err: unknown) => {
+        if (!alive) return;
+        setArea(null);
+        setError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       alive = false;
     };
-  }, [slug, workspace]);
+  }, [slug, workspace, reloadKey]);
 
   const groups: { label: string; files: AttachmentFile[] }[] = [
     {
@@ -270,10 +282,26 @@ function AttachmentsAreaSection({ slug, workspace }: { slug: string; workspace: 
     >
       <span className="text-xs font-medium opacity-50">附件区</span>
 
-      {!area && (
+      {!area && !error && (
         <div className="flex items-center gap-1.5 text-[11px] opacity-50">
           <Loader2 className="h-3 w-3 animate-spin" />
           读取中…
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center justify-between gap-2 text-[11px] text-red-500">
+          <span className="min-w-0 flex-1 truncate" title={error}>
+            附件区读取失败：{error}
+          </span>
+          <button
+            type="button"
+            onClick={() => setReloadKey((key) => key + 1)}
+            className="shrink-0 rounded-md border px-2 py-0.5 opacity-80 transition-opacity hover:opacity-100"
+            style={{ borderColor: "var(--border)" }}
+          >
+            重试
+          </button>
         </div>
       )}
 

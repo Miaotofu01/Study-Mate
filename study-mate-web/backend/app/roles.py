@@ -18,6 +18,7 @@ from fastapi import HTTPException
 from . import audit
 from . import prompts
 from .llm import chat_once, extract_json
+from .tools import safe_write_target, unsafe_relative_reason
 
 ENVELOPE_MISSING = "角色回复不是规定的 JSON envelope（缺 files/data/report 任一结构）"
 
@@ -69,8 +70,9 @@ def envelope_files(envelope: dict[str, Any]) -> list[dict[str, str]]:
         content = item.get("content")
         if not path or not isinstance(content, str):
             raise ValueError(f"envelope 文件项缺 path 或 content：{path!r}")
-        if path.startswith("/") or ".." in Path(path).parts or Path(path).is_absolute():
-            raise ValueError(f"envelope 文件路径越出科目目录：{path}")
+        reason = unsafe_relative_reason(path, for_write=True)
+        if reason:
+            raise ValueError(f"envelope 文件路径越出科目目录：{path}（{reason}）")
         cleaned.append({"path": path, "content": content})
     return cleaned
 
@@ -79,7 +81,7 @@ def write_deliver(stage_dir: Path, files: list[dict[str, str]]) -> list[Path]:
     """逐字落 deliver/（.stage/<角色>-<节点>/deliver/<相对路径>），返回落盘绝对路径。"""
     written: list[Path] = []
     for item in files:
-        target = stage_dir / "deliver" / item["path"]
+        target = safe_write_target(stage_dir / "deliver", item["path"])
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(item["content"], encoding="utf-8", newline="\n")
         written.append(target)
@@ -91,8 +93,8 @@ def promote_deliver(stage_dir: Path, base: Path, files: list[dict[str, str]]) ->
     deliver = stage_dir / "deliver"
     moved: list[str] = []
     for item in files:
-        source = deliver / item["path"]
-        target = base / item["path"]
+        source = safe_write_target(deliver, item["path"])
+        target = safe_write_target(base, item["path"])
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
         moved.append(item["path"])
@@ -121,7 +123,17 @@ async def dispatch_role(
         {"role": "user", "content": values},
     ]
     audit.record("dispatch", route=route, fixture_kind=fixture_kind, values=values)
-    raw = await chat_once(provider, messages, json_mode=True, fixture_kind=fixture_kind)
+    # 角色派工是长调用（建课/产课单次实测可达数分钟）：显式给编排墙钟，
+    # 不用 llm 的默认 300s（llm owner 支持 max_seconds，到点抛 LLMDeadlineExceeded 不重试）。
+    from .agent import ORCH_MAX_SECONDS
+
+    raw = await chat_once(
+        provider,
+        messages,
+        json_mode=True,
+        fixture_kind=fixture_kind,
+        max_seconds=ORCH_MAX_SECONDS,
+    )
     audit.record("dispatch_reply", route=route, raw=raw)
     try:
         return parse_envelope(raw)

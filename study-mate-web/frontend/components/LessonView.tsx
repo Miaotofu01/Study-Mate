@@ -5,15 +5,19 @@ import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
 import { AlertCircle, ArrowLeft, ListChecks, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace";
 import { GradingPanel } from "./GradingPanel";
 import type { LessonInfo } from "@/lib/types";
 
 export function LessonView() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { activeWorkspace } = useWorkspace();
 
   const subject = searchParams.get("subject");
   const nodeId = searchParams.get("node");
+  // 课件所属工作区：优先 URL 显式携带（从节点详情跳来时带上），否则用会话当前工作区
+  const workspace = searchParams.get("workspace") ?? activeWorkspace;
 
   const [lessons, setLessons] = useState<LessonInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +31,7 @@ export function LessonView() {
     let alive = true;
     setError(null);
     api
-      .listLessons(subject)
+      .listLessons(subject, workspace)
       .then((res) => {
         if (alive) setLessons(res.lessons);
       })
@@ -40,17 +44,22 @@ export function LessonView() {
     return () => {
       alive = false;
     };
-  }, [subject]);
+  }, [subject, workspace]);
 
   const lesson = useMemo(
     () => lessons?.find((l) => l.node_id === nodeId) ?? null,
     [lessons, nodeId],
   );
 
-  // file 字段可能自带 lessons/ 前缀，统一剥掉后拼到 files/lessons/ 下
+  // file 字段可能自带 lessons/ 前缀，统一剥掉后拼到 files/lessons/ 下；带上 workspace 让课件
+  // 与它的共享资源（../../../assets/...）都从所属工作区解析。
   const fileSrc =
     subject && lesson
-      ? `/api/courses/${encodeURIComponent(subject)}/files/lessons/${lesson.file.replace(/^\/?lessons\//, "")}`
+      ? api.courseFileUrl(
+          subject,
+          `lessons/${lesson.file.replace(/^\/?lessons\//, "")}`,
+          workspace,
+        )
       : null;
 
   const back = () => {
@@ -113,9 +122,10 @@ export function LessonView() {
 
         {panelOpen && subject && nodeId && (
           <GradingPanel
-            key={`${subject}:${nodeId}`}
+            key={`${subject}:${nodeId}:${workspace ?? ""}`}
             slug={subject}
             nodeId={nodeId}
+            workspace={workspace}
             onClose={() => setPanelOpen(false)}
           />
         )}

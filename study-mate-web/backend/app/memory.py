@@ -5,8 +5,11 @@
 """
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 import threading
+import uuid
 from pathlib import Path
 
 from . import curriculum_store as cs
@@ -17,6 +20,18 @@ TEMPLATE_PATH = REPO_ROOT / "templates" / "MEMORY.md"
 SECTIONS = ["我是谁", "教学偏好", "学习习惯", "跨科目观察"]
 _SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
 _write_lock = threading.Lock()
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """临时文件 + os.replace：读者永远看到完整快照，不会撞上写了一半的 MEMORY.md。"""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            with contextlib.suppress(OSError):
+                tmp.unlink()
 
 
 def memory_path() -> Path:
@@ -48,7 +63,7 @@ def append_entries(entries: list[dict[str, str]]) -> tuple[Path, int]:
             lines, inserted = _insert(lines, section, content)
             written += 1 if inserted else 0
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        _atomic_write(path, "\n".join(lines).rstrip() + "\n")
         return path, written
 
 

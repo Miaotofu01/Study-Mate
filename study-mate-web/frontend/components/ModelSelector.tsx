@@ -34,6 +34,30 @@ export function activeModelOf(
   return entry?.models.find((m) => m.name === active.model) ?? null;
 }
 
+/**
+ * 真正生效的三元组：会话绑定**完全可用**时用它，否则回落到全局默认。
+ * 判据与后端 `config.get_session_provider` 对齐（提供商存在且启用、模型仍在模型表里）；
+ * 绑定失效（提供商被删/停用、模型被移除）时前端如实显示回落后的默认模型，
+ * 而不是拿失效绑定去禁用输入（后端本会回落并给提示）。
+ */
+export function effectiveActiveOf(
+  settings: AppSettings | null,
+  sessionActive: SessionActive | null | undefined,
+): ActiveProvider | null {
+  if (!settings) return sessionActive ?? null;
+  if (sessionActive) {
+    const entry = settings.providers.find((p) => p.id === sessionActive.provider_id);
+    if (
+      entry &&
+      entry.enabled !== false &&
+      entry.models.some((m) => m.name === sessionActive.model)
+    ) {
+      return sessionActive;
+    }
+  }
+  return settings.active;
+}
+
 interface ModelSelectorProps {
   settings: AppSettings | null;
   onUpdated: (settings: AppSettings) => void;
@@ -69,8 +93,8 @@ export function ModelSelector({
     );
   }
 
-  // 生效的三元组：会话绑定优先，否则全局默认（2026-10-04：模型/档位按会话持久化）
-  const effective: ActiveProvider = sessionActive ?? settings.active;
+  // 生效的三元组：会话绑定可用优先，绑定失效（提供商被删/停用、模型被移除）则回落全局默认
+  const effective: ActiveProvider = effectiveActiveOf(settings, sessionActive) ?? settings.active;
   const activeEntry =
     settings.providers.find((p) => p.id === effective.provider_id) ?? null;
   const label = activeEntry

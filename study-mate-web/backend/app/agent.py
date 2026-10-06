@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Awaitable, Callable
 
 from . import audit
-from . import llm
+from . import llm, errors
 from .tools import ToolContext
 
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
@@ -39,6 +39,69 @@ IDLE_NUDGE = "（上一轮没有任何输出，请直接给出最终答复。）
 # 两个口径分开：聊天一轮 300s 就该给答案了；建课/产课的单次派工实测可达 694s，给 1800s。
 CHAT_MAX_SECONDS = float(os.getenv("STUDYMATE_CHAT_MAX_SECONDS", "300") or 300)
 ORCH_MAX_SECONDS = float(os.getenv("STUDYMATE_ORCH_MAX_SECONDS", "1800") or 1800)
+# 建课收口阶段的墙钟：本轮只做纯最终输出（不跑工具），不需要聊天那 300s；
+# 默认取聊天上限与 120s 的较小值，可用 STUDYMATE_INTERVIEW_FINALIZE_MAX_SECONDS 覆盖。
+INTERVIEW_FINALIZE_MAX_SECONDS = float(
+    os.getenv("STUDYMATE_INTERVIEW_FINALIZE_MAX_SECONDS", str(min(CHAT_MAX_SECONDS, 120)))
+    or min(CHAT_MAX_SECONDS, 120)
+)
+
+# 盘问收口标记（与 chat.py 同口径）：完整成对出现才视为「已收口」。
+INTERVIEW_MARKER_OPEN = "<!--INTERVIEW_RESULT-->"
+INTERVIEW_MARKER_CLOSE = "<!--/INTERVIEW_RESULT-->"
+
+# 工具结果里可随工具卡下发的结构化元数据（tool_result 与 tool_activities 一并保留）。
+TOOL_METADATA_KEYS = ("task", "lesson", "assessment")
+
+# assess_node 判失败、工具未自带 assessment 时给模型的受控纠正：约束收尾不要把失败说成成功。
+ASSESS_FAILURE_CORRECTION = (
+    "（系统状态：assess_node 未落盘——评估失败，未写入评估记录、未置位。"
+    "请如实说明评估未完成或失败，不要声称已写入评估记录、已置位或已掌握；"
+    "信息足够时可重试，或在回复里请学习者补充作答。）"
+)
+
+
+def has_complete_interview_marker(text: str) -> bool:
+    """文本里是否有完整成对的收口标记（开标记出现在闭标记之前）。"""
+    opened = text.find(INTERVIEW_MARKER_OPEN)
+    if opened == -1:
+        return False
+    return text.find(INTERVIEW_MARKER_CLOSE, opened + len(INTERVIEW_MARKER_OPEN)) != -1
+
+
+def _parse_arguments(arguments: Any) -> dict[str, Any]:
+    if isinstance(arguments, dict):
+        return arguments
+    if isinstance(arguments, str) and arguments.strip():
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def assessment_failure_meta(
+    name: str, arguments: Any, ctx: ToolContext, content: str
+) -> dict[str, Any] | None:
+    """assess_node 失败且结果没带 assessment 时，补一份确定性失败元数据。
+
+    node_id 从工具参数解析、subject_slug 取会话上下文（ctx.state.slug）：供前端系统
+    状态卡如实展示「评估未落盘」，不靠删正文假装可靠。
+    """
+    if name != "assess_node":
+        return None
+    args = _parse_arguments(arguments)
+    meta: dict[str, Any] = {
+        "status": "failed",
+        "node_id": str(args.get("node_id") or "").strip(),
+        "subject_slug": str((ctx.state or {}).get("slug") or "").strip(),
+        "background": False,
+    }
+    text = str(content or "").strip()
+    if text:
+        meta["error"] = text
+    return meta
 
 
 @dataclass(frozen=True)
@@ -51,6 +114,10 @@ class AgentBudget:
     @property
     def total_rounds(self) -> int:
         return self.explore_rounds + self.wrapup_rounds + self.forced_rounds
+
+
+# 建课收口阶段预算：1 次纯最终输出 + 最多 1 次修复（forced 轮去工具再给一次）。
+INTERVIEW_FINALIZE_BUDGET = AgentBudget(explore_rounds=1, wrapup_rounds=0, forced_rounds=1)
 
 
 @dataclass
@@ -66,6 +133,7 @@ class AgentOutcome:
     usage: dict[str, int] | None = None
     # 本轮工具调用与结果（落库进助手消息，字段名与前端 ToolActivity 对齐）
     tools: list[dict[str, Any]] = field(default_factory=list)
+    error: dict[str, Any] | None = None
 
 
 class ProgressReporter:
@@ -198,6 +266,14 @@ FIXTURE_TOOL_SCRIPTS: dict[str, list[dict[str, Any]]] = {
         },
         {"text": "已产出这一课：讲解与题库都已落盘，可以继续往后推进或让我评估你的掌握情况。"},
     ],
+    "produce_next": [
+        {
+            "tool_calls": [
+                {"id": "call-1", "name": "produce_lesson", "arguments": "{}"},
+            ]
+        },
+        {"text": "已按大纲顺序处理下一节尚未产出的课件，请以工具结果为准。"},
+    ],
     "assess": [
         {
             "tool_calls": [
@@ -216,8 +292,89 @@ FIXTURE_TOOL_SCRIPTS: dict[str, list[dict[str, Any]]] = {
         },
         {"text": "评估完成：判定与掌握度已写入评估记录，可打开记录查看判分细节。"},
     ],
+    # 产课任务卡场景（E2E）：真实跑 produce_lesson fixture 链生成 HTML，工具回吐
+    # task/lesson 元数据并 emit task_update；前端据此渲染任务卡而非旧工具卡。
+    "production_task": [
+        {
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "name": "produce_lesson",
+                    "arguments": json.dumps({"node_id": "net.layers"}, ensure_ascii=False),
+                }
+            ]
+        },
+        {"text": "已产出该课：讲解与题库都已落盘，可在任务卡打开课件继续学习。"},
+    ],
+    # 评估确定性失败场景（E2E）：节点不存在 ⇒ 真实 assess 失败且无 assessment 元数据；
+    # agent 补 status=failed 机器状态。末段故意说「我认为通过」，用于断言系统状态仍为 failed。
+    "assessment_failure": [
+        {
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "name": "assess_node",
+                    "arguments": json.dumps(
+                        {"node_id": "fixture-missing-node", "evidence": "fixture作答"},
+                        ensure_ascii=False,
+                    ),
+                }
+            ]
+        },
+        {"text": "我认为通过——不过以系统状态为准：若评估未落盘，请补全作答后再评估。"},
+    ],
+    # 流序 E2E 场景（fixture_scenario=stream_order）：三段独特正文与两次工具调用交错，
+    # 每次工具静默 ~2s（靠 tool_calls 的 delay 键），总时长 ~5s。用于验证
+    # 「编辑请继续 → 工具执行中切换会话 → 切回/停止」时 SSE 心跳、中途 checkpoint、
+    # 有序 parts 与中断终态，最终落库内容与顺序可精确断言。
+    "stream_order": [
+        {
+            "reasoning": "先确认学习进度，再读课件。",
+            "text": "先检查学习进度。",
+            "tool_calls": [
+                {
+                    "id": "order-1",
+                    "name": "read_course_file",
+                    "arguments": json.dumps({"path": "MISSION.md"}),
+                    "delay": 2,
+                }
+            ],
+        },
+        {
+            "text": "已查看进度，接着读取课件。",
+            "tool_calls": [
+                {
+                    "id": "order-2",
+                    "name": "read_course_file",
+                    "arguments": json.dumps({"path": "MISSION.md"}),
+                    "delay": 2,
+                }
+            ],
+        },
+        {"text": "本轮学习内容已整理完成。"},
+    ],
+    # 建课切换场景（E2E，2026-10-05 拍板③）：普通会话里 agent 经 start_course_interview
+    # 切入建课模式并当场收口——收口判定用「本轮结束时的会话模式」，同轮即出「确认建课」卡。
+    # 标记载荷与 llm.FIXTURE_INTERVIEW_SEGMENTS 末段一致（落到同一名草稿 python）。
+    "interview_switch": [
+        {
+            "tool_calls": [
+                {"id": "call-1", "name": "start_course_interview", "arguments": "{}"},
+            ],
+        },
+        {
+            "text": (
+                "好——就以「用 Python 做一个小工具」为目标来盘科目。"
+                "盘问收口：科目定为「Python 实用小工具」。"
+                '<!--INTERVIEW_RESULT-->{"name": "Python 实用小工具", "purpose": "能独立写出解决日常问题的小脚本", '
+                '"level": "能独立做项目", "background": "没学过编程", "project": "批量整理文件的命令行工具", '
+                '"carrier": "jupyter"}<!--/INTERVIEW_RESULT-->'
+            ),
+        },
+    ],
 }
-FIXTURE_TOOL_SCENARIOS = tuple(FIXTURE_TOOL_SCRIPTS)
+FIXTURE_ERROR_SCENARIOS = ("partial503", "empty503", "unexpected_eof", "transport_error")
+FIXTURE_TOOL_SCENARIOS = (*FIXTURE_TOOL_SCRIPTS, *FIXTURE_ERROR_SCENARIOS)
 # fixture 模式下的假用量：真实网关在末块带 usage，E2E 需要确定性数字
 FIXTURE_USAGE: dict[str, int] = {
     "prompt_tokens": 11500,
@@ -234,6 +391,14 @@ def fixture_turn_source(scenario: str, fallback_scenario: str | None = None) -> 
     async def source(
         messages: list[dict[str, Any]], tools: list[dict[str, Any]]
     ) -> AsyncGenerator[dict[str, Any], None]:
+        if scenario in FIXTURE_ERROR_SCENARIOS:
+            if scenario != "empty503":
+                yield {"type": "text", "content": "我已经开始整理这节课，但回复尚未完成。"}
+            if scenario in ("partial503", "empty503"):
+                raise llm.ProviderError('HTTP 503: {"error":{"code":"system_memory_overloaded","message":"system memory overloaded"}}')
+            if scenario == "unexpected_eof":
+                raise errors.UpstreamEOFError("连接在正常结束标记前关闭")
+            raise ConnectionError("模型服务连接中断")
         if cursor["index"] < len(script):
             turn = script[cursor["index"]]
             cursor["index"] += 1
@@ -331,31 +496,35 @@ async def _run_agent_loop(
     wrapup_notified = False
     forced = False
     tools_active = list(tool_schemas)
+    # 本轮允许执行的工具名（按传入 schema）。收口阶段 schemas=[] ⇒ 允许集为空：
+    # 上游若无视 tools=[] 仍发起调用，一律返回明确错误而**不执行**，避免越权副作用。
+    allowed_tools = {
+        str(schema.get("name") or "") for schema in tool_schemas if isinstance(schema, dict)
+    }
 
     if audit_meta:
         audit.record("agent_start", **audit_meta)
 
+    async def failed(exc: BaseException, reason: str) -> AgentOutcome:
+        info = errors.from_exception(exc, request_id=(audit_meta or {}).get("turn_id"))
+        if reason == "wallclock":
+            info = errors.make("budget_exhausted", phase="stream", summary="本轮达到时长上限，回复未正常完成。", detail=str(exc), stopped_reason=reason, request_id=(audit_meta or {}).get("turn_id"))
+        payload = info.to_dict()
+        await emit({"type": "error", "message": payload["summary"], **payload})
+        return AgentOutcome("".join(text_parts), rounds, tool_count, degraded=True,
+                            stopped_reason=reason, reasoning="".join(reasoning_parts),
+                            usage=usage, tools=tool_activities, error=payload)
+
     while rounds < budget.total_rounds:
         if deadline is not None and time.monotonic() >= deadline:
             audit.record("agent_wallclock", rounds=rounds, limit_s=max_seconds)
-            await emit(
-                {"type": "notice", "message": f"（已到单次时长上限 {max_seconds:.0f}s，用现有内容收尾。）"}
-            )
-            return AgentOutcome(
-                "".join(text_parts),
-                rounds,
-                tool_count,
-                degraded=True,
-                stopped_reason="wallclock",
-                reasoning="".join(reasoning_parts),
-                usage=usage,
-                tools=tool_activities,
-            )
+            return await failed(TimeoutError(f"单次时长上限 {max_seconds:.0f}s"), "wallclock")
         rounds += 1
         if reporter is not None:
             reporter.round = rounds
         if rounds > budget.explore_rounds + budget.wrapup_rounds and not forced:
             tools_active = []
+            allowed_tools = set()
             forced = True
             messages.append({"role": "user", "content": FORCED_NUDGE})
         elif rounds == budget.explore_rounds + 1 and not wrapup_notified:
@@ -405,45 +574,13 @@ async def _run_agent_loop(
             except asyncio.TimeoutError:
                 # 单轮本身跑过了墙钟上限：不再重试/不再等（这正是"永久卡住"的成因）
                 audit.record("agent_wallclock_turn", round=rounds, limit_s=max_seconds)
-                await emit(
-                    {"type": "notice", "message": f"（单轮超过 {max_seconds:.0f}s 上限，用现有内容收尾。）"}
-                )
-                return AgentOutcome(
-                    "".join(text_parts),
-                    rounds,
-                    tool_count,
-                    degraded=True,
-                    stopped_reason="wallclock",
-                    reasoning="".join(reasoning_parts),
-                    usage=usage,
-                    tools=tool_activities,
-                )
+                return await failed(TimeoutError(f"单轮时长上限 {max_seconds}s"), "wallclock")
             except Exception as exc:  # noqa: BLE001 - 传输失败：未可见则重试，已可见则降级
                 # 确定性错误（400 / 鉴权失败等）重试也不会成功：直接降级，别白等 + 白烧请求
                 transient = llm._is_transient(exc)  # noqa: SLF001 - 与 chat_once 共用同一判据
                 if text_parts or reasoning_parts or not transient or attempt >= turn_retries:
                     audit.record("agent_transport_error", round=rounds, error=str(exc))
-                    produced = bool(text_parts or reasoning_parts)
-                    await emit(
-                        {
-                            "type": "notice",
-                            "message": (
-                                f"（上游中断，带着已有内容收尾：{exc}）"
-                                if produced
-                                else f"（本轮未能产出内容：{exc}）"
-                            ),
-                        }
-                    )
-                    return AgentOutcome(
-                        "".join(text_parts),
-                        rounds,
-                        tool_count,
-                        degraded=True,
-                        stopped_reason="transport",
-                        reasoning="".join(reasoning_parts),
-                        tools=tool_activities,
-                        usage=usage,
-                    )
+                    return await failed(exc, "transport")
                 attempt += 1
                 await asyncio.sleep(1.5 * attempt)
 
@@ -454,18 +591,23 @@ async def _run_agent_loop(
                 if idle <= budget.idle_rescues and rounds < budget.total_rounds:
                     messages.append({"role": "user", "content": IDLE_NUDGE})
                     continue
-                return AgentOutcome(
-                    "".join(text_parts),
-                    rounds,
-                    tool_count,
-                    degraded=True,
-                    stopped_reason="idle",
-                    reasoning="".join(reasoning_parts),
-                    tools=tool_activities,
-                    usage=usage,
-                )
+                return await failed(RuntimeError("上游空响应，未收到回复或工具调用"), "empty")
             audit.record(
                 "agent_done", rounds=rounds, tool_calls=tool_count, text="".join(text_parts)
+            )
+            return AgentOutcome(
+                "".join(text_parts),
+                rounds,
+                tool_count,
+                reasoning="".join(reasoning_parts),
+                tools=tool_activities,
+                usage=usage,
+            )
+
+        # 完整收口标记已输出：优先收口，本轮不得再执行后置工具（标记是建草稿的权威依据）。
+        if calls and has_complete_interview_marker("".join(text_parts)):
+            audit.record(
+                "agent_interview_close", rounds=rounds, skipped_tool_calls=len(calls)
             )
             return AgentOutcome(
                 "".join(text_parts),
@@ -492,13 +634,55 @@ async def _run_agent_loop(
                 {"id": call_id, "name": name, "arguments": arguments, "status": "running"}
             )
             await emit({"type": "tool_call", "id": call_id, "name": name, "arguments": arguments})
-            result = await _execute_tool(name, call.get("arguments"), ctx)
+            # 本轮允许集之外（含收口阶段 schemas=[]）：返回明确错误，绝不执行。
+            if name not in allowed_tools:
+                available = "、".join(sorted(allowed_tools)) or "无"
+                result: dict[str, Any] = {
+                    "content": (
+                        f"本轮不开放该工具：{name}（本轮可用工具：{available}）。"
+                        "请直接根据已获得的信息作答。"
+                    ),
+                    "is_error": True,
+                }
+            else:
+                # fixture 脚本可用 `delay` 键模拟"工具静默执行"（真机产课要几分钟）；该键只出现
+                # 在 fixture tool_calls 里，真实模型不会带回，生产路径不受影响。
+                delay = call.get("delay")
+                if isinstance(delay, (int, float)) and not isinstance(delay, bool) and delay > 0:
+                    await asyncio.sleep(float(delay))
+                # 工具经 ctx.state["tool_call_id"] 认领父调用：emit task_update 时以此为 id。
+                # finally 恢复原值，不把本调用 id 污染给下一个工具。
+                previous_call_id = ctx.state.get("tool_call_id")
+                ctx.state["tool_call_id"] = call_id
+                audit_token = audit.snapshot_token()
+                try:
+                    result = await _execute_tool(name, call.get("arguments"), ctx)
+                finally:
+                    audit.restore(audit_token)
+                    if previous_call_id is None:
+                        ctx.state.pop("tool_call_id", None)
+                    else:
+                        ctx.state["tool_call_id"] = previous_call_id
             is_error = bool(result.get("is_error"))
             content = str(result.get("content") or "")
+            # 保留工具下发的结构化元数据（task/lesson/assessment），随工具卡一并落库/下发。
+            metadata: dict[str, Any] = {
+                key: result[key] for key in TOOL_METADATA_KEYS if result.get(key) is not None
+            }
+            # assess_node 失败且工具未带 assessment：补确定性失败元数据（供前端系统状态卡）。
+            if is_error and "assessment" not in metadata:
+                fallback = assessment_failure_meta(name, call.get("arguments"), ctx, content)
+                if fallback is not None:
+                    metadata["assessment"] = fallback
             for activity in tool_activities:
                 if activity["id"] == call_id:
                     activity.update(
-                        {"status": "error" if is_error else "done", "result": content, "isError": is_error}
+                        {
+                            "status": "error" if is_error else "done",
+                            "result": content,
+                            "isError": is_error,
+                            **metadata,
+                        }
                     )
                     break
             audit.record(
@@ -515,18 +699,29 @@ async def _run_agent_loop(
                     "id": call_id,
                     "name": name,
                     "content": content,
-                    "is_error": bool(result.get("is_error")),
+                    "is_error": is_error,
+                    **metadata,
                 }
             )
+            tool_content = str(result.get("content") or "(no output)")
+            if name == "assess_node" and is_error:
+                # 机器状态提示随工具结果给模型，避免把「未落盘」当成成功。
+                tool_content += (
+                    "\n（系统状态：评估未落盘——assessment=failed；"
+                    "不要声称已写入评估记录或已置位。）"
+                )
             messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": call_id,
                     "name": name,
-                    "content": _clamp(str(result.get("content") or "(no output)")),
-                    "is_error": bool(result.get("is_error")),
+                    "content": _clamp(tool_content),
+                    "is_error": is_error,
                 }
             )
+            if name == "assess_node" and is_error:
+                # 受控纠正消息：约束模型随后收尾时如实说明评估失败。
+                messages.append({"role": "user", "content": ASSESS_FAILURE_CORRECTION})
 
         if repeat_count in (3, 5, 8):
             messages.append(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   BookOpen,
@@ -40,14 +40,21 @@ const LAB_STATUSES: LabStatus[] = ["待生成", "待提交", "待评估", "已�
 
 const lessonsCache = new Map<string, LessonInfo[]>();
 
+/** 课件缓存按「工作区 + 科目」分槽：同名 slug 在不同工作区不得互相污染 */
+function lessonsCacheKey(slug: string, workspace: string | null): string {
+  return `${workspace ?? ""}::${slug}`;
+}
+
 interface NodeDetailProps {
   slug: string;
   node: GraphNode;
+  /** 会话级工作区（null = 默认）：读课件/写进度/读误解都落到它 */
+  workspace: string | null;
   onSelectNode: (id: string) => void;
   onUpdated: (node: GraphNode) => void;
 }
 
-export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailProps) {
+export function NodeDetail({ slug, node, workspace, onSelectNode, onUpdated }: NodeDetailProps) {
   const router = useRouter();
 
   const [mastery, setMastery] = useState(node.mastery);
@@ -62,28 +69,44 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
   const [nodeTicketId, setNodeTicketId] = useState<string | null>(null);
 
+  // 用户是否在输入框里改过（未保存）：外部刷新节点数据时不得覆盖正在编辑的草稿
+  const dirtyRef = useRef(false);
+  const lastNodeIdRef = useRef(node.id);
+
   useEffect(() => {
-    setMastery(node.mastery);
-    setNotes(node.notes);
-    setSaving(false);
-    setSaved(false);
-    setError(null);
-    setOpenTicketId(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在切换节点时重置；保存后的值由 save() 自己同步，避免抹掉"已保存"反馈
-  }, [node.id]);
+    const switchedNode = lastNodeIdRef.current !== node.id;
+    if (switchedNode) {
+      lastNodeIdRef.current = node.id;
+      dirtyRef.current = false;
+      setMastery(node.mastery);
+      setNotes(node.notes);
+      setSaving(false);
+      setSaved(false);
+      setError(null);
+      setOpenTicketId(null);
+      return;
+    }
+    // 同一节点被外部更新（如聊天侧评估改进度）：没有本地未保存改动时才回填，
+    // 避免抹掉用户正在编辑、还没点保存的掌握度/笔记。
+    if (!dirtyRef.current) {
+      setMastery(node.mastery);
+      setNotes(node.notes);
+    }
+  }, [node.id, node.mastery, node.notes]);
 
   // 课件列表缓存判断当前节点是否有课件
   useEffect(() => {
     let alive = true;
-    const cached = lessonsCache.get(slug);
+    const cacheKey = lessonsCacheKey(slug, workspace);
+    const cached = lessonsCache.get(cacheKey);
     if (cached) {
       setHasLesson(cached.some((l) => l.node_id === node.id));
       return;
     }
     api
-      .listLessons(slug)
+      .listLessons(slug, workspace)
       .then((res) => {
-        lessonsCache.set(slug, res.lessons);
+        lessonsCache.set(cacheKey, res.lessons);
         if (alive) setHasLesson(res.lessons.some((l) => l.node_id === node.id));
       })
       .catch(() => {
@@ -92,13 +115,13 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
     return () => {
       alive = false;
     };
-  }, [slug, node.id]);
+  }, [slug, node.id, workspace]);
 
   // 本节点未关闭的质检工单（角标入口）
   useEffect(() => {
     let alive = true;
     api
-      .listTickets(slug, true)
+      .listTickets(slug, true, workspace)
       .then((tickets) => {
         if (alive) {
           const mine = tickets.find((t) => t.node_id === node.id);
@@ -109,7 +132,7 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
     return () => {
       alive = false;
     };
-  }, [slug, node.id]);
+  }, [slug, node.id, workspace]);
 
   const save = async (payload: {
     status?: NodeStatus;
@@ -120,10 +143,18 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
     setSaving(true);
     setError(null);
     try {
-      const res = await api.updateNodeProgress(slug, node.id, payload);
+      const res = await api.updateNodeProgress(slug, node.id, payload, workspace);
       onUpdated(res.node);
-      setMastery(res.node.mastery);
-      setNotes(res.node.notes);
+      // 只有本次真的提交了掌握度/笔记才回填并清掉「未保存」标记；状态 / 实验状态保存
+      // 不能覆盖用户正在编辑但还没保存的掌握度与笔记。
+      if (payload.mastery !== undefined) {
+        setMastery(res.node.mastery);
+        dirtyRef.current = false;
+      }
+      if (payload.notes !== undefined) {
+        setNotes(res.node.notes);
+        dirtyRef.current = false;
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
     } catch (err) {
@@ -134,7 +165,10 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
   };
 
   const openLesson = () => {
-    router.push(`/lesson?subject=${encodeURIComponent(slug)}&node=${encodeURIComponent(node.id)}`);
+    const workspaceParam = workspace ? `&workspace=${encodeURIComponent(workspace)}` : "";
+    router.push(
+      `/lesson?subject=${encodeURIComponent(slug)}&node=${encodeURIComponent(node.id)}${workspaceParam}`,
+    );
   };
 
   return (
@@ -311,7 +345,10 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
               max={1}
               step={0.05}
               value={mastery}
-              onChange={(e) => setMastery(Number(e.target.value))}
+              onChange={(e) => {
+                dirtyRef.current = true;
+                setMastery(Number(e.target.value));
+              }}
               className="w-full accent-brand"
             />
           </label>
@@ -320,7 +357,10 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
             <span className="text-xs opacity-60">笔记</span>
             <textarea
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              onChange={(e) => {
+                dirtyRef.current = true;
+                setNotes(e.target.value);
+              }}
               rows={3}
               placeholder="记录你的理解、卡点…"
               className="w-full resize-none rounded-lg border bg-transparent px-2 py-1.5 text-sm outline-none"
@@ -374,13 +414,15 @@ export function NodeDetail({ slug, node, onSelectNode, onUpdated }: NodeDetailPr
         )}
 
         {/* 本节点误解（概念本的节点维度入口，2026-10-04 连贯化拍板） */}
-        <NodeMisconceptions slug={slug} nodeId={node.id} />
+        <NodeMisconceptions slug={slug} nodeId={node.id} workspace={workspace} />
       </div>
 
       {/* 质检工单模态（节点角标入口） */}
       {openTicketId && (
         <InspectionDialog
+          key={openTicketId}
           ticketId={openTicketId}
+          workspace={workspace}
           onClose={() => setOpenTicketId(null)}
           onResolved={() => setNodeTicketId(null)}
         />
@@ -396,14 +438,22 @@ const MISCONCEPTION_IMPORTANCE_LABEL: Record<string, string> = {
 };
 
 /** 本节点误解：概念本的节点维度入口（列出条目 + 带参跳转概念本管理）。 */
-function NodeMisconceptions({ slug, nodeId }: { slug: string; nodeId: string }) {
+function NodeMisconceptions({
+  slug,
+  nodeId,
+  workspace,
+}: {
+  slug: string;
+  nodeId: string;
+  workspace: string | null;
+}) {
   const [items, setItems] = useState<MisconceptionItem[] | null>(null);
 
   useEffect(() => {
     let alive = true;
     setItems(null);
     api
-      .listMisconceptions(slug, { node_id: nodeId })
+      .listMisconceptions(slug, { node_id: nodeId }, workspace)
       .then((res) => {
         if (alive) setItems(res.items);
       })
@@ -413,14 +463,18 @@ function NodeMisconceptions({ slug, nodeId }: { slug: string; nodeId: string }) 
     return () => {
       alive = false;
     };
-  }, [slug, nodeId]);
+  }, [slug, nodeId, workspace]);
+
+  const misconceptionsHref = `/misconceptions?subject=${encodeURIComponent(slug)}&node=${encodeURIComponent(nodeId)}${
+    workspace ? `&workspace=${encodeURIComponent(workspace)}` : ""
+  }`;
 
   return (
     <div className="mt-4 flex flex-col gap-2 rounded-xl border p-3" style={{ borderColor: "var(--border)" }}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">本节点误解</span>
         <a
-          href={`/misconceptions?subject=${encodeURIComponent(slug)}&node=${encodeURIComponent(nodeId)}`}
+          href={misconceptionsHref}
           className="flex shrink-0 items-center gap-1 text-xs text-brand-light hover:underline"
           title="在概念本中查看与管理"
         >

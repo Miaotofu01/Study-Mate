@@ -8,6 +8,7 @@ from .. import prompts
 from ..common import require_node, require_provider
 from ..llm import chat_once, extract_json
 from ..models import GradeRequest
+from .courses import bound_workspace
 
 router = APIRouter(prefix="/api", tags=["practice"])
 
@@ -28,8 +29,11 @@ GRADE_SYSTEM_PROMPT = (
 
 
 @router.post("/courses/{slug}/nodes/{node_id}/grade")
-async def grade_answer(slug: str, node_id: str, payload: GradeRequest) -> dict:
-    require_node(slug, node_id)
+async def grade_answer(
+    slug: str, node_id: str, payload: GradeRequest, workspace: str | None = None
+) -> dict:
+    with bound_workspace(workspace):
+        require_node(slug, node_id)
     provider = require_provider()
     question = payload.question.strip()
     criteria = payload.criteria.strip()

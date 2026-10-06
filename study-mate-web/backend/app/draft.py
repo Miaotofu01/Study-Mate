@@ -26,7 +26,19 @@ _SHARED_ASSETS = ("style.css", "quiz.js", "lesson-toc.js")
 
 
 def draft_dir(slug: str) -> Path:
-    return DRAFTS_DIR / slug
+    """草稿目录：slug 必须是合法 slug 且解析后仍在草稿根内（考虑符号链接）。
+
+    非法 slug（如 `..`、绝对路径、含分隔符）或指向草稿根之外的链接都抛
+    ValueError——调用方（路由）据此 404，且在任何写盘/删除之前失败。
+    """
+    if not is_valid_slug(slug):
+        raise ValueError(f"slug 格式非法：{slug}")
+    root = DRAFTS_DIR.resolve()
+    target = DRAFTS_DIR / slug
+    resolved = target.resolve()
+    if resolved == root or root not in resolved.parents:
+        raise ValueError(f"草稿路径越界：{slug}")
+    return target
 
 
 def _read_yaml(path: Path) -> dict[str, Any] | None:
@@ -181,17 +193,27 @@ def save_draft_progress(slug: str, data: dict[str, Any]) -> None:
 
 
 def write_material(slug: str, title: str, markdown: str) -> str:
-    """用户给料 → reference/<文件>.md + RESOURCES.md 追加条目（不做主动检索）。"""
+    """用户给料 → reference/<文件>.md + RESOURCES.md 追加条目（不做主动检索）。
+
+    同名标题不再静默覆盖已有资料：文件名加确定去重后缀（-2/-3…）；RESOURCES.md
+    条目行去重（同一行只保留一条），避免重复条目与「看起来只有一份」的假象。
+    """
     base = draft_dir(slug)
     reference = base / "reference"
     reference.mkdir(parents=True, exist_ok=True)
     safe = "".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in title).strip() or "material"
     filename = f"{safe}.md"
+    serial = 2
+    while (reference / filename).exists():
+        filename = f"{safe}-{serial}.md"
+        serial += 1
     (reference / filename).write_text(markdown, encoding="utf-8")
     resources = base / "RESOURCES.md"
     entry = f"- [{title}](reference/{filename})：学习者提供的本地资料。"
     text = resources.read_text(encoding="utf-8") if resources.is_file() else "# 资源清单\n"
-    resources.write_text(text.rstrip() + "\n" + entry + "\n", encoding="utf-8")
+    if entry not in text.splitlines():
+        text = text.rstrip() + "\n" + entry + "\n"
+        resources.write_text(text, encoding="utf-8")
     return f"reference/{filename}"
 
 

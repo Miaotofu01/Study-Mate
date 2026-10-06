@@ -14,11 +14,13 @@
 """
 from __future__ import annotations
 
-import time
+import asyncio
+import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Awaitable, Callable
 
+from . import concurrency
 from .config import REPO_ROOT
 
 SKILLS_ROOT = REPO_ROOT / ".dsh" / "skills"
@@ -51,15 +53,39 @@ def _denied(mode: str, reason: str) -> SandboxError:
     return SandboxError(f"[sandbox: file access denied under {mode} mode] {reason}")
 
 
+def unsafe_relative_reason(relative: str, *, for_write: bool = False) -> str | None:
+    """相对路径的越界判定（返回原因或 None）。
+
+    按 **Windows 语义**判定，Linux 上对同一输入给出同样结论——写路径的盘符相对
+    （`C:evil.md`）、UNC（`\\\\server\\share`）、反斜杠分隔、盘符/根锚点、`..`
+    以及 NTFS 备用数据流（`file.txt:stream`）都必须拒绝，否则 `root / path`
+    会被 pathlib 重置成盘符相对路径，写到 allow-list 之外。
+
+    `for_write=True`（交付落盘）额外拒绝反斜杠与冒号；读路径只在 `resolve()`
+    之后用包含关系兜底（见 `_resolve_within`）。
+    """
+    raw = str(relative)
+    if not raw:
+        return "路径为空"
+    if raw.startswith(("/", "\\")):
+        return f"路径越界：{raw}"
+    win = PureWindowsPath(raw)
+    if win.drive or win.anchor or win.is_absolute():
+        return f"路径越界：{raw}"
+    if ".." in win.parts or ".." in PurePosixPath(raw).parts:
+        return f"路径越界：{raw}"
+    if for_write and ("\\" in raw or ":" in raw):
+        return f"路径越界：{raw}"
+    return None
+
+
 def _resolve_within(root: Path, relative: str, *, mode: str) -> Path:
     """把相对路径解析进 root 并当场 canonicalize 校验包含关系（消 TOCTOU）。"""
-    if not relative:
-        raise _denied(mode, "路径为空")
-    candidate_rel = Path(relative)
-    if candidate_rel.is_absolute() or ".." in candidate_rel.parts:
-        raise _denied(mode, f"路径越界：{relative}")
+    reason = unsafe_relative_reason(relative)
+    if reason:
+        raise _denied(mode, reason)
     root = root.resolve()
-    target = (root / candidate_rel).resolve()
+    target = (root / Path(relative)).resolve()
     if target != root and root not in target.parents:
         raise _denied(mode, f"路径越出允许根：{relative}")
     return target
@@ -162,10 +188,28 @@ async def _tool_read_skill(args: dict[str, Any], ctx: ToolContext) -> dict[str, 
 
 
 def _safe_rel(relative: str) -> str:
-    candidate = Path(str(relative))
-    if not relative or candidate.is_absolute() or ".." in candidate.parts:
-        raise SandboxError(f"[sandbox: file access denied under write mode] 非法交付路径：{relative}")
-    return str(candidate).replace("\\", "/")
+    reason = unsafe_relative_reason(relative, for_write=True)
+    if reason:
+        raise SandboxError(f"[sandbox: file access denied under write mode] 非法交付路径：{relative}（{reason}）")
+    return str(Path(str(relative))).replace("\\", "/")
+
+
+def safe_write_target(base: Path, relative: str) -> Path:
+    """写路径的最终目标：先按 Windows 语义拒绝越界，再 `resolve()` 校验包含关系。
+
+    两层都有必要：`C:evil.md` 这类盘符相对路径会让 `base / path` 被 pathlib 重置，
+    必须在校验阶段拦掉；`resolve()` 包含关系则兜住符号链接等落点漂移。
+    """
+    reason = unsafe_relative_reason(relative, for_write=True)
+    if reason:
+        raise SandboxError(f"[sandbox: file access denied under write mode] {reason}")
+    resolved_base = base.resolve()
+    target = (resolved_base / str(relative)).resolve()
+    if target != resolved_base and resolved_base not in target.parents:
+        raise SandboxError(
+            f"[sandbox: file access denied under write mode] 路径越出允许根：{relative}"
+        )
+    return target
 
 
 async def _tool_write_deliver_file(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
@@ -179,7 +223,7 @@ async def _tool_write_deliver_file(args: dict[str, Any], ctx: ToolContext) -> di
         return {"content": "content 必须是非空字符串", "is_error": True}
     stage = ctx.state.get("stage_dir")
     if stage is not None:
-        target = Path(stage) / "deliver" / relative
+        target = safe_write_target(Path(stage) / "deliver", relative)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8", newline="\n")
     files = ctx.state.setdefault("files", [])
@@ -188,7 +232,7 @@ async def _tool_write_deliver_file(args: dict[str, Any], ctx: ToolContext) -> di
 
 
 async def _tool_submit_curriculum(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
-    """提交课程大纲；后端立即跑门禁并把报错原文返回，模型据此自修。"""
+    """提交课程大纲；后端立即跑大纲自检并把报错原文返回，模型据此自修。"""
     data = args.get("data") if isinstance(args.get("data"), dict) else args
     if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
         return {"content": "提交内容缺少 nodes 数组（大纲 DAG）", "is_error": True}
@@ -198,11 +242,11 @@ async def _tool_submit_curriculum(args: dict[str, Any], ctx: ToolContext) -> dic
     if problems:
         lines = "\n".join(f"- {p['message']}" for p in problems[:20])
         return {
-            "content": f"门禁未过（{len(problems)} 处），请逐条修正后重新提交：\n{lines}",
+            "content": f"大纲自检未过（{len(problems)} 处），请逐条修正后重新提交：\n{lines}",
             "is_error": True,
         }
     ctx.state["curriculum"] = data
-    return {"content": "已提交，通过门禁。请在最终回复里简述大纲设计，然后结束。", "is_error": False}
+    return {"content": "已提交，通过大纲自检。请在最终回复里简述大纲设计，然后结束。", "is_error": False}
 
 
 async def _tool_run_check(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
@@ -224,6 +268,9 @@ async def _tool_run_check(args: dict[str, Any], ctx: ToolContext) -> dict[str, A
         return None
 
     ok, problems = await produce_svc.render_and_check(Path(base), str(node_id), index, _noop)
+    # 记录本轮自检结果：编排方据此保守接受「产物已存在 + 本轮检查通过」的交付，
+    # 同时它也只在本次角色执行内有效（ctx.state 每次派工新建）。
+    ctx.state["check_passed"] = bool(ok)
     if ok:
         return {"content": "渲染与检查均通过。", "is_error": False}
     lines = "\n".join(f"- {p.get('path')}:{p.get('line')} {p.get('message')}" for p in problems[:20])
@@ -256,10 +303,18 @@ def _first_unproduced_node(base: Path, nodes: list[dict[str, Any]]) -> str:
 
 
 async def _tool_produce_lesson(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
-    """为会话科目产出一节课：真跑讲解→出题→渲染→检查（含自动打回重试）。"""
+    """为会话科目产出一节课：生成一次父工具任务，真跑讲解→出题→渲染→检查。
+
+    过程不再每 10s 折成 notice 刷屏：产课链事件（阶段/角色/重试/心跳）由
+    `production_task.ProductionTaskReducer` 归约成完整快照，经
+    `emit({type:"task_update", id:<父 call id>, task})` 原位回吐（chat 存到
+    `tools[i].task`，前端原位展示）。成功且 HTML 真落盘可读时才返回 `lesson`
+    入口；失败/handoff/取消绝不伪 done，也不给入口。
+    """
     from . import common
     from . import curriculum_store as cs
     from . import produce as produce_svc
+    from . import production_task as pt
 
     state = ctx.state or {}
     slug = _state_slug(ctx)
@@ -269,10 +324,29 @@ async def _tool_produce_lesson(args: dict[str, Any], ctx: ToolContext) -> dict[s
     nodes = produce_svc._curriculum_of(base, slug)
     if not nodes:
         return {"content": f"科目 {slug} 还没有课程大纲，无法产课。", "is_error": True}
-    node_id = str(args.get("node_id") or state.get("node_id") or "").strip()
+    raw_regenerate = args.get("regenerate")
+    if raw_regenerate is not None and not isinstance(raw_regenerate, bool):
+        return {
+            "content": "regenerate 必须是布尔值 true/false（收到非布尔值已拒绝）。",
+            "is_error": True,
+        }
+    regenerate = bool(raw_regenerate) if raw_regenerate is not None else False
+    explicit_node = str(args.get("node_id") or "").strip()
+    if regenerate and not explicit_node:
+        # 强制重做必须明确目标：不静默取「第一个未产出」（那会把重做变成顺带产新课）。
+        return {
+            "content": "regenerate=true 时必须显式传 node_id（指定要重做的节点）；"
+            "省略 node_id 时不会自动选择节点。",
+            "is_error": True,
+        }
+    node_id = explicit_node
     if not node_id:
+        # 省略 node_id 严格按 schema：取大纲顺序里第一个还没有课件的节点。
+        # 不使用 ctx 推断的聚焦节点（那是「接着上次学」的会话焦点，不是产课目标；
+        # 否则会把已完成的聚焦节点反复重产）。
         node_id = _first_unproduced_node(base, nodes)
     if not node_id:
+        # 已全产完：不建新任务、不给新入口，直接告诉模型没有待产节点。
         return {"content": "该科目所有节点都已产出课件，没有待产节点。", "is_error": False}
     node = next((n for n in nodes if n.get("id") == node_id), None)
     if node is None:
@@ -282,10 +356,33 @@ async def _tool_produce_lesson(args: dict[str, Any], ctx: ToolContext) -> dict[s
     except Exception as exc:  # noqa: BLE001 - HTTPException 等统一转 is_error 文本
         return {"content": str(exc), "is_error": True}
 
+    title = str(node.get("title") or node_id)
     emit = state.get("emit")
-    # 产课进度节流：progress 事件最多每 10s 转一条 notice（SSE 每条都会到 UI）
-    progress_gate = {"last": 0.0}
-    result = {"done": False, "artifacts": [], "error": None}
+    # 父 call id 由 agent 主循环在执行工具前写入 ctx.state；缺失时给稳定兜底 id，
+    # 保证 task_update 不丢桥（chat 按 id 认领 tools[i].task）。
+    parent_id = str(state.get("tool_call_id") or "").strip()
+    if not parent_id:
+        parent_id = f"produce_lesson-{slug}-{node_id}-{uuid.uuid4().hex[:8]}"
+    if produce_svc.is_draft(base):
+        workspace = str(base.resolve())
+    else:
+        workspace = str(produce_svc.workspace_of_subject(base).resolve())
+
+    reducer = pt.ProductionTaskReducer(
+        task_id=parent_id,
+        title=title,
+        subject_slug=slug,
+        node_id=node_id,
+        workspace=workspace,
+    )
+    stream = pt.TaskUpdateStream(reducer, emit)
+    result: dict[str, Any] = {
+        "done": False,
+        "artifacts": [],
+        "error": None,
+        "handoff": None,
+        "timeout": False,
+    }
 
     async def forward_emit(event: dict[str, Any]) -> None:
         kind = str(event.get("event") or "")
@@ -294,57 +391,83 @@ async def _tool_produce_lesson(args: dict[str, Any], ctx: ToolContext) -> dict[s
             result["artifacts"] = [str(a) for a in event.get("artifacts") or []]
         elif kind == "error":
             result["error"] = str(event.get("message") or "产课失败")
-        if emit is None:
-            return
-        if kind == "stage":
-            stage = str(event.get("stage") or "")
-            status = event.get("status")
-            if status == "start":
-                message = f"{stage}中…"
-            elif status == "done":
-                message = f"{stage}完成"
-            else:
-                message = f"{stage}未通过，进入打回修复。"
-        elif kind == "retry":
-            owners = "、".join(str(o) for o in event.get("owners") or []) or "总控"
-            problems = event.get("problems") or []
-            first = str((problems[0] if problems else {}).get("message") or "按报错修正")
-            message = f"第 {event.get('round')} 轮打回（{owners}）：{first}"
+            # 按机器可读字段判超时终态，不做字符串匹配。
+            if event.get("code") == "role_timeout" or event.get("type") == "timeout":
+                result["timeout"] = True
         elif kind == "handoff":
-            ticket = event.get("ticket") or {}
-            message = f"质检未过，已转人工工单 {ticket.get('id')}。"
-        elif kind == "done":
-            message = f"产课完成：{'、'.join(result['artifacts']) or '（未给出产物）'}"
-        elif kind == "error":
-            message = f"产课失败：{result['error']}"
-        elif kind == "progress":
-            now = time.monotonic()
-            if now - progress_gate["last"] < 10:
-                return
-            progress_gate["last"] = now
-            message = (
-                f"仍在{event.get('stage')}（第 {event.get('round')} 轮，"
-                f"已等待 {event.get('elapsed_s')}s）。"
-            )
-        else:
-            return
-        await emit({"type": "notice", "message": message})
+            result["handoff"] = event.get("ticket")
+        await stream.consume(event)
 
+    # 与 HTTP 产课端点共用同一 base+node 键：会话内 produce_lesson 与并发产课请求
+    # 互斥。本对话轮已持有会话键，此处再取产课键（两键不同、无同键嵌套 ⇒ 不自锁）；
+    # 冲突转明确的 tool error 而不是异常穿透成 500。
+    key = concurrency.produce_key(base, node_id)
     try:
-        await produce_svc.run_produce(base, slug, node_id, provider, forward_emit)
-    except Exception as exc:  # noqa: BLE001 - 产课链异常不炸对话
-        return {"content": f"产课执行失败：{type(exc).__name__}: {exc}", "is_error": True}
-    if result["error"]:
-        return {"content": result["error"], "is_error": True}
-    title = str(node.get("title") or node_id)
-    artifacts = "、".join(result["artifacts"]) or "（未收到产物清单）"
-    return {
-        "content": (
-            f"已产出节点「{title}」（{node_id}）：{artifacts}。"
-            "下一步：可调用 assess_node 评估学习者掌握情况，或继续产出后续节点。"
-        ),
-        "is_error": False,
-    }
+        lease = concurrency.acquire_many(
+            [(key, f"该科目（节点）正在产课中，请等待当前产课结束后再试（{slug} / {node_id}）。")]
+        )
+    except concurrency.ConflictError as exc:
+        return {"content": str(exc), "is_error": True}
+
+    failure: str | None = None
+    try:
+        await stream.start()
+        try:
+            try:
+                await produce_svc.run_produce(
+                    base, slug, node_id, provider, forward_emit, regenerate=regenerate
+                )
+            except asyncio.CancelledError:
+                # 取消：任务终态 interrupted，running 角色一并转 interrupted；
+                # 不吞 CancelledError，继续向上抛给 SSE/agent 层。
+                reducer.finalize(pt.STATUS_INTERRUPTED)
+                raise
+            except Exception as exc:  # noqa: BLE001 - 产课链异常不炸对话
+                failure = f"产课执行失败：{type(exc).__name__}: {exc}"
+                reducer.finalize(pt.STATUS_ERROR, error=failure)
+            else:
+                if result["done"] and not result["error"] and not result["handoff"]:
+                    reducer.finalize(pt.STATUS_DONE)
+                elif result["timeout"]:
+                    failure = result["error"] or "备用派工超时"
+                    # production_task owner 消费该常量；未就位时用字面量保持并行可用。
+                    reducer.finalize(getattr(pt, "STATUS_TIMEOUT", "timeout"), error=failure)
+                else:
+                    failure = result["error"] or (
+                        "质检未过，已转人工。" if result["handoff"] else "产课未完成"
+                    )
+                    reducer.finalize(pt.STATUS_ERROR, error=failure)
+        finally:
+            await stream.stop()
+    finally:
+        lease.release()
+
+    if failure is None:
+        node_ids = {str(n.get("id")) for n in nodes if n.get("id")}
+        lesson = pt.lesson_link(
+            base=base,
+            subject_slug=slug,
+            node_id=node_id,
+            title=title,
+            workspace=workspace,
+            artifacts=result["artifacts"],
+            node_ids=node_ids,
+        )
+        if lesson:
+            reducer.set_lesson(lesson)
+            # 最终 flush 带上已确认的课件入口（此前 finally 的收尾快照没有 lesson）。
+            await stream.emit_current()
+        artifacts = "、".join(result["artifacts"]) or "（未收到产物清单）"
+        return {
+            "content": (
+                f"已产出节点「{title}」（{node_id}）：{artifacts}。"
+                "下一步：可调用 assess_node 评估学习者掌握情况，或继续产出后续节点。"
+            ),
+            "is_error": False,
+            "lesson": lesson,
+            "task": reducer.snapshot(),
+        }
+    return {"content": failure, "is_error": True, "task": reducer.snapshot()}
 
 
 async def _tool_assess_node(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
@@ -357,25 +480,40 @@ async def _tool_assess_node(args: dict[str, Any], ctx: ToolContext) -> dict[str,
 
     state = ctx.state or {}
     slug = _state_slug(ctx)
-    if not slug:
-        return {"content": "无法确定科目：本会话未关联科目，请先在对话里选定科目。", "is_error": True}
     node_id = str(args.get("node_id") or "").strip()
+
+    def failed(error: str) -> dict[str, Any]:
+        """失败统一带 assessment 失败载荷（后台可靠性由 records 侧 owner 负责）。"""
+        return {
+            "content": error,
+            "is_error": True,
+            "assessment": {
+                "status": "failed",
+                "node_id": node_id,
+                "subject_slug": slug,
+                "error": error,
+                "background": False,
+            },
+        }
+
+    if not slug:
+        return failed("无法确定科目：本会话未关联科目，请先在对话里选定科目。")
     evidence = str(args.get("evidence") or "").strip()
     if not node_id:
-        return {"content": "缺少参数 node_id（要评估的节点 id）。", "is_error": True}
+        return failed("缺少参数 node_id（要评估的节点 id）。")
     if not evidence:
-        return {"content": "缺少参数 evidence（学习者的作答/理解原文）。", "is_error": True}
+        return failed("缺少参数 evidence（学习者的作答/理解原文）。")
     session_id = state.get("session_id")
     try:
         common.require_provider(session_id)
     except Exception as exc:  # noqa: BLE001
-        return {"content": str(exc), "is_error": True}
+        return failed(str(exc))
     payload = AssessRequest(session_id=session_id, extra_context=evidence)
     try:
         with workspace_ctx.bind(storage.session_workspace(session_id) if session_id else None):
             result = await _assess_node(slug, node_id, payload)
     except Exception as exc:  # noqa: BLE001 - HTTPException 等统一转 is_error 文本
-        return {"content": f"评估失败：{type(exc).__name__}: {exc}", "is_error": True}
+        return failed(f"评估失败：{type(exc).__name__}: {exc}")
     if not isinstance(result, dict) or not result.get("ok"):
         detail = "评估未通过校验，未落盘"
         if not isinstance(result, dict):
@@ -389,7 +527,7 @@ async def _tool_assess_node(args: dict[str, Any], ctx: ToolContext) -> dict[str,
                     detail += "；" + "；".join(str(p) for p in problems[:5])
             except Exception:  # noqa: BLE001 - 解析失败保留兜底文案
                 pass
-        return {"content": detail, "is_error": True}
+        return failed(detail)
     meta = result.get("assessment") or {}
     mastery = meta.get("mastery")
     line = (
@@ -403,7 +541,53 @@ async def _tool_assess_node(args: dict[str, Any], ctx: ToolContext) -> dict[str,
             str(item.get("title") or item.get("id")) for item in promoted
         )
     line += f"；评估记录：{result.get('record_file')}"
-    return {"content": line, "is_error": False}
+    assessment: dict[str, Any] = {
+        "status": "saved",
+        "node_id": node_id,
+        "subject_slug": slug,
+        "record_file": result.get("record_file"),
+        "verdict": meta.get("verdict"),
+        "progress_updated": bool(result.get("progress_updated")),
+    }
+    if mastery is not None:
+        assessment["mastery"] = mastery
+    return {"content": line, "is_error": False, "assessment": assessment}
+
+
+async def _tool_start_course_interview(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    """把当前普通会话切入建课（方向盘问）模式（2026-10-05 拍板③）。
+
+    切换 = 落库 `mode: "interview"`：后续请求按请求开始时的派生规则注入建课技能规范；
+    本轮收口也成立——chat.py 的收口判定用「本轮结束时的会话模式」，agent 切完当场收口
+    （学习者一句话给足信息时一次成稿）也能被解析。
+    """
+    from . import storage
+
+    session_id = str((ctx.state or {}).get("session_id") or "")
+    if not session_id:
+        return {"content": "无法确定当前会话，未能进入建课会话。", "is_error": True}
+    session = storage.get_session(session_id)
+    if session is None:
+        return {"content": "会话不存在或已被删除，无法进入建课会话。", "is_error": True}
+    if session.get("subject_slug"):
+        return {
+            "content": "本会话已关联科目，不能转建课会话（换科目或另建新课请开新会话）。",
+            "is_error": True,
+        }
+    if str(session.get("mode") or "chat") == "interview":
+        return {
+            "content": "本会话已是建课会话：请继续方向盘问，信息足够后按规范输出收口标记。",
+            "is_error": False,
+        }
+    storage.update_session(session_id, mode="interview")
+    return {
+        "content": (
+            "已切换为建课会话（后续轮次会注入建课技能规范）。"
+            "请立刻开始方向盘问：围绕学习方向、目标、程度与基础逐条提问，"
+            "信息足够后按规范输出收口标记建草稿。"
+        ),
+        "is_error": False,
+    }
 
 
 @dataclass(frozen=True)
@@ -467,7 +651,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     "submit_curriculum": ToolSpec(
         name="submit_curriculum",
         description=(
-            "提交课程大纲（课程 DAG：nodes/edges）。后端会立即跑门禁校验，"
+            "提交课程大纲（课程 DAG：nodes/edges）。后端会立即跑大纲自检校验，"
             "未过则把报错原文返回给你，按报错逐条修正后重新提交，直到通过。"
         ),
         parameters=_params(
@@ -511,7 +695,9 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         description=(
             "为本会话关联的科目产出一节课：真跑完整产课链（讲解 → 出题 → 渲染 → 检查，"
             "检查不过会自动按归属打回重派，最多 2 轮）。产课可能要几分钟，期间会持续回吐进度。"
-            "按大纲顺序推进（跳跃节点会失败）；不传 node_id 时自动选大纲里第一个还没有课件的节点。"
+            "按大纲顺序推进（跳跃节点会失败）；不传 node_id 时**严格**选大纲里第一个还没有课件的"
+            "节点（不使用会话当前聚焦/学习中节点——要指定就显式传 node_id）。"
+            "默认允许复用已存在且本轮检查通过的产物；要强制重做（覆盖既有课件）时传 regenerate=true。"
             "完成后在回复里告诉学习者产出了哪个节点、产物在哪、下一步做什么。"
         ),
         parameters=_params(
@@ -519,7 +705,15 @@ TOOL_SPECS: dict[str, ToolSpec] = {
                 "node_id": {
                     "type": "string",
                     "description": "要产课的节点 id；省略则选大纲顺序里第一个还没课件的节点",
-                }
+                },
+                "regenerate": {
+                    "type": "boolean",
+                    "description": (
+                        "强制重做：true 时必须重新生成产物，不得以已存在的旧课件冒充交付；"
+                        "且必须同时显式传 node_id。非布尔值会被拒绝。"
+                        "默认 false 允许复用已存在且本轮检查通过的产物"
+                    ),
+                },
             }
         ),
         handler=_tool_produce_lesson,
@@ -542,10 +736,22 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         ),
         handler=_tool_assess_node,
     ),
+    "start_course_interview": ToolSpec(
+        name="start_course_interview",
+        description=(
+            "把当前会话切入建课（方向盘问）模式。学习者不知道学什么、想开一门新课、"
+            "或明确要求规划课程/选方向时调用；调用成功后立刻开始方向盘问"
+            "（方向/目标/程度/基础），信息足够后按建课规范收口建草稿。"
+            "已关联科目的会话调用会失败——换科目或另建新课请让学习者开新会话。"
+        ),
+        parameters=_params({}),
+        handler=_tool_start_course_interview,
+    ),
 }
 
-CHAT_TOOLS = ("list_workspace", "read_course_file", "read_skill")
+CHAT_TOOLS = ("list_workspace", "read_course_file", "read_skill", "start_course_interview")
 # 会话绑定科目后额外开放的动作工具（产课 / 评估需要会话上下文与长墙钟）
+# start_course_interview 属基础聊天工具（未绑定科目更要能切建课），不在此列
 CHAT_ACTION_TOOLS = ("produce_lesson", "assess_node")
 BUILD_TOOLS = ("list_workspace", "read_course_file", "submit_curriculum")
 PRODUCE_TOOLS = ("list_workspace", "read_course_file", "write_deliver_file", "run_check")

@@ -2,10 +2,13 @@
 // 与 globalSetup（每轮重建种子工作区），探索跑在确定性的 fixture 世界上。
 import { defineConfig, devices } from "@playwright/test";
 
-import { E2E_CONFIG_PATH, E2E_DATA_DIR, ensureWorkspaceConfig } from "./tests/e2e/constants";
+import { BACKEND_PYTHON, E2E_CONFIG_PATH, E2E_DATA_DIR, ensureWorkspaceConfig } from "./tests/e2e/constants";
 
 const BACKEND_PORT = 8290;
 const FRONTEND_PORT = 3810;
+// 与 playwright.config.ts 同理：探索 dev server 有自己的 distDir，避免与开发者
+// 正在跑的 dev（默认 .next）或 E2E（.next-e2e）共用构建目录而冲突。
+const FRONTEND_DIST_DIR = ".next-explorer";
 
 // 与 playwright.config.ts 同一套口径：工作区经配置文件发现（STUDYMATE_CONFIG 指到 e2e-data），
 // 不用 STUDYMATE_WORKSPACE 注入（env 优先级最高，会架空 PUT /api/workspace）。
@@ -30,7 +33,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: ".venv\\Scripts\\python.exe -m uvicorn app.main:app --port 8290",
+      command: `${BACKEND_PYTHON} -m uvicorn app.main:app --port 8290`,
       cwd: "../backend",
       env: {
         STUDYMATE_E2E_FIXTURE: "1",
@@ -45,7 +48,10 @@ export default defineConfig({
     },
     {
       command: "npm run dev:e2e",
-      env: { BACKEND_PORT: String(BACKEND_PORT) },
+      env: {
+        BACKEND_PORT: String(BACKEND_PORT),
+        STUDYMATE_NEXT_DIST: FRONTEND_DIST_DIR,
+      },
       url: `http://localhost:${FRONTEND_PORT}`,
       reuseExistingServer: false,
       timeout: 180_000,
