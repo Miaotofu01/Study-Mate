@@ -1,23 +1,24 @@
-/* 问答面板的引用（#92）：真浏览器 + 真鼠标拖拽。
+/* 右栏「问答」tab = 宿主的一条真会话（#105）：真浏览器 + 真 `lib/client.js`。
    ────────────────────────────────────────────────────────────────────────────────
-   这条票要的是「选中正文 → 打开问答 → 点输入框/打字/切 tab 之后引用仍在」。**只有真浏览器
-   能验**：Node 里没有真选区，而毛病恰恰出在「document 级 mouseup 读实时选区、判定失败就清空」——
-   点输入框会让浏览器把文档选区折叠成空，那一次 mouseup 又冒到同一个监听上。
+   #92 那条套件原来守的是「选中正文 → 面板上那条引用 → 点输入框/打字/切 tab 之后还在」。
+   #105 把面板从「一次一问一答的表单」改成**宿主的一条真会话**：面板不再有自己的输入框、不再
+   自己发请求，正文交给宿主的 `conversation.content`（`variant:'embedded'`），会话由插件宿主半
+   建、客户端只 retain。于是这一条套件改守新形态的四件事：
 
-   所以这一条不搭假 DOM：真 `lib/client.js` + `fixtures/mini-react.js` + 宿主 token + 现抠的
-   内联 CSS（与 reading_test.mjs / reading_routes_test.mjs 同一套夹具），鼠标动作走 CDP 的
-   `Input.dispatchMouseEvent`——`session.send` 能直接下发，harness 里没有选区/拖拽助手，
-   这里自己补一个 dragSelect（按下 → 挪几步 → 抬起）与 clickAt。
+     · 打开问答就有一条会话：POST `/api/studymate/qa/session`（请求体只有拼标题要的两个名字），
+       然后 `retain` 它——来源标签是 `studymateAsk`（**不是** `mainView`）；
+     · 面板嵌的是 `conversation.content`，而且被 `SessionProvider` 包着、指着我们 retain 的那条；
+     · 「新对话」建一条新的并换过去，上一条被 release；「上一段会话」只列答疑会话（标题前缀认）；
+     · 切「题目」tab 再切回、以及**真刷新页面**之后，会话还在（不重复建）。
 
-   取景要先把右栏打开：面板只在右栏开着「问答」tab 时才存在（选中之后的浮动胶囊
-   `[data-proto="qa-chip"]` 会自己把它打开，那条路本身也在用例里）。
+   外加一条从 #92 保留下来的：真鼠标划一段正文 → 面板上看得见那一段与它的来源（引用 chip 的
+   可点开/可删掉/随下一条消息走归 #106）。
 
    口径（别顺手改回去）：
-     · 断言只到「这条引用还在不在、送出去的是什么」这一层。**不钉引用原文的每一个字**：
-       拖拽落点由浏览器定，套件不该猜它——断的是「面板显示的那一条 === POST 里送出去的那一条」，
-       以及它确实是正文里的一段。
-     · `/api/studymate/ask` 是夹具里的假货（记录请求体 + 回一份固定回执）：这里验的是**面板
-       送出了什么**，真模型那条链路在 test_host_ask_route.mjs（假 llm，不花额度）。
+     · 断言只到「哪条会话被 retain、送出去的是什么、面板里嵌的是不是那套」这一层，**不钉宿主
+       正文渲染成什么样**——那由宿主自己保证，夹具只给一个带标记的替身。
+     · 夹具页给的是**假的**宿主服务（会话列表 + retain + 一条建会话路由）。真宿主认不认这条
+       调用序列只有在真 DSH 里证得了（spec #102 已接受这个口径）；这里验的是**阅读端送出了什么**。
      · 截图与 summary.json 落在 `.shots/ask-quote/`。
 
    浏览器二进制由 harness 探测；找不到时明确跳过（退出码 3），不是静默绿。
@@ -48,7 +49,7 @@ const TEMPS = [];
 function subjectFiles() {
   return {
     '.learning/subjects/demo/subject.yaml': [
-      'slug: demo', 'name: 演示科目', 'goal: 在真浏览器里验问答引用', 'status: 学习中',
+      'slug: demo', 'name: 演示科目', 'goal: 在真浏览器里验问答会话', 'status: 学习中',
       'created_at: "2026-01-02T03:04:05+08:00"', '',
     ].join('\n'),
     '.learning/subjects/demo/curriculum.yaml': [
@@ -77,7 +78,7 @@ function subjectFiles() {
 }
 
 function makeWorkspace() {
-  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sm-askquote-'));
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sm-asksession-'));
   TEMPS.push(root);
   const workspace = path.join(root, 'ws');
   fs.mkdirSync(path.join(workspace, '.learning'), { recursive: true });
@@ -103,20 +104,6 @@ function hostTokenCss() {
   ].join('\n');
 }
 
-/** 面板默认拿到的那份回执（套件可以在场景里换掉它，见 `SET_REPLY`）。 */
-const OK_REPLY = {
-  available: true,
-  ok: true,
-  model: { provider: 'fixture-provider', model: 'fixture-model' },
-  answer: '别名与绑定是一回事：名字指向同一个值，不是复制。',
-  misconception: {
-    topic: '为什么别名不是复制', source: '问答面板',
-    evidence: '提问原文：为什么别名不是复制？\n回答摘要：名字指向同一个值\n引用：…\n位置：demo/1-变量.md · 小节「绑定」',
-    status: '未处理', at: '2026-10-05',
-  },
-  write: { ok: true, version: 'fixture-v1', replayed: false },
-};
-
 function buildFixture(dir, payload) {
   const css = extractCss(fs.readFileSync(path.join(ROOT, 'lib', 'client.js'), 'utf8'));
   const json = JSON.stringify(payload).replace(/</g, '\\u003c');
@@ -124,7 +111,7 @@ function buildFixture(dir, payload) {
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>StudyMate 问答引用 QA 夹具</title>
+<title>StudyMate 答疑会话 QA 夹具</title>
 <style>
   html, body { margin: 0; height: 100%; }
   #root { height: 100%; }
@@ -136,17 +123,58 @@ function buildFixture(dir, payload) {
   window.__StudymateSpec = null;
   window.__ModuleLoader__ = { load: function (spec) { window.__StudymateSpec = spec; } };
   window.__Payload = ${json};
-  // 问答那条路由的替身：把每一次 POST 的请求体原样记下来（套件据此断言「送出去的是什么」），
-  // 回一份现成的回执。真模型那条链路不在这一条套件的验收面上。
-  window.__ASK = { calls: [], reply: ${JSON.stringify(OK_REPLY)} };
+  // 宿主客户端服务（#105 的假货）：会话列表 + retain/release + 建会话那条路由。
+  // __HOST_SEED 由套件用 Page.addScriptToEvaluateOnNewDocument 提前塞进来，用来演「刷新之后
+  // 那条会话还在磁盘上、列表里也还在」——种子在页面脚本之前就位，所以这里读得到。
+  window.__HOST = {
+    rows: (window.__HOST_SEED && window.__HOST_SEED.rows) || [],
+    retains: [], releases: [], refreshes: 0,
+    factoryCalls: [], providers: [],
+    seq: 0,
+    snapshot: function () {
+      var ids = [], byId = {};
+      for (var i = 0; i < window.__HOST.rows.length; i++) { ids.push(window.__HOST.rows[i].id); byId[window.__HOST.rows[i].id] = window.__HOST.rows[i]; }
+      return { ids: ids, byId: byId, phase: 'ready', projectionsBySession: {} };
+    },
+    addRow: function (row) { window.__HOST.rows.push(row); return row; },
+    sessions: {
+      list: { getSnapshot: function () { return window.__HOST.snapshot(); }, subscribe: function () { return function () {}; } },
+      retain: function (id, options) {
+        window.__HOST.retains.push({ id: id, source: options && options.source });
+        return { sessionId: id, binding: { sessionId: id }, ready: Promise.resolve({}),
+          release: function () { window.__HOST.releases.push(id); } };
+      },
+      refresh: function () { window.__HOST.refreshes += 1; return Promise.resolve(); },
+    },
+  };
+  // 建会话那条路由的替身：记下请求体，回一条新会话，并把它放进列表（标题按同一套拼法）。
+  window.__QA = {
+    calls: [], reply: null,
+    create: function (body) {
+      window.__HOST.seq += 1;
+      var id = 'qa-fixture-' + window.__HOST.seq;
+      // 夹具镜像宿主那条路由的拼法（「答疑 · 科目 · 节点」，缺哪节少写哪节）
+      var title = ['答疑', String(body.subject || '').trim(), String(body.node || '').trim()]
+        .filter(function (part) { return part !== ''; }).join(' · ');
+      window.__HOST.addRow({ id: id, title: title, displayTitle: title, updatedAt: Date.now(), blank: false, running: false, retainedBy: {} });
+      return { available: true, ok: true, sessionId: id, title: title, renamed: true, memoryInjected: true };
+    },
+  };
   window.fetch = function (url, options) {
     var target = String(url);
     if (target.indexOf('/api/studymate/library') === 0) {
       return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(window.__Payload); } });
     }
-    if (target.indexOf('/api/studymate/ask') === 0) {
-      window.__ASK.calls.push({ url: target, method: (options && options.method) || 'GET', body: (options && options.body) || '' });
-      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(window.__ASK.reply); } });
+    if (target.indexOf('/api/studymate/qa/session') === 0) {
+      var body = {};
+      try { body = JSON.parse((options && options.body) || '{}'); } catch (error) { body = {}; }
+      window.__QA.calls.push({ url: target, method: (options && options.method) || 'GET', body: (options && options.body) || '' });
+      if (window.__QA.reply) {
+        var fixed = window.__QA.reply;
+        return Promise.resolve({ ok: true, status: fixed.available === false ? 503 : 200, json: function () { return Promise.resolve(fixed); } });
+      }
+      var view = window.__QA.create(body);
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(view); } });
     }
     return Promise.resolve({
       ok: false, status: 404,
@@ -176,26 +204,74 @@ function buildFixture(dir, payload) {
 <script src="${pathToFileURL(path.join(ROOT, 'lib', 'client.js')).href}"></script>
 <script>
   (function () {
+    // 真 React 把 children 放进函数组件的 props；mini-react 不（仓库里 PaneDrawer 的注释记过这个
+    // 边界，它的对策是把内容改用 body 传）。SessionProvider 是**宿主**给的组件、props 形状改不了，
+    // 所以这里**只在这一套夹具里**把那一步补上——让夹具与真宿主同语义，而不是绕开要验的那条路。
+    // 只对函数组件补：DOM 元素那一支 mini-react 自己会渲染 children。
+    var raw = window.MiniReact.createElement;
+    window.MiniReact.createElement = function (type, props, kids) {
+      var rest = Array.prototype.slice.call(arguments, 2);
+      if (typeof type === 'function' && rest.length) {
+        var merged = {};
+        for (var key in (props || {})) merged[key] = props[key];
+        merged.children = rest.length === 1 ? rest[0] : rest;
+        return raw.apply(null, [type, merged].concat(rest));
+      }
+      return raw.apply(null, arguments);
+    };
+
     var spec = window.__StudymateSpec;
     if (!spec) throw new Error('lib/client.js 没有向 window.__ModuleLoader__ 登记');
     var mod = spec.factory(function (name) { return name === 'react' ? window.MiniReact : undefined; });
     var Main = null;
+    var registrations = [];
+    var sessions = window.__HOST.sessions;
     mod.apply({
       slots: {
         inject: function (seat, callback) { callback(); },
         register: function (options, component) {
+          registrations.push({ name: options && options.name, children: options && options.children, component: component });
           if (options && options.name === 'main') Main = component;
         },
       },
+      sessions: sessions,
+      // #106 的两件：这一票只要求「声明了依赖、拿得到」，行为不在这一条里验
+      inputTriggers: {}, conversation: {},
+      get: function (name) { return name === 'sessions' ? sessions : undefined; },
+      effect: function (fn) { return fn(); },
     });
     if (!Main) throw new Error('没有从 main 座位拿到组件');
-    window.MiniReact.mount(window.MiniReact.createElement(Main, null), document.getElementById('root'));
+    var mainSeat = registrations.filter(function (entry) { return entry.name === 'main'; })[0];
+    window.__HOST.mainChildren = mainSeat ? mainSeat.children : null;
+
+    // 框架交给这颗座位的标准件（#105 只用得到 SessionProvider / renderFactorySlot）。
+    // SessionProvider 的替身把「罩着谁」记下来：真实宿主里 occurrence 的会话就是它给的。
+    function SessionProvider(props) {
+      var child = props.children;
+      window.__HOST.providers.push({
+        sessionId: props.session && props.session.sessionId,
+        childName: child && child.props && child.props['data-name'],
+        childVariant: child && child.props && child.props['data-variant'],
+      });
+      return child;
+    }
+    function renderFactorySlot(name, props) {
+      window.__HOST.factoryCalls.push({ name: name, props: props });
+      return window.MiniReact.createElement('div',
+        { 'data-proto': 'host-conversation', 'data-name': name, 'data-variant': props && props.variant },
+        '宿主会话正文');
+    }
+    window.MiniReact.mount(window.MiniReact.createElement(Main, {
+      SessionProvider: SessionProvider,
+      renderSlot: function () { return null; },
+      renderFactorySlot: renderFactorySlot,
+    }), document.getElementById('root'));
   }());
 </script>
 </body>
 </html>
 `;
-  const file = path.join(dir, 'ask-quote-fixture.html');
+  const file = path.join(dir, 'ask-session-fixture.html');
   fs.writeFileSync(file, html);
   return pathToFileURL(file).href;
 }
@@ -208,25 +284,29 @@ const HELPERS = `
   const text = (sel) => { const el = q(sel); return el ? el.textContent.trim() : null; };
 `;
 
-/** 选中之后每一步都读这一份：引用还在不在、输入框里是什么、发出去过什么。 */
-const ASK_PROBE = `(() => {
+/** 面板上的会话面：哪条被 retain、嵌了什么、单子里有哪些条目。 */
+const SESSION_PROBE = `(() => {
   ${HELPERS}
-  const quote = q('[data-proto="qa-quote"]');
-  const quoteText = quote ? quote.querySelector('.smb-quote__text') : null;
-  const quoteWhere = quote ? quote.querySelector('.smb-quote__where') : null;
   const panel = q('.smb-askbody');
-  const last = (window.__ASK.calls || []).slice(-1)[0] || null;
   return {
     panelOpen: !!panel,
     panelText: panel ? panel.innerText : null,
+    creates: (window.__QA.calls || []).length,
+    lastCreate: (window.__QA.calls || []).slice(-1)[0] || null,
+    retains: (window.__HOST.retains || []).slice(),
+    releases: (window.__HOST.releases || []).slice(),
+    refreshes: window.__HOST.refreshes,
+    factoryCalls: (window.__HOST.factoryCalls || []).slice(),
+    providers: (window.__HOST.providers || []).slice(),
+    mainChildren: window.__HOST.mainChildren,
+    embedded: !!q('[data-proto="host-conversation"]'),
+    embeddedVariant: q('[data-proto="host-conversation"]') ? q('[data-proto="host-conversation"]').getAttribute('data-variant') : null,
+    historyItems: qa('[data-proto="qa-history-item"]').map((el) => ({ id: el.getAttribute('data-session'), text: el.textContent.trim() })),
+    historyOpen: !!q('[data-proto="qa-history-list"]'),
     tabAsk: q('[data-proto="tab-ask"]') ? q('[data-proto="tab-ask"]').getAttribute('aria-selected') : null,
-    chip: text('[data-proto="qa-chip"]'),
-    quoteText: quoteText ? quoteText.textContent : null,
-    quoteWhere: quoteWhere ? quoteWhere.textContent : null,
-    drop: !!q('[data-proto="qa-quote-clear"]'),
-    inputValue: q('[data-proto="qa-input"]') ? q('[data-proto="qa-input"]').value : null,
-    askCalls: (window.__ASK.calls || []).length,
-    lastAsk: last,
+    quoteText: q('[data-proto="qa-quote"]') ? q('[data-proto="qa-quote"]').textContent.trim() : null,
+    newButton: !!q('[data-proto="qa-new"]'),
+    historyButton: !!q('[data-proto="qa-history"]'),
     liveSelection: String(window.getSelection()),
   };
 })()`;
@@ -234,9 +314,9 @@ const ASK_PROBE = `(() => {
 /**
  * 挑一段够长的正文段落，把它前 40 个字的位置量出来（给真鼠标拖拽用）。
  *
- * 量的是 `Range.getClientRects()`——文字**真正**画在哪，不是段落盒子的矩形：段落有内边距，
- * 按盒子中心按下去可能落在空白上，选不出任何字。滚动用 `behavior:'instant'`：正文滚动区带
- * `scroll-behavior: smooth`，平滑滚动会让这里的 rect 与之后的鼠标动作对不上。
+ * 量的是 `Range.getClientRects()`——文字**真正**画在哪，不是段落盒子的矩形；滚动用
+ * `behavior:'instant'`：正文滚动区带 `scroll-behavior: smooth`，平滑滚动会让这里的 rect 与
+ * 之后的鼠标动作对不上。
  */
 const SELECT_TARGET = `(() => {
   const art = document.querySelector('article.smb-doc');
@@ -265,27 +345,6 @@ const SELECT_TARGET = `(() => {
   };
 })()`;
 
-/** 点某个元素的**正中间**：坐标取自页面里的实测矩形（视口 CSS 像素，与 CDP 同一套）。 */
-function clickSelector(selector) {
-  return `(() => {
-    const el = document.querySelector(${JSON.stringify(selector)});
-    if (!el) throw new Error('要点的元素不在：' + ${JSON.stringify(selector)});
-    const r = el.getBoundingClientRect();
-    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
-  })()`;
-}
-
-/** 往问答输入框里打字：mini-react 把 onChange 直连成 change 监听，所以设值后派发 change。 */
-function typeQuestion(value) {
-  return `(() => {
-    const input = document.querySelector('[data-proto="qa-input"]');
-    if (!input) throw new Error('问答输入框不在');
-    input.value = ${JSON.stringify(value)};
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    return input.value;
-  })()`;
-}
-
 const OPEN_SUBJECT = `(() => {
   const cards = Array.from(document.querySelectorAll('[data-proto="nav-subject"]'));
   (cards.find((el) => el.textContent.includes('演示科目')) || cards[0]).click();
@@ -296,14 +355,31 @@ const OPEN_LESSON = `(() => {
   (cards.find((el) => el.textContent.includes('变量')) || cards[0]).click();
 })()`;
 
-/** 换掉夹具那份回执：没有可用模型那一场用它。 */
-function setReply(reply) {
-  return `(() => { window.__ASK.reply = ${JSON.stringify(reply)}; return true; })()`;
+/** 直接开右栏的「问答」（不划词那条路）。 */
+const OPEN_ASK = `(() => { document.querySelector('[data-proto="toggle-ask"]').click(); })()`;
+const OPEN_QUIZ = `(() => { document.querySelector('[data-proto="tab-quiz"]').click(); })()`;
+const BACK_TO_ASK = `(() => { document.querySelector('[data-proto="tab-ask"]').click(); })()`;
+const CLICK_NEW = `(() => { document.querySelector('[data-proto="qa-new"]').click(); })()`;
+const OPEN_HISTORY = `(() => { document.querySelector('[data-proto="qa-history"]').click(); })()`;
+
+/** 往夹具的会话列表里塞几行（演「上一段会话」与「刷新之后还在」）。 */
+function seedRows(rows) {
+  return `(() => { ${JSON.stringify(rows)}.forEach((row) => window.__HOST.addRow(row)); return window.__HOST.rows.length; })()`;
+}
+
+/** 点单子里某一条（按 id）。 */
+function clickHistoryItem(id) {
+  return `(() => {
+    const item = document.querySelector('[data-proto="qa-history-item"][data-session=${JSON.stringify(id)}]');
+    if (!item) throw new Error('单子里没有这条会话：' + ${JSON.stringify(id)});
+    item.click();
+    return true;
+  })()`;
 }
 
 /* ── 真鼠标 ────────────────────────────────────────────────────────────── */
 
-/** 点一下：按下 → 抬起。`mouseup` 是这条套件的关键——客户端的捕获监听就挂在它上面。 */
+/** 点一下：按下 → 抬起。 */
 async function clickAt(session, point) {
   await session.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1 });
   await session.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1 });
@@ -329,7 +405,7 @@ async function dragSelect(session, target) {
 
 /* ── 跑 ────────────────────────────────────────────────────────────────── */
 
-const session = await openSession({ suite: 'ask-quote', width: 1440, height: 960 });
+const session = await openSession({ suite: 'ask-session', width: 1440, height: 960 });
 
 /** 首页 → 科目页 → 课件页。每个场景都从头走一遍，场景之间不带上一步的状态。 */
 async function openLesson(ctx) {
@@ -340,25 +416,10 @@ async function openLesson(ctx) {
   await ctx.sleep(400);
 }
 
-/** 划一段正文并断言浮动胶囊浮出来了（捕获真的读到了）。返回拖拽的读数。 */
-async function selectParagraph(ctx, tag) {
-  const target = await ctx.evaluate(SELECT_TARGET);
-  check(`${tag} 取到了要划的那一段正文（够四个字、位置量得出来）`,
-    !!target && target.text.trim().length >= 8, JSON.stringify(target));
-  if (!target) return null;
-  await dragSelect(session, target);
-  const seen = await ctx.evaluate(ASK_PROBE);
-  check(`${tag} 真鼠标划完正文后浮出「就这段问一句」`,
-    seen.chip === '就这段问一句', `chip=${JSON.stringify(seen.chip)} live=${JSON.stringify(seen.liveSelection)}`);
-  return target;
-}
-
-/** 「问一句」那颗按钮点了之后等回执渲染完。 */
-async function askOnce(ctx, question = '为什么别名不是复制？') {
-  await ctx.evaluate(typeQuestion(question));
-  await ctx.sleep(200);
-  await ctx.evaluate(`document.querySelector('[data-proto="qa-ask"]').click()`);
-  await ctx.sleep(500);
+/** 打开「问答」并等面板把会话认下来（建会话那条路是异步的）。 */
+async function openAskTab(ctx) {
+  await ctx.evaluate(OPEN_ASK);
+  await ctx.sleep(600);
 }
 
 let fixture = null;
@@ -369,165 +430,163 @@ try {
   console.log(`夹具：${fixture}`);
   console.log(`数据：${workspace}（跑完删）`);
 
-  /* ── 一、选中 → 打开问答 → 点输入框/打字/切 tab 之后引用仍在（这条票的主用例）── */
-  await session.scene('ask-quote-keep', async (ctx) => {
+  /* ── 一、打开问答：建一条会话、retain 它、面板里嵌的是宿主正文 ─────────── */
+  await session.scene('ask-session-open', async (ctx) => {
     await openLesson(ctx);
-    const target = await selectParagraph(ctx, '[选中]');
-    if (!target) return { failed: '没有可以划的正文段落' };
+    await openAskTab(ctx);
+    const seen = await ctx.evaluate(SESSION_PROBE);
 
-    // 浮动胶囊 → 右栏滑出并停在「问答」
+    check('[打开] 面板起来了，顶部有「新对话」与「上一段会话」',
+      seen.panelOpen && seen.newButton && seen.historyButton,
+      `open=${seen.panelOpen} new=${seen.newButton} history=${seen.historyButton}`);
+    check('[打开] 一条现成的都没有，于是请宿主半建了一条（POST /api/studymate/qa/session）',
+      seen.creates === 1 && !!seen.lastCreate && seen.lastCreate.url.indexOf('/api/studymate/qa/session') === 0,
+      `creates=${seen.creates} last=${JSON.stringify(seen.lastCreate)}`);
+    const body = seen.lastCreate ? JSON.parse(seen.lastCreate.body) : {};
+    check('[打开] 请求体只有拼标题要的两个展示名（面板不背会话）',
+      JSON.stringify(Object.keys(body).sort()) === JSON.stringify(['node', 'subject'])
+      && body.subject === '演示科目' && body.node === '变量',
+      JSON.stringify(body));
+    check('[打开] retain 了刚建的那条，来源标签是 studymateAsk（绝不能用 mainView）',
+      seen.retains.length === 1 && seen.retains[0].source === 'studymateAsk'
+      && seen.retains[0].id === 'qa-fixture-1',
+      JSON.stringify(seen.retains));
+    check('[打开] 嵌的是 conversation.content，入参 embedded / active / hero:false',
+      seen.factoryCalls.length >= 1 && seen.factoryCalls[0].name === 'conversation.content'
+      && seen.factoryCalls[0].props.variant === 'embedded' && seen.factoryCalls[0].props.phase === 'active'
+      && seen.factoryCalls[0].props.hero === false,
+      JSON.stringify(seen.factoryCalls));
+    check('[打开] 宿主正文被 SessionProvider 包着，指着我们 retain 的那条',
+      seen.providers.length >= 1 && seen.providers[0].sessionId === 'qa-fixture-1'
+      && seen.providers[0].childName === 'conversation.content'
+      && seen.providers[0].childVariant === 'embedded',
+      JSON.stringify(seen.providers));
+    check('[打开] 宿主正文那一格真的渲染进了 DOM',
+      seen.embedded && seen.embeddedVariant === 'embedded',
+      `embedded=${seen.embedded} variant=${seen.embeddedVariant}`);
+    check('[打开] main 座位声明了非 root 的子座位（不然框架不会给 SessionProvider）',
+      !!seen.mainChildren && !!seen.mainChildren['studymate.ask.session']
+      && seen.mainChildren['studymate.ask.session'].scope === 'session',
+      JSON.stringify(seen.mainChildren));
+
+    return { creates: seen.creates, retains: seen.retains, providers: seen.providers, body };
+  });
+
+  /* ── 二、切走 tab 再切回来：会话还在（不重复建），引用也还在 ────────────── */
+  await session.scene('ask-session-keep', async (ctx) => {
+    await openLesson(ctx);
+    // 先划一段正文：面板上看得见那一段与它的来源（#92 保留下来的那半；chip 归 #106）
+    const target = await ctx.evaluate(SELECT_TARGET);
+    check('[保持] 取到了要划的那一段正文', !!target && target.text.trim().length >= 8, JSON.stringify(target));
+    if (target) await dragSelect(session, target);
+    const chipped = await ctx.evaluate(`(() => { const el = document.querySelector('[data-proto="qa-chip"]'); return el ? el.textContent.trim() : null; })()`);
+    check('[保持] 真鼠标划完正文后浮出「就这段问一句」', chipped === '就这段问一句', String(chipped));
+
     await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
-    await ctx.sleep(400);
-    const opened = await ctx.evaluate(ASK_PROBE);
-    check('[选中] 点胶囊后问答面板带着一条引用出现',
-      opened.panelOpen && !!opened.quoteText && opened.drop,
-      `open=${opened.panelOpen} quote=${JSON.stringify(opened.quoteText)} drop=${opened.drop}`);
-    check('[选中] 引用写着它的来源小节（捕获那一下冻住的锚点）',
-      /小节「绑定」/.test(String(opened.quoteWhere)), String(opened.quoteWhere));
-    check('[选中] 引用原文确实是正文里的一段',
-      !!opened.quoteText && payload.subjects[0].nodes[0].lesson_md.includes(opened.quoteText.trim()),
+    await ctx.sleep(600);
+    const opened = await ctx.evaluate(SESSION_PROBE);
+    check('[保持] 从正文发问打开的面板带着那条引用（原文 + 来源小节）',
+      !!opened.quoteText && opened.quoteText.includes('绑定'),
       JSON.stringify(opened.quoteText));
 
-    // ① 点输入框：真鼠标点 → mouseup → 浏览器把文档选区折叠成空。这正是原来的病根。
-    await clickAt(session, await ctx.evaluate(clickSelector('[data-proto="qa-input"]')));
-    const afterClick = await ctx.evaluate(ASK_PROBE);
-    check('[选中] 点输入框之后引用仍在（病根：读到空选区不得清已存在的引用）',
-      afterClick.quoteText === opened.quoteText && afterClick.drop,
-      `quote=${JSON.stringify(afterClick.quoteText)} live=${JSON.stringify(afterClick.liveSelection)}`);
-
-    // ② 打字
-    await ctx.evaluate(typeQuestion('为什么别名不是复制？'));
-    await ctx.sleep(200);
-    const afterType = await ctx.evaluate(ASK_PROBE);
-    check('[选中] 打字之后引用仍在',
-      afterType.quoteText === opened.quoteText && afterType.inputValue === '为什么别名不是复制？',
-      `quote=${JSON.stringify(afterType.quoteText)} input=${JSON.stringify(afterType.inputValue)}`);
-
-    // ③ 切走 tab 再切回来（面板会被卸载重挂：引用住在面板外面，所以不该丢）
-    await ctx.evaluate(`document.querySelector('[data-proto="tab-quiz"]').click()`);
+    // 切到「题目」再切回「问答」：面板会被卸载重挂——会话与引用都该还在，且不该再建一条
+    await ctx.evaluate(OPEN_QUIZ);
     await ctx.sleep(300);
-    const onQuiz = await ctx.evaluate(ASK_PROBE);
-    check('[选中] 切到「题目」tab 后面板换了一面', onQuiz.panelOpen === false, JSON.stringify(onQuiz.panelOpen));
-    await ctx.evaluate(`document.querySelector('[data-proto="tab-ask"]').click()`);
-    await ctx.sleep(300);
-    const back = await ctx.evaluate(ASK_PROBE);
-    check('[选中] 切回「问答」tab 之后引用仍在',
-      back.quoteText === opened.quoteText && back.inputValue === '为什么别名不是复制？',
-      `quote=${JSON.stringify(back.quoteText)} input=${JSON.stringify(back.inputValue)}`);
+    const onQuiz = await ctx.evaluate(SESSION_PROBE);
+    check('[保持] 切到「题目」后面板换了一面', onQuiz.panelOpen === false, String(onQuiz.panelOpen));
+    await ctx.evaluate(BACK_TO_ASK);
+    await ctx.sleep(600);
+    const back = await ctx.evaluate(SESSION_PROBE);
+    check('[保持] 切回来之后会话还是那一条（没有再建一条）',
+      back.panelOpen && back.creates === opened.creates && back.retains.length >= 1
+      && back.retains[back.retains.length - 1].id === 'qa-fixture-1',
+      `creates=${back.creates} retains=${JSON.stringify(back.retains)}`);
+    check('[保持] 切回来之后引用也还在',
+      back.quoteText === opened.quoteText && !!back.quoteText,
+      `before=${JSON.stringify(opened.quoteText)} after=${JSON.stringify(back.quoteText)}`);
 
-    // ④ 提交：引用随问题一起送出去，成功后清掉
-    await ctx.evaluate(`document.querySelector('[data-proto="qa-ask"]').click()`);
+    return { quote: opened.quoteText, keeps: back.retains.length, creates: back.creates };
+  });
+
+  /* ── 三、「新对话」建新的并换过去；「上一段会话」只列答疑会话 ────────────── */
+  await session.scene('ask-session-switch', async (ctx) => {
+    await openLesson(ctx);
+    await openAskTab(ctx);
+    const first = await ctx.evaluate(SESSION_PROBE);
+
+    // 单子里先塞两条别的：一条答疑（较早）、一条学习会话（更新的）——只有前者该出现
+    await ctx.evaluate(seedRows([
+      { id: 'qa-older', title: '答疑 · 演示科目 · 变量', displayTitle: '不计较', updatedAt: 100, blank: false, running: false, retainedBy: {} },
+      { id: 'learn-1', title: '学习 · 演示科目 · 变量', displayTitle: '学习 · 演示科目 · 变量', updatedAt: 999, blank: false, running: false, retainedBy: {} },
+    ]));
+
+    await ctx.evaluate(CLICK_NEW);
+    await ctx.sleep(600);
+    const second = await ctx.evaluate(SESSION_PROBE);
+    check('[切换] 「新对话」建了一条新的会话并 retain 它',
+      second.creates === first.creates + 1
+      && second.retains[second.retains.length - 1].id === 'qa-fixture-2',
+      `creates=${second.creates} retains=${JSON.stringify(second.retains)}`);
+    check('[切换] 上一条会话被 release（不 release 它永远不退休）',
+      second.releases.includes('qa-fixture-1'),
+      JSON.stringify(second.releases));
+    check('[切换] 嵌的换成了新那一条',
+      second.providers[second.providers.length - 1].sessionId === 'qa-fixture-2',
+      JSON.stringify(second.providers));
+
+    await ctx.evaluate(OPEN_HISTORY);
+    await ctx.sleep(300);
+    const listed = await ctx.evaluate(SESSION_PROBE);
+    const ids = listed.historyItems.map((item) => item.id);
+    check('[切换] 「上一段会话」单子里只有答疑会话，最近的在前',
+      listed.historyOpen && ids.length === 3 && ids[0] === 'qa-fixture-2'
+      && ids.indexOf('qa-older') > 0 && ids.indexOf('learn-1') < 0,
+      JSON.stringify(listed.historyItems));
+
+    await ctx.evaluate(clickHistoryItem('qa-older'));
     await ctx.sleep(500);
-    const sent = await ctx.evaluate(ASK_PROBE);
-    check('[选中] 提交真的发出了请求', sent.askCalls === 1, `askCalls=${sent.askCalls}`);
-    const body = sent.lastAsk ? JSON.parse(sent.lastAsk.body) : {};
-    check('[选中] 送出去的就是面板上那一条引用',
-      body.selection === opened.quoteText,
-      `sent=${JSON.stringify(body.selection)} shown=${JSON.stringify(opened.quoteText)}`);
-    check('[选中] 引用带着来源锚点（哪一课、哪一小节）',
-      !!body.selectionAnchor && body.selectionAnchor.lesson === 'demo/1-变量.md'
-      && body.selectionAnchor.section === target.section && body.selectionAnchor.sectionTitle === '绑定',
-      JSON.stringify(body.selectionAnchor));
-    check('[选中] 提交成功后引用清掉（面板回到「划一段」的提示）',
-      sent.quoteText === null && /在正文里划一段/.test(String(sent.panelText)),
-      `quote=${JSON.stringify(sent.quoteText)}`);
-    check('[选中] 回答与那条误解记录按回执渲染出来',
-      /已记一条误解记录/.test(String(sent.panelText)) && /fixture-model/.test(String(sent.panelText)),
-      String(sent.panelText).slice(0, 120));
+    const picked = await ctx.evaluate(SESSION_PROBE);
+    check('[切换] 点一条上一段会话就换过去（也 retain 它）',
+      picked.retains[picked.retains.length - 1].id === 'qa-older'
+      && picked.providers[picked.providers.length - 1].sessionId === 'qa-older',
+      JSON.stringify(picked.retains));
+    check('[切换] 换过去的会话照样没再建新的',
+      picked.creates === second.creates, `creates=${picked.creates}`);
 
-    return {
-      dragged: target.text, lines: target.lines, section: target.section,
-      quoteShown: opened.quoteText, quoteWhere: opened.quoteWhere,
-      quoteKeptAfterClick: afterClick.quoteText === opened.quoteText,
-      quoteKeptAfterTyping: afterType.quoteText === opened.quoteText,
-      quoteKeptAfterTabSwitch: back.quoteText === opened.quoteText,
-      liveSelectionAtClick: afterClick.liveSelection,
-      sentBody: body,
-    };
-  });
-
-  /* ── 二、显式删除：清除的另一处 ──────────────────────────────────────── */
-  await session.scene('ask-quote-drop', async (ctx) => {
-    await openLesson(ctx);
-    const target = await selectParagraph(ctx, '[删掉]');
-    if (!target) return { failed: '没有可以划的正文段落' };
-    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
-    await ctx.sleep(400);
-    const opened = await ctx.evaluate(ASK_PROBE);
-
-    await clickAt(session, await ctx.evaluate(clickSelector('[data-proto="qa-quote-clear"]')));
-    const dropped = await ctx.evaluate(ASK_PROBE);
-    check('[删掉] 点「删掉」之后引用没了、提示回来了',
-      dropped.quoteText === null && /在正文里划一段/.test(String(dropped.panelText)),
-      `quote=${JSON.stringify(dropped.quoteText)}`);
-
-    // 删掉之后照样能提问：请求体里没有引用这两格
-    await askOnce(ctx, '那绑定到底是什么？');
-    const asked = await ctx.evaluate(ASK_PROBE);
-    const body = asked.lastAsk ? JSON.parse(asked.lastAsk.body) : {};
-    check('[删掉] 没有引用时照样问得出去，且请求体里不带引用',
-      asked.askCalls === 1 && body.selection === '' && !Object.hasOwn(body, 'selectionAnchor'),
-      JSON.stringify(body));
-
-    return { dragged: target.text, quoteBeforeDrop: opened.quoteText, sentBody: body };
-  });
-
-  /* ── 三、从头就没有引用：面板照样能用 ────────────────────────────────── */
-  await session.scene('ask-quote-blank', async (ctx) => {
-    await openLesson(ctx);
-    // 不划词，直接从右栏的窄轨打开「问答」
-    await ctx.evaluate(`document.querySelector('[data-proto="toggle-ask"]').click()`);
-    await ctx.sleep(400);
-    const opened = await ctx.evaluate(ASK_PROBE);
-    check('[无引用] 没划词时面板照样打得开、给的是「划一段」的提示',
-      opened.panelOpen && opened.quoteText === null && /在正文里划一段/.test(String(opened.panelText)),
-      String(opened.panelText).slice(0, 80));
-    check('[无引用] 页面上没有浮动胶囊（没引用可带）', opened.chip === null, String(opened.chip));
-
-    await askOnce(ctx, '这一课在讲什么？');
-    const asked = await ctx.evaluate(ASK_PROBE);
-    const body = asked.lastAsk ? JSON.parse(asked.lastAsk.body) : {};
-    check('[无引用] 照样问得出去，送出去的是一格空引用',
-      asked.askCalls === 1 && body.selection === '' && !Object.hasOwn(body, 'selectionAnchor'),
-      JSON.stringify(body));
-
-    return { openedHint: /在正文里划一段/.test(String(opened.panelText)), sentBody: body };
-  });
-
-  /* ── 四、没有可用模型：如实说明，且**不清**引用 ──────────────────────── */
-  await session.scene('ask-quote-unavailable', async (ctx) => {
-    await openLesson(ctx);
-    await ctx.evaluate(setReply({
-      available: false,
-      ok: false,
-      reason: '夹具：宿主里一个模型 provider 都没注册',
-      error: { code: 'model-unavailable', message: '夹具：宿主里一个模型 provider 都没注册' },
-    }));
-    const target = await selectParagraph(ctx, '[无模型]');
-    if (!target) return { failed: '没有可以划的正文段落' };
-    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
-    await ctx.sleep(400);
-    const opened = await ctx.evaluate(ASK_PROBE);
-
-    await askOnce(ctx, '这一课在讲什么？');
-    const asked = await ctx.evaluate(ASK_PROBE);
-    check('[无模型] 如实说明这条链路上没有可用的模型',
-      /没有可用的模型/.test(String(asked.panelText)) && /provider 都没注册/.test(String(asked.panelText)),
-      String(asked.panelText).slice(0, 140));
-    check('[无模型] 不假装会答：一个字都没编，也没说记了误解记录',
-      /没有写误解记录/.test(String(asked.panelText)) && !/已记一条误解记录/.test(String(asked.panelText)),
-      String(asked.panelText).slice(0, 140));
-    check('[无模型] 引用留着——一个字都没落盘，配好模型该能拿同一条引用再问一次',
-      asked.quoteText === opened.quoteText && asked.drop,
-      `before=${JSON.stringify(opened.quoteText)} after=${JSON.stringify(asked.quoteText)}`);
-
-    return { quoteBefore: opened.quoteText, quoteAfter: asked.quoteText, panelText: String(asked.panelText).slice(0, 200) };
+    return { ids, picked: picked.retains[picked.retains.length - 1] };
   });
 } catch (error) {
-  check('问答引用套件跑完（浏览器起来、夹具能开）', false, String(error));
-  await session.scene('ask-quote-error', async (ctx) => { ctx.note('harness', String(error)); });
+  check('答疑会话套件跑完（浏览器起来、夹具能开）', false, String(error));
+  await session.scene('ask-session-error', async (ctx) => { ctx.note('harness', String(error)); });
+}
+
+/* ── 四、真刷新：会话在磁盘上，回来还是那一条 ──────────────────────────────
+   用 `Page.addScriptToEvaluateOnNewDocument` 提前把「列表里有一条答疑会话」塞进去：它就是
+   「上一次打开留下的那条会话」。真刷新之后面板该认得出它，而不是又建一条。 */
+try {
+  await session.inject(`window.__HOST_SEED = { rows: [
+    { id: 'qa-persisted', title: '答疑 · 演示科目 · 变量', displayTitle: '不计题', updatedAt: 5, blank: false, running: false, retainedBy: {} },
+    { id: 'learn-1', title: '学习 · 演示科目 · 变量', displayTitle: '学习 · 演示科目 · 变量', updatedAt: 9, blank: false, running: false, retainedBy: {} }
+  ] };`);
+  await session.scene('ask-session-reload', async (ctx) => {
+    await openLesson(ctx);
+    await openAskTab(ctx);
+    const seen = await ctx.evaluate(SESSION_PROBE);
+    check('[刷新] 页面重开之后认出了最近那条答疑会话，没有再建一条',
+      seen.creates === 0, `creates=${seen.creates} ${JSON.stringify(seen.lastCreate)}`);
+    check('[刷新] retain 的就是那条落盘的会话（标题前缀认，不用另存 id 清单）',
+      seen.retains.length === 1 && seen.retains[0].id === 'qa-persisted'
+      && seen.retains[0].source === 'studymateAsk',
+      JSON.stringify(seen.retains));
+    check('[刷新] 嵌的还是宿主正文，指着那条会话',
+      seen.embedded && seen.providers[seen.providers.length - 1].sessionId === 'qa-persisted',
+      JSON.stringify(seen.providers));
+    return { creates: seen.creates, retains: seen.retains };
+  });
+} catch (error) {
+  check('刷新那一条跑完了', false, String(error));
 }
 
 console.log(failures ? `\n${failures} 条失败` : '\n全部通过');
-await finishSuite(session, { suite: 'ask-quote', failed: failures });
+await finishSuite(session, { suite: 'ask-session', failed: failures });
 for (const dir of TEMPS) fs.rmSync(dir, { recursive: true, force: true });

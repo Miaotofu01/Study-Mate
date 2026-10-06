@@ -391,20 +391,25 @@ function fakeCtx({ llm, selection }) {
     get: (name) => (name === 'llm' ? llm : name === 'agentDefaultModel' ? selection : undefined),
   };
   const ctx = { inject: (names, handler) => { assert.deepEqual(names, ['connection']); handler(child); } };
-  return { ctx, routes };
+  // #105 起 `registerAskRoute` 把「建答疑会话」那条（`/api/studymate/qa/session`）也一起挂上——
+  // 这一份套件守的是 `/ask` 那条旧链路（#107 退役），所以下面按路径取它，别拿 routes[0] 当它。
+  const askRoute = () => routes.find((route) => route.path === ASK_PATH);
+  return { ctx, routes, askRoute };
 }
 
 test('#79 路由：POST /api/studymate/ask 注册在 /api/studymate 命名空间下，形状与另外三条一致', async () => {
   const llm = fakeLlm();
-  const { ctx, routes } = fakeCtx({ llm, selection: { currentSelection: () => DEFAULT_SELECTION } });
+  const { ctx, routes, askRoute } = fakeCtx({ llm, selection: { currentSelection: () => DEFAULT_SELECTION } });
   registerAskRoute(ctx);
 
-  assert.equal(routes.length, 1);
-  assert.equal(routes[0].path, ASK_PATH);
-  assert.deepEqual(routes[0].methods, ['POST']);
-  assert.equal(routes[0].requestBody, 'buffered');
+  // #105：注册面现在有两条（`/ask` 与建答疑会话），这条只钉 `/ask` 那一条
+  assert.ok(routes.length >= 1);
+  assert.equal(routes.filter((route) => route.path === ASK_PATH).length, 1);
+  assert.equal(askRoute().path, ASK_PATH);
+  assert.deepEqual(askRoute().methods, ['POST']);
+  assert.equal(askRoute().requestBody, 'buffered');
 
-  const response = await routes[0].fetch(new Request('http://localhost' + ASK_PATH, {
+  const response = await askRoute().fetch(new Request('http://localhost' + ASK_PATH, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ subject: SUBJECT, node: NODE, selection: '这一段', question: '掩码怎么算？', operationId: op('route') }),
@@ -419,22 +424,22 @@ test('#79 路由：POST /api/studymate/ask 注册在 /api/studymate 命名空间
 });
 
 test('#79 路由：请求体不是 JSON 对象 → 400；没模型 → 503（面板按状态码区分）', async () => {
-  const { ctx, routes } = fakeCtx({ llm: fakeLlm(), selection: { currentSelection: () => DEFAULT_SELECTION } });
+  const { ctx, askRoute } = fakeCtx({ llm: fakeLlm(), selection: { currentSelection: () => DEFAULT_SELECTION } });
   registerAskRoute(ctx);
 
-  const bad = await routes[0].fetch(new Request('http://localhost' + ASK_PATH, { method: 'POST', body: 'not json' }));
+  const bad = await askRoute().fetch(new Request('http://localhost' + ASK_PATH, { method: 'POST', body: 'not json' }));
   assert.equal(bad.status, 400);
   assert.equal((await bad.json()).error.code, 'body-invalid');
 
-  const missing = await routes[0].fetch(new Request('http://localhost' + ASK_PATH, {
+  const missing = await askRoute().fetch(new Request('http://localhost' + ASK_PATH, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ subject: SUBJECT, node: NODE }),
   }));
   assert.equal(missing.status, 400);
   assert.equal((await missing.json()).error.code, 'question-required');
 
-  const { ctx: noModelCtx, routes: noModelRoutes } = fakeCtx({ llm: undefined, selection: null });
+  const { ctx: noModelCtx, askRoute: noModelAskRoute } = fakeCtx({ llm: undefined, selection: null });
   registerAskRoute(noModelCtx);
-  const unavailable = await noModelRoutes[0].fetch(new Request('http://localhost' + ASK_PATH, {
+  const unavailable = await noModelAskRoute().fetch(new Request('http://localhost' + ASK_PATH, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ subject: SUBJECT, node: NODE, question: '掩码怎么算？', operationId: op('route-nomodel') }),
   }));

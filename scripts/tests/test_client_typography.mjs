@@ -80,7 +80,7 @@ const PROSE_SELECTORS = [
   '.smb-root',                 // 正文那一档就定义在这里，全树继承
   '.smb-doc',                  // 正文列本体
   '.smb-goal',                 // 本节目标
-  '.smb-quote',                // 引用块（正文里与问答面板里的引用）
+  '.smb-quote',                // 引用块（正文里的 blockquote；面板上那条只读展示也复用它）
   '.smb-note',                 // 提示块
   '.smb-practice__head',
   '.smb-practice__body',
@@ -93,7 +93,8 @@ const PROSE_SELECTORS = [
   '.smb-input',
   '.smb-empty',
   '.smb-askchip',
-  '.smb-askbody p',
+  // `.smb-askbody p` 随面板那条规则一起退役（#105）：正文交给宿主 conversation.content，
+  // 排版归宿主的 --dsh-* 那一套——面板外壳再管正文字号就会两套体系打架。
   '.smb-crumb',                // 顶部面包屑
   '.smb-rtab',                 // 右栏 tab
   '.smb-hit__text',            // 搜索命中正文

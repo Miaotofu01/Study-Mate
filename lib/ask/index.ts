@@ -16,5 +16,14 @@
    `lib/core/model.ts`，见那里的文件头）。
    ───────────────────────────────────────────────────────────────────────── */
 
-export { ASK_PATH, askPanel, registerAskRoute, collectStream, readLessonFromWorkspace, readMemoryFromWorkspace, resolveSelection, stripFrontMatter } from './route.ts';
+export { ASK_PATH, askPanel, registerAskRoute, collectStream, readLessonFromWorkspace, resolveSelection, stripFrontMatter } from './route.ts';
 export type { AskDeps, AskRequestInput, AskRouteContext, AskView, LessonLookup } from './route.ts';
+// #105：建答疑会话那条路由（`POST /api/studymate/qa/session`）与它的标题纯函数。
+// 由 `registerAskRoute` 一起注册，所以 `bin/dsh-plugin.ts` 那一行不用动。
+export {
+  QA_SESSION_PATH, QA_AGENT_PRESET, ASK_SESSION_PREFIX, ASK_SESSION_SEP,
+  isAskSessionTitle, openAskSession, registerAskSessionRoute, titleForAskSession,
+} from './session.ts';
+export type { AskAgents, AskPresetRegistry, AskSessionDeps, AskSessionInput, AskSessionTitle, AskSessionView } from './session.ts';
+// 共享记忆的读法（#105 起从 route.ts 搬到这里：两条路由共用，互相 import 会成环）
+export { readMemoryFromWorkspace } from './memory.ts';

@@ -35,10 +35,31 @@ const RUNTIME_MODULES = ['react'];
 let hookState = null;
 let stateIndex = 0;
 let effectCount = 0;
+/** 这一次渲染里 `useEffect` 登记下来的副作用（桩**不自己跑**，见 `drainEffects`）。 */
+let pendingEffects = [];
 
 export function setHookState(values) { hookState = values; }
-export function resetHookState() { hookState = null; stateIndex = 0; effectCount = 0; }
+export function resetHookState() { hookState = null; stateIndex = 0; effectCount = 0; pendingEffects = []; }
 export function effectRuns() { return effectCount; }
+
+/**
+ * 跑一次刚渲染时登记下来的 effect（按登记顺序），返回它们的清理函数。
+ *
+ * 为什么要有：有些行为**只能**住在 `useEffect` 里（#105 的「找那条会话 / retain 它 / 没有就建
+ * 一条」就是），而桩的 `useEffect` 默认只记一笔、不执行。套件 `renderWithState` 之后调一次
+ * 这里，就能断言「挂载时真的 retain 了、真的发了那条 POST」——不必把 effect 拆成 props，
+ * 也不必另造一份和实现并行的假逻辑。
+ */
+export function drainEffects() {
+  const list = pendingEffects;
+  pendingEffects = [];
+  const cleanups = [];
+  for (const fn of list) {
+    const out = fn();
+    if (typeof out === 'function') cleanups.push(out);
+  }
+  return cleanups;
+}
 
 function stubReact() {
   const Fragment = Symbol('react.fragment');
@@ -58,8 +79,9 @@ function stubReact() {
       const has = hookState !== null && index < hookState.length;
       return [has ? hookState[index] : (typeof initial === 'function' ? initial() : initial), () => {}];
     },
-    // 副作用不执行（没有 DOM），只记一笔跑了几个——`SearchPalette` 靠它把光标送进输入框
-    useEffect: () => { effectCount++; },
+    // 副作用不执行（没有 DOM），只记一笔跑了几个并把函数收起来——`SearchPalette` 靠它把光标
+    // 送进输入框；要真的跑一次（断言挂载行为）用 `drainEffects()`
+    useEffect: (fn) => { effectCount++; if (typeof fn === 'function') pendingEffects.push(fn); },
     // 一律现算：桩不做记忆化，而 useMemo 的求值函数都是纯的
     useMemo: (compute) => compute(),
     useCallback: (fn) => fn,
