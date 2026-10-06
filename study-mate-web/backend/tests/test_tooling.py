@@ -263,7 +263,7 @@ def test_audit_dispatch_retained_on_contract_failure(monkeypatch):
 
     monkeypatch.setattr(llm, "is_fixture_mode", lambda: False)
 
-    async def bad_chat(provider, messages, json_mode=False, fixture_kind=None):
+    async def bad_chat(provider, messages, json_mode=False, fixture_kind=None, max_seconds=None):
         return '{oops not json'
 
     monkeypatch.setattr(roles, "chat_once", bad_chat)
@@ -389,7 +389,7 @@ def test_submit_curriculum_tool_reports_gate_errors():
     ctx = ToolContext(read_roots=[], write_roots=[], label="x", state={})
     result = asyncio.run(tools_svc.execute("submit_curriculum", {"data": bad}, ctx))
     assert result["is_error"] is True
-    assert "门禁未过" in result["content"]
+    assert "大纲自检未过" in result["content"]
     assert "curriculum" not in ctx.state
 
 
@@ -440,8 +440,8 @@ def test_curriculum_tool_loop_self_fixes_then_returns(monkeypatch, tmp_path):
     )
     assert data and data["nodes"]
     assert rounds["n"] == 3
-    # 第一次提交被门禁打回、第二次通过（循环内自修）
-    gate_events = [e for e in events if e.get("stage") == "门禁"]
+    # 第一次提交被大纲自检打回、第二次通过（循环内自修）
+    gate_events = [e for e in events if e.get("stage") == "大纲自检"]
     assert any(e.get("status") == "fail" for e in gate_events)
     assert any(e.get("status") == "done" for e in gate_events)
 
@@ -524,8 +524,9 @@ def test_agent_wallclock_stops_a_hanging_turn():
     assert outcome.degraded is True
     assert outcome.stopped_reason == "wallclock"
     assert elapsed < 3, f"应该被 0.4s 的墙钟砍掉，实际等了 {elapsed:.1f}s"
-    notices = [e for e in events if e["type"] == "notice"]
-    assert any("上限" in str(e.get("message")) for e in notices), notices
+    failures = [e for e in events if e["type"] == "error"]
+    assert any(e.get("code") == "budget_exhausted" and "上限" in e["summary"] for e in failures)
+    assert outcome.error and outcome.error["code"] == "budget_exhausted"
 
 
 def test_agent_reports_progress_snapshots():

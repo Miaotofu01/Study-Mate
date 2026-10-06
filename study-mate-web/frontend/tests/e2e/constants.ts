@@ -28,6 +28,17 @@ export const STREAM_LAST_SEGMENT = STREAM_VISIBLE_SEGMENTS[STREAM_VISIBLE_SEGMEN
 export const BACKEND_URL = "http://127.0.0.1:8290";
 const STUDY_MATE_WEB_DIR = path.resolve(__dirname, "../../..");
 export const BACKEND_DIR = path.join(STUDY_MATE_WEB_DIR, "backend");
+
+/** 后端 venv 解释器（相对 webServer 的 cwd `../backend`），按平台判别布局：
+ *  Windows 在 `.venv/Scripts/python.exe`，POSIX 在 `.venv/bin/python`。路径含空格时
+ *  整体加引号，避免 command 交给 shell 执行时被拆成多个参数。 */
+export const BACKEND_PYTHON = (() => {
+  const rel =
+    process.platform === "win32"
+      ? path.join(".venv", "Scripts", "python.exe")
+      : path.join(".venv", "bin", "python");
+  return rel.includes(" ") ? `"${rel}"` : rel;
+})();
 // 运行产物在 <study-mate-web>/data/，与 config.py 的 WEB_ROOT/DATA_DIR 和 playwright.config 一致
 export const E2E_WORKSPACE_DIR = path.join(STUDY_MATE_WEB_DIR, "data", "e2e-ws");
 export const E2E_DATA_DIR = path.join(STUDY_MATE_WEB_DIR, "data", "e2e-data");

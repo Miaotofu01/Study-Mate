@@ -50,7 +50,7 @@ EXPLORER_GOAL=tests/explorer/goals/g1-no-subject-misconception.md npm run explor
 | `g6-course-build-interview` | 建课全链：方向探索 → 确认建课 → 编排 → 落点确认 |
 | `g7-produce-canonical` | 按大纲顺序产出一节课并打开课件 |
 | `g8-produce-out-of-order` | 越序产课受阻后自行找到顺序出路 |
-| `g9-inspection-ticket` | 质检工单总览 → 快改 → 放弃（需 `seed: tickets` 前置） |
+| `g9-inspection-ticket` | 质检工单总览 → 快改 → 放弃工单（需 `seed: tickets` 前置） |
 | `g10-workspace-switch-and-empty` | 相对路径校验 + 切空目录 + 新会话引导块切回 |
 | `g11-memory-precipitate` | 会话后沉淀记忆（建议 → 逐条确认 → 写入） |
 | `g12-attachment-image-only` | 只发图片附件、不写文字（用 `setfiles` 动作） |
@@ -60,11 +60,11 @@ EXPLORER_GOAL=tests/explorer/goals/g1-no-subject-misconception.md npm run explor
 | `g16-assessment-promotion` | 评估通过 → 节点置位 + 沉淀记忆入口 |
 | `g17-dark-new-surfaces` | 暗夜下新弹窗可读性（截图取证，人眼复核） |
 
-> g6–g17 为 2026-10-03 新增，**尚未试跑**；执行由维护者按需决定，建议先正基线（g5/g6/g7）再 adverse。
+> g6–g17 为 2026-10-03 新增，**尚未试跑**；执行由维护者按需决定，建议先正基线（g5/g6/g7）再 adverse。**（2026-10-05 本轮）** 同步 g9 按钮文案「放弃本次」→「放弃工单」与工单 seed loader 补 workspace；**本轮未跑真实探索**。
 
 ## 目标编写小抄（新增于 2026-10-03）
 
-- front matter：`id` / `title` / `start_url` / `max_steps` / `max_walls`，外加可选的 **`seed: <name>`**（把 `seeds/<name>.json` 落到后端数据目录，用于 fixture 下不自然出现的界面，如质检工单）。
+- front matter：`id` / `title` / `start_url` / `max_steps` / `max_walls`，外加可选的 **`seed: <name>`**（把 `seeds/<name>.json` 落到后端数据目录，用于 fixture 下不自然出现的界面，如质检工单）。**（2026-10-05）seed loader 在装载时给「非 draft、缺 `workspace`」的种子单补 E2E 工作区**（不改静态 json 绝对路径），使其显示为正常工单（否则按 legacy 规则会判 unknown「待归属」）。
 - 目标正文里的路径占位符（引擎展开为**正斜杠**绝对路径）：`{{FILES_DIR}}`（`tests/explorer/files/`，附件样例）、`{{WORKSPACE_DIR}}`、`{{EMPTY_WS}}`、`{{DATA_DIR}}`。
 - 附件类目标用动作 `{"type":"setfiles","value":"<绝对路径>"}`——📎 会弹系统文件框，agent 操作不了。
 

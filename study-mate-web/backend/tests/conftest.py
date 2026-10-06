@@ -28,6 +28,24 @@ os.environ.pop("LEARN_WORKSPACE", None)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_settings_file():
+    """每个用例前后还原 settings.json：任何用例写坏/改写全局设置都不跨用例污染。
+
+    `load_settings` 几乎被每个请求调用，而设置是整文件读改写；用例若不还原（例如故意
+    写坏或替换 providers），后跑的用例会读到被改过的全局配置而失败。此夹具在用例前
+    快照原始字节、用例后原样写回（原本不存在则删除），与用例顺序无关。
+    """
+    from app.config import SETTINGS_PATH
+
+    original = SETTINGS_PATH.read_bytes() if SETTINGS_PATH.exists() else None
+    yield
+    if original is None:
+        SETTINGS_PATH.unlink(missing_ok=True)
+    else:
+        SETTINGS_PATH.write_bytes(original)
+
+
 @pytest.fixture()
 def client():
     from fastapi.testclient import TestClient

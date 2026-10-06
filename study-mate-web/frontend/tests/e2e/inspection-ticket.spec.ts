@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
-import { E2E_DATA_DIR } from "./constants";
+import { E2E_DATA_DIR, E2E_WORKSPACE_DIR } from "./constants";
 import { openNodeDetail } from "./helpers";
 
 const TICKETS_FILE = path.join(E2E_DATA_DIR, "tickets.json");
@@ -17,6 +17,8 @@ function seedTicket(slug: string, nodeId: string): void {
     slug,
     node_id: nodeId,
     base_label: "workspace",
+    // 记录归属：无 workspace 的旧单已是 ambiguous，会要求先确认工作区（另一个 E2E 覆盖）
+    workspace: E2E_WORKSPACE_DIR,
     problems: [
       {
         owner: "讲解",

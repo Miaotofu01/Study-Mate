@@ -41,15 +41,23 @@ def test_partial_bucket_accumulates_and_persists(client):
     assert saved["model"] == "my-api / 模型"
     assert saved["tools"][0]["name"] == "list_workspace"
     assert saved["tools"][0]["status"] == "done" and saved["tools"][0]["isError"] is False
-    assert any("中断" in item for item in saved["notices"])
+    assert saved["error"]["code"] == "upstream_transport"
+    assert saved["error"]["stopped_reason"] == "disconnect"
+    assert saved["stopped_reason"] == "disconnect"
     assert any("讲解完成" in item for item in saved["notices"])
 
 
-def test_partial_persist_is_noop_when_nothing_produced(client):
+def test_disconnect_with_no_body_still_persists_error(client):
+    """空桶断开也要留下无正文的 error 终态：用户不能只看到"什么都没发生"。"""
     session_id = storage.create_session("空桶")["id"]
     bucket = {"text": [], "reasoning": [], "tools": [], "notices": [], "usage": None}
     _persist_partial(session_id, bucket, None)
-    assert storage.require_session(session_id)["messages"] == []
+    messages = storage.require_session(session_id)["messages"]
+    assert len(messages) == 1
+    saved = messages[0]
+    assert saved["role"] == "assistant" and saved["content"] == ""
+    assert saved["error"]["code"] == "upstream_transport"
+    assert saved["stopped_reason"] == "disconnect"
 
 
 def _drive_and_disconnect(session_id: str, body: dict) -> None:
@@ -130,7 +138,8 @@ def test_disconnect_keeps_streamed_reply_of_tool_path(client, monkeypatch):
     assert saved["role"] == "assistant"
     assert saved["content"] == "已经产出的半截回复"
     assert saved["tools"][0]["name"] == "list_workspace"
-    assert any("中断" in item for item in saved.get("notices") or [])
+    assert saved["error"]["code"] == "upstream_transport"
+    assert saved["stopped_reason"] == "disconnect"
 
 
 def test_disconnect_keeps_streamed_reply_of_plain_path(client, monkeypatch):
@@ -153,4 +162,5 @@ def test_disconnect_keeps_streamed_reply_of_plain_path(client, monkeypatch):
     saved = messages[-1]
     assert saved["role"] == "assistant"
     assert saved["content"] == "半截正文"
-    assert any("中断" in item for item in saved.get("notices") or [])
+    assert saved["error"]["code"] == "upstream_transport"
+    assert saved["stopped_reason"] == "disconnect"

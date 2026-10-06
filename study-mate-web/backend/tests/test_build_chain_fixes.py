@@ -193,6 +193,7 @@ def test_ticket_retry_uses_role_tool_loop(monkeypatch, client, produce_subject):
     from app import produce as produce_svc
     from app.routers import production
     from app import tickets as tickets_svc
+    from app import curriculum_store as cs
 
     slug, _base = produce_subject
     # 先按 fixture 跑一遍，落好课件与题库，制造可复检的科目状态
@@ -207,7 +208,7 @@ def test_ticket_retry_uses_role_tool_loop(monkeypatch, client, produce_subject):
 
     entered: list[str] = []
 
-    async def fake_loop(provider, route, values, emit, *, base, node_id, index, stage_dir):
+    async def fake_loop(provider, route, values, emit, *, base, node_id, index, stage_dir, **kwargs):
         entered.append(route)
         if route == "produce_experiment":
             return produce_svc.fixture_experiment_envelope(values)
@@ -231,6 +232,7 @@ def test_ticket_retry_uses_role_tool_loop(monkeypatch, client, produce_subject):
             }
         ],
         artifacts=["lessons/0001-demo.intro.quiz.json"],
+        workspace=str(cs.workspace_dir()),
     )
     r = client.post(f"/api/tickets/{ticket['id']}/retry", json={})
     names = [name for name, _ in _sse(r)]

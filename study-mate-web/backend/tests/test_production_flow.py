@@ -5,11 +5,11 @@ import json
 import re
 from pathlib import Path
 
+from app import curriculum_store as cs
 from app import draft as draft_svc
 from app import tickets as tickets_svc
 
 import pytest
-
 
 @pytest.fixture()
 def produce_subject(client, new_subject):
@@ -106,6 +106,8 @@ def test_produce_enforces_curriculum_order(client, produce_subject):
 def test_ticket_recheck_resolves(client, produce_subject):
     slug, base = produce_subject
     client.post(f"/api/courses/{slug}/nodes/demo.intro/produce", json={})
+    # 新版：缺 workspace 的非草稿旧单 unscoped 也 409；这些用例验的是 owned 单的
+    # 正常重试/复检/快改，故显式记归属（=默认工作区）。
     ticket = tickets_svc.create_ticket(
         kind="produce",
         slug=slug,
@@ -113,6 +115,7 @@ def test_ticket_recheck_resolves(client, produce_subject):
         base_label="workspace",
         problems=[],
         artifacts=["lessons/0001-demo.intro.md"],
+        workspace=str(cs.workspace_dir()),
     )
     r = client.post(f"/api/tickets/{ticket['id']}/recheck", json={})
     names = event_names(r)
@@ -130,6 +133,7 @@ def test_ticket_quick_edit_and_listing(client, produce_subject):
         base_label="workspace",
         problems=[{"owner": "讲解", "path": "lessons/0001-demo.intro.md", "line": "6", "message": "示例问题"}],
         artifacts=["lessons/0001-demo.intro.md"],
+        workspace=str(cs.workspace_dir()),
     )
     detail = client.get(f"/api/tickets/{ticket['id']}").json()
     assert detail["groups"]["讲解"]
@@ -310,6 +314,7 @@ def test_ticket_retry_recovers_after_failure(client, produce_subject):
             }
         ],
         artifacts=["lessons/0001-demo.intro.quiz.json"],
+        workspace=str(cs.workspace_dir()),
     )
     r = client.post(f"/api/tickets/{ticket['id']}/retry", json={"hint": "题目再贴近锚点一点"})
     names = event_names(r)
@@ -321,6 +326,8 @@ def test_quick_edit_rejects_absolute_path(client, produce_subject):
     """快改只认科目目录内的相对路径（绝对路径拒绝）。"""
     slug, _ = produce_subject
     client.post(f"/api/courses/{slug}/nodes/demo.intro/produce", json={})
+    # 新版：缺 workspace 的非草稿旧单 unscoped 也 409；这些用例验的是 owned 单的
+    # 正常重试/复检/快改，故显式记归属（=默认工作区）。
     ticket = tickets_svc.create_ticket(
         kind="produce",
         slug=slug,
@@ -328,6 +335,7 @@ def test_quick_edit_rejects_absolute_path(client, produce_subject):
         base_label="workspace",
         problems=[],
         artifacts=["lessons/0001-demo.intro.md"],
+        workspace=str(cs.workspace_dir()),
     )
     r = client.put(
         f"/api/tickets/{ticket['id']}/artifact",
@@ -342,9 +350,13 @@ def _real_dispatch_mode(monkeypatch):
     两层都要绕：路由层的 _provider()（fixture 模式才返回假 provider）与派工层的
     is_fixture_mode()；后者否则会直接吃 fixture envelope 工厂。
     """
-    from app import llm
+    from app import llm, produce
     from app.routers import production
 
+    async def no_tool_delivery(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(produce, "_role_tool_loop", no_tool_delivery)
     monkeypatch.delenv("STUDYMATE_E2E_FIXTURE", raising=False)
     monkeypatch.setattr(llm, "_fixture_at_import", False)
     monkeypatch.setattr(

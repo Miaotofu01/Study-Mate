@@ -44,7 +44,7 @@ test("assistant name bar and context window panel show model and usage", async (
   await expect(page.getByTestId("context-window-bar")).toBeVisible();
 });
 
-test("thinking chain and tool calls fold into the process panel", async ({ page }) => {
+test("thinking fragments fold independently between tool calls", async ({ page }) => {
   await useProcessScenario(page);
   await page.goto("/chat");
   await expandRightRail(page);
@@ -54,7 +54,9 @@ test("thinking chain and tool calls fold into the process panel", async ({ page 
   // 场景末段文本 = 本轮结束
   await expect(messages(page).getByText("过程折叠场景")).toBeVisible({ timeout: 20_000 });
 
-  const panel = page.getByTestId("process-panel");
+  const panels = page.getByTestId("process-panel");
+  await expect(panels).toHaveCount(3);
+  const panel = panels.first();
   await expect(panel).toBeVisible();
   await expect(panel.getByTestId("process-label")).toContainText("中间过程");
 
@@ -71,6 +73,10 @@ test("thinking chain and tool calls fold into the process panel", async ({ page 
   await panel.getByTestId("process-summary").click();
   await expect(panel).toHaveAttribute("open", "");
   await expect(panel.getByTestId("process-reasoning")).toContainText("先看看工作区");
+  await expect(panels.nth(1).getByTestId("process-reasoning")).toBeHidden();
+  expect(await page.getByTestId("assistant-parts").locator("[data-part-type]").evaluateAll(
+    (elements) => elements.map((element) => element.getAttribute("data-part-type")),
+  )).toEqual(["reasoning", "tool", "reasoning", "tool", "reasoning", "text"]);
 });
 
 test("editing a user message truncates later turns and regenerates", async ({ page }) => {

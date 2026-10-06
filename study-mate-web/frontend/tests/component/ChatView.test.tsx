@@ -29,6 +29,8 @@ const { push, workspace, api } = vi.hoisted(() => ({
       refreshSessions: vi.fn(),
       refreshSubjects: vi.fn(),
       setMisconceptionDraft: vi.fn(),
+      // 建课编排开始/结束由 ChatView 上报（侧栏转圈推导用）
+      setBuildingSessionId: vi.fn(),
     },
   },
   api: {

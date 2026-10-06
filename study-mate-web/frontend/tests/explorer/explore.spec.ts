@@ -159,8 +159,25 @@ test("explorer（草案）：目标驱动的模拟用户", async ({ page }) => {
   // 后端数据目录（<DATA_DIR>/<name>.json，见 frontend/tests/explorer/seeds/）。globalSetup 早于本测试重建数据目录。
   if (goal.seed) {
     const seedSrc = path.join(__dirname, "seeds", `${goal.seed}.json`);
+    const seedDest = path.join(E2E_DATA_DIR, `${goal.seed}.json`);
     fs.mkdirSync(E2E_DATA_DIR, { recursive: true });
-    fs.copyFileSync(seedSrc, path.join(E2E_DATA_DIR, `${goal.seed}.json`));
+    if (goal.seed === "tickets") {
+      // 工单种子必须记测试工作区归属：静态 JSON 不能写死某台机器的绝对路径（否则换机即失效）。
+      // 缺 workspace 的旧非草稿单在新语义下是 ambiguous（要先确认归属），会挡住 g9 的快改/放弃。
+      const seed: unknown = JSON.parse(fs.readFileSync(seedSrc, "utf-8"));
+      const patched = Array.isArray(seed)
+        ? seed.map((t) => {
+            const item = t as Record<string, unknown> | null;
+            if (item && typeof item === "object" && !("workspace" in item) && item.base_label !== "draft") {
+              return { ...item, workspace: E2E_WORKSPACE_DIR };
+            }
+            return t;
+          })
+        : seed;
+      fs.writeFileSync(seedDest, JSON.stringify(patched, null, 2), "utf-8");
+    } else {
+      fs.copyFileSync(seedSrc, seedDest);
+    }
   }
 
   await page.goto(goal.startUrl);

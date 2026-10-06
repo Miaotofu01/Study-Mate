@@ -22,5 +22,9 @@ test("upload a txt attachment and send it with a message", async ({ page }) => {
   await expect(page.getByText(STREAM_LAST_SEGMENT)).toBeVisible();
 
   await expect(page.locator('a[download="e2e-note.txt"]')).toBeVisible();
-  await expect(page.getByText("帮我看看这份笔记", { exact: true })).toBeVisible();
+  // 用户原文现在也作为会话标题（R7 display_content），全局 getByText 会同时命中
+  // 侧栏标题与顶部 chat-title；限定到消息区，断言气泡里显示的是用户原文。
+  await expect(
+    page.getByTestId("chat-messages").getByText("帮我看看这份笔记", { exact: true }),
+  ).toBeVisible();
 });
