@@ -345,15 +345,14 @@ test('#105 建不出来（不是没模型）：说清是哪一格没开起来，
   assert.equal(text.includes('没有可用的模型'), false, '这不是「没有模型」，别说成没有模型');
 });
 
-/* ══ 八、选中的那一段：这一票先只读地摆着（chip 归 #106） ═════════════════ */
+/* ══ 八、选中的那一段：面板上看得见（可点开 / 可删掉的 chip 归 #106） ═════ */
 
-test('#105 引用：选中的那一段与它的来源在面板上看得见（清除入口归 #106）', () => {
+test('#105 引用：选中的那一段与它的来源在面板上看得见', () => {
   const text = renderText(frame(), { quote: QUOTE });
   assert.ok(text.includes(SELECTION), '选中的那段没显示出来：' + text);
   assert.ok(text.includes('来源：小节「掩码」 · computer-networks/0003-net.mask.md'), text);
-  // 这一票没有「删掉」入口：面板自己的引用块退役了，chip 由 #106 接上
-  const tree = renderTree(frame(), { quote: QUOTE });
-  assert.equal(findByProp(tree, 'data-proto', 'qa-quote-clear').length, 0);
+  // chip 那一层（点开看原文、删掉、进草稿、提交时送出去的是什么）归 #106：
+  // `test_client_ask_chip.mjs` 守纯函数与调用序列，`browser/ask_quote_test.mjs` 守真鼠标那一条。
 });
 
 test('#105 入口：顶部有「新对话」与「上一段会话」', () => {

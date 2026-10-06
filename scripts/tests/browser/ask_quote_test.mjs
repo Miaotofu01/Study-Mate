@@ -1,9 +1,9 @@
-/* 右栏「问答」tab = 宿主的一条真会话（#105）：真浏览器 + 真 `lib/client.js`。
+/* 右栏「问答」tab = 宿主的一条真会话（#105）+ 引用 chip（#106）：真浏览器 + 真 `lib/client.js`。
    ────────────────────────────────────────────────────────────────────────────────
    #92 那条套件原来守的是「选中正文 → 面板上那条引用 → 点输入框/打字/切 tab 之后还在」。
    #105 把面板从「一次一问一答的表单」改成**宿主的一条真会话**：面板不再有自己的输入框、不再
    自己发请求，正文交给宿主的 `conversation.content`（`variant:'embedded'`），会话由插件宿主半
-   建、客户端只 retain。于是这一条套件改守新形态的四件事：
+   建、客户端只 retain。于是这一条套件改守新形态的几件事：
 
      · 打开问答就有一条会话：POST `/api/studymate/qa/session`（请求体只有拼标题要的两个名字），
        然后 `retain` 它——来源标签是 `studymateAsk`（**不是** `mainView`）；
@@ -11,15 +11,24 @@
      · 「新对话」建一条新的并换过去，上一条被 release；「上一段会话」只列答疑会话（标题前缀认）；
      · 切「题目」tab 再切回、以及**真刷新页面**之后，会话还在（不重复建）。
 
-   外加一条从 #92 保留下来的：真鼠标划一段正文 → 面板上看得见那一段与它的来源（引用 chip 的
-   可点开/可删掉/随下一条消息走归 #106）。
+   外加 #106 那条链（引用 chip 是承重件：#92 只把选中的那段冻成一条数据，这里才让它跟着
+   **下一条消息**走）：
+
+     · 真鼠标划一段正文 → 面板输入框上方出现一颗 chip（原文 + 来源小节），**而且它已经进了
+       那条会话的草稿**——宿主没有提交钩子，草稿里没有它，消息就不会带上它；
+     · 提交那一刻送出去的文字 = 我们注册的引用来源的 `codec.serialize(ref)`（探针照宿主那条
+       调用走一遍：按 `occurrence.source` 找 owner，拿它序列化）；
+     · 再划一段 → 旧的被**换掉**（草稿里始终只有一颗 chip），不是攒成两颗；
+     · chip 点得开（看完整原文与来源）、删得掉（草稿里那颗同时撤掉），删掉之后照样能提问；
+     · 太短的选区（误触）不产生 chip；点输入框、切 tab 都不会把 chip 弄丢。
 
    口径（别顺手改回去）：
-     · 断言只到「哪条会话被 retain、送出去的是什么、面板里嵌的是不是那套」这一层，**不钉宿主
-       正文渲染成什么样**——那由宿主自己保证，夹具只给一个带标记的替身。
-     · 夹具页给的是**假的**宿主服务（会话列表 + retain + 一条建会话路由）。真宿主认不认这条
-       调用序列只有在真 DSH 里证得了（spec #102 已接受这个口径）；这里验的是**阅读端送出了什么**。
-     · 截图与 summary.json 落在 `.shots/ask-quote/`。
+     · 断言只到「哪条会话被 retain、送出去的是什么、面板里嵌的是不是那套、草稿里躺着几颗 chip」
+       这一层，**不钉宿主正文渲染成什么样**——那由宿主自己保证，夹具只给一个带标记的替身。
+     · 夹具页给的是**假的**宿主服务（会话列表 + retain + 一条建会话路由 + 一份假输入门面）。
+       真宿主认不认这条调用序列只有在真 DSH 里证得了（spec #102 已接受这个口径）；这里验的是
+       **阅读端送出了什么、往草稿里放了什么**。
+     · 截图与 summary.json 落在 `.shots/ask-session/`。
 
    浏览器二进制由 harness 探测；找不到时明确跳过（退出码 3），不是静默绿。
 */
@@ -61,14 +70,15 @@ function subjectFiles() {
       'updated_at: "2026-05-06T07:08:09+08:00"',
       'nodes:', '  变量:', '    status: 学习中', '',
     ].join('\n'),
-    // 两个小节：引用要认出它落在哪一节（「来源：小节「绑定」」），所以第二小节是必要的
+    // 两个小节：引用要认出它落在哪一节（「来源：小节「绑定」」），所以第二小节是必要的；
+    // 两节里都留一段够长的正文——「再划一段换掉旧的」那一步要在另一节里划。
     '.learning/subjects/demo/lessons/1-变量.md': [
       '# 变量', '',
       '## 绑定', '',
       '变量是名字指向值：写了 const a = 1 之后，a 这个名字就指向 1，改 a 不会改到别的绑定；'
       + '别名只是同一个值的两个名字，不是把值复制一份。', '',
       '## 小结', '',
-      '绑定是名字与值的对应，不是把值装进盒子里。', '',
+      '绑定是名字与值的对应，不是把值装进盒子里；改名字指的是换了另一个值，值本身不会跟着变。', '',
     ].join('\n'),
     '.learning/subjects/demo/MISSION.md': '# 使命\n\n## Why\n\n因为要在浏览器里验。\n',
     '.learning/subjects/demo/GLOSSARY.md': '## 基础\n\n**绑定**: 名字指向值\n',
@@ -130,6 +140,8 @@ function buildFixture(dir, payload) {
     rows: (window.__HOST_SEED && window.__HOST_SEED.rows) || [],
     retains: [], releases: [], refreshes: 0,
     factoryCalls: [], providers: [],
+    // #106：注册进来的引用来源（引用 chip 的 codec 就在这儿）与插件 fiber 上的 effect
+    sources: [], sourceByName: {}, effects: [],
     seq: 0,
     snapshot: function () {
       var ids = [], byId = {};
@@ -139,14 +151,61 @@ function buildFixture(dir, payload) {
     addRow: function (row) { window.__HOST.rows.push(row); return row; },
     sessions: {
       list: { getSnapshot: function () { return window.__HOST.snapshot(); }, subscribe: function () { return function () {}; } },
+      scope: function (id) { return { __session: id }; },
       retain: function (id, options) {
         window.__HOST.retains.push({ id: id, source: options && options.source });
-        return { sessionId: id, binding: { sessionId: id }, ready: Promise.resolve({}),
+        window.__DRAFT.session = id;
+        return { sessionId: id, binding: { sessionId: id, ctx: { __session: id } }, ready: Promise.resolve({}),
           release: function () { window.__HOST.releases.push(id); } };
       },
       refresh: function () { window.__HOST.refreshes += 1; return Promise.resolve(); },
     },
   };
+  // 假的宿主输入门面（#106）：那颗引用 chip 进的就是这里。照宿主的行为写照——
+  // state.getSnapshot() 给 {draft, draftRev, occurrences}，insertReference 在 span.draftRev
+  // 过期时**静默返回 false**，成功时把这一段换成一颗 chip（后面跟一个分隔空格）。
+  window.__DRAFT = (function () {
+    var listeners = [], notices = [];
+    var api = { rev: 1, draft: '', chips: [], session: null, notices: notices };
+    function snapshot() {
+      return { draft: api.draft, draftRev: api.rev, phase: 'plain',
+        occurrences: api.chips.map(function (chip) {
+          return { occurrenceId: chip.occurrenceId, source: chip.source, ref: chip.ref,
+            offset: chip.offset, length: chip.length, label: chip.label, clipboardText: chip.clipboardText };
+        }) };
+    }
+    function bump() { api.rev += 1; listeners.slice().forEach(function (fn) { fn(); }); }
+    function splice(text, span, chip) {
+      var covered = api.draft.slice(span.start, span.end);
+      var delta = text.length - covered.length;
+      api.draft = api.draft.slice(0, span.start) + text + api.draft.slice(span.end);
+      api.chips = api.chips.filter(function (one) { return one.offset + one.length <= span.start || one.offset >= span.end; });
+      api.chips.forEach(function (one) { if (one.offset >= span.end) one.offset += delta; });
+      if (chip) { api.chips.push(chip); api.chips.sort(function (a, b) { return a.offset - b.offset; }); }
+      bump();
+    }
+    api.state = {
+      getSnapshot: snapshot,
+      subscribe: function (fn) { listeners.push(fn); return function () { var at = listeners.indexOf(fn); if (at >= 0) listeners.splice(at, 1); }; },
+    };
+    api.notify = function (level, text) { notices.push({ level: level, text: text }); };
+    api.insertReference = function (ref, span) {
+      if (span.draftRev !== api.rev) return false;
+      var tail = api.draft.slice(span.end, span.end + 1);
+      var piece = tail === ' ' ? ref.clipboardText : ref.clipboardText + ' ';
+      splice(piece, span, { occurrenceId: api.chips.length + 100, source: ref.source, ref: ref.ref, label: ref.label,
+        offset: span.start, length: ref.clipboardText.length, clipboardText: ref.clipboardText });
+      return true;
+    };
+    api.insertText = function (text, span) {
+      if (span.draftRev !== api.rev) return false;
+      splice(text, span, null);
+      return true;
+    };
+    api.setDraft = function (text) { api.draft = text; api.chips = []; bump(); };
+    api.reset = function () { api.rev += 1; api.draft = ''; api.chips = []; api.session = null; notices.length = 0; bump(); };
+    return api;
+  }());
   // 建会话那条路由的替身：记下请求体，回一条新会话，并把它放进列表（标题按同一套拼法）。
   window.__QA = {
     calls: [], reply: null,
@@ -157,6 +216,8 @@ function buildFixture(dir, payload) {
       var title = ['答疑', String(body.subject || '').trim(), String(body.node || '').trim()]
         .filter(function (part) { return part !== ''; }).join(' · ');
       window.__HOST.addRow({ id: id, title: title, displayTitle: title, updatedAt: Date.now(), blank: false, running: false, retainedBy: {} });
+      // 新会话 = 新草稿（宿主是这样：草稿按会话分）
+      window.__DRAFT.reset();
       return { available: true, ok: true, sessionId: id, title: title, renamed: true, memoryInjected: true };
     },
   };
@@ -226,6 +287,28 @@ function buildFixture(dir, payload) {
     var Main = null;
     var registrations = [];
     var sessions = window.__HOST.sessions;
+    var inputTriggers = {
+      registerSource: function (source) {
+        window.__HOST.sources.push(source);
+        window.__HOST.sourceByName[source.name] = source;
+        return function () {
+          var at = window.__HOST.sources.indexOf(source);
+          if (at >= 0) window.__HOST.sources.splice(at, 1);
+          delete window.__HOST.sourceByName[source.name];
+        };
+      },
+    };
+    var conversation = {
+      input: {
+        // 照宿主的判据：actx 必须是**我们 retain 的那条会话**的作用域（拿不到就抛，不是返回 undefined）
+        for: function (actx) {
+          if (!actx || !actx.__session || actx.__session !== window.__DRAFT.session) {
+            throw new Error('conversation.input.for requires a retained Session scope');
+          }
+          return window.__DRAFT;
+        },
+      },
+    };
     mod.apply({
       slots: {
         inject: function (seat, callback) { callback(); },
@@ -235,10 +318,15 @@ function buildFixture(dir, payload) {
         },
       },
       sessions: sessions,
-      // #106 的两件：这一票只要求「声明了依赖、拿得到」，行为不在这一条里验
-      inputTriggers: {}, conversation: {},
-      get: function (name) { return name === 'sessions' ? sessions : undefined; },
-      effect: function (fn) { return fn(); },
+      inputTriggers: inputTriggers,
+      conversation: conversation,
+      get: function (name) {
+        if (name === 'sessions') return sessions;
+        if (name === 'inputTriggers') return inputTriggers;
+        if (name === 'conversation') return conversation;
+        return undefined;
+      },
+      effect: function (fn) { var dispose = fn(); window.__HOST.effects.push(dispose); return dispose; },
     });
     if (!Main) throw new Error('没有从 main 座位拿到组件');
     var mainSeat = registrations.filter(function (entry) { return entry.name === 'main'; })[0];
@@ -312,38 +400,97 @@ const SESSION_PROBE = `(() => {
 })()`;
 
 /**
+ * 引用 chip 那一半（#106）：面板上那颗的样子 + **草稿里真实躺着的那颗**（假输入门面）
+ * + 我们注册的引用来源按它自己的 codec 序列化出来的那段文字。
+ *
+ * 「提交时送出去的就是那段」在夹具里的判据就是这个：宿主提交时做的唯一一件事是按
+ * `occurrence.source` 找 owner 的 `codec.serialize(ref)`——这里照同一条调用走一遍。
+ */
+const CHIP_PROBE = `(async () => {
+  ${HELPERS}
+  const draft = window.__DRAFT.state.getSnapshot();
+  const chips = (draft.occurrences || []).map((one) => ({ source: one.source, ref: one.ref, label: one.label, offset: one.offset, length: one.length }));
+  const serialized = [];
+  for (const chip of chips) {
+    const owner = window.__HOST.sourceByName[chip.source];
+    serialized.push(owner && owner.codec ? await owner.codec.serialize(chip.ref, new AbortController().signal) : null);
+  }
+  return {
+    sources: (window.__HOST.sources || []).map((one) => ({ trigger: one.trigger, name: one.name, hasCodec: !!(one.codec && one.codec.serialize) })),
+    draftText: draft.draft,
+    chips: chips,
+    chipCount: chips.length,
+    serialized: serialized,
+    notices: window.__DRAFT.notices.slice(),
+    panelChip: q('[data-proto="qa-quote"]') ? q('[data-proto="qa-quote"]').textContent.trim() : null,
+    panelWhere: text('[data-proto="qa-quote"] .smb-askquote__where'),
+    quoteOpen: q('[data-proto="qa-quote"]') ? q('[data-proto="qa-quote"]').getAttribute('data-open') : null,
+    hasToggle: !!q('[data-proto="qa-quote-toggle"]'),
+    hasDrop: !!q('[data-proto="qa-quote-clear"]'),
+    fullText: q('[data-proto="qa-quote-full"]') ? q('[data-proto="qa-quote-full"]').textContent.trim() : null,
+    floatChip: q('[data-proto="qa-chip"]') ? q('[data-proto="qa-chip"]').textContent.trim() : null,
+    embedded: !!q('[data-proto="host-conversation"]'),
+    effects: (window.__HOST.effects || []).length,
+  };
+})()`;
+
+/** 一个元素的中心点（给「点输入框」那一步用真鼠标）。 */
+function pointOf(selector, offsetY) {
+  return `(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + Math.min(r.height / 2, ${Number(offsetY) || 24})) };
+  })()`;
+}
+
+/**
  * 挑一段够长的正文段落，把它前 40 个字的位置量出来（给真鼠标拖拽用）。
  *
  * 量的是 `Range.getClientRects()`——文字**真正**画在哪，不是段落盒子的矩形；滚动用
  * `behavior:'instant'`：正文滚动区带 `scroll-behavior: smooth`，平滑滚动会让这里的 rect 与
- * 之后的鼠标动作对不上。
+ * 之后的鼠标动作对不上。`title` 给了就只在这一小节里挑（「再划一段换掉旧的」要另一节）；
+ * 没给就在有段落的小节里挑第一个够长的——`# 变量` 那个标题自己也是一节、但没有段落。
  */
-const SELECT_TARGET = `(() => {
-  const art = document.querySelector('article.smb-doc');
-  if (!art) return null;
-  const paras = Array.from(art.querySelectorAll('.smb-sec-block p'));
-  const pick = paras.find((p) => (p.textContent || '').trim().length >= 24);
-  if (!pick) return null;
-  pick.scrollIntoView({ block: 'center', behavior: 'instant' });
-  const walker = document.createTreeWalker(pick, NodeFilter.SHOW_TEXT);
-  let node = walker.nextNode();
-  while (node && node.nodeValue.trim().length < 12) node = walker.nextNode();
-  if (!node) return null;
-  const range = document.createRange();
-  range.setStart(node, 0);
-  range.setEnd(node, Math.min(node.nodeValue.length, 40));
-  const rects = Array.from(range.getClientRects()).filter((r) => r.width > 1 && r.height > 1);
-  if (!rects.length) return null;
-  const first = rects[0];
-  const last = rects[rects.length - 1];
-  return {
-    text: range.toString(),
-    lines: rects.length,
-    section: (pick.closest('.smb-sec-block') || {}).id || '',
-    from: { x: Math.round(first.left) + 1, y: Math.round(first.top + first.height / 2) },
-    to: { x: Math.round(last.right) - 1, y: Math.round(last.top + last.height / 2) },
-  };
-})()`;
+function selectTargetIn(title, take) {
+  return `(() => {
+    const art = document.querySelector('article.smb-doc');
+    if (!art) return null;
+    const blocks = Array.from(art.querySelectorAll('.smb-sec-block'));
+    const wanted = ${JSON.stringify(title || '')};
+    const scoped = wanted
+      ? blocks.filter((el) => { const head = el.querySelector('h2'); return head && head.textContent.trim() === wanted; })
+      : blocks;
+    let pick = null;
+    for (const one of scoped) {
+      pick = Array.from(one.querySelectorAll('p')).find((p) => (p.textContent || '').trim().length >= 24);
+      if (pick) break;
+    }
+    if (!pick) return null;
+    const block = pick.closest('.smb-sec-block') || scoped[0];
+    pick.scrollIntoView({ block: 'center', behavior: 'instant' });
+    const walker = document.createTreeWalker(pick, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node && node.nodeValue.trim().length < 12) node = walker.nextNode();
+    if (!node) return null;
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, Math.min(node.nodeValue.length, ${Number(take) || 40}));
+    const rects = Array.from(range.getClientRects()).filter((r) => r.width > 1 && r.height > 1);
+    if (!rects.length) return null;
+    const first = rects[0];
+    const last = rects[rects.length - 1];
+    return {
+      text: range.toString(),
+      section: block.id,
+      sectionTitle: (block.querySelector('h2') || {}).textContent || '',
+      from: { x: Math.round(first.left) + 1, y: Math.round(first.top + first.height / 2) },
+      to: { x: Math.round(last.right) - 1, y: Math.round(last.top + last.height / 2) },
+    };
+  })()`;
+}
+
+const SELECT_TARGET = selectTargetIn('', 40);
 
 const OPEN_SUBJECT = `(() => {
   const cards = Array.from(document.querySelectorAll('[data-proto="nav-subject"]'));
@@ -472,10 +619,10 @@ try {
     return { creates: seen.creates, retains: seen.retains, providers: seen.providers, body };
   });
 
-  /* ── 二、切走 tab 再切回来：会话还在（不重复建），引用也还在 ────────────── */
+  /* ── 二、划一段 → chip 进草稿；点输入框 / 切 tab 都不丢；点得开、删得掉 ────── */
   await session.scene('ask-session-keep', async (ctx) => {
     await openLesson(ctx);
-    // 先划一段正文：面板上看得见那一段与它的来源（#92 保留下来的那半；chip 归 #106）
+    // 先划一段正文：面板上看得见那一段与它的来源，而且它已经进了那条会话的草稿（#106）
     const target = await ctx.evaluate(SELECT_TARGET);
     check('[保持] 取到了要划的那一段正文', !!target && target.text.trim().length >= 8, JSON.stringify(target));
     if (target) await dragSelect(session, target);
@@ -489,7 +636,43 @@ try {
       !!opened.quoteText && opened.quoteText.includes('绑定'),
       JSON.stringify(opened.quoteText));
 
-    // 切到「题目」再切回「问答」：面板会被卸载重挂——会话与引用都该还在，且不该再建一条
+    /* #106：chip 那一半的正面判据——注册的来源、草稿里那颗、以及**提交时会送出去的文字** */
+    const first = await ctx.evaluate(CHIP_PROBE);
+    check('[chip] 引用来源在插件激活时就注册着（trigger @、名字不撞宿主、codec 在册）',
+      first.sources.length === 1 && first.sources[0].trigger === '@'
+      && first.sources[0].name === 'studymate' && first.sources[0].hasCodec,
+      JSON.stringify(first.sources));
+    check('[chip] 划中的那段真的进了那条会话的草稿（宿主没有提交钩子，这一步不能省）',
+      first.chipCount === 1 && first.chips[0].source === 'studymate',
+      `chips=${JSON.stringify(first.chips)}`);
+    check('[chip] 提交时送出去的就是那段原文 + 来源锚点（走 codec.serialize）',
+      !!first.serialized[0] && first.serialized[0].includes(target.text.trim())
+      && first.serialized[0].includes('小节「绑定」') && first.serialized[0].includes('1-变量.md'),
+      JSON.stringify(first.serialized));
+    check('[chip] 面板上那颗写着原文与来源小节，点开看全文与删掉的入口都在',
+      !!first.panelChip && first.panelChip.includes('绑定') && !!first.panelWhere
+      && first.panelWhere.includes('小节「绑定」') && first.hasToggle && first.hasDrop,
+      `chip=${JSON.stringify(first.panelChip)} where=${JSON.stringify(first.panelWhere)}`);
+
+    // 点开看原文：完整那一段出来（chip 上一行是省略形态）
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-quote-toggle"]').click()`);
+    await ctx.sleep(200);
+    const unfolded = await ctx.evaluate(CHIP_PROBE);
+    check('[chip] 点开 chip 看到完整原文与来源小节',
+      unfolded.quoteOpen === '1' && !!unfolded.fullText && unfolded.fullText.includes(target.text.trim()),
+      `open=${unfolded.quoteOpen} full=${JSON.stringify(unfolded.fullText)}`);
+
+    // 「点输入框」：宿主正文那一格点一下（文档选区被折叠成空），引用不该被抹掉
+    const spot = await ctx.evaluate(pointOf('[data-proto="host-conversation"]', 20));
+    check('[保持] 取到了宿主正文那一格的位置（点它 = 点输入框）', !!spot, JSON.stringify(spot));
+    if (spot) await clickAt(session, spot);
+    const afterClick = await ctx.evaluate(CHIP_PROBE);
+    check('[chip] 点输入框之后 chip 还在（草稿里也还是那一颗，没多出第二颗）',
+      !!afterClick.panelChip && afterClick.chipCount === 1
+      && afterClick.chips[0].ref === first.chips[0].ref,
+      `chip=${JSON.stringify(afterClick.panelChip)} chips=${JSON.stringify(afterClick.chips)}`);
+
+    // 切到「题目」再切回「问答」：面板会被卸载重挂——会话、chip 与草稿里那一颗都该还在
     await ctx.evaluate(OPEN_QUIZ);
     await ctx.sleep(300);
     const onQuiz = await ctx.evaluate(SESSION_PROBE);
@@ -502,10 +685,84 @@ try {
       && back.retains[back.retains.length - 1].id === 'qa-fixture-1',
       `creates=${back.creates} retains=${JSON.stringify(back.retains)}`);
     check('[保持] 切回来之后引用也还在',
-      back.quoteText === opened.quoteText && !!back.quoteText,
-      `before=${JSON.stringify(opened.quoteText)} after=${JSON.stringify(back.quoteText)}`);
+      back.quoteText === unfolded.panelChip && !!back.quoteText,
+      `before=${JSON.stringify(unfolded.panelChip)} after=${JSON.stringify(back.quoteText)}`);
+    const kept = await ctx.evaluate(CHIP_PROBE);
+    check('[chip] 切回来草稿里还是那一颗（重挂不许把同一段插成两颗）',
+      kept.chipCount === 1 && kept.chips[0].ref === first.chips[0].ref,
+      JSON.stringify(kept.chips));
 
-    return { quote: opened.quoteText, keeps: back.retains.length, creates: back.creates };
+    return { quote: opened.quoteText, keeps: back.retains.length, creates: back.creates, ref: first.chips[0].ref };
+  });
+
+  /* ── 二之二、再划一段：旧的被换掉（同一会话只挂一条，不攒成两颗） ──────────── */
+  await session.scene('ask-chip-replace', async (ctx) => {
+    await openLesson(ctx);
+    const first = await ctx.evaluate(selectTargetIn('绑定', 40));
+    check('[换掉] 取到了第一段（绑定）', !!first && first.text.trim().length >= 8, JSON.stringify(first));
+    if (first) await dragSelect(session, first);
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
+    await ctx.sleep(600);
+    const before = await ctx.evaluate(CHIP_PROBE);
+    check('[换掉] 第一段已经进了草稿', before.chipCount === 1, JSON.stringify(before.chips));
+
+    const second = await ctx.evaluate(selectTargetIn('小结', 40));
+    check('[换掉] 取到了第二段（小结，另一节）',
+      !!second && second.text.trim().length >= 8 && second.sectionTitle.trim() === '小结',
+      JSON.stringify(second));
+    if (second) await dragSelect(session, second);
+    await ctx.sleep(400);
+    const after = await ctx.evaluate(CHIP_PROBE);
+
+    check('[换掉] 还是只有一颗 chip（新选区换掉旧的，不是攒成两颗）',
+      after.chipCount === 1, JSON.stringify(after.chips));
+    check('[换掉] 那一颗换成了新的一段（ref 变了）',
+      after.chips[0].ref !== before.chips[0].ref, 'ref 没变：旧的没被换掉');
+    check('[换掉] 送出去的是新那段 + 它的来源小节（旧那段的原文不在草稿里了）',
+      !!after.serialized[0] && after.serialized[0].includes(second.text.trim())
+      && after.serialized[0].includes('小节「小结」')
+      && !after.draftText.includes(first.text.trim()),
+      JSON.stringify(after.serialized));
+
+    return { chips: after.chips.length, serialized: after.serialized[0] };
+  });
+
+  /* ── 二之三、删掉 chip：草稿里那颗也撤掉，照样能直接提问 ──────────────────── */
+  await session.scene('ask-chip-drop', async (ctx) => {
+    await openLesson(ctx);
+    const target = await ctx.evaluate(SELECT_TARGET);
+    if (target) await dragSelect(session, target);
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
+    await ctx.sleep(600);
+    const before = await ctx.evaluate(CHIP_PROBE);
+    check('[删掉] 划一段之后草稿里有一颗', before.chipCount === 1, JSON.stringify(before.chips));
+
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-quote-clear"]').click()`);
+    await ctx.sleep(300);
+    const after = await ctx.evaluate(CHIP_PROBE);
+    check('[删掉] chip 从面板上没了，草稿里那颗也撤掉了',
+      after.panelChip === null && after.chipCount === 0 && !after.draftText.includes(target.text.trim()),
+      `panel=${JSON.stringify(after.panelChip)} chips=${JSON.stringify(after.chips)} draft=${JSON.stringify(after.draftText)}`);
+    check('[删掉] 删掉之后照样能直接提问（面板与宿主输入框都还在）',
+      after.embedded && !after.hasDrop, `embedded=${after.embedded} drop=${after.hasDrop}`);
+
+    return { draft: after.draftText, chips: after.chipCount };
+  });
+
+  /* ── 二之四、太短的选区（误触）不产生 chip ──────────────────────────────── */
+  await session.scene('ask-chip-short', async (ctx) => {
+    await openLesson(ctx);
+    await openAskTab(ctx);                       // 面板先开着：太短也不该冒出一颗
+    const target = await ctx.evaluate(selectTargetIn('绑定', 2));
+    check('[太短] 取到了一个两字的选区', !!target && [...target.text.trim()].length <= 3, JSON.stringify(target));
+    if (target) await dragSelect(session, target);
+    const seen = await ctx.evaluate(CHIP_PROBE);
+    check('[太短] 两字的误触不产生 chip（面板上没有、草稿里也没有）',
+      seen.panelChip === null && seen.chipCount === 0,
+      `panel=${JSON.stringify(seen.panelChip)} chips=${JSON.stringify(seen.chips)}`);
+    check('[太短] 浮出的「就这段问一句」也没有', seen.floatChip === null, String(seen.floatChip));
+
+    return { chips: seen.chipCount };
   });
 
   /* ── 三、「新对话」建新的并换过去；「上一段会话」只列答疑会话 ────────────── */
