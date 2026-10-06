@@ -34,7 +34,8 @@ export const ROUTE_ERROR_CODES = [
   'file-shape-unknown', 'http-error', 'internal', 'lesson-missing', 'lesson-not-found', 'markdown-invalid',
   'method-not-allowed', 'model-empty', 'model-error', 'model-unavailable', 'name-conflict',
   'network', 'no-workspace', 'node-invalid', 'operation-id-conflict', 'operation-id-invalid',
-  'path-invalid', 'question-required', 'questions-invalid', 'subject-invalid', 'title-invalid',
+  'path-invalid', 'preset-unavailable', 'question-required', 'questions-invalid',
+  'session-create-failed', 'subject-invalid', 'title-invalid',
   'topic-invalid', 'version-conflict', 'workspace-missing', 'write-failed', 'write-verification-failed',
 ] as const;
 

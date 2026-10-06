@@ -159,6 +159,10 @@ const groups = {
       // Host 那一半用**注入的假 llm** 证明链路通（真模型调用要花额度，门禁里不跑）。
       'scripts/tests/test_client_ask_panel.mjs',
       'scripts/tests/test_host_ask_route.mjs',
+      // #105：问答面板改成宿主的一条真会话。建会话只能走宿主半（客户端 sessions.create 把
+      // agentPreset 静默丢掉），所以这条钉的是「按答疑预设建、带 cwd、标题拼法与识别、共享
+      // 记忆只注入一次、没有模型就不建会话」。先例同上（假 ctx）。
+      'scripts/tests/test_host_ask_session.mjs',
       // #92：选中正文冻成一条**留得住的引用**（文本 + 来源锚点）。捕获那一下的判据在 Node 里
       // 用假 DOM 逐个喂（含各种「读到空选区」的触发方式，都不得清掉已存在的引用），面板那一半
       // 断言它渲染这条引用、提交时随问题送出、答成了才清。真鼠标拖拽那一条在 --browser 组。

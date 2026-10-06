@@ -30,6 +30,9 @@ import { cmpCodePoints } from '../core/format.ts';
 import { errorBody, routeError } from '../route-envelope.ts';
 import { resolveWorkspace } from '../workspace.ts';
 import { writeMisconception, ASK_SOURCE } from '../misconceptions.ts';
+// 共享记忆的读法住在 memory.ts：`/ask` 与「建答疑会话」两条路由共用，互相 import 会成环
+import { readMemoryFromWorkspace } from './memory.ts';
+import { registerAskSessionRoute } from './session.ts';
 
 /** 与 `bin/dsh-plugin.ts` 里三条路由同一个命名空间（`/api/studymate/…`）。 */
 export const ASK_PATH = '/api/studymate/ask';
@@ -155,15 +158,6 @@ export function readLessonFromWorkspace({ workspace, subject, node }: { workspac
     return null;
   }
   return { markdown, file, rel: `${subject}/${file}` };
-}
-
-/** 真宿主里的共享记忆：`.learning/MEMORY.md`；读不到就是空（不是错误）。 */
-export function readMemoryFromWorkspace(workspace: string): string {
-  try {
-    return fs.readFileSync(path.resolve(workspace, '.learning', 'MEMORY.md'), 'utf8');
-  } catch {
-    return '';
-  }
 }
 
 /** 从 `ctx.llm.stream(...)` 的块流里拼出整段文本。**唯一会花钱的那一步。** */
@@ -379,6 +373,8 @@ export function stripFrontMatter(markdown: string): string {
 
 /** `ctx.inject(['connection'], …)` 给的那层上下文：只用到这几个成员。 */
 export interface AskRouteContext {
+  /** 插件根 ctx 上的预设注册表：建答疑会话那条路由（#105）要用它 */
+  agentPresets?: unknown;
   connection?: { fetch?: { register?: (route: unknown) => unknown } };
   effect?: (fn: () => unknown, description?: string) => unknown;
   get?: (name: string) => unknown;
@@ -399,6 +395,9 @@ function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>, ms: number): P
  * 每次请求**现读**工作区与共享记忆（学习文件是纯文本、体量小，目标态 §12「按需扫描足够」）。
  */
 export function registerAskRoute(ctx: AskRouteContext): void {
+  // #105：问答域现在有**两条**路由。建答疑会话那条自己 inject(['connection'])，这里
+  // 顺手一起挂——`bin/dsh-plugin.ts` 只认 `registerAskRoute` 这一个入口（那一行不动）。
+  registerAskSessionRoute(ctx);
   if (typeof ctx.inject !== 'function') return;
   ctx.inject(['connection'], (connectionCtx: any) => {
     const connection = connectionCtx?.connection;
