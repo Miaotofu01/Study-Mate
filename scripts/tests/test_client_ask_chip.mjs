@@ -11,11 +11,13 @@
      3. **进草稿那条调用序列**（插入 / 换掉 / 撤掉）：同一会话只挂一条，再划一段换掉旧的；
         `draftRev` 的 CAS 失败要重试或把话说明白，别静默丢。
 
-   夹具：`fixtures/client_harness.mjs`（React 桩 + `apply(fakeCtx)`）+ 一份**假输入门面**。
-   假门面照宿主的行为写照：`state.getSnapshot()` 给 `{draft, draftRev, occurrences}`，
-   `insertReference` 在 `span.draftRev` 过期时静默返回 false、成功时把这一段换成一颗 chip
-   （后面跟一个分隔用的空格）。Node 里没有真选区与真编辑器——真鼠标拖拽那一条在
-   `browser/ask_quote_test.mjs`。数据现造现弃。
+   夹具：`fixtures/client_harness.mjs`（React 桩 + `apply(fakeCtx)`）+ `fixtures/ask_draft_facade.js`
+   那份**假输入门面**（与浏览器夹具 `browser/ask_quote_test.mjs` 共用同一份）。假门面照宿主的
+   行为写照，**而且同时照两套投影**：`state.getSnapshot()` 给 `{draft, draftRev, detectText,
+   clipboardText, occurrences, selection, caret}`——`occurrences[].offset/length` 是**剪贴板**
+   坐标（一颗 chip 占它的 `clipboardText` 那么长），而 `insertReference` / `insertText` 收到的
+   span 按 **detect** 长度校验（一颗 chip 恒占 1 个字，越界就拒——照宿主 `selectSpan` 的行为）。
+   Node 里没有真选区与真编辑器——真鼠标拖拽那一条在 `browser/ask_quote_test.mjs`。数据现造现弃。
    ──────────────────────────────────────────────────────────────────────────────── */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,6 +25,7 @@ import assert from 'node:assert/strict';
 import {
   clientInternals, drainEffects, findByProp, loadClient, renderWithState, resetHookState, setHookState,
 } from './fixtures/client_harness.mjs';
+import { makeAskDraft, CHIP_PLACEHOLDER } from './fixtures/ask_draft_facade.mjs';
 
 const internals = clientInternals();
 const {
@@ -30,7 +33,8 @@ const {
   QUOTE_TRIGGER, QUOTE_SOURCE_NAME, QUOTE_REF_KIND,
   encodeQuoteRef, decodeQuoteRef, quoteForModel, quoteForClipboard, shortQuote, quoteSource,
   referenceInsertFor, quoteReferenceSource, quoteSlots,
-  ourOccurrence, putQuoteInDraft, dropQuoteFromDraft,
+  inputFacadeFor, ourOccurrence, putQuoteInDraft, dropQuoteFromDraft,
+  detectLengthOf, detectOffsetOfClipboardOffset, chipDetectSpan,
 } = internals;
 
 const TEXT = '别名只是同一个值的两个名字：改了 a，b 也跟着变——它俩指向同一个值。';
@@ -38,75 +42,13 @@ const ANCHOR = { lesson: 'demo/1-变量.md', section: 'binding-2', sectionTitle:
 const QUOTE = { text: TEXT, anchor: ANCHOR };
 const HOST_TAKEN = ['reference', 'skill', 'command'];
 
-/* ── 假输入门面：照宿主的行为写照 ───────────────────────────────────────── */
+/* ── 假输入门面：共用夹具 + 这一套要的「一条会话」那一层 ─────────────────── */
 
-/** 一份假草稿：`draft` + 已插进去的 chip（occurrences）+ 单调的 `draftRev`。 */
-function fakeDraft(initial = '') {
-  const listeners = [];
-  const notices = [];
-  const facade = {
-    rev: 1,
-    draft: initial,
-    chips: [],
-    notices,
-    state: {
-      getSnapshot: () => ({
-        draft: facade.draft,
-        draftRev: facade.rev,
-        phase: 'plain',
-        occurrences: facade.chips.map((chip) => Object.assign({}, chip)),
-      }),
-      subscribe(fn) { listeners.push(fn); return () => { const at = listeners.indexOf(fn); if (at >= 0) listeners.splice(at, 1); }; },
-    },
-    notify(level, text) { notices.push({ level, text }); },
-    insertReference(ref, span) {
-      if (span.draftRev !== facade.rev) return false;          // CAS：坐标过期就静默让位
-      const tail = facade.draft.slice(span.end, span.end + 1);
-      splice(tail === ' ' ? ref.clipboardText : ref.clipboardText + ' ', span, {
-        occurrenceId: facade.chips.length + 1,
-        source: ref.source,
-        ref: ref.ref,
-        label: ref.label,
-        clipboardText: ref.clipboardText,
-      });
-      return true;
-    },
-    insertText(text, span) {
-      if (span.draftRev !== facade.rev) return false;
-      splice(text, span, null);
-      return true;
-    },
-    setDraft(text) {
-      facade.draft = text;
-      facade.chips = [];
-      bump();
-    },
-  };
-
-  /** 把 `[span.start, span.end)` 换成 `text`；与这一段交叠的 chip 跟着一起被换掉。 */
-  function splice(text, span, chip) {
-    const covered = facade.draft.slice(span.start, span.end);
-    const delta = text.length - covered.length;
-    facade.draft = facade.draft.slice(0, span.start) + text + facade.draft.slice(span.end);
-    const kept = [];
-    for (const one of facade.chips) {
-      if (one.offset + one.length <= span.start) { kept.push(one); continue; }
-      if (one.offset >= span.end) { one.offset += delta; kept.push(one); continue; }
-    }
-    facade.chips = kept;
-    if (chip) {
-      facade.chips.push(Object.assign({}, chip, { offset: span.start, length: chip.clipboardText.length }));
-      facade.chips.sort((a, b) => a.offset - b.offset);
-    }
-    bump();
-  }
-
-  function bump() {
-    facade.rev += 1;
-    for (const fn of listeners.slice()) fn();
-  }
-
-  return facade;
+/** 一条假草稿。`sessionId` 就是 `conversation.input.for` 认的那个作用域。 */
+function fakeDraft(sessionId, initial = '') {
+  const draft = makeAskDraft({ initial });
+  draft.session = sessionId;
+  return draft;
 }
 
 /** 照宿主 `sessions.retain()` 给的那条引用：`binding.ctx` 就是输入门面的 `actx`。 */
@@ -138,7 +80,7 @@ function boot({ draft = null } = {}) {
   const conversation = {
     input: {
       for(actx) {
-        if (!actx || !draft || actx.__session !== draft.__session) throw new Error('conversation.input.for requires a retained Session scope');
+        if (!actx || !draft || actx.__session !== draft.session) throw new Error('conversation.input.for requires a retained Session scope');
         return draft;
       },
     },
@@ -289,8 +231,7 @@ test('#106 注册：挂在插件 fiber 上——插件活着它就注册着，�
 /* ══ 四、进草稿：插入 / 换掉 / 撤掉 ═══════════════════════════════════════ */
 
 test('#106 插入：草稿里没有我们的 chip 就落在末尾，且只有一个 ref', () => {
-  const draft = fakeDraft('请讲讲这个');
-  draft.__session = 'qa-1';
+  const draft = fakeDraft('qa-1', '请讲讲这个');
   const slot = held('qa-1', draft);
   boot({ draft });
 
@@ -305,8 +246,7 @@ test('#106 插入：草稿里没有我们的 chip 就落在末尾，且只有一
 });
 
 test('#106 换掉：同一会话只挂一条——再划一段换掉旧的，不攒成两颗', () => {
-  const draft = fakeDraft('前缀 ');
-  draft.__session = 'qa-1';
+  const draft = fakeDraft('qa-1', '前缀 ');
   boot({ draft });
   const slot = held('qa-1', draft);
 
@@ -319,9 +259,86 @@ test('#106 换掉：同一会话只挂一条——再划一段换掉旧的，不
   assert.ok(draft.draft.startsWith('前缀 '), '打好的字被动了：' + draft.draft);
 });
 
+/* ── 两套投影：chip 的 detect 坐标是一个字，不是 clipboardText 那么长 ────────
+   宿主的事实（见 fixtures/ask_draft_facade.js 的文件头）：`occurrences[].offset/length`
+   是**剪贴板**坐标，而 `insertReference` / `insertText` 的 `span` 要的是 **detect** 坐标。
+   这两条断言就是把「实现拿错了哪一套坐标」钉死。 */
+
+test('#106 坐标：chip 在 detect 投影里恒占 1 个字，检测长度 = 剪贴板长度 − Σ(length−1)', () => {
+  const draft = fakeDraft('qa-1', '前缀 ');
+  boot({ draft });
+  assert.equal(putQuoteInDraft(held('qa-1', draft), QUOTE), 'in');
+  const now = draft.state.getSnapshot();
+  const chip = ourOccurrence(now);
+  const span = chipDetectSpan(chip, now.occurrences);
+  assert.equal(now.clipboardText.slice(chip.offset, chip.offset + chip.length), chip.clipboardText,
+    '夹具自身写错了：occurrence 的 offset/length 该是剪贴板坐标');
+  assert.equal(now.detectText.slice(span.start, span.end), CHIP_PLACEHOLDER,
+    'chip 在 detect 投影里该正好占一个占位符');
+  assert.equal(span.end, span.start + 1, 'chip 的 detect 长度必须是 1');
+  assert.ok(chip.length > 1, '这条断言的对照价值在于 clipboardText 确实比 1 长');
+  assert.equal(detectLengthOf(now), now.clipboardText.length - (chip.length - 1),
+    'detect 长度折算错了');
+  assert.equal(detectLengthOf(now), now.detectText.length);
+  // 剪贴板偏移 → detect 偏移：chip 的首尾都在同一个字上（这就是 >> 换了坐标 << 会越界的根）
+  assert.equal(detectOffsetOfClipboardOffset(now.occurrences, chip.offset), span.start);
+  assert.equal(detectOffsetOfClipboardOffset(now.occurrences, chip.offset + chip.length), span.end);
+});
+
+test('#106 坐标：chip 后面有学生打的字时，换掉只动那一颗 chip——不连带删字', () => {
+  const draft = fakeDraft('qa-1', '先说一句：');
+  boot({ draft });
+  const slot = held('qa-1', draft);
+  assert.equal(putQuoteInDraft(slot, QUOTE), 'in');
+  // 学生接着在 chip **后面**打了一段字（宿主草稿里 chip 之后可以有文字）
+  draft.insertText('再问一句', { start: draft.detect.length, end: draft.detect.length, draftRev: draft.rev });
+  const after = draft.draft;
+  assert.ok(after.includes('再问一句'), '夹具没把后面那段字放进去：' + after);
+  const tail = after.slice(after.indexOf('再问一句'));
+
+  const second = { text: '换一段：别名只是同一个值的两个名字。', anchor: ANCHOR };
+  assert.equal(putQuoteInDraft(slot, second), 'in');
+  // 只有那一颗 chip 被换掉：学生打的字一个不落
+  assert.equal(draft.chips.length, 1, '换完该还是只有一颗 chip：' + JSON.stringify(draft.chips));
+  assert.equal(draft.draft.includes(TEXT), false, '旧那一段还留在草稿里：' + draft.draft);
+  assert.ok(draft.draft.includes(tail.trim()), 'chip 后面学生打的字被连带删了：' + draft.draft);
+  assert.equal(decodeQuoteRef(draft.chips[0].ref).text, second.text);
+});
+
+test('#106 坐标：chip 后头还跟着别的来源的 chip（宿主自己的 @ 引用）时，新建不越界', () => {
+  const draft = fakeDraft('qa-1', '');
+  boot({ draft });
+  // 先放一颗**别的来源**的 chip：剪贴板里它很长，detect 里只占 1 个字。
+  // 旧实现拿剪贴板长度当 detect 落点，这一条会在 span.end > detectLength 上被拒。
+  assert.equal(draft.insertReference(
+    { source: 'file', ref: 'demo/x.md', label: 'x.md', clipboardText: 'x.md（宿主自己的引用）' },
+    { start: 0, end: 0, draftRev: draft.rev },
+  ), true);
+  assert.equal(putQuoteInDraft(held('qa-1', draft), QUOTE), 'in');
+  assert.equal(draft.chips.length, 2, '我们的 chip 没插进去：' + JSON.stringify(draft.chips));
+  const ours = ourOccurrence(draft.state.getSnapshot());
+  assert.ok(ours, '草稿里找不到我们的 chip');
+  assert.equal(decodeQuoteRef(ours.ref).text, TEXT);
+  // 落点紧接着宿主那颗（而不是「剪贴板长度那么远」的越界处）
+  assert.equal(ours.offset, 'x.md（宿主自己的引用） '.length, '我们的 chip 没落在宿主那颗之后：' + ours.offset);
+  assert.ok(draft.draft.startsWith('x.md（宿主自己的引用）'), '宿主那颗被动了：' + draft.draft);
+});
+
+test('#106 坐标：草稿里有光标/选区时新建落在它那里（detect 空间），不是剪贴板长度处', () => {
+  const draft = fakeDraft('qa-1', '前一段话');
+  boot({ draft });
+  draft.select(2);                                  // detect 空间里第 2 个字之后
+  assert.equal(putQuoteInDraft(held('qa-1', draft), QUOTE), 'in');
+  const now = draft.state.getSnapshot();
+  const chip = ourOccurrence(now);
+  // 「前一段话」的前两个字留在 chip 前面——插进去的位置是 detect 的 2，不是草稿末尾
+  assert.ok(draft.draft.startsWith('前一'), '落点不是光标那里：' + draft.draft);
+  assert.equal(now.detectText.indexOf(CHIP_PLACEHOLDER), 2, 'detect 空间的落点不是 2：' + now.detectText);
+  assert.equal(chip.offset, 2, '剪贴板空间的落点也该是 2（前面没有别的 chip）');
+});
+
 test('#106 CAS：坐标过期（draftRev 让了一次）要重读状态重试，别静默丢', () => {
-  const draft = fakeDraft('');
-  draft.__session = 'qa-1';
+  const draft = fakeDraft('qa-1');
   // 第一次调用让 rev 先过期一次：insertReference 会静默返回 false
   const rawInsert = draft.insertReference;
   let first = true;
@@ -338,8 +355,7 @@ test('#106 CAS：坐标过期（draftRev 让了一次）要重读状态重试，
 });
 
 test('#106 CAS：两次都让位才认输——返回 failed（调用方据此给一句可读提示）', () => {
-  const draft = fakeDraft('');
-  draft.__session = 'qa-1';
+  const draft = fakeDraft('qa-1');
   draft.insertReference = () => false;
   boot({ draft });
   assert.equal(putQuoteInDraft(held('qa-1', draft), QUOTE), 'failed');
@@ -353,18 +369,38 @@ test('#106 拿不到输入门面 / 没有那件服务：返回 unavailable，不
 });
 
 test('#106 撤掉：把草稿里我们那一颗剪掉，别的字与别的 chip 都不动', () => {
-  const draft = fakeDraft('请讲讲：');
-  draft.__session = 'qa-1';
+  const draft = fakeDraft('qa-1', '请讲讲：');
   boot({ draft });
   const slot = held('qa-1', draft);
   putQuoteInDraft(slot, QUOTE);
+  // 学生接着在 chip 后面打字（宿主草稿里 chip 之后可以有文字）。注意 chip 后面那个分隔空格
+  // 是宿主 `insertReference` 自己加的，撤掉 chip 不会把它一起收走——这正是「只动这一段」。
+  draft.insertText('再补一句', { start: draft.detect.length, end: draft.detect.length, draftRev: draft.rev });
+  const withChip = draft.draft;
+  assert.ok(withChip.includes('再补一句'), '夹具没把后面那段字放进去：' + withChip);
 
   assert.equal(dropQuoteFromDraft(slot), 'gone');
   assert.equal(draft.chips.length, 0);
-  assert.equal(draft.draft.trim(), '请讲讲：', `草稿没回到原样：${JSON.stringify(draft.draft)}`);
+  assert.equal(draft.draft, '请讲讲： 再补一句', `草稿没回到「原文 + 分隔空格 + 后打的字」：${JSON.stringify(draft.draft)}`);
   assert.equal(draft.draft.includes(TEXT), false);
   // 已经没有那一颗了：再来一次是空操作，不是错
   assert.equal(dropQuoteFromDraft(slot), 'gone');
+});
+
+test('#106 撤掉：别的来源的 chip 与我们那颗一起在时，只撤我们那颗（剪贴板退路切的是剪贴板坐标）', () => {
+  const draft = fakeDraft('qa-1', '');
+  boot({ draft });
+  draft.insertReference(
+    { source: 'file', ref: 'demo/x.md', label: 'x.md', clipboardText: 'x.md（宿主自己的引用）' },
+    { start: 0, end: 0, draftRev: draft.rev },
+  );
+  const slot = held('qa-1', draft);
+  putQuoteInDraft(slot, QUOTE);
+  assert.equal(draft.chips.length, 2, '前置条件：两颗 chip 都在');
+  assert.equal(dropQuoteFromDraft(slot), 'gone');
+  assert.equal(draft.chips.length, 1, '只该撤掉我们那一颗');
+  assert.equal(draft.chips[0].source, 'file', '撤错了对象：' + JSON.stringify(draft.chips));
+  assert.ok(draft.draft.includes('x.md（宿主自己的引用）'), '宿主那颗的字被动了：' + draft.draft);
 });
 
 /* ══ 五、面板上那颗 chip：看得见、点得开、删得掉 ═════════════════════════ */
@@ -400,8 +436,7 @@ test('#106 chip 界面：原文 + 来源小节在，点开看全文的入口在�
 });
 
 test('#106 删除：点一下删掉，草稿里那颗跟着撤掉，学生照样能直接提问', () => {
-  const draft = fakeDraft('先谢谢');
-  draft.__session = 'qa-1';
+  const draft = fakeDraft('qa-1', '先谢谢');
   boot({ draft });
   const slot = held('qa-1', draft);
   const cleared = [];
@@ -430,8 +465,7 @@ test('#106 删除：点一下删掉，草稿里那颗跟着撤掉，学生照样
 });
 
 test('#106 提交即让位：草稿里那颗没了（消息真送出去了）就清掉面板上这一颗', () => {
-  const draft = fakeDraft('');
-  draft.__session = 'qa-1';
+  const draft = fakeDraft('qa-1');
   boot({ draft });
   const slot = held('qa-1', draft);
   const cleared = [];
@@ -450,8 +484,7 @@ test('#106 提交即让位：草稿里那颗没了（消息真送出去了）就
 });
 
 test('#106 提交没成功（草稿被还原）：chip 回来，引用留着——那一次什么都没送出去', () => {
-  const draft = fakeDraft('');
-  draft.__session = 'qa-1';
+  const draft = fakeDraft('qa-1');
   boot({ draft });
   const slot = held('qa-1', draft);
   const cleared = [];
