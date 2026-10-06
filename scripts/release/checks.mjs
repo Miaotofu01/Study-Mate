@@ -164,9 +164,14 @@ const groups = {
       // 记忆只注入一次、没有模型就不建会话」。先例同上（假 ctx）。
       'scripts/tests/test_host_ask_session.mjs',
       // #92：选中正文冻成一条**留得住的引用**（文本 + 来源锚点）。捕获那一下的判据在 Node 里
-      // 用假 DOM 逐个喂（含各种「读到空选区」的触发方式，都不得清掉已存在的引用），面板那一半
-      // 断言它渲染这条引用、提交时随问题送出、答成了才清。真鼠标拖拽那一条在 --browser 组。
+      // 用假 DOM 逐个喂（含各种「读到空选区」的触发方式，都不得清掉已存在的引用）。真鼠标拖拽
+      // 那一条在 --browser 组。
       'scripts/tests/test_client_ask_quote.mjs',
+      // #106：引用 chip（选中那段跟着**下一条消息**走）。`ref` 是字符串、没有反序列化入口，
+      // 所以「原文 + 来源锚点」的编解码 / `serialize` / `clipboardText` 是一对纯函数；引用来源
+      // 「插件激活时注册、卸载时注销」是承重的（提交那一刻找不到 owner 会让整次发送失败），
+      // 插入/换掉/撤掉那条调用序列用假输入门面（occurrences + draftRev CAS）逐条钉住。
+      'scripts/tests/test_client_ask_chip.mjs',
       // 监听域 lib/watch/**（#74）：变更通知的形状与域映射（纯）、目录集合监听（真 fs）、
       // 两条推送路（真 HTTP，bridge 与宿主同形）、阅读端「未变即同引用」（VM 里跑 lib/client.js）。
       // 真 DSH 里的端到端在 scripts/tests/test_dsh_runtime.mjs 的监听探针里。
