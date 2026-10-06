@@ -125,7 +125,7 @@ export interface AskSessionDeps {
 
 /** 回执。`available:false` = 确定没有可用模型；`ok:false` = 有模型但这次没建起来。 */
 export interface AskSessionView {
-  /** 模型能力探测的结论（与工具域、`/ask` 那条路由同一个形状） */
+  /** 模型能力探测的结论（与工具域同一个形状） */
   available: boolean;
   /** 这条会话建起来没有（`available:false` 时恒 false） */
   ok: boolean;
@@ -156,7 +156,7 @@ function errorView(code: string, message: string): AskSessionView {
   return { available: true, ...errorBody(code, message) } as AskSessionView;
 }
 
-/** 没有可用模型：`available:false` 是协商结果（与 `/ask` 那条路由同一口径）。 */
+/** 没有可用模型：`available:false` 是协商结果（与工具域同一口径）。 */
 function unavailableView(reason: string): AskSessionView {
   return { available: false, reason, ...errorBody('model-unavailable', reason) } as AskSessionView;
 }
@@ -205,7 +205,7 @@ async function releaseScope(scope: unknown): Promise<void> {
 export async function openAskSession(deps: AskSessionDeps, input: AskSessionInput = {}): Promise<AskSessionView> {
   const title = titleForAskSession(input.subject, input.node);
 
-  // 1. 能力探测（与工具域、`/ask` 同一份判据，见 lib/core/model.ts）
+  // 1. 能力探测（与工具域同一份判据，见 lib/core/model.ts）
   const capability = probeModel({ get: (name: string) => (name === 'llm' ? deps.llm : undefined) });
   if (!capability.available) return unavailableView(capability.reason ?? '模型能力不可用');
 
@@ -286,7 +286,7 @@ export async function openAskSession(deps: AskSessionDeps, input: AskSessionInpu
 
 /* ── 路由注册 ──────────────────────────────────────────────────────────── */
 
-/** `ctx.inject(['connection'], …)` 给的那层上下文：与 `lib/ask/route.ts` 同一形状。 */
+/** `ctx.inject(['connection'], …)` 给的那层上下文：与 `/api/studymate/*` 下其余路由同一形状。 */
 export interface AskSessionRouteContext {
   agentPresets?: unknown;
   connection?: { fetch?: { register?: (route: unknown) => unknown } };
@@ -296,8 +296,9 @@ export interface AskSessionRouteContext {
 }
 
 /**
- * 把「建答疑会话」挂到插件上。与 `/ask` 那条同一个姿势：`connection` 就绪才注册，缺了就不挂。
- * 由 `lib/ask/route.ts` 的 `registerAskRoute(ctx)` 一起注册（`bin/dsh-plugin.ts` 那一行不动）。
+ * 把「建答疑会话」挂到插件上。注册约定与其余路由逐字相同：`connection` 就绪才注册，缺了就不挂。
+ * 它是问答域**唯一**的注册入口（`bin/dsh-plugin.ts` 那一行调的就是它）——#107 之后这个域里
+ * 没有第二条路由了。
  */
 export function registerAskSessionRoute(ctx: AskSessionRouteContext): void {
   if (typeof ctx.inject !== 'function') return;

@@ -1,18 +1,23 @@
 /* ─────────────────────────────────────────────────────────────────────────
    StudyMate · Host 半数据层 —— 误解记录的追加（目标态规格 §5.4，单一落点）
 
-   阅读端的问答面板每次提问都要留一条记录：`topic / source / evidence / status / at`，
-   落点是**科目目录下的 `misconceptions.yaml`**（`progress.yaml` 不再重复存一份）。
+   误解记录的追加：`topic / source / evidence / status / at`，落点是**科目目录下的
+   `misconceptions.yaml`**（`progress.yaml` 不再重复存一份）。
+
+   **谁写**：讲解反馈与实验课验收那两类，由总控在会话里记事时落下。阅读端的问答面板自
+   #107 起**不写**误解记录（它是一条真会话，答完停在原地）——但 `source` 的 `问答面板`
+   这个**值**保留：旧学科里已经落盘的那些记录还要读得进、校验得过（读侧兼容，与旧六档
+   只活在读侧映射里同一条先例）。所以这份模块一个字都没退役，退役的只是面板那个写入方。
 
    「只追加」是这份文件的既有口径（工作区里的文件头自己写着「只追加，不做整篇重写」），
    所以这里也**不整篇重写**：读出现有字节，把新记录接在末尾。这样：
 
      · 学生/模型自己写的文件头注释、旧字段（`node` / `importance` / `follow_up`）原样留着——
-       学习档案是学生的积累，一次面板提问不该把别人的写法洗掉；
+       学习档案是学生的积累，一次写盘不该把别人的写法洗掉；
      · 版本号是**内容哈希**（不是目录清单）：写之前对不上就拒绝并重读，绝不覆盖别人的改动
        （栅栏两件武器之一，判据在 `lib/core/fence.ts`）；
      · 幂等键沿用同一套：同一个 `operationId` 重放只回放上次的回执，不写第二遍
-       （面板按钮双击、网络重试都会撞上这条）。
+       （双击、网络重试都会撞上这条）。
 
    为什么 `evidence` 写成**双引号标量**而不是块标量：它里面有提问原文与回答摘要，可能带引号、
    冒号、换行、甚至一段代码。块标量的缩进规则会被「内容里本来就有的空行 / 行首空白」咬到
@@ -35,7 +40,7 @@ import { parseYaml } from './yaml.ts';
 export interface MisconceptionInput {
   /** 卡在哪 */
   topic?: unknown;
-  /** 从哪来：问答面板 / 讲解反馈 / 实验课验收 */
+  /** 从哪来：问答面板（旧数据，读侧兼容） / 讲解反馈 / 实验课验收 */
   source?: unknown;
   /** 证据：提问原文、作答引用或验收结论 */
   evidence?: unknown;
@@ -79,8 +84,14 @@ const LEDGER = new IdempotencyLedger<MisconceptionWriteResult | MisconceptionRep
 const TOPIC_MAX = 120;
 const EVIDENCE_MAX = 2000;
 
-/** 面板每次都写这个来源（另外两个值只有总控/讲解/验收那条路会写）。 */
-export const ASK_SOURCE = '问答面板';
+/**
+ * 没给 `source` 时的兜底：按「讲解反馈」算。
+ *
+ * 与读侧归一（`lib/core/misconceptions.ts` 的 `normalizeMisconception`）同一句话、同一个值——
+ * 剩下的两个写入方（讲解反馈、实验课验收）里，讲解反馈是那条常态的路。`问答面板` 这个值仍
+ * 在词表与 schema 里（旧数据要校验得过），但**没有**任何写入方再拿它当默认。
+ */
+const DEFAULT_SOURCE = '讲解反馈';
 
 function isDirectory(target: string): boolean {
   try {
@@ -229,7 +240,7 @@ export function writeMisconception({
 
   const entry: Misconception = {
     topic,
-    source: text(raw.source) || ASK_SOURCE,
+    source: text(raw.source) || DEFAULT_SOURCE,
     evidence,
     status: text(raw.status) || '未处理',
     at: text(raw.at) || localDay(now instanceof Date ? now : new Date()),

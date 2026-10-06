@@ -137,7 +137,7 @@ ${hostTokenCss()}</style>
 /** 迷你宿主：library 现读，attempts 交给真路由；POST 与回执都记下来给断言用。 */
 async function startHost(workspace) {
   const routes = [];
-  // 注册约定：收外层 ctx、自己 inject(['connection'])（与 registerAskRoute 同一姿势）
+  // 注册约定：收外层 ctx、自己 inject(['connection'])（与 registerAskSessionRoute 同一姿势）
   registerAttemptRoutes({
     inject: (names, handler) => handler({
       connection: { fetch: { register: (route) => { routes.push(route); return () => {}; } } },

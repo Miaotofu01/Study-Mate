@@ -66,7 +66,7 @@ function makeHome() {
 }
 
 /* ── 挂路由：模拟宿主的**两层** ctx（外层 `inject` → 注入后的 connection ctx）──
-   注册约定与 `registerAskRoute` / `registerTaskRoute` 逐字相同：收外层 ctx、自己
+   注册约定与 `registerAskSessionRoute` / `registerTaskRoute` 逐字相同：收外层 ctx、自己
    `inject(['connection'])`。所以假 ctx 也要两层，`inject` 立刻回调（与宿主同一时机）。 */
 
 function connect() {
