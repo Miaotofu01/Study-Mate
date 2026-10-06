@@ -74,23 +74,32 @@ test('工作目录在本仓库里时，宿主默认的项目根扫描扫不到�
   }
 });
 
-test('学习预设显式声明技能目录，且只声明这一个', () => {
-  const plugins = parseYaml(fs.readFileSync(PRESET, 'utf8'),
-    { file: PRESET, tags: 'expression', blockScalars: true });
-  assert.ok(Array.isArray(plugins), '学习预设必须是插件列表');
-  const declaring = plugins.filter(row => row && typeof row === 'object'
-    && row.config && typeof row.config === 'object'
-    && (row.config.customSkillDirs !== undefined || row.config.includeDefaultRoots !== undefined));
-  assert.equal(declaring.length, 1, '技能目录只能有一个声明点：多一处就会有两份会漂的真相');
-  const row = declaring[0];
-  assert.equal(row.id, 'skill-filesystem');
-  assert.equal(row.config.includeDefaultRoots, false,
-    '学习会话不扫全局目录：那半本来是对的，别退回默认值');
-  assert.deepEqual(row.config.customSkillDirs, ['__STUDYMATE_SKILLS__'],
-    '技能目录由安装器写入绝对路径；占位符丢了就该在安装时抛（bin/studymate.mjs）');
+test('两条预设各自显式声明技能目录，且每条只声明一处', () => {
+  // #104 起有两条预设、两份声明：学习模式是全部 12 份，答疑模式**只**含 local-qa。
+  // 「只声明一处」这条判据一条都没放宽——每份预设里仍然只有一个 skill-filesystem 行，
+  // 多一处就是两个会漂的真相。
+  const expectations = [
+    ['学习模式', path.join(ROOT, 'preset', 'learning', 'agent.cordis.yml'), ['__STUDYMATE_SKILLS__']],
+    ['答疑模式', path.join(ROOT, 'preset', 'qa', 'agent.cordis.yml'), ['__STUDYMATE_SKILLS__/local-qa']],
+  ];
+  for (const [label, file, customSkillDirs] of expectations) {
+    const plugins = parseYaml(fs.readFileSync(file, 'utf8'),
+      { file, tags: 'expression', blockScalars: true });
+    assert.ok(Array.isArray(plugins), `${label}必须是插件列表`);
+    const declaring = plugins.filter(row => row && typeof row === 'object'
+      && row.config && typeof row.config === 'object'
+      && (row.config.customSkillDirs !== undefined || row.config.includeDefaultRoots !== undefined));
+    assert.equal(declaring.length, 1, `${label}：技能目录只能有一个声明点`);
+    const row = declaring[0];
+    assert.equal(row.id, 'skill-filesystem');
+    assert.equal(row.config.includeDefaultRoots, false,
+      `${label}不扫全局目录：那半本来是对的，别退回默认值`);
+    assert.deepEqual(row.config.customSkillDirs, customSkillDirs,
+      `${label}的技能目录由安装器写入绝对路径；占位符丢了就该在安装时抛（bin/studymate.mjs）`);
+  }
 });
 
-test('预设声明的技能目录在包内，装完之后技能照旧可加载', () => {
+test('预设声明的技能目录在包内真实存在，装完之后技能照旧可加载', () => {
   // 包内的技能源：原生加载下 <root> 就是包自身，所以安装器写进预设的绝对路径
   // 必须正好指向这里（standalone 那份是同一个相对位置在 engine 副本里，见 test_installer）。
   assert.equal(fs.existsSync(path.join(ROOT, 'preset', 'skills', 'learning-system', 'SKILL.md')), true);
@@ -102,6 +111,15 @@ test('预设声明的技能目录在包内，装完之后技能照旧可加载',
   // 声明的那个目录不能落在宿主默认会扫的位置上——换名字可以，换回扫描面不行。
   const declared = path.relative(ROOT, SKILLS).split(path.sep).join('/');
   assert.equal(SCANNED_FROM_PROJECT_ROOT.includes(declared), false);
+  // 答疑预设声明的根指向 `preset/skills/local-qa`：**恰好一个**技能（宿主只扫一层，
+  // `SKILL.md` 走「散装 .md」分支），而且它必须真在包里。
+  const qaRoot = path.join(SKILLS, 'local-qa');
+  assert.equal(fs.existsSync(path.join(qaRoot, 'SKILL.md')), true, '答疑模式的技能目录必须真在包里');
+  assert.deepEqual(fs.readdirSync(qaRoot, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && fs.existsSync(path.join(qaRoot, entry.name, 'SKILL.md')))
+    .map(entry => entry.name), [], '那个根下不该再嵌一层技能目录：它给出的是它自己那一个技能');
+  const qaDeclared = path.relative(ROOT, qaRoot).split(path.sep).join('/');
+  assert.equal(SCANNED_FROM_PROJECT_ROOT.includes(qaDeclared), false);
 });
 
 test('预设里少了技能目录占位符就装不上（搬家没把这条守卫绕过去）', async t => {

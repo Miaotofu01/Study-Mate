@@ -75,9 +75,9 @@ const skills = new Map([
     default_prompt: '请用 $evidence-check 的内部规范核验当前学习任务的真实作答和运行证据。',
   }],
   ['local-qa', {
-    description: 'StudyMate 局部答疑内部规范：阅读端问答面板就地回答选中内容的边界，以及答完写下的那条误解记录；面板不可用时由学习总控按同一套规则就地答。',
+    description: 'StudyMate 局部答疑内部规范：阅读端那段答疑会话就地回答选中内容的边界，不派角色、不安排课程、也不写误解记录；面板不可用时由学习总控按同一套规则就地答。',
     display_name: 'StudyMate · 学习答疑',
-    short_description: '供阅读端问答面板与学习总控就地回答局部疑问并留下一条误解记录',
+    short_description: '供阅读端答疑会话与学习总控就地回答局部疑问，不写记录、不派角色',
     default_prompt: '请用 $local-qa 的内部规范解答我在当前 StudyMate 课程中的局部疑问。',
   }],
 ]);

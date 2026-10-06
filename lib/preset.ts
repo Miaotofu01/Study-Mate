@@ -10,6 +10,11 @@
    现在 Python 退场了，这个形状一字不改地由这里产出（`installPreset` 的返回值），
    安装器直接读对象，不再有子进程与 JSON.parse。
 
+   #104 起这里注册的是**两条**预设：默认的「学习模式」与同一份发行里的「答疑模式」
+   （`extraPresets`，`preset/qa/`）。两条在**同一次**调用里产出——托管块的 BEGIN/END 只有
+   一套，分两次调用会让后一次把前一次那块剥掉。学习那一侧的返回值字段与托管块逐字不变，
+   答疑那条另给 `qaConfig`（additive）。
+
    **三件事，一件都不能少**：
 
      · 按 dsh 版本改写预设里的 workflow 行（0.1.6 起 `ptc`，之前是 `worker-thread`），
@@ -39,9 +44,16 @@ import { parseYaml } from './yaml.ts';
 const BEGIN = '# BEGIN STUDYMATE LEARNING PRESET';
 const END = '# END STUDYMATE LEARNING PRESET';
 const PLUGIN = '@deepseek-ai/dsh-agent-preset';
-const ENTRY_ID = 'studymate-learning-preset';
 const BUNDLE = '@yunmiao/studymate';
 const BUNDLE_ENTRY_ID = 'studymate';
+
+/** 主预设的 id：学习模式。托管块与冲突检查按它 + `extraPresets` 的 id 一起认「我们的预设」。 */
+const DEFAULT_PRESET_ID = 'learning';
+
+/** 声明式入口的行 id。一条预设一行，名字里带预设 id——托管块里因此有两行（学习 + 答疑）。 */
+export function presetEntryId(presetId: string): string {
+  return `studymate-${presetId}-preset`;
+}
 
 /**
  * 声明式入口的停用条件，在**导入那一行之前**求值：更老的 DSH 解析不到
@@ -52,10 +64,25 @@ const DECLARATIVE_DISABLED = {
     + "'@deepseek-ai/dsh-agent-preset', ctx.baseUrl); } catch { return true; } })()",
 };
 
+/** 一条预设的来源：id（进 `config.id`、托管行与冲突检查）+ 目录（`agent.cordis.yml` + `preset.yml`）。 */
+export interface PresetSource {
+  id: string;
+  dir: string;
+}
+
 export interface InstallPresetOptions {
   /** 预设目录（`agent.cordis.yml` + `preset.yml`）。改写**就地**写回这一份——
       安装器随后把整个目录原子替换到位，所以这里不认识「最终落点」。 */
   presetDir: string;
+  /** 这条预设的 id；省略就是 `learning`（学习模式）。旧的调用一字不用改。 */
+  presetId?: string;
+  /**
+   * 与主预设**同一次**注册的其余预设（答疑模式）：共用一段 BEGIN/END 托管块，各占一行 insert。
+   *
+   * 为什么必须同一次调用：托管块的标记只有一套，分两次调用时后一次会把前一次那块一起剥掉
+   * （`withoutManaged` 按标记整块删），结果只剩一条预设。
+   */
+  extraPresets?: readonly PresetSource[];
   dshHome: string;
   profile?: string;
   mode?: 'standalone' | 'native';
@@ -74,6 +101,8 @@ export interface PresetRegistration {
   mode: 'bundle' | 'declarative' | 'legacy';
   /** 只有 `mode === 'bundle'` 有：交给 `ctx.agentPresets.register` 的预设配置。 */
   config?: unknown;
+  /** 只有 `mode === 'bundle'` 且给了 `extraPresets` 才有：第一条附加预设（答疑模式）的配置。 */
+  qaConfig?: unknown;
 }
 
 /* ── 版本比较（对齐迁移前的 Python 安装助手的 at_least） ───────────────────────
@@ -362,19 +391,23 @@ function nameOf(row: Record<string, unknown>): unknown {
   return 'name' in row ? row.name : null;
 }
 
-/** 手动声明的 learning 预设：它比我们更权威，见到就停手。 */
-function learningRows(data: unknown): Array<Record<string, unknown>> {
-  return [...rows(data)].filter(row => {
+/** 手动声明的 StudyMate 预设（我们的任意一条预设 id）：它比我们更权威，见到就停手。 */
+function declaredPresetRows(data: unknown, ids: readonly string[]): Array<{ id: string; row: Record<string, unknown> }> {
+  const found: Array<{ id: string; row: Record<string, unknown> }> = [];
+  for (const row of rows(data)) {
     const name = nameOf(row);
-    return (name === null || name === '' || name === PLUGIN)
-      && isPlainObject(row.config) && row.config.id === 'learning';
-  });
+    if (!(name === null || name === '' || name === PLUGIN)) continue;
+    if (!isPlainObject(row.config)) continue;
+    const id = row.config.id;
+    if (typeof id === 'string' && ids.includes(id)) found.push({ id, row });
+  }
+  return found;
 }
 
 /* ── 与用户已有配置的冲突检查 ──────────────────────────────────────────── */
 
 function checkNativeOverrides(data: unknown, file: string, options: {
-  standalone: boolean; selected: boolean; globalPatch: boolean;
+  standalone: boolean; selected: boolean; globalPatch: boolean; entryIds: ReadonlySet<string>;
 }): void {
   for (const row of rows(data)) {
     let introduced: unknown[] = Array.isArray(row.insert) ? [...row.insert] : [];
@@ -382,7 +415,9 @@ function checkNativeOverrides(data: unknown, file: string, options: {
     if ([...rows(introduced)].some(item => nameOf(item) === BUNDLE || item.id === BUNDLE_ENTRY_ID)) {
       throw new Error(`${file} 有手动插入的 StudyMate 入口；请先处理该声明，未修改配置`);
     }
-    if (row.id === ENTRY_ID) throw new Error(`${file} 的 ${ENTRY_ID} 已被手动配置使用；未修改配置`);
+    if (typeof row.id === 'string' && options.entryIds.has(row.id)) {
+      throw new Error(`${file} 的 ${row.id} 已被手动配置使用；未修改配置`);
+    }
     if (row.id !== BUNDLE_ENTRY_ID) continue;
     const name = nameOf(row);
     if (!(name === null || name === '' || name === BUNDLE)) {
@@ -468,7 +503,10 @@ function atomicWrite(file: string, text: string): void {
 /* ── 入口 ──────────────────────────────────────────────────────────────── */
 
 /**
- * 注册「学习模式」预设；形状与迁移前的 Python 安装助手的 stdout 一字不差。
+ * 注册 StudyMate 的预设；形状与迁移前的 Python 安装助手的 stdout 一字不差。
+ *
+ * 默认只注册「学习模式」（`presetId` 省略 = `learning`）；给了 `extraPresets` 就在**同一次**
+ * 调用里把「答疑模式」也注册上——两条预设共用一段 BEGIN/END 托管块，各占一行 insert。
  *
  * 失败一律抛 `Error`，且**在写盘之前**——调用方（安装器）把消息原样报给用户，
  * 不需要从 stderr 里捞。
@@ -491,10 +529,30 @@ export function installPreset(options: InstallPresetOptions): PresetRegistration
     throw new Error('--profile 必须是单个配置名称，不能包含路径分隔符，也不能使用 node_modules');
   }
 
-  const presetFile = path.join(options.presetDir, 'agent.cordis.yml');
-  const agent = fs.readFileSync(presetFile, 'utf8').replace(
-    /(@deepseek-ai\/dsh-workflow-|\bid: workflow-)(?:worker-thread|ptc)\b/g,
-    (_match, prefix: string) => prefix + workflow);
+  // 主预设 + 附加预设（答疑模式）。顺序就是托管块里 insert 行的顺序，也是 `config`/`qaConfig` 的顺序。
+  const presets: PresetSource[] = [
+    { id: options.presetId ?? DEFAULT_PRESET_ID, dir: options.presetDir },
+    ...(options.extraPresets ?? []),
+  ];
+  for (const preset of presets) {
+    if (typeof preset.id !== 'string' || preset.id.trim() === '') {
+      throw new Error('预设 id 不能为空；未修改配置');
+    }
+  }
+  if (new Set(presets.map(preset => preset.id)).size !== presets.length) {
+    throw new Error('预设 id 不能重复；未修改配置');
+  }
+  const presetIds = presets.map(preset => preset.id);
+  const entryIds = new Set(presets.map(preset => presetEntryId(preset.id)));
+
+  // 每条预设的 workflow 行都按 dsh 版本就地在**它自己那份** agent.cordis.yml 上改写。
+  const staged = presets.map(preset => {
+    const file = path.join(preset.dir, 'agent.cordis.yml');
+    const agent = fs.readFileSync(file, 'utf8').replace(
+      /(@deepseek-ai\/dsh-workflow-|\bid: workflow-)(?:worker-thread|ptc)\b/g,
+      (_match, prefix: string) => prefix + workflow);
+    return { ...preset, file, agent };
+  });
 
   const patch = path.join(home, 'profiles', profile, 'cordis.patch.yml');
   const selected = bundleSelected(path.dirname(patch));
@@ -510,11 +568,13 @@ export function installPreset(options: InstallPresetOptions): PresetRegistration
   const document = parsePatch(clean, patch);
   const homePatch = path.join(home, 'cordis.patch.yml');
   const homeData = parsePatch(read(homePatch), homePatch).data;
-  if (learningRows(homeData).length) {
-    throw new Error(`${homePatch} 已声明 learning 预设，请先处理该全局声明；未修改配置`);
+  const declaredHome = declaredPresetRows(homeData, presetIds);
+  if (declaredHome.length) {
+    throw new Error(`${homePatch} 已声明 ${declaredHome[0].id} 预设，请先处理该全局声明；未修改配置`);
   }
-  if (learningRows(document.data).length) {
-    throw new Error(`${patch} 已手动声明 learning 预设，请先处理该声明；未修改配置`);
+  const declaredLocal = declaredPresetRows(document.data, presetIds);
+  if (declaredLocal.length) {
+    throw new Error(`${patch} 已手动声明 ${declaredLocal[0].id} 预设，请先处理该声明；未修改配置`);
   }
   if (native && original.includes(BEGIN)) {
     throw new Error('学习模式仍由 npx 管理；如需切换，请运行 '
@@ -522,24 +582,30 @@ export function installPreset(options: InstallPresetOptions): PresetRegistration
   }
   for (const [entries, location, globalPatch] of [
     [document.data, patch, false], [homeData, homePatch, true]] as const) {
-    checkNativeOverrides(entries, location, { standalone: !bundle, selected, globalPatch });
+    checkNativeOverrides(entries, location, { standalone: !bundle, selected, globalPatch, entryIds });
   }
 
   let updated = native ? original : clean;
-  let config: unknown;
+  const configs: unknown[] = [];
   const managed: unknown[] = [];
   if (modern) {
-    const metadata = parseYaml(read(path.join(options.presetDir, 'preset.yml')), { file: 'preset.yml' });
-    if (metadata !== null && !isPlainObject(metadata)) throw new Error('学习预设元数据必须是对象；未修改配置');
-    const source = (metadata ?? {}) as Record<string, unknown>;
-    config = Object.fromEntries(['name', 'description', 'order']
-      .filter(key => key in source).map(key => [key, source[key]]));
-    const plugins = parseYaml(agent, { file: presetFile, tags: 'expression', blockScalars: true });
-    if (!Array.isArray(plugins)) throw new Error('学习预设必须是插件列表；未修改配置');
-    (config as Record<string, unknown>).id = 'learning';
-    (config as Record<string, unknown>).plugins = plugins;
-    if (!bundle) {
-      managed.push({ insert: [{ id: ENTRY_ID, name: PLUGIN, disabled: DECLARATIVE_DISABLED, config }] });
+    for (const preset of staged) {
+      const metadataFile = path.join(preset.dir, 'preset.yml');
+      const metadata = parseYaml(read(metadataFile), { file: metadataFile });
+      if (metadata !== null && !isPlainObject(metadata)) {
+        throw new Error(`${preset.id} 预设元数据必须是对象；未修改配置`);
+      }
+      const source = (metadata ?? {}) as Record<string, unknown>;
+      const config: Record<string, unknown> = Object.fromEntries(['name', 'description', 'order']
+        .filter(key => key in source).map(key => [key, source[key]]));
+      const plugins = parseYaml(preset.agent, { file: preset.file, tags: 'expression', blockScalars: true });
+      if (!Array.isArray(plugins)) throw new Error(`${preset.id} 预设必须是插件列表；未修改配置`);
+      config.id = preset.id;
+      config.plugins = plugins;
+      configs.push(config);
+      if (!bundle) {
+        managed.push({ insert: [{ id: presetEntryId(preset.id), name: PLUGIN, disabled: DECLARATIVE_DISABLED, config }] });
+      }
     }
   }
   if (selected && !bundle) managed.push({ id: BUNDLE_ENTRY_ID, name: BUNDLE, disabled: true });
@@ -553,11 +619,10 @@ export function installPreset(options: InstallPresetOptions): PresetRegistration
 
   const changed = !native && updated !== original;
   const output = options.patchOutput ?? patch;
-  if (fs.lstatSync(presetFile, { throwIfNoEntry: false })?.isSymbolicLink()
-      || (changed && fs.lstatSync(output, { throwIfNoEntry: false })?.isSymbolicLink())) {
-    throw new Error('预设或配置文件是符号链接；未修改配置');
-  }
-  atomicWrite(presetFile, agent);
+  const symlink = staged.some(preset => fs.lstatSync(preset.file, { throwIfNoEntry: false })?.isSymbolicLink())
+    || (changed && fs.lstatSync(output, { throwIfNoEntry: false })?.isSymbolicLink());
+  if (symlink) throw new Error('预设或配置文件是符号链接；未修改配置');
+  for (const preset of staged) atomicWrite(preset.file, preset.agent);
   if (changed) atomicWrite(output, updated);
 
   const result: PresetRegistration = {
@@ -565,6 +630,9 @@ export function installPreset(options: InstallPresetOptions): PresetRegistration
     patchChanged: changed,
     mode: bundle ? 'bundle' : modern ? 'declarative' : 'legacy',
   };
-  if (bundle) result.config = config;
+  if (bundle) {
+    result.config = configs[0];
+    if (configs.length > 1) result.qaConfig = configs[1];
+  }
   return result;
 }

@@ -97,6 +97,22 @@ test('每个工具的 parameters 都是对象根，且必填项写成宿主认�
   }
 });
 
+test('答疑预设的只读工具也只用宿主认的子集（它不在 registerStudyMate 里，别漏检）', async () => {
+  // #104：`studymate_lesson_read` 只挂进答疑预设，所以上面那两条按注册点扫的断言看不到它。
+  // 真宿主同样会拿 `assertSupportedJsonSchema` 查它的输出契约——一个多余关键字就整条预设注册不上。
+  const { apply } = await import('../../lib/tools/qa-preset.ts');
+  const { ctx, definitions } = fakeContext();
+  // fakeContext 没有 restrict（那是宿主作用域上的成员）：补一个假的，走正常路径
+  ctx.tools.restrict = () => () => {};
+  apply(ctx);
+  assert.deepEqual([...definitions.keys()], ['studymate_lesson_read']);
+  const definition = definitions.get('studymate_lesson_read');
+  assert.deepEqual(violations(definition.parameters), [], '参数 schema');
+  assert.deepEqual(violations(definition.output?.schema), [], '输出 schema');
+  assert.equal(definition.parameters.type, 'object');
+  assert.equal(definition.parameters.additionalProperties, false);
+});
+
 test('子集检查自己不是空转：宿主不认的写法逐条报得出来', () => {
   // 这些全是**真出现过或真会被拒**的写法，一条不报就说明上面那个走查退化了。
   const bad = [

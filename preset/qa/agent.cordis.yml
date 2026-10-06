@@ -1,0 +1,41 @@
+# StudyMate「答疑模式」预设的 agent-plane 组合（#104）——从标准预设裁到最小面。
+#
+# **这条预设的 plugins 行就是它的工具面与身份**（`PresetDefinition` 没有 tools / skills /
+# systemPrompt 字段）。只有四行：
+#   · persona          —— 它是「阅读端的就地答疑」，按 local-qa 的指示答；
+#   · skill-filesystem —— 技能目录只含 local-qa 一个，模型读不到总控那套（否则它会当起总控、
+#                         派起角色）。根直接指到**那一个技能目录**：宿主只扫一层，`SKILL.md`
+#                         走「散装 .md」分支，正好给出一个技能（见
+#                         `@deepseek-ai/dsh-skill-filesystem/lib/index.js` 的 discoverRoot）。
+#                         别指到 `.../preset/skills`——那会给出全部 12 个；
+#   · tool-skill       —— 模型靠这个加载器读 local-qa（技能加载器，不是能力工具）；
+#   · studymate-qa-tools —— 注册只读的取课件工具，并把 profile 根那批原生工具从这条会话的
+#                         工具面上抹掉（`lib/tools/qa-preset.ts`）。
+#
+# **没有** bash / pwsh / 文件读写 / 搜索 / jobs / 子 agent / workflow / web / plan / todo /
+# 任务 / 实验 / goal / ask-user / present / compaction——删行才是配置层的保证，不是提示词祈祷。
+#
+# `__STUDYMATE_SKILLS__` 由安装器换成 <引擎根>/preset/skills 的**绝对路径**；少了它，
+# 安装时必须抛（`bin/studymate.mjs` 的 installPayload 有这条守卫）。裸相对路径不行——
+# `{{cwd}}` 是学生会话的任意工作目录，在别处启动时解析不出来。
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    suffix: Your working directory is {{cwd}}.
+    prefix: >-
+      你是 StudyMate 阅读端的就地答疑（答疑模式）。按 __STUDYMATE_SKILLS__/local-qa 的指示答：
+      短、停在原地（指根因与正误对比，不写成讲义），不派角色、不安排课程。
+
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    includeDefaultRoots: false
+    customSkillDirs:
+      - '__STUDYMATE_SKILLS__/local-qa'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+- id: studymate-qa-tools
+  name: '@yunmiao/studymate/qa-preset'

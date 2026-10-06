@@ -126,7 +126,7 @@ const tarballFiles = ['package.json', 'README.md', 'cordis.patch.yml', 'bin/dsh-
   'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'bin/openai-interaction.mjs', 'bin/openai-skill-ui.mjs',
   'openai/studymate/scripts/interaction_state.mjs', 'openai/studymate/skills/learning-system/references/codex-interaction.md',
   'openai/studymate/.codex-plugin/plugin.json', 'docs/使用/Codex与ChatGPT.md',
-  'preset/learning/agent.cordis.yml', 'lib/preset.ts', 'preset/skills/learning-system/SKILL.md',
+  'preset/learning/agent.cordis.yml', 'preset/qa/agent.cordis.yml', 'lib/preset.ts', 'preset/skills/learning-system/SKILL.md',
   'antigravity/studymate/plugin.json', 'antigravity/studymate/rules/AGENTS.md',
   'schemas/subject.json', 'templates/MEMORY.md', 'docs/使用/使用说明.md'];
 const tarballPack = () => ({ name, version: '0.1.2', files: tarballFiles.map(path => ({ path })) });
