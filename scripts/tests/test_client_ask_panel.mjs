@@ -1,169 +1,365 @@
-/* 验收 #79 · 问答面板接上模型（阅读端 `lib/client.js`）
+/* 验收 #105 · 右栏「问答」面板 = 宿主的一条真会话（阅读端 `lib/client.js`）
    ────────────────────────────────────────────────────────────────────────
-   面板原来是 `setTimeout(240ms)` + 一段硬编码的假回答（界面还标着「尚未接模型」）。这个套件
-   钉住**换成真调用之后**的三件事：
+   面板原来是「一次一问一答」的表单：点「问一句」→ POST `/api/studymate/ask` → 一段回答。
+   这条票把它换成宿主的一条真会话，于是这份套件钉的四件事全变了：
 
-     1. 点「问一句」真的发 `POST /api/studymate/ask`，请求体里只有那几样（subject / node /
-        selection / selectionAnchor / question / operationId）——**没有会话**；
-     2. 回答与那条误解记录按 Host 半的回执渲染出来，不再有「尚未接模型」与「会记一条」；
-     3. 没有可用模型时如实说明，并且**一个字的回答都不编**。
+     1. **建会话走宿主半**：面板 POST 的是 `/api/studymate/qa/session`，请求体只有
+        `{subject, node}`（拼标题用）——**没有** messages / history / sessionId 这些「面板自己
+        背会话」的痕迹（旧契约的化身，见 #79 那条套件）；
+     2. **retain 那条会话**：`sessions.retain(id, { source: 'studymateAsk' })`——`mainView`
+        是宿主判「谁是当前会话」的标签，借了它会顶掉学生正在看的会话，所以逐字断言不是它；
+     3. **嵌的是宿主正文**：`SessionProvider` 包着 `conversation.content`（`variant:'embedded'`），
+        并且 Provider 指着的就是我们 retain 的那条引用；
+     4. **上一段会话只列答疑会话**：标题前缀认（`title` 而不是会退化成项目名的 `displayTitle`），
+        没有可用模型时如实说明、不假装会答。
 
-   面板本体在 `lib/client.js` 的工厂闭包里（零构建、不加 export），靠
-   `fixtures/client_harness.mjs` 的 React 桩取出来。`fetch` 是本地假货——套件里不联网、
-   更不调模型。数据现造现弃。
+   夹具：`fixtures/client_harness.mjs` 的 React 桩（`useState` 按调用次序喂帧、`useEffect`
+   要显式 `drainEffects()` 才跑）+ 一个假的 `sessions` 服务（`apply(fakeCtx)` 时交给插件）。
+   `fetch` 是本地假货——套件里不联网。数据现造现弃。
    ──────────────────────────────────────────────────────────────────────── */
 import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { clientInternals, findByProp, renderWithState, setHookState, resetHookState } from './fixtures/client_harness.mjs';
+import {
+  clientInternals, drainEffects, findByProp, loadClient, renderWithState, resetHookState, setHookState,
+} from './fixtures/client_harness.mjs';
+// 宿主半那一份拼法（客户端 import 不了 lib/ask/**：它是零构建的浏览器文件，自己写了一份）
+import {
+  ASK_SESSION_PREFIX as HOST_PREFIX, ASK_SESSION_SEP as HOST_SEP,
+  isAskSessionTitle as hostIsAskSessionTitle, titleForAskSession as hostTitleForAskSession,
+} from '../../lib/ask/index.ts';
 
-const { AskPanel, ASK_ENDPOINT } = clientInternals();
+const internals = clientInternals();
+const {
+  AskPanel, QA_SESSION_ENDPOINT, ASK_RETAIN_SOURCE, ASK_SESSION_PREFIX, ASK_SESSION_SEP,
+  titleForAskSession, isAskSessionTitle, askSessionRows, latestAskSessionId, askHost,
+} = internals;
 
-/** 假 fetch：记下每一次调用，按脚本给回执。 */
+/* ── 假服务与假 fetch ──────────────────────────────────────────────────── */
+
+const ASK_SOURCE = ASK_RETAIN_SOURCE;
+assert.equal(ASK_SOURCE, 'studymateAsk', 'retain 的来源标签被改了？它必须是我们自己那个');
+
+/** 假会话服务：记下 retain/release，列表是现造现用的快照。 */
+function fakeSessions(rows = []) {
+  const retained = [];
+  const released = [];
+  const refreshes = [];
+  const state = {
+    ids: rows.map((row) => row.id),
+    byId: Object.fromEntries(rows.map((row) => [row.id, row])),
+    phase: 'ready',
+    projectionsBySession: {},
+  };
+  const references = {};
+  const sessions = {
+    retained,
+    released,
+    refreshes,
+    list: { getSnapshot: () => state, subscribe: () => () => {} },
+    retain: (id, options) => {
+      retained.push({ id, options });
+      const reference = {
+        sessionId: id,
+        binding: { sessionId: id },
+        ready: Promise.resolve(),
+        release: () => { released.push(id); },
+      };
+      references[id] = reference;
+      return reference;
+    },
+    refresh: () => { refreshes.push(true); return Promise.resolve(); },
+  };
+  return { sessions, references, state };
+}
+
 let calls = [];
 let reply = null;
+let sessions = null;
+let references = {};
+
 globalThis.fetch = async (url, options) => {
   calls.push({ url, options });
-  const payload = reply;
-  return { ok: true, status: 200, json: async () => payload };
+  return { ok: true, status: 200, json: async () => reply };
 };
 
-beforeEach(() => { calls = []; reply = null; });
+beforeEach(() => {
+  calls = [];
+  reply = null;
+  const made = fakeSessions([]);
+  sessions = made.sessions;
+  references = made.references;
+  // 服务只能从 `apply(ctx)` 进闭包（它不是 props）：这里照宿主的姿势把它交进去
+  loadClient().plugin.apply({
+    get: (name) => (name === 'sessions' ? sessions : undefined),
+    slots: { inject: (seat, callback) => { callback(); }, register: () => null },
+  });
+});
 
-const SUBJECT = { slug: 'computer-networks', misconception_version: 'v1' };
+const SUBJECT = { slug: 'computer-networks', name: '计算机网络' };
 const NODE = { id: 'net.mask', title: '子网与掩码' };
+const TITLE = `答疑${ASK_SESSION_SEP}计算机网络${ASK_SESSION_SEP}子网与掩码`;
 const SELECTION = '掩码是按位与：100 与 192 逐位相与得 64。';
-// #92：面板拿到的是一条**冻好的引用**（文本 + 来源锚点），不是一个跟着实时选区跑的字符串。
-// 这一份套件是 #79 的验收面（面板接模型），所以只按新形状喂进去；「读到空不清引用」「提交
-// 才清」那些判据归 test_client_ask_quote.mjs。
 const QUOTE = { text: SELECTION, anchor: { lesson: 'computer-networks/0003-net.mask.md', section: 'mask-2', sectionTitle: '掩码' } };
-const QUESTION = '掩码怎么算？';
 
-const OK_REPLY = {
-  available: true,
-  ok: true,
-  model: { provider: 'opencode-go', model: 'deepseek-v4.1-flash' },
-  answer: '掩码按位与：100 与 192 得 64，所以网络地址是 192.168.1.64。',
-  misconception: {
-    topic: '掩码怎么算', source: '问答面板',
-    evidence: '提问原文：掩码怎么算？\n回答摘要：掩码按位与算出网络地址\n位置：computer-networks/0003-net.mask.md',
-    status: '未处理', at: '2026-10-05',
-  },
-  write: { ok: true, version: 'abc123', replayed: false },
-};
+/** 面板的 hook 次序：sessionId / held / error / busy / menuOpen（useRef、useEffect 不占帧）。 */
+function frame({ sessionId = null, reference = null, error = null, busy = false, menuOpen = false } = {}) {
+  return [sessionId, sessionId && reference ? { id: sessionId, reference } : null, error, busy, menuOpen];
+}
 
-const UNAVAILABLE_REPLY = {
-  available: false,
-  ok: false,
-  reason: '宿主里一个模型 provider 都没注册（adapter 没挂上）——要模型的能力这次不跑',
-  error: { code: 'model-unavailable', message: '宿主里一个模型 provider 都没注册（adapter 没挂上）——要模型的能力这次不跑' },
-};
+/** 假的宿主标准件：`renderFactorySlot` 记账并给出一个带标记的元素。 */
+function fakeKit() {
+  const factoryCalls = [];
+  const SessionProvider = (props) => props.children;
+  const renderFactorySlot = (name, props) => {
+    factoryCalls.push({ name, props });
+    return {
+      type: 'div',
+      props: { 'data-proto': 'host-conversation', 'data-name': name, 'data-variant': props && props.variant },
+      children: null,
+    };
+  };
+  return { kit: { SessionProvider, renderSlot: () => null, renderFactorySlot }, factoryCalls, SessionProvider };
+}
 
-/** 把面板渲染成文本（把 useState 驱到某一帧）。 */
-function render(state) {
-  return renderWithState(AskPanel, { subject: SUBJECT, node: NODE, quote: QUOTE, focusTick: 1 }, state)
+/** 在元素树里找「type === 某个函数」的节点（`findByProp` 只按 props 找，这里按组件找）。 */
+function findByType(node, type, found = []) {
+  if (!node || typeof node !== 'object') return found;
+  if (Array.isArray(node)) { for (const item of node) findByType(item, type, found); return found; }
+  if (node.type === type) found.push(node);
+  if ('children' in node) findByType(node.children, type, found);
+  if (node.props && node.props.children !== undefined) findByType(node.props.children, type, found);
+  return found;
+}
+
+/** 面板渲染成文本（把 useState 驱到某一帧）；effect 不跑，行为类断言调 `drainEffects`。 */
+function renderText(state, props = {}) {
+  const { kit } = fakeKit();
+  return renderWithState(AskPanel, { subject: SUBJECT, node: NODE, quote: null, host: kit, ...props }, state)
     .replace(/\s+/g, ' ').trim();
 }
 
-/**
- * 取出「问一句」那颗按钮的 onClick 并点它（元素树是桩造的，只能这样找）。
- *
- * 必须先把 `question` 那一帧喂进去：桩的 `useState` 按调用次序取值，不喂就是空串，
- * 而面板对空问题直接 return（连 fetch 都不会发）——套件会误判成「面板没接上模型」。
- * 点完立刻把钩子清掉，别给后面的渲染留痕。
- */
-function clickAsk(question = QUESTION) {
-  setHookState([question, null, false]);
+/** 只渲染一次、拿原始元素树（结构类断言用；`viewText` 会把组件就地展开，这里不需要）。 */
+function renderTree(state, props = {}) {
+  resetHookState();
+  setHookState(state);
   try {
-    const tree = AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, focusTick: 1 });
-    const found = findByProp(tree, 'data-proto', 'qa-ask');
-    assert.equal(found.length, 1, '面板里应该恰好有一颗「问一句」按钮');
-    return found[0].props.onClick;
+    return AskPanel({ subject: SUBJECT, node: NODE, quote: null, host: fakeKit().kit, ...props });
   } finally {
     resetHookState();
   }
 }
 
-test('#79 面板：点「问一句」真的发 POST，请求体只有那几样', async () => {
-  reply = OK_REPLY;
-  await clickAsk()();
+/* ══ 一、纯函数：标题的拼法与识别、会话列表的认法 ═════════════════════════ */
 
-  assert.equal(calls.length, 1, '面板没有发请求（还是那段假回答）');
-  assert.equal(calls[0].url, ASK_ENDPOINT);
-  assert.equal(calls[0].url, '/api/studymate/ask');
+test('#105 标题：拼法与宿主半逐字一致（缺哪节少写哪节），识别只认「答疑」+ 一节以上', () => {
+  assert.equal(titleForAskSession('计算机网络', '子网与掩码'), TITLE);
+  assert.equal(titleForAskSession('计算机网络', ''), `答疑${ASK_SESSION_SEP}计算机网络`);
+  assert.equal(titleForAskSession('', ''), '答疑');
+  assert.equal(isAskSessionTitle(TITLE), true);
+  assert.equal(isAskSessionTitle('答疑解惑'), false, '「以答疑开头就算」会认错别的标题');
+  assert.equal(isAskSessionTitle('学习 · 计算机网络'), false);
+  assert.equal(isAskSessionTitle(undefined), false, 'title 是可缺的：认不出就是「没有上一段」');
+});
+
+test('#105 防漂移：宿主半拼出来的标题，客户端必须逐字认得（同一份前缀，两个文件）', () => {
+  // 这份判据是「注释祈祷」的替代品：客户端那份重复实现漂了，症状是「上一段会话」列不出来
+  // 或列出别人的会话——很难查。所以拿宿主半的拼法去喂客户端的识别，逐条对上。
+  assert.equal(ASK_SESSION_PREFIX, HOST_PREFIX, '两边的前缀字面量不一致');
+  assert.equal(ASK_SESSION_SEP, HOST_SEP, '两边的分隔符不一致');
+  for (const [subject, node] of [['数学', '0003-变量'], ['网络', '子网与掩码'], ['', ''], ['  数学  ', ' 变量 ']]) {
+    const title = hostTitleForAskSession(subject, node);
+    assert.equal(titleForAskSession(subject, node), title, `两边的拼法不一致：「${title}」`);
+    assert.equal(isAskSessionTitle(title), true, `客户端认不出宿主拼出来的「${title}」`);
+    assert.equal(hostIsAskSessionTitle(title), true);
+  }
+  // 反证：宿主不认的，客户端也不许认
+  for (const title of ['答疑解惑', '学习 · 数学', '', undefined]) {
+    assert.equal(isAskSessionTitle(title), hostIsAskSessionTitle(title), `对「${title}」两边判得不一样`);
+  }
+});
+
+test('#105 上一段会话：只列答疑会话，用 title 不用会退化成项目名的 displayTitle', () => {
+  const rows = [
+    { id: 'learn-1', title: '学习 · 计算机网络', displayTitle: '学习 · 计算机网络', updatedAt: 300 },
+    { id: 'ask-old', title: `答疑${ASK_SESSION_SEP}计算机网络${ASK_SESSION_SEP}子网与掩码`, displayTitle: 'x', updatedAt: 100 },
+    { id: 'ask-new', title: `答疑${ASK_SESSION_SEP}计算机网络${ASK_SESSION_SEP}子网与掩码`, displayTitle: 'x', updatedAt: 200 },
+    // 工作目录恰好以「答疑」开头的项目：displayTitle 会退化成它，title 缺 → 不算我们那几条
+    { id: 'other', displayTitle: '答疑项目 · 别的会话', updatedAt: 400 },
+  ];
+  const made = fakeSessions(rows);
+  const ours = askSessionRows(made.sessions);
+  assert.deepEqual(ours.map((row) => row.id), ['ask-new', 'ask-old'], '没按最近在前排，或把别的会话算进来了');
+  assert.equal(latestAskSessionId(made.sessions, TITLE), 'ask-new');
+  assert.equal(latestAskSessionId(made.sessions, `答疑${ASK_SESSION_SEP}别的科目`), null);
+});
+
+/* ══ 二、注册形状：拿得到 SessionProvider 的前提 ═════════════════════════ */
+
+test('#105 注册：main 声明了非 root 子座位（不然永远拿不到 SessionProvider），插件注入会话服务', () => {
+  const plugin = loadClient().plugin;
+  assert.deepEqual(plugin.inject, ['slots', 'sessions', 'inputTriggers', 'conversation']);
+  const registered = [];
+  plugin.apply({
+    get: () => undefined,
+    slots: { inject: (seat, callback) => { callback(); }, register: (options, component) => { registered.push({ options, component }); return () => {}; } },
+  });
+  const main = registered.find((entry) => entry.options.name === 'main');
+  assert.ok(main, '没在 main 座位注册阅读端本体');
+  assert.deepEqual(main.options.children, { 'studymate.ask.session': { kind: 'single', scope: 'session' } },
+    'children 里没有非 root 子座位：框架不会把 SessionProvider 交给我们');
+});
+
+/* ══ 三、建会话：走宿主半那条路由，请求体里没有会话 ═══════════════════════ */
+
+test('#105 建会话：面板 POST /api/studymate/qa/session，请求体只有 {subject, node}', async () => {
+  reply = { available: true, ok: true, sessionId: 'qa-1', title: TITLE, renamed: true, memoryInjected: true };
+  const kit = fakeKit();
+  resetHookState();
+  setHookState(frame());
+  let tree = null;
+  try {
+    tree = AskPanel({ subject: SUBJECT, node: NODE, quote: null, host: kit.kit });
+    assert.ok(tree, '面板没渲染出来');
+    // 挂载时没有现成会话 → 请宿主半建一条（effect 里的事；桩要显式跑一次）
+    for (const cleanup of drainEffects()) cleanup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    resetHookState();
+  }
+
+  assert.equal(calls.length, 1, '面板没有去建会话');
+  assert.equal(calls[0].url, QA_SESSION_ENDPOINT);
+  assert.equal(calls[0].url, '/api/studymate/qa/session');
   assert.equal(calls[0].options.method, 'POST');
   const body = JSON.parse(calls[0].options.body);
-  assert.deepEqual(Object.keys(body).sort(), ['node', 'operationId', 'question', 'selection', 'selectionAnchor', 'subject']);
-  assert.equal(body.subject, 'computer-networks');
-  assert.equal(body.node, 'net.mask');
-  assert.equal(body.selection, SELECTION);
-  // #92：引用不是光有原文——来源锚点（哪一课、哪一小节）也随问题一起送出去
-  assert.deepEqual(body.selectionAnchor, QUOTE.anchor);
-  assert.equal(body.question, QUESTION);
-  assert.match(body.operationId, /^ask-/);
-  // 面板**不背会话**：请求体里没有 messages / history / sessionId 这类东西
-  for (const forbidden of ['messages', 'history', 'sessionId', 'conversation']) {
-    assert.equal(Object.hasOwn(body, forbidden), false, `请求体里出现了 ${forbidden}`);
+  // 面板**不背会话**：送出去的只有拼标题要的两个展示名
+  assert.deepEqual(Object.keys(body).sort(), ['node', 'subject']);
+  assert.equal(body.subject, '计算机网络');
+  assert.equal(body.node, '子网与掩码');
+  for (const forbidden of ['messages', 'history', 'sessionId', 'conversation', 'question']) {
+    assert.equal(Object.hasOwn(body, forbidden), false, `请求体里出现了 ${forbidden}（那是旧的「面板自己拼会话」）`);
   }
-  // 也不带 expectedVersion：这份文件是「只追加」的，而快照里的版本号随时会过期——
-  // 带上它只会在总控刚写过之后把面板这一笔挡掉（理由见 client.js 那处注释）
-  assert.equal(Object.hasOwn(body, 'expectedVersion'), false);
 });
 
-test('#79 面板：回答与那条误解记录按回执渲染，承诺不再是空头支票', () => {
-  const text = render([QUESTION, OK_REPLY, false]);
-  assert.ok(text.includes(OK_REPLY.answer), '回答没渲染出来：' + text);
-  assert.ok(text.includes('已记一条误解记录'), '没说明记录已经写下去了：' + text);
-  assert.ok(text.includes('topic「掩码怎么算」'), '没显示 topic：' + text);
-  assert.ok(text.includes('source 问答面板'), '没显示 source：' + text);
-  assert.ok(text.includes('status 未处理'), '没显示 status：' + text);
-  assert.ok(text.includes('at 2026-10-05'), '没显示 at：' + text);
-  assert.ok(text.includes('总控下次开场读得到'), '没说明这条记录下次开场读得到');
-  // 旧文案与旧承诺都不该再出现
-  assert.equal(text.includes('尚未接模型'), false, '徽标还是「尚未接模型」');
-  assert.equal(text.includes('会记一条误解记录'), false, '还是「会记」（未实现的承诺）');
-  assert.equal(text.includes('问答面板还没有接上模型'), false, '假回答还在');
-  assert.ok(text.includes('模型 deepseek-v4.1-flash'), '没显示用的是哪个模型：' + text);
+test('#105 建会话：没有现成会话时，面板不去 retain 一条不存在的会话', () => {
+  resetHookState();
+  setHookState(frame());
+  try {
+    AskPanel({ subject: SUBJECT, node: NODE, quote: null, host: fakeKit().kit });
+    drainEffects();
+  } finally {
+    resetHookState();
+  }
+  assert.equal(sessions.retained.length, 0);
 });
 
-test('#79 面板：没有可用模型时如实说明，不编回答、不说已记录', () => {
-  const text = render([QUESTION, UNAVAILABLE_REPLY, false]);
-  assert.ok(text.includes('这条链路上没有可用的模型'), '没如实说明没有模型：' + text);
-  assert.ok(text.includes('adapter 没挂上'), '没把 reason 带出来：' + text);
-  assert.ok(text.includes('没有写误解记录'), '没说明这次不写记录：' + text);
-  assert.equal(text.includes('已记一条误解记录'), false, '没有模型却说记了误解记录');
-  assert.equal(text.includes('没有可用模型'), true);
+/* ══ 四、retain：来源标签绝不能用 mainView，卸载时 release ═══════════════ */
+
+test('#105 retain：选中的那条会话用 { source: "studymateAsk" } retain，换会话时 release', () => {
+  resetHookState();
+  setHookState(frame({ sessionId: 'qa-7', reference: { sessionId: 'qa-7', release() {} } }));
+  try {
+    AskPanel({ subject: SUBJECT, node: NODE, quote: null, host: fakeKit().kit });
+    const cleanups = drainEffects();
+    assert.equal(sessions.retained.length, 1, '没有 retain 面板那条会话');
+    assert.equal(sessions.retained[0].id, 'qa-7');
+    assert.equal(sessions.retained[0].options.source, 'studymateAsk');
+    assert.notEqual(sessions.retained[0].options.source, 'mainView',
+      'mainView 是宿主判「谁是当前会话」的标签，借了它会顶掉学生正在看的会话');
+    // 卸载 / 换会话：必须释放，否则那条会话永远不退休
+    for (const cleanup of cleanups) cleanup();
+    assert.deepEqual(sessions.released, ['qa-7']);
+  } finally {
+    resetHookState();
+  }
 });
 
-test('#79 面板：有模型但没答成时，说清「回答没拿到，所以没写记录」', () => {
-  const text = render([QUESTION, { available: true, ok: false, error: { code: 'model-error', message: '模型没答上来：provider 402 余额不足' } }, false]);
-  assert.ok(text.includes('这次没答上来'), text);
-  assert.ok(text.includes('余额不足'), text);
-  assert.ok(text.includes('没有写误解记录'), text);
-  assert.equal(text.includes('已记一条误解记录'), false);
+/* ══ 五、嵌的是宿主正文，并且被 SessionProvider 指着我们那条 ═════════════ */
+
+test('#105 嵌正文：SessionProvider 包着 conversation.content（embedded），指向我们 retain 的引用', () => {
+  const reference = { sessionId: 'qa-9', binding: { sessionId: 'qa-9' }, ready: Promise.resolve(), release() {} };
+  const { kit, factoryCalls, SessionProvider } = fakeKit();
+  const tree = renderTree(frame({ sessionId: 'qa-9', reference }), { host: kit });
+
+  const providers = findByType(tree, SessionProvider);
+  assert.equal(providers.length, 1, '面板没有用 SessionProvider 把正文罩起来');
+  assert.equal(providers[0].props.session, reference, 'SessionProvider 指的不是我们 retain 的那条引用');
+
+  // 罩在里面的就是宿主正文那个工厂，入参只给 embedded / active / hero:false
+  const embedded = findByProp(providers[0].children, 'data-name', 'conversation.content');
+  assert.equal(embedded.length, 1, 'SessionProvider 里包的不是 conversation.content');
+  assert.equal(embedded[0].props['data-variant'], 'embedded');
+  assert.deepEqual(factoryCalls.map((call) => call.name), ['conversation.content']);
+  assert.deepEqual(factoryCalls[0].props, { variant: 'embedded', phase: 'active', hero: false });
+  // 渲染得出来 = 这一格真的进了树（不是某个 if 后面的死代码）
+  assert.ok(renderText(frame({ sessionId: 'qa-9', reference })).length > 0);
 });
 
-test('#79 面板：回答拿到了但写盘失败时，两件事分开报（回答不跟着丢）', () => {
-  const text = render([QUESTION, {
-    ...OK_REPLY,
-    write: { ok: false, error: 'version-conflict', message: '误解记录已经变了：版本号对不上，这次不写' },
-  }, false]);
-  assert.ok(text.includes(OK_REPLY.answer), '回答被写盘失败一起吞掉了');
-  assert.ok(text.includes('回答拿到了，但误解记录没写进去'), text);
-  assert.ok(text.includes('版本号对不上'), text);
-  assert.equal(text.includes('已记一条误解记录'), false, '写盘失败却说记下了');
+test('#105 没有宿主标准件时如实说明（嵌不了就说嵌不了，不是白屏）', () => {
+  const text = renderText(frame({ sessionId: 'qa-9', reference: { sessionId: 'qa-9', release() {} } }), { host: null });
+  assert.ok(text.includes('嵌不了宿主会话'), text);
 });
 
-test('#79 面板：输入框空着时按钮是禁用的（不会拿空问题去花一次调用）', () => {
-  const tree = AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, focusTick: 0 });
-  const found = findByProp(tree, 'data-proto', 'qa-ask');
-  assert.equal(found.length, 1);
-  assert.equal(found[0].props.disabled, true, '空问题也能点');
+/* ══ 六、上一段会话与当前那条 ═════════════════════════════════════════════ */
+
+test('#105 上一段会话：单子上只有答疑会话，点一条就换过去', () => {
+  const made = fakeSessions([
+    { id: 'ask-1', title: `答疑${ASK_SESSION_SEP}计算机网络`, displayTitle: '不计较', updatedAt: 100 },
+    { id: 'learn-1', title: '学习 · 计算机网络', displayTitle: '学习 · 计算机网络', updatedAt: 200 },
+    { id: 'ask-2', title: `答疑${ASK_SESSION_SEP}计算机网络${ASK_SESSION_SEP}子网与掩码`, displayTitle: '不计较', updatedAt: 300 },
+  ]);
+  sessions = made.sessions;
+  loadClient().plugin.apply({
+    get: (name) => (name === 'sessions' ? sessions : undefined),
+    slots: { inject: (seat, callback) => { callback(); }, register: () => null },
+  });
+
+  const tree = renderTree(frame({ sessionId: 'ask-2', menuOpen: true }));
+  const items = findByProp(tree, 'data-proto', 'qa-history-item');
+  assert.deepEqual(items.map((item) => item.props['data-session']), ['ask-2', 'ask-1'],
+    '单子里混进了非答疑会话，或者没按最近的在前');
+  const text = renderText(frame({ sessionId: 'ask-2', menuOpen: true }));
+  assert.ok(text.includes('答疑' + ASK_SESSION_SEP + '计算机网络'), text);
+  assert.equal(text.includes('学习 · 计算机网络'), false, '学习会话不该出现在答疑的单子里');
 });
 
-test('#79 面板：选中那段照旧显示，提示语说明了「不经过总控、回答不进会话记录」', () => {
-  const text = render([]);
-  assert.ok(text.includes(SELECTION), '选中的那段没显示');
-  assert.ok(text.includes('不经过总控'), text);
-  assert.ok(text.includes('回答不进会话记录'), text);
+/* ══ 七、没有可用模型：如实说明，旧文案一句不留 ═══════════════════════════ */
+
+test('#105 无模型：如实说明，且不再提「误解记录 / 不经过总控 / 回答不进会话记录」', () => {
+  const text = renderText(frame({
+    error: { unavailable: true, reason: '宿主里一个模型 provider 都没注册' },
+  }));
+  assert.ok(text.includes('这条链路上没有可用的模型'), text);
+  assert.ok(text.includes('provider 都没注册'), '没把 reason 带出来：' + text);
+  assert.ok(text.includes('不假装会答'), text);
+  for (const gone of ['不经过总控', '回答不进会话记录', '误解记录', '问一句', '错一条']) {
+    assert.equal(text.includes(gone), false, `旧文案还在：${gone}`);
+  }
+});
+
+test('#105 建不出来（不是没模型）：说清是哪一格没开起来，同样不假装会答', () => {
+  const text = renderText(frame({ error: { unavailable: false, reason: '读不到「答疑模式」预设' } }));
+  assert.ok(text.includes('这条答疑会话没开起来'), text);
+  assert.ok(text.includes('读不到「答疑模式」预设'), text);
+  assert.equal(text.includes('没有可用的模型'), false, '这不是「没有模型」，别说成没有模型');
+});
+
+/* ══ 八、选中的那一段：这一票先只读地摆着（chip 归 #106） ═════════════════ */
+
+test('#105 引用：选中的那一段与它的来源在面板上看得见（清除入口归 #106）', () => {
+  const text = renderText(frame(), { quote: QUOTE });
+  assert.ok(text.includes(SELECTION), '选中的那段没显示出来：' + text);
+  assert.ok(text.includes('来源：小节「掩码」 · computer-networks/0003-net.mask.md'), text);
+  // 这一票没有「删掉」入口：面板自己的引用块退役了，chip 由 #106 接上
+  const tree = renderTree(frame(), { quote: QUOTE });
+  assert.equal(findByProp(tree, 'data-proto', 'qa-quote-clear').length, 0);
+});
+
+test('#105 入口：顶部有「新对话」与「上一段会话」', () => {
+  const tree = renderTree(frame());
+  assert.equal(findByProp(tree, 'data-proto', 'qa-new').length, 1);
+  assert.equal(findByProp(tree, 'data-proto', 'qa-history').length, 1);
+  const text = renderText(frame());
+  assert.ok(text.includes('这条会话住在宿主里'), '没说明这段会话住在哪儿：' + text);
 });
