@@ -27,7 +27,6 @@ const TEXT = { type: 'string' } as const;
 interface LessonRow {
   slug: string;
   node: string;
-  number: string;
   file: string;
   markdown: string;
 }
@@ -36,7 +35,6 @@ interface LessonRow {
 interface PoolRow {
   slug: string;
   node: string;
-  file: string;
   pool: unknown;
 }
 

@@ -59,18 +59,22 @@ export function apply(ctx: QaPresetContext): void {
   // 1) 只读工具进**本作用域**：自己的那层不受下面那条 restriction 影响
   registerStudyTool(ctx, lessonReadTool());
 
-  // 2) 抹掉 profile 根那一批
-  const restrict = ctx.tools?.restrict;
-  if (typeof restrict !== 'function') {
+  // 2) 抹掉 profile 根那一批。
+  // 调法上别把它摘出来存成变量：宿主的服务访问是一层 Proxy（`cordis` 的 `createTraceable`），
+  // `restrict` 用 `this.ctx` 决定 restriction 落在**哪一层的 scope** 上，而那个 `.ctx`
+  // 正是「谁访问了这个服务」——写成 `ctx.tools.restrict(...)` 才把这条行的作用域带进去
+  // （`createShadowMethod` 对「函数被摘出来再调」也补了一层 shadow，但那条路多一个前提，
+  // 没必要踩）。这也是这条行必须住在一个**预设行**里的原因。
+  if (typeof ctx.tools?.restrict !== 'function') {
     console.warn('StudyMate 答疑模式：这条宿主没有 ctx.tools.restrict，原生工具的收窄没做上——'
       + '答疑照常，只是模型还看得见总控那批工具。');
     return;
   }
   try {
-    restrict.call(ctx.tools, { deny: [...QA_DENIED_TOOL_NAMES] });
+    ctx.tools.restrict({ deny: [...QA_DENIED_TOOL_NAMES] });
   } catch (error) {
     try {
-      restrict.call(ctx.tools, { deny: [...STUDY_TOOL_NAMES] });
+      ctx.tools.restrict({ deny: [...STUDY_TOOL_NAMES] });
       console.warn('StudyMate 答疑模式：任务与实验那批原生工具没在注册名册里，只收掉了八个学习工具。'
         + `${error instanceof Error ? error.message : String(error)}`);
     } catch (retryError) {
