@@ -33,6 +33,22 @@
 
 > 任务域（`studymate_task_status` / `_wait` / `_cancel` / `_destroy` / `_resume`）不在本表：那是插件自己跑的后台工作（导出、格式转换、索引重建）的句柄，契约见 `lib/tasks/tools.ts`。它只有一条常驻纪律——**状态查询从不阻塞，等待有上限，超时会告诉你下一步**。
 
+### 答疑模式专用的只读工具（`studymate_lesson_read`）
+
+**它不在上面那张表里，也不在学习会话的工具面上**：它由「答疑模式」预设那条插件行
+（[`lib/tools/qa-preset.ts`](../../../../lib/tools/qa-preset.ts)）注册进**预设自己的作用域**，
+只有阅读端右栏那条答疑会话看得见（`local-qa` 那条链上唯一的工具）。名字表在
+[`lib/tools/index.ts`](../../../../lib/tools/index.ts) 的 `QA_TOOL_NAMES`，与学习面那八条并列、
+不混——**别把它当成总控能调的第九个工具**。
+
+| 工具 | 参数 | 什么时候用 |
+|---|---|---|
+| `studymate_lesson_read` | **`node`**（大纲里的节点 id，例如 `net.ip`） | 答疑会话要学生问的那一段所在课的正文、或这一节点的题时：给节点 id，一次拿回这一课与它的题（答疑的上下文只有三样，课件就是靠这一下取的） |
+
+返回形状：`found: true` 时给 `node` / `subject`（科目 slug）/ `file`（`lessons/` 下的文件名，空串＝这一课还没有正文文件）/ `markdown`（那一课正文）/ `questions`（数组，每项 `{ anchor, questions }`；题目的字段形状归 [`schemas/question.schema.json`](../../../../schemas/question.schema.json)）/ `alsoIn`（别的科目里也有同一个节点 id 时列在这里）。
+
+读不到时给 `{ found: false, node, reason }`——节点不存在、id 带路径分隔符或 `..`、还没有正文文件，都走这一条，**不抛异常**（会话里不该因为一次取课件失败就断）。域边界：只读 `lessons` 与 `pool` 两个域，`writes` 为空——跑一遍一个字节都不落盘。
+
 ## 三、返回形状与空值口径
 
 共同约定：**返回的是事实，不是结论**。校验器给「逐条问题 + 一句放行/阻断」，不给退出码；空的地方给明确的空值，不给 `null` 之外的猜测。

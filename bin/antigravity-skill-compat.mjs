@@ -239,6 +239,8 @@ export const NATIVE_TOOL_FALLBACK = {
   studymate_validate_handoff: '按 `deliver/` 清单逐项自查：manifest 与交付文件一一对应、角色与节点对得上、路径不越界、没有符号链接',
   studymate_renumber_lessons: '按 `curriculum.yaml` 的节点顺序重排 `lessons/` 的文件名序号（`NNNN-<节点id>.<后缀>`），先列出要改的清单再动手',
   studymate_apply_empty_reasons: '把每个无题锚点的 `empty_reason:` 写进内容文件对应的 `::: quiz` 块（锚点逐字匹配，别动正文其余部分）',
+  // 答疑面那条只读工具（#104，只挂答疑预设）：本宿主没有工具，做法是按节点 id 找文件读
+  studymate_lesson_read: '按节点 id 在 `<LEARN_WORKSPACE>/.learning/subjects/*/lessons/` 下找到那一课的正文文件与题库文件读出来（没有这个节点就如实说没有）',
 };
 
 // Host-neutral rewrites shared by adapted skills and generated agents: the same DSH text
