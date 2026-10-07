@@ -37,6 +37,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { readLibrary } from '../../../lib/library.ts';
 import { extractCss } from '../fixtures/client-css.mjs';
+import { contrastRatio } from '../fixtures/contrast-probe.mjs';
 import { openSession, finishSuite } from './harness.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,26 @@ function check(label, ok, detail = '') {
 function brightness(filter) {
   const m = /brightness\(([\d.]+)\)/.exec(String(filter));
   return m ? Number(m[1]) : 1;
+}
+
+/** 代码行三档的关系式：命令 > 输出 > 注释，相邻两档的对比度差 ≥ 20%，三档都达 AA。
+ *
+ *  亮暗两场量的是同一件事（`#114` 评审 6 之前两处各抄了一遍 against/gap/pct），所以
+ *  断言与标签都只写这一份：`tag` 是场景标签，`book` 是这一场的代码块读数（只在详情里用），
+ *  `row` 按档名取行。对比度走共享探针那支 `contrastRatio`（`#114` 评审 1）。 */
+function checkCodeTiers(tag, book, row) {
+  const against = (name) => {
+    const line = row(name);
+    return line && book ? contrastRatio(line.color, book.bodyBg) : null;
+  };
+  const fmt = (v) => (v === null ? 'n/a' : v.toFixed(2));
+  const gap = (a, b) => (a === null || b === null ? null : a / b);
+  const pct = (g) => (g === null ? 'n/a' : ((g - 1) * 100).toFixed(1) + '%');
+  check(`${tag} 三档都达 AA、且相邻两档差 ≥ 20%（对比度 命令 ${fmt(against('cmd'))} / 输出 ${fmt(against('out'))} / 注释 ${fmt(against('cmt'))}；命令/输出 +${pct(gap(against('cmd'), against('out')))}、输出/注释 +${pct(gap(against('out'), against('cmt')))}）`,
+    !!row('cmd') && !!row('out') && !!row('cmt')
+    && against('cmd') >= 4.5 && against('out') >= 4.5 && against('cmt') >= 4.5
+    && gap(against('cmd'), against('out')) >= 1.2 && gap(against('out'), against('cmt')) >= 1.2,
+    JSON.stringify(book && { cmd: against('cmd'), out: against('out'), cmt: against('cmt') }));
 }
 
 /* ── 两档视口 ──────────────────────────────────────────────────────────────
@@ -103,28 +124,6 @@ const INLINE_SVG = [
   '<circle cx="820" cy="226" r="14" fill="#12b886"/>',
   '</svg>',
 ].join('');
-
-/** 从两个 computed 色值读出 WCAG 对比度（三档行的「亮一档／暗一档」按这条关系判，不钉具体色值）。
-    computed color 有两种写法：`rgb(r, g, b)` 与 `color(srgb r g b)`（color-mix 出来的走后者，
-    通道是 0..1 的小数）——两种都要认，不然会把小数当 0..255 读，算出个假的 1.21。 */
-function relLum(css) {
-  const text = String(css);
-  const mixed = /color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(text);
-  const raw = mixed
-    ? [Number(mixed[1]) * 255, Number(mixed[2]) * 255, Number(mixed[3]) * 255]
-    : (text.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
-  if (raw.length < 3) return null;
-  const [r, g, b] = raw.map((v) => {
-    const c = v / 255;
-    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-  });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-function contrastRatio(a, b) {
-  const la = relLum(a), lb = relLum(b);
-  if (la === null || lb === null) return null;
-  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-}
 
 /** 一行真的比列宽长很多的代码（宽档列约 712px，这行约 1000px）。 */
 const LONG_CODE_LINE = 'const binding = resolveNestedScopeBinding(outer, inner, { strict: true, fallback: "outer-binding-name-that-is-really-long" });';
@@ -791,24 +790,16 @@ try {
 
       // 三档行：档位按行首前缀判，命令档比另外两档亮、还垫着一条命令带；关系式在亮暗两套各跑一遍。
       const tierOf = (name) => (term ? term.rows.filter((r) => r.tier === name) : []);
-      const cmdRow = tierOf('cmd')[0], cmtRow = tierOf('cmt')[0], outRow = tierOf('out')[0];
-      const against = (row) => (row && term ? contrastRatio(row.color, term.bodyBg) : null);
-      const fmt = (v) => (v === null ? 'n/a' : v.toFixed(2));
-      const gap = (a, b) => (a === null || b === null ? null : a / b);
-      const pct = (g) => (g === null ? 'n/a' : ((g - 1) * 100).toFixed(1) + '%');
+      const rowOf = (name) => tierOf(name)[0] || null;
+      const cmdRow = rowOf('cmd'), cmtRow = rowOf('cmt'), outRow = rowOf('out');
       check(`${tag} 三档行按行首前缀判定（命令 ${tierOf('cmd').length} / 输出 ${tierOf('out').length} / 注释 ${tierOf('cmt').length}，合起来 ${term ? term.rows.length : 0} 行）`,
         !!cmdRow && !!outRow && !!cmtRow && tierOf('cmd').length === 2 && tierOf('out').length === 2
         && tierOf('cmt').length === 1, JSON.stringify(term && term.rows.map((r) => [r.tier, r.text])));
       check(`${tag} 命令行垫着一条命令带（行底 ${cmdRow && cmdRow.background} ≠ 块底 ${term && term.bodyBg}）`,
         !!cmdRow && !!term && cmdRow.background !== term.bodyBg,
         JSON.stringify({ band: cmdRow && cmdRow.background, block: term && term.bodyBg }));
-      // 三档的关系式：命令 > 输出 > 注释，相邻两档的对比度差 ≥ 20%，三档都达 AA。
-      // 亮暗两套各跑一遍（这一场是亮色，暗色那一份在下面的 dark 场景）。
-      check(`${tag} 三档都达 AA、且相邻两档差 ≥ 20%（对比度 命令 ${fmt(against(cmdRow))} / 输出 ${fmt(against(outRow))} / 注释 ${fmt(against(cmtRow))}；命令/输出 +${pct(gap(against(cmdRow), against(outRow)))}、输出/注释 +${pct(gap(against(outRow), against(cmtRow)))}）`,
-        !!cmdRow && !!outRow && !!cmtRow
-        && against(cmdRow) >= 4.5 && against(outRow) >= 4.5 && against(cmtRow) >= 4.5
-        && gap(against(cmdRow), against(outRow)) >= 1.2 && gap(against(outRow), against(cmtRow)) >= 1.2,
-        JSON.stringify(term && { cmd: against(cmdRow), out: against(outRow), cmt: against(cmtRow) }));
+      // 三档的关系式（亮色这一份；暗色那一份在下面的 dark 场景，两边调同一个 helper）。
+      checkCodeTiers(tag, term, rowOf);
 
       /* #116：`::: code` 的框内解释槽。要解决的是「解释只能写在框外」——所以槽必须在框内、
          贴在它解释的那一块下方；alt 落成这一块的无障碍名字（role=group + aria-label）。 */
@@ -975,21 +966,11 @@ try {
       check(`${themeTag} 暗色下正文列与页面依旧没有横向溢出（${dark.overflow.center} / ${dark.overflow.page}）`,
         dark.overflow.center === 0 && dark.overflow.page === 0, JSON.stringify(dark.overflow));
 
-      // #115 三档行在暗色下的关系式：与亮色场景同一条——三档都达 AA、相邻两档差 ≥ 20%，
-      // 顺序是命令 > 输出 > 注释（亮色那一份在上面主场景，两套主题都必须成立）。
+      // #115 三档行在暗色下的关系式：与亮色那一场同一条、调同一个 helper——暗色下也得
+      // 命令 > 输出 > 注释、相邻两档差 ≥ 20%、三档都达 AA（两套主题都必须成立）。
       const dt = dark.code115 && dark.code115.term;
-      const dRow = (name) => (dt ? dt.rows.find((r) => r.tier === name) : null);
-      const dAgainst = (name) => {
-        const row = dRow(name);
-        return row && dt ? contrastRatio(row.color, dt.bodyBg) : null;
-      };
-      const dGap = (a, b) => (a === null || b === null ? null : a / b);
-      const dPct = (g) => (g === null ? 'n/a' : ((g - 1) * 100).toFixed(1) + '%');
-      check(`${themeTag} 三档都达 AA、且相邻两档差 ≥ 20%（对比度 命令 ${dAgainst('cmd') && dAgainst('cmd').toFixed(2)} / 输出 ${dAgainst('out') && dAgainst('out').toFixed(2)} / 注释 ${dAgainst('cmt') && dAgainst('cmt').toFixed(2)}；命令/输出 +${dPct(dGap(dAgainst('cmd'), dAgainst('out')))}、输出/注释 +${dPct(dGap(dAgainst('out'), dAgainst('cmt')))}）`,
-        !!dRow('cmd') && !!dRow('out') && !!dRow('cmt')
-        && dAgainst('cmd') >= 4.5 && dAgainst('out') >= 4.5 && dAgainst('cmt') >= 4.5
-        && dGap(dAgainst('cmd'), dAgainst('out')) >= 1.2 && dGap(dAgainst('out'), dAgainst('cmt')) >= 1.2,
-        JSON.stringify(dt && { cmd: dAgainst('cmd'), out: dAgainst('out'), cmt: dAgainst('cmt') }));
+      const dRow = (name) => (dt ? dt.rows.find((r) => r.tier === name) || null : null);
+      checkCodeTiers(themeTag, dt, dRow);
       check(`${themeTag} 暗色下顶栏与块体分得开（顶栏 ${dt && dt.barBg} ≠ 块底 ${dt && dt.bodyBg}）`,
         !!dt && !!dt.barBg && dt.barBg !== dt.bodyBg,
         JSON.stringify({ bar: dt && dt.barBg, block: dt && dt.bodyBg }));
