@@ -34,8 +34,8 @@ const AA_NORMAL = 4.5;
 const TEXT_TOKENS = [
   '--smb-text',            // 主文字
   '--smb-text-2',          // 次级
-  '--smb-text-3',          // 三级
-  '--smb-text-4',          // 四级（最小号）
+  '--smb-text-3',          // 三级（#115 起也是代码块顶栏那行语言标记）
+  '--smb-text-4',          // 四级（最小号；#115 起也是代码行号槽与注释档）
   '--smb-text-done',       // 语义色的文字档（饱和档达不到 AA，见 token 块的注释）
   '--smb-text-learning',
   '--smb-text-info',
@@ -44,8 +44,16 @@ const TEXT_TOKENS = [
   '--dsw-alias-label-primary-inverted',   // 反色文字：只压在品牌填充上，单独一条断言
 ];
 
-/** 当表面用的 token（CSS 里做 background 的那些）。 */
-const SURFACE_TOKENS = ['--smb-bg', '--smb-panel', '--smb-raise', '--smb-fill'];
+/** 当表面用的 token（CSS 里做 background 的那些）。
+    代码块那一组（#115）：块体与顶栏换成宿主自己的 markdown 代码块 token，命令行还垫着一条
+    `-segment-selected` 的带——文字就压在这三层上，所以三层都要进这张表，AA 这半条才真的
+    压在新底上（只引 token 不登记，比对度那半条会漏过去，先例是 --dsw-alias-fill-tertiary）。 */
+const SURFACE_TOKENS = [
+  '--smb-bg', '--smb-panel', '--smb-raise', '--smb-fill',
+  '--dsw-alias-markdown-code-block',
+  '--dsw-alias-markdown-code-block-banner',
+  '--dsw-alias-markdown-code-segment-selected',
+];
 
 /** 把 token 名解成具体颜色；解不出来就抛，别让 null 混进对比度算式。 */
 function color(name, mode) {

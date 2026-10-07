@@ -609,7 +609,8 @@ const LESSON_PROBE = `(() => {
     secs: qa('.smb-sec').map((el) => el.textContent.trim()),
     quizMarkers: qa('[data-proto="quiz-marker"]').length,
     quizMarkerText: text('[data-proto="quiz-marker"]'),
-    codeLangs: qa('.smb-code__bar b').map((el) => el.textContent.trim()),
+    // 语言标记写在自己的元素里（#115 换了骨架，旧选择器 .smb-code__bar b 在新骨架里取不到）
+    codeLangs: qa('.smb-code__lang').map((el) => el.textContent.trim()),
     mathInline: qa('.smb-math').length,
     mathBlock: qa('.smb-math-block').length,
     figure: img ? { scheme: String(img.getAttribute('src')).split(':')[0], loaded: !!(img.complete && img.naturalWidth > 0), natural: img.naturalWidth } : null,
@@ -827,7 +828,8 @@ const CONTRAST_TARGETS = {
     ['.smb-sec', '课件·小节目录项'],
     ['.smb-doc a', '课件·正文链接'],
     ['.smb-doc figcaption', '课件·图注（四级文字）'],
-    ['.smb-code__bar b', '课件·代码语言标签（四级文字）'],
+    // #115 换了代码块骨架：语言标记不再是一个贴了底的 <b>，而是顶栏里那行小字本身
+    ['.smb-code__lang', '课件·代码语言标签（三级文字）'],
     ['.smb-math-block', '课件·块级公式'],
     ['.smb-node', '左栏·节点（只宽档有）'],
     ['.smb-rail__label', '窄轨·标签'],

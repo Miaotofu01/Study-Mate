@@ -104,8 +104,40 @@ const INLINE_SVG = [
   '</svg>',
 ].join('');
 
+/** 从两个 computed 色值读出 WCAG 对比度（三档行的「亮一档／暗一档」按这条关系判，不钉具体色值）。
+    computed color 有两种写法：`rgb(r, g, b)` 与 `color(srgb r g b)`（color-mix 出来的走后者，
+    通道是 0..1 的小数）——两种都要认，不然会把小数当 0..255 读，算出个假的 1.21。 */
+function relLum(css) {
+  const text = String(css);
+  const mixed = /color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(text);
+  const raw = mixed
+    ? [Number(mixed[1]) * 255, Number(mixed[2]) * 255, Number(mixed[3]) * 255]
+    : (text.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+  if (raw.length < 3) return null;
+  const [r, g, b] = raw.map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function contrastRatio(a, b) {
+  const la = relLum(a), lb = relLum(b);
+  if (la === null || lb === null) return null;
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
 /** 一行真的比列宽长很多的代码（宽档列约 712px，这行约 1000px）。 */
 const LONG_CODE_LINE = 'const binding = resolveNestedScopeBinding(outer, inner, { strict: true, fallback: "outer-binding-name-that-is-really-long" });';
+
+/** 终端块夹具（#115）：`> ` 命令行、`# ` 注释行、其余输出三类都在，另有一行行首带空白。
+    这一份逐字进断言——前缀不删不重写、行首空白不动；三档只影响呈现，不动文本。 */
+const TERM_LINES = [
+  '> pwd',
+  '/Users/studymate/demo',
+  '> ls -l',
+  '  drwxr-xr-x  2 studymate  staff   64  1月  1 00:00 子目录',
+  '# 上面这段是回放，输出原样保留',
+];
 
 /** 一个不含空格的长标识符 + 一条长 URL：两者都能把正文列顶宽，除非正文允许在词内断行。 */
 const LONG_TOKEN = 'studymate_pane_widths_v1_override_for_narrow_canvas_scenarios_' + 'x'.repeat(24);
@@ -124,6 +156,10 @@ function subjectFiles(dirName, { slug, name, touched }) {
     '提示块里的字同样是正文。',
     ':::', '',
     '```js', LONG_CODE_LINE, 'const b = a + 1;', '```', '',
+    // 终端块（#115）：三类行都在。**放在 js 块之后**——既有探针按 `.smb-code pre` 取第一个
+    // 代码块，插到它前面会让「超长行在块内横滚」那条读数改去量终端块（那几行都不长），
+    // 读数会静默失去覆盖。
+    '```term', ...TERM_LINES, '```', '',
     // 位图（宽 1100）与矢量图（随列宽流动）各一张
     `::: figure ${BITMAP_SRC}`,
     'alt: 名字与值的对应示意（宽图）',
@@ -296,6 +332,12 @@ const PROBE = `(() => {
   const svg = q('.smb-figure__frame > svg');
   const pre = q('.smb-code pre');
   const bar = q('.smb-code__bar');
+  // 语言标记：#115 之后写在自己的元素里（旧骨架那个 <b> 已经不在了）。取顶栏里那行字，
+  // 不挑元素名——「顶栏写着 js」这件事本身才是判据。
+  const barLang = (b) => {
+    const el = b && b.querySelector('.smb-code__lang');
+    return el ? el.textContent.trim() : null;
+  };
   const tableWrap = q('.smb-table-wrap');
   const table = q('.smb-table');
   const crumb = q('.smb-crumb--current');
@@ -384,10 +426,76 @@ const PROBE = `(() => {
     } : null,
     // 代码块：语言标签 + 块内横向滚动
     code: pre ? {
-      lang: bar && bar.querySelector('b') ? bar.querySelector('b').textContent.trim() : null,
+      lang: barLang(bar),
       preClientW: px(pre.clientWidth), preScrollW: px(pre.scrollWidth),
       blockInner: px(inner(q('.smb-code'))), whiteSpace: cs(pre).whiteSpace,
     } : null,
+    // #115：代码块与终端块共用的一副骨架——顶栏（三颗点 + 语言标记）、行号槽、三档行。
+    // 两块分别量：普通代码块（js）与终端块（term）。
+    code115: (() => {
+      const describe = (block) => {
+        if (!block) return null;
+        const codePre = block.querySelector('pre');
+        const gutter = block.querySelector('.smb-code__gutter');
+        const nums = gutter ? Array.from(gutter.children) : [];
+        const lines = codePre ? Array.from(codePre.querySelectorAll('.smb-code__line')) : [];
+        const bodyBg = getComputedStyle(block).backgroundColor;
+        const rows = lines.map((el, i) => {
+          const s = getComputedStyle(el);
+          return {
+            text: el.textContent,
+            tier: (/(?:^|\\s)smb-code__line--(\\w+)/.exec(el.className) || [])[1] || null,
+            color: s.color, background: s.backgroundColor,
+            top: px(el.getBoundingClientRect().top),
+            num: nums[i] ? nums[i].textContent.trim() : null,
+            numTop: nums[i] ? px(nums[i].getBoundingClientRect().top) : null,
+          };
+        });
+        return {
+          inner: px(inner(block)), boxW: px(block.getBoundingClientRect().width), bodyBg,
+          barBg: (() => {
+            const el = block.querySelector('.smb-code__bar');
+            return el ? getComputedStyle(el).backgroundColor : null;
+          })(),
+          lang: barLang(block.querySelector('.smb-code__bar')),
+          dots: Array.from(block.querySelectorAll('.smb-code__dot')).map((d) => {
+            const r = d.getBoundingClientRect(); const s = getComputedStyle(d);
+            return { w: px(r.width), h: px(r.height), bg: s.backgroundColor, opacity: s.opacity };
+          }),
+          dotsHidden: (() => {
+            const box = block.querySelector('.smb-code__dots');
+            return box ? box.getAttribute('aria-hidden') === 'true' : null;
+          })(),
+          langGutterHidden: (() => {
+            const el = block.querySelector('.smb-code__lang');
+            return el ? el.getAttribute('aria-hidden') : null;
+          })(),
+          gutter: gutter ? {
+            count: nums.length, ariaHidden: gutter.getAttribute('aria-hidden'),
+            userSelect: getComputedStyle(gutter).userSelect,
+            nums: nums.map((n) => n.textContent.trim()),
+          } : null,
+          rows,
+          // 「代码横滚时行号不跟着跑」：把代码那一层滚到底，行号槽的横坐标不许动
+          scrollFrozen: codePre && gutter ? (() => {
+            const before = px(gutter.getBoundingClientRect().left);
+            const prev = codePre.scrollLeft;
+            codePre.scrollLeft = 100000;
+            const scrolled = px(codePre.scrollLeft);
+            const after = px(gutter.getBoundingClientRect().left);
+            codePre.scrollLeft = prev;
+            return { before, after, scrolled };
+          })() : null,
+        };
+      };
+      const blocks = qa('.smb-code');
+      const pick = (lang) => blocks.find((b) => barLang(b.querySelector('.smb-code__bar')) === lang);
+      return {
+        js: describe(pick('js')),
+        term: describe(pick('term')),
+        legacyTitle: document.body.textContent.indexOf('运行结果') >= 0,
+      };
+    })(),
     // 长内容：长标识符 / 长 URL / 宽表格
     longText: (() => {
       const el = qa('article.smb-doc p').find((one) => one.textContent.indexOf('studymate_pane_widths') >= 0);
@@ -604,6 +712,58 @@ try {
       check(`${tag} 代码块本身不超正文列宽（${one.code.blockInner} ≤ ${column}）`,
         one.code.blockInner <= column + 1, `${one.code.blockInner} vs ${column}`);
 
+      /* #115：代码块与终端块共用一副文档站骨架——顶栏（三颗点 + 语言标记）、行号槽、三档行 */
+      const c115 = one.code115;
+      const term = c115 && c115.term;
+      check(`${tag} 终端块与普通代码块共用同一副骨架（终端块在：底 ${term && term.bodyBg}，顶栏写 ${term && term.lang}）`,
+        !!term && term.lang === 'term', JSON.stringify(term && { lang: term.lang, bg: term.bodyBg }));
+      check(`${tag} 阅读端全文里不再有写死的「运行结果」`, !!c115 && c115.legacyTitle === false,
+        String(c115 && c115.legacyTitle));
+      check(`${tag} 顶栏左边三颗等径单色点、不进无障碍树（语言标记还在无障碍树里）`,
+        !!term && term.dots.length === 3 && term.dotsHidden === true && term.langGutterHidden === null
+        && new Set(term.dots.map((d) => `${d.w}×${d.h}`)).size === 1,
+        JSON.stringify(term && { dots: term.dots, hidden: term.dotsHidden, langHidden: term.langGutterHidden }));
+      check(`${tag} 左侧行号槽独立成列：从 1 起、逐行对齐、选不中、读屏听不到`,
+        !!term && !!term.gutter && term.gutter.count === TERM_LINES.length
+        && JSON.stringify(term.gutter.nums) === JSON.stringify(TERM_LINES.map((_, i) => String(i + 1)))
+        && term.gutter.userSelect === 'none' && term.gutter.ariaHidden === 'true'
+        && term.rows.length === TERM_LINES.length
+        && term.rows.every((r) => r.num !== null && Math.abs(r.top - r.numTop) <= 1),
+        JSON.stringify(term && term.gutter && { nums: term.gutter.nums, userSelect: term.gutter.userSelect,
+          ariaHidden: term.gutter.ariaHidden, offsets: term.rows.map((r) => [r.top, r.numTop]) }));
+      check(`${tag} 代码横向滚动时行号不跟着跑（滚到 ${c115 && c115.js && c115.js.scrollFrozen && c115.js.scrollFrozen.scrolled}，行号槽横坐标动 ${(() => {
+        const f = c115 && c115.js && c115.js.scrollFrozen;
+        return f ? Math.round(Math.abs(f.after - f.before) * 100) / 100 : 'n/a';
+      })()}）`,
+        !!c115 && !!c115.js && !!c115.js.scrollFrozen && c115.js.scrollFrozen.scrolled > 0
+        && Math.abs(c115.js.scrollFrozen.after - c115.js.scrollFrozen.before) <= 1,
+        JSON.stringify(c115 && c115.js && c115.js.scrollFrozen));
+      check(`${tag} 行的文本逐字保留（\`> \` 前缀不删、行首空白不动）`,
+        !!term && JSON.stringify(term.rows.map((r) => r.text)) === JSON.stringify(TERM_LINES),
+        JSON.stringify(term && term.rows.map((r) => r.text)));
+      check(`${tag} 块整宽对齐正文列、也不是贴左边一条（块外框 ${term && term.boxW} ≈ 列 ${column}）`,
+        !!term && term.boxW <= column + 1 && term.boxW >= column - 1,
+        `${term && term.boxW} vs ${column}`);
+
+      // 三档行：档位按行首前缀判，命令档比另外两档亮、还垫着一条命令带。
+      // 亮色下「输出」与「注释」两档的色差极小（宿主的文字阶梯在亮色下 2/3/4 档塌到同一支灰，
+      // 再暗一档就够不到 AA），所以严格的「注释比输出暗」这一步由下面暗色场景守着。
+      const tierOf = (name) => (term ? term.rows.filter((r) => r.tier === name) : []);
+      const cmdRow = tierOf('cmd')[0], cmtRow = tierOf('cmt')[0], outRow = tierOf('out')[0];
+      const against = (row) => (row && term ? contrastRatio(row.color, term.bodyBg) : null);
+      check(`${tag} 三档行按行首前缀判定（命令 ${tierOf('cmd').length} / 输出 ${tierOf('out').length} / 注释 ${tierOf('cmt').length}，合起来 ${term ? term.rows.length : 0} 行）`,
+        !!cmdRow && !!outRow && !!cmtRow && tierOf('cmd').length === 2 && tierOf('out').length === 2
+        && tierOf('cmt').length === 1, JSON.stringify(term && term.rows.map((r) => [r.tier, r.text])));
+      check(`${tag} 命令行比输出行亮一档（对比度 ${against(cmdRow) && against(cmdRow).toFixed(2)} > ${against(outRow) && against(outRow).toFixed(2)}）`,
+        !!cmdRow && !!outRow && against(cmdRow) > against(outRow),
+        JSON.stringify(term && { cmd: [cmdRow && cmdRow.color, against(cmdRow)], out: [outRow && outRow.color, against(outRow)] }));
+      check(`${tag} 命令行垫着一条命令带（行底 ${cmdRow && cmdRow.background} ≠ 块底 ${term && term.bodyBg}）`,
+        !!cmdRow && !!term && cmdRow.background !== term.bodyBg,
+        JSON.stringify({ band: cmdRow && cmdRow.background, block: term && term.bodyBg }));
+      check(`${tag} 输出行与注释行是两支不同的色，但亮色下只差一线（对比度 ${against(outRow) && against(outRow).toFixed(2)} / ${against(cmtRow) && against(cmtRow).toFixed(2)}；严格的「注释比输出暗」在暗色场景守）`,
+        !!outRow && !!cmtRow && outRow.color !== cmtRow.color,
+        JSON.stringify({ out: outRow && outRow.color, cmt: cmtRow && cmtRow.color }));
+
       /* 条目 15：长标识符 / URL / 宽表格不撑出横向滚动条 */
       check(`${tag} 长标识符与长 URL 在段落里断行（段落不溢出：${one.longText.scrollW} ≤ ${one.longText.clientW}）`,
         !!one.longText && one.longText.scrollW <= one.longText.clientW + 1, JSON.stringify(one.longText));
@@ -664,6 +824,11 @@ try {
       return {
         viewport: viewport.key, size: [one.width, viewport.height],
         docInner: one.doc.inner, figure: one.figure, code: one.code,
+        code115: c115 && {
+          term: c115.term && { lang: c115.term.lang, inner: c115.term.inner, dots: c115.term.dots,
+            gutter: c115.term.gutter && c115.term.gutter.nums, rows: c115.term.rows.map((r) => [r.tier, r.text]) },
+          legacyTitle: c115.legacyTitle,
+        },
         longText: one.longText, table: one.table, overflow: one.overflow,
         prose: one.prose, bodyTokens: one.bodyTokens, head: one.head, crumb: one.crumb,
         markers: one.markers, groups: one.groups,
@@ -734,6 +899,25 @@ try {
         JSON.stringify({ img: light.figure.img.filter, svg: svgFilter(light) }));
       check(`${themeTag} 暗色下正文列与页面依旧没有横向溢出（${dark.overflow.center} / ${dark.overflow.page}）`,
         dark.overflow.center === 0 && dark.overflow.page === 0, JSON.stringify(dark.overflow));
+
+      // #115 三档行在暗色下的严格分档：命令 > 输出 > 注释（亮色下后两档的 token 塌到同一支灰，
+      // 那一步在亮色场景里只断言到「两支不同的色」，原因写在那条断言的注释里）。
+      const dt = dark.code115 && dark.code115.term;
+      const dRow = (name) => (dt ? dt.rows.find((r) => r.tier === name) : null);
+      const dAgainst = (name) => {
+        const row = dRow(name);
+        return row && dt ? contrastRatio(row.color, dt.bodyBg) : null;
+      };
+      check(`${themeTag} 命令 > 输出 > 注释三档在暗色下严格分开（${dAgainst('cmd') && dAgainst('cmd').toFixed(2)} > ${dAgainst('out') && dAgainst('out').toFixed(2)} > ${dAgainst('cmt') && dAgainst('cmt').toFixed(2)}）`,
+        !!dRow('cmd') && !!dRow('out') && !!dRow('cmt')
+        && dAgainst('cmd') > dAgainst('out') && dAgainst('out') > dAgainst('cmt'),
+        JSON.stringify(dt && { cmd: dAgainst('cmd'), out: dAgainst('out'), cmt: dAgainst('cmt') }));
+      check(`${themeTag} 暗色下顶栏与块体分得开（顶栏 ${dt && dt.barBg} ≠ 块底 ${dt && dt.bodyBg}）`,
+        !!dt && !!dt.barBg && dt.barBg !== dt.bodyBg,
+        JSON.stringify({ bar: dt && dt.barBg, block: dt && dt.bodyBg }));
+      check(`${themeTag} 暗色下代码块骨架照旧整宽、行号槽还在（行号 ${dt && dt.gutter && dt.gutter.nums.join(',')}）`,
+        !!dt && dt.inner > 0 && !!dt.gutter && dt.gutter.count === TERM_LINES.length,
+        JSON.stringify(dt && { inner: dt.inner, gutter: dt.gutter }));
 
       return {
         viewport: viewport.key, theme: 'dark', size: [dark.width, viewport.height],
