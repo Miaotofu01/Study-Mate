@@ -13,7 +13,7 @@
      6. 页面里不再有「只在内存里作答」的说法        —— describe「界面文案」
 
    「刷新页面仍在」那一条的**跨请求**证据在 Host 半：`test_host_attempts_route.mjs` 里
-   「POST 落盘 → 另起一次 readLibrary」那一条。这里只验前端这一侧把作答交给了谁、怎么交。
+   「POST 落盘 → 另起一次 readLibrary」那一条。这里只验阅读端这一侧把作答交给了谁、怎么交。
    ───────────────────────────────────────────────────────────────────────── */
 import test from 'node:test';
 import assert from 'node:assert/strict';

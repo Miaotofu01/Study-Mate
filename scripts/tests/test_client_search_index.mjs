@@ -323,7 +323,7 @@ test('#78 索引是派生物：建索引不改动输入（没有第二份真相�
 
 test('#78 索引是派生物：索引只活在返回值里，没有任何落盘入口', () => {
   // 读 client.js 源码断言：建索引这一段不出现任何写盘/存储调用。
-  // 规格 §4.3「索引：前端内存，按需扫描工作区，不落盘」——这条是**否定性**要求，
+  // 规格 §4.3「索引：阅读端内存，按需扫描工作区，不落盘」——这条是**否定性**要求，
   // 只能这样钉：出现 fetch 写、localStorage、IndexedDB 都算越界。
   const source = loadClient().source;
   const start = source.indexOf('function buildIndex(');

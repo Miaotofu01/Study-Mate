@@ -227,7 +227,7 @@ test('#77 labFactsOf：退出码原样、布尔不参与，缺形状时返回 nu
   assert.equal(labFactsOf('跑完了'), null);
 });
 
-test('#77 端点常量与 Host 半逐字一致（前端拼错就是一个静默的 404）', () => {
+test('#77 端点常量与 Host 半逐字一致（阅读端拼错就是一个静默的 404）', () => {
   assert.equal(LAB_ENDPOINT, '/api/studymate/lab-run');
 });
 
