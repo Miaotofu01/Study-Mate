@@ -64,7 +64,9 @@ const FOUND_SCHEMA = {
   additionalProperties: false,
   required: ['found', 'node', 'subject', 'file', 'markdown', 'questions', 'alsoIn'],
   properties: {
-    found: { const: true },
+    // `type` 不能省：宿主那条子集里「有 const/enum/properties… 但既没有 type 也没有
+    // oneOf」是硬违规（`…const requires type or oneOf`），整条预设都会注册不上。
+    found: { type: 'boolean', const: true },
     node: TEXT,
     subject: TEXT,
     /** `lessons/` 下的文件名；空串=这一课还没有正文文件。 */
@@ -81,7 +83,7 @@ const MISSING_SCHEMA = {
   additionalProperties: false,
   required: ['found', 'node', 'reason'],
   properties: {
-    found: { const: false },
+    found: { type: 'boolean', const: false },
     node: TEXT,
     reason: TEXT,
   },
