@@ -160,6 +160,20 @@ function subjectFiles(dirName, { slug, name, touched }) {
     // 代码块，插到它前面会让「超长行在块内横滚」那条读数改去量终端块（那几行都不长），
     // 读数会静默失去覆盖。
     '```term', ...TERM_LINES, '```', '',
+    // 框内解释槽（#116）：`::: code` 的 alt / caption 贴在它解释的那一块里。
+    // 三条位置都刻意选过：
+    //   · 排在两个围栏**之后**——既有探针按语言取第一个块（js / term），插到前面会换掉 #115 那几组读数；
+    //   · 排在位图**之前**——代码块的 caption 若误占图的编号，下面「内联图是图 2」那条会红；
+    //   · caption 里带一处行内 code（`pwd`），顺带钉住「caption 走行内语法」。
+    '::: code term',
+    'alt: 终端回放：先看当前目录，再列这一层里有什么',
+    'caption: 先 `pwd` 看当前目录，再用 `ls -l` 列文件',
+    '',
+    '> cd /tmp/demo',
+    '/tmp/demo',
+    '> ls -l',
+    'drwxr-xr-x  2 studymate  staff   64  1月  1 00:00 子目录',
+    ':::', '',
     // 位图（宽 1100）与矢量图（随列宽流动）各一张
     `::: figure ${BITMAP_SRC}`,
     'alt: 名字与值的对应示意（宽图）',
@@ -371,7 +385,7 @@ const PROBE = `(() => {
     return n;
   };
 
-  // 正文取样：成句的元素（段落 / 列表项 / 表格单元 / 引用 / 提示块 / 练习块 / 目标 / 题面 / 选项 / 解析）
+  // 正文取样：成句的元素（段落 / 列表项 / 表格单元 / 引用 / 提示块 / 练习块 / 目标 / 代码解释槽 / 题面 / 选项 / 解析）
   const PROSE = [
     ['正文·段落', 'article.smb-doc p:not(.smb-hero__eyebrow)'],
     ['正文·列表项', 'article.smb-doc li'],
@@ -380,6 +394,8 @@ const PROBE = `(() => {
     ['正文·提示块', 'article.smb-doc .smb-note'],
     ['正文·练习块', 'article.smb-doc .smb-practice__body'],
     ['正文·本节目标', 'article.smb-doc .smb-goal'],
+    // #116：框内的解释槽也是成句的正文，走同一档字号与行高（不是代码档，也不是图注那档小字）
+    ['正文·代码解释槽', 'article.smb-doc .smb-code__caption'],
     ['右栏·题干', '.smb-q__text p'],
     ['右栏·选项', '.smb-opt'],
     ['右栏·组标题', '.smb-agroup__text'],
@@ -476,6 +492,29 @@ const PROBE = `(() => {
             nums: nums.map((n) => n.textContent.trim()),
           } : null,
           rows,
+          // #116：框内的解释槽。判据是「贴着它解释的那一块」——几何上四边都在 .smb-code
+          // 的矩形之内、且在代码那一层下方；再记下它的字号与前景色（对比度由 reading_routes
+          // 的真取样量，这里只钉「走的是哪一档正文」）。
+          caption: (() => {
+            const el = block.querySelector('.smb-code__caption');
+            if (!el) return null;
+            const s = getComputedStyle(el);
+            const r = el.getBoundingClientRect();
+            const box = block.getBoundingClientRect();
+            const codeBody = block.querySelector('.smb-code__body');
+            return {
+              text: el.textContent.trim(),
+              tag: el.tagName.toLowerCase(),
+              inlineCode: el.querySelectorAll('code').length,
+              color: s.color, background: s.backgroundColor,
+              size: px(parseFloat(s.fontSize)), line: px(parseFloat(s.lineHeight)),
+              inside: r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5
+                && r.left >= box.left - 0.5 && r.right <= box.right + 0.5,
+              belowCode: !!codeBody && r.top >= codeBody.getBoundingClientRect().bottom - 0.5,
+            };
+          })(),
+          role: block.getAttribute('role'),
+          label: block.getAttribute('aria-label'),
           // 「代码横滚时行号不跟着跑」：把代码那一层滚到底，行号槽的横坐标不许动
           scrollFrozen: codePre && gutter ? (() => {
             const before = px(gutter.getBoundingClientRect().left);
@@ -493,6 +532,11 @@ const PROBE = `(() => {
       return {
         js: describe(pick('js')),
         term: describe(pick('term')),
+        // ::: code 那一块由**槽元素反查**它所属的块（不按语言取——语言可能与围栏撞车）
+        slot: (() => {
+          const el = document.querySelector('.smb-code__caption');
+          return describe(el && el.closest ? el.closest('.smb-code') : null);
+        })(),
         legacyTitle: document.body.textContent.indexOf('运行结果') >= 0,
       };
     })(),
@@ -764,6 +808,30 @@ try {
         !!outRow && !!cmtRow && outRow.color !== cmtRow.color,
         JSON.stringify({ out: outRow && outRow.color, cmt: cmtRow && cmtRow.color }));
 
+      /* #116：`::: code` 的框内解释槽。要解决的是「解释只能写在框外」——所以槽必须在框内、
+         贴在它解释的那一块下方；alt 落成这一块的无障碍名字（role=group + aria-label）。 */
+      const slot = c115 && c115.slot;
+      const cap = slot && slot.caption;
+      check(`${tag} ::: code 的解释槽在框内、贴在代码那一层下方（槽「${cap && cap.text}」）`,
+        !!cap && cap.inside && cap.belowCode
+        && cap.text.indexOf('先 pwd 看当前目录') === 0,
+        JSON.stringify(cap));
+      check(`${tag} 解释槽不冒充图注（元素是 ${cap && cap.tag}、文案不带「图 N ·」）`,
+        !!cap && cap.tag === 'p' && !/^图\s*\d/.test(cap.text), JSON.stringify(cap));
+      check(`${tag} 解释槽走正文那一档字号（${cap && cap.size}px / 行高 ${cap && cap.line}）`,
+        !!cap && cap.size === one.bodyTokens.fontSize
+        && Math.abs(cap.line / cap.size - Number(one.bodyTokens.line)) < 0.01,
+        JSON.stringify({ cap: cap && [cap.size, cap.line], body: one.bodyTokens }));
+      check(`${tag} 解释槽里的行内 code 真的排出来了（${cap && cap.inlineCode} 处）`,
+        !!cap && cap.inlineCode === 2, JSON.stringify(cap));
+      check(`${tag} ::: code 的 alt 落成这一块的无障碍名字（role=${slot && slot.role} label=${slot && slot.label}）`,
+        !!slot && slot.role === 'group'
+        && slot.label === '终端回放：先看当前目录，再列这一层里有什么',
+        JSON.stringify(slot && { role: slot.role, label: slot.label }));
+      check(`${tag} 解释槽只加在写了槽的那一块上（js 围栏没有 aria-label）`,
+        !!c115 && !!c115.js && c115.js.label === null && c115.js.role === null,
+        JSON.stringify(c115 && c115.js && { role: c115.js.role, label: c115.js.label }));
+
       /* 条目 15：长标识符 / URL / 宽表格不撑出横向滚动条 */
       check(`${tag} 长标识符与长 URL 在段落里断行（段落不溢出：${one.longText.scrollW} ≤ ${one.longText.clientW}）`,
         !!one.longText && one.longText.scrollW <= one.longText.clientW + 1, JSON.stringify(one.longText));
@@ -827,6 +895,11 @@ try {
         code115: c115 && {
           term: c115.term && { lang: c115.term.lang, inner: c115.term.inner, dots: c115.term.dots,
             gutter: c115.term.gutter && c115.term.gutter.nums, rows: c115.term.rows.map((r) => [r.tier, r.text]) },
+          // #116：解释槽的读数（框内 / 位置 / 字号 / 无障碍名字）
+          slot: c115.slot && { lang: c115.slot.lang, role: c115.slot.role, label: c115.slot.label,
+            caption: c115.slot.caption && [c115.slot.caption.text, c115.slot.caption.inside,
+              c115.slot.caption.belowCode, c115.slot.caption.size, c115.slot.caption.inlineCode],
+            rows: c115.slot.rows.map((r) => [r.tier, r.text]) },
           legacyTitle: c115.legacyTitle,
         },
         longText: one.longText, table: one.table, overflow: one.overflow,
@@ -919,10 +992,22 @@ try {
         !!dt && dt.inner > 0 && !!dt.gutter && dt.gutter.count === TERM_LINES.length,
         JSON.stringify(dt && { inner: dt.inner, gutter: dt.gutter }));
 
+      // #116：解释槽在暗色下还在框内的原位（文字色换 token 由 CSS 管；AA 那一条由
+      // reading_routes 的真取样点在两套主题下各量一次）
+      const dSlot = dark.code115 && dark.code115.slot;
+      const dCap = dSlot && dSlot.caption;
+      check(`${themeTag} 解释槽在暗色下仍在框内、仍在代码下方（${dCap && dCap.text}）`,
+        !!dCap && dCap.inside && dCap.belowCode
+        && dCap.text === (light.code115.slot.caption.text), JSON.stringify(dCap));
+      check(`${themeTag} ::: code 的无障碍名字在暗色下不变（${dSlot && dSlot.label}）`,
+        !!dSlot && dSlot.role === 'group' && dSlot.label === light.code115.slot.label,
+        JSON.stringify(dSlot && { role: dSlot.role, label: dSlot.label }));
+
       return {
         viewport: viewport.key, theme: 'dark', size: [dark.width, viewport.height],
         figureFilter: { img: dark.figure.img.filter, svg: svgFilter(dark) },
         lightFilter: { img: light.figure.img.filter, svg: svgFilter(light) },
+        slot: dSlot && { label: dSlot.label, caption: dCap && [dCap.text, dCap.inside, dCap.belowCode, dCap.color] },
         overflow: dark.overflow,
       };
     });

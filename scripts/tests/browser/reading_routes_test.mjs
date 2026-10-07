@@ -155,6 +155,14 @@ function subjectFiles(dirName, { slug, name, touched }) {
       '# 变量', '',
       '变量是名字指向值，别名见 [绑定](./glossary.md)；行内公式 $x = 3$ 也是这个意思。', '',
       '```js', 'const a = 1;', 'let b = a + 1;', '```', '',
+      // #116：框内解释槽。对比度那一场在这里取样（`.smb-code__caption`），亮暗两套各量一次；
+      // 排在配图之前——代码块的 caption 若误占图的编号，「图 1 · 绑定示意」那条会红。
+      '::: code term',
+      'alt: 终端里跑一遍，看两个绑定各是什么',
+      'caption: 先跑一遍再读值：`a` 是 1，`b` 是 2',
+      '> node -e "console.log(a, b)"',
+      '1 2',
+      ':::', '',
       `::: figure ${FIGURE_SRC}`,
       'alt: 名字与值的对应示意',
       'caption: 图 1 · 绑定示意',
@@ -830,6 +838,9 @@ const CONTRAST_TARGETS = {
     ['.smb-doc figcaption', '课件·图注（四级文字）'],
     // #115 换了代码块骨架：语言标记不再是一个贴了底的 <b>，而是顶栏里那行小字本身
     ['.smb-code__lang', '课件·代码语言标签（三级文字）'],
+    // #116 的框内解释槽也压在代码块的底上（与顶栏同色那一层），所以它得单独取样：
+    // 亮暗两套都要过 AA（这是那张票「框内的解释读得下去」那条判据的实测）
+    ['.smb-code__caption', '课件·代码解释槽（二级文字）'],
     ['.smb-math-block', '课件·块级公式'],
     ['.smb-node', '左栏·节点（只宽档有）'],
     ['.smb-rail__label', '窄轨·标签'],

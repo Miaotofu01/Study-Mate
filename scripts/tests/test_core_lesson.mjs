@@ -386,6 +386,20 @@ test('renderBody：图注编号按页内顺序、图片库来源自动补', () =
     /图 1 · 描述（来源：自己写的）<\/figcaption>/);
 });
 
+test('renderBody：::: code 的解释槽在框内、且不占图的编号序列', () => {
+  const result = run([
+    '::: code term', 'alt: 终端回放', 'caption: 先看目录再列文件', '> pwd', ':::', '',
+    '::: svg', 'alt: 一', 'caption: 收拢', '<svg viewBox="0 0 4 2"/>', ':::',
+  ]);
+  const rendered = renderBody(result, 'a.md');
+  // 解释槽与它解释的那一块在**同一个 div 里**（「贴在框内」，不是另起一段正文）
+  assert.match(rendered.html,
+    /<div class="lesson-code" role="group" aria-label="终端回放">[\s\S]*<pre data-lang="term"><code>&gt; pwd<\/code><\/pre>[\s\S]*<p class="lesson-code__caption">先看目录再列文件<\/p>[\s\S]*<\/div>/);
+  // 代码块的 caption 不编号：这张矢量图还是「图 1」，「图 N」一共只出现一次
+  assert.match(rendered.html, /<figcaption>图 1 · 收拢<\/figcaption>/);
+  assert.equal((rendered.html.match(/图 \d/g) || []).length, 1);
+});
+
 /* ── 零宿主依赖 ───────────────────────────────────────────────────────── */
 
 test('解析层不碰文件系统：option 里没有任何路径读盘，题库是对象不是路径', async () => {

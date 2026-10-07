@@ -60,6 +60,16 @@ const LESSON = [
   '提示正文甲',
   ':::',
   '',
+  '## 小节·代码解释槽',
+  '',
+  // #116：`::: code` 的 alt / caption 是这一块的检索串，代码原文才是正文文本。
+  // 故意排在配图之前——代码块的 caption 若误占图的编号，下面「配图题注」那条会红。
+  '::: code term',
+  'alt: 代码替代文字甲',
+  'caption: 代码解释甲',
+  '> echo 代码解释槽内容甲',
+  ':::',
+  '',
   '## 小节·配图题注',
   '',
   '::: svg',
@@ -176,6 +186,17 @@ test('#78 配图的图号与 alt 进检索串，题注才是文本', () => {
   assert.ok(hit, '配图题注没进索引');
   assert.ok(hit.search.includes('配图替代文字甲'), 'alt 没有进检索串');
   assert.ok(hit.search.includes('图 1'), '图号没有进检索串');
+});
+
+test('#116 `::: code` 的 alt 与 caption 进检索串，代码原文才是正文文本', () => {
+  const hit = findHits(demoIndex, 'echo 代码解释槽内容甲')[0];
+  assert.ok(hit, '::: code 的原文没进索引');
+  assert.ok(hit.search.includes('代码替代文字甲'), 'alt 没有进检索串');
+  assert.ok(hit.search.includes('代码解释甲'), 'caption 没有进检索串');
+  assert.equal(hit.text.includes('代码替代文字甲'), false, 'alt 不该冒充正文文本');
+  // 两者各自也搜得到（进的是检索串，不另起一条正文）
+  assert.ok(findHits(demoIndex, '代码解释甲').length > 0, '搜不到代码槽的 caption');
+  assert.ok(findHits(demoIndex, '代码替代文字甲').length > 0, '搜不到代码槽的 alt');
 });
 
 test('#78 锚点标记本身不进正文索引（题干走题库那一类，不重复）', () => {

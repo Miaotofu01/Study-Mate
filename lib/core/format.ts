@@ -17,9 +17,9 @@
 
    ## 编号两处对不上，按实现来（issue #66 施工要点）
 
-   - **`:::` 指令是 9 个，不是 8 个**：`practice quiz figure svg tip warn note
-     resources related`（迁移前的 Python 渲染器:74）。ticket 与 `docs/设计/实施路线.md:41`
-     都写「8 个」——那是计数错。这里按实现，`DIRECTIVES` 是唯一名单。
+   - **`:::` 指令是 10 个**：`practice quiz figure svg code tip warn note
+     resources related`（迁移前的 Python 渲染器:74 是前 9 个；`code` 是 #116 加的框内解释槽）。
+     `docs/设计/实施路线.md:41` 写「8 个」——那是计数错。这里按实现，`DIRECTIVES` 是唯一名单。
    - **文档 L178-179 与实现冲突**：文档说 `花了 $5 和 $10` 按字面量处理、不报错，
      实现（迁移前的 Python 渲染器:917-920）**报错**。这里按实现（更严、更确定），
      文档已在本次一并改掉——两处现在一致了。
@@ -119,9 +119,9 @@ export function maskComments(text: string): string {
 
 /* ── 词汇表 ─────────────────────────────────────────────────────────────── */
 
-/** `:::` 指令名：**9 个**（迁移前的 Python 渲染器:74；ticket 与实施路线写的「8 个」是计数错）。 */
+/** `:::` 指令名：**10 个**（前 9 个照迁移前的 Python 渲染器:74；`code` 是 #116 加的框内解释槽）。 */
 export const DIRECTIVES = [
-  'practice', 'quiz', 'figure', 'svg', 'tip', 'warn', 'note', 'resources', 'related',
+  'practice', 'quiz', 'figure', 'svg', 'code', 'tip', 'warn', 'note', 'resources', 'related',
 ] as const;
 
 /** 块里还能写普通块的指令（其余指令的块内是字段或原文，不是 Markdown）。 */
@@ -247,6 +247,8 @@ export const ERROR_CODES = [
   'practice-args', 'quiz-args', 'quiz-level', 'quiz-body',
   'figure-missing-alt', 'figure-body', 'figure-src',
   'svg-args', 'svg-body', 'svg-no-open', 'svg-no-close',
+  // #116：`::: code` 的框内解释槽。三条都指向**出问题那一行**（指令头或字段行）
+  'code-lang', 'code-body', 'code-field',
   'links-item', 'links-empty', 'stray-empty-reason',
   'anchor-missing', 'anchor-duplicate', 'anchor-ambiguous', 'anchor-stale',
   'pool-orphan', 'pool-shape', 'pool-json', 'pool-missing', 'pool-unused',
@@ -331,7 +333,7 @@ export type BlockDatum =
   | { kind: 'p'; text: string; line: number }
   | { kind: 'code'; lang: string; text: string; line: number }
   | { kind: 'table'; header: string[]; rows: string[][]; line: number }
-  | PracticeBlock | QuizBlock | FigureBlock | SvgBlock | CardBlock | LinksBlock;
+  | PracticeBlock | QuizBlock | FigureBlock | SvgBlock | CodeBlock | CardBlock | LinksBlock;
 
 export type Block<D = BlockDatum> =
   | D
@@ -356,6 +358,16 @@ export interface FigureBlock {
 export interface SvgBlock {
   kind: 'directive'; name: 'svg';
   alt: string; caption: string; raw: string; line: number;
+  alt_line: number; caption_line: number;
+}
+
+/** `::: code <语言>`：与围栏同一个代码块，另加两个**框内**字段位（#116）。
+ *
+ *  围栏（```` ```term ````）保持原样——它没有字段位，解释只能写在框外；这一条是它的字段版。
+ *  两份的原文语义逐字相同：`text` 原样保留（缩进、空行、行首 `#` / `:::` 都不动）。 */
+export interface CodeBlock {
+  kind: 'directive'; name: 'code';
+  lang: string; text: string; alt: string; caption: string; line: number;
   alt_line: number; caption_line: number;
 }
 
@@ -878,6 +890,9 @@ export function parseDirective(
   if (name === 'svg') {
     return { block: buildSvg(args, lines, index + 1, bodyEnd, lineNo, ctx), next: nextIndex };
   }
+  if (name === 'code') {
+    return { block: buildCode(args, lines, index + 1, bodyEnd, lineNo, ctx), next: nextIndex };
+  }
   return { block: buildLinks(name, lines, index + 1, bodyEnd, lineNo, ctx), next: nextIndex };
 }
 
@@ -1040,6 +1055,68 @@ export function buildSvg(
   return {
     kind: 'directive', name: 'svg', alt: fields.alt ?? '', caption: fields.caption ?? '',
     raw: raw.join('\n'), line: lineNo,
+    alt_line: fieldLines.alt ?? lineNo, caption_line: fieldLines.caption ?? lineNo,
+  };
+}
+
+/** `::: code <语言>` + 可选 `alt:` / `caption:` + 块内原文逐字保留（#116 的框内解释槽）。
+ *
+ *  为什么另起一条而**不去扩围栏信息串**：```` ```term caption:x ```` 会被两套解析器双双拒掉
+ *  （服务端 `isKnownLang`、阅读端围栏正则 `/^```(\w*)\s*$/`），而且围栏没有独立行号，
+ *  校验器报不出「槽写错在哪一行」。指令形状从 `::: svg` 照搬：头一行是指令、字段行各有行号、
+ *  块尾 `:::` 收尾，所以 `code-lang` / `code-field` 都能指到出问题那一行。
+ *
+ *  三条口径（规范 `docs/规范/课件内容格式.md` §4 是唯一出处）：
+ *   · 指令参数**只当一个语言标签**用，可选（与围栏同一条：不写就不产出 `data-lang`）；
+ *     认不出的标签报 `code-lang`——把 `caption:` 写到指令头也走这一条。
+ *   · `alt:` / `caption:` **只在原文之前认**：原文一开始，`caption: …` 那一行就是原文本身
+ *     （照 `::: svg` 的先例）。两个字段都可选，写了但没值报 `code-field`。
+ *   · 字段之后没有任何原文报 `code-body`（只写字段等于留了个空框）。 */
+export function buildCode(
+  args: string, lines: string[], start: number, end: number, lineNo: number, ctx: LessonCtx,
+): CodeBlock {
+  const { file, problems } = ctx;
+  const lang = pyStrip(args);
+  if (!isKnownLang(lang)) {
+    // 两种坏写法分开说：写到指令头的字段行要讲清「字段在块里」，认不出的语言标签要给出白名单
+    const looksLikeField = /(^|\s)(alt|caption):/.test(lang);
+    problems.add(file, lineNo, looksLikeField
+      ? `::: code 后面只写一个语言标签，alt: / caption: 写在块里的单独两行（现在是 \`${lang}\`）`
+      : `::: code 后面只写一个语言标签（如 \`::: code term\`），现在是 \`${lang}\`——`
+        + `不认识的语言标签。会着色的写 ${COLORED_LANGS.join(' / ')}；`
+        + `不上色写 text（${PLAIN_LANGS.slice(1).join(' / ')} 也认），`
+        + '或者干脆不写语言标签（阅读端按内容猜）', 'code-lang');
+  }
+  const fields: Record<string, string> = {};
+  const fieldLines: Record<string, number> = {};
+  const body: string[] = [];
+  for (let offset = start; offset < end; offset++) {
+    const rawLine = lines[offset];
+    const text = rawLine.trim();
+    if (body.length === 0) {
+      if (!text) continue;
+      const field = FIELD_RE.exec(text);
+      if (field && (field[1] === 'alt' || field[1] === 'caption')) {
+        const value = pyStrip(field[2]);
+        fieldLines[field[1]] = offset + 1;
+        if (!value) {
+          problems.add(file, offset + 1,
+            `::: code 的 ${field[1]}: 后面没写内容——写一句，或者把这一行删掉`, 'code-field');
+          continue;
+        }
+        fields[field[1]] = value;   // 写两遍后者覆盖前者（与 figure / svg 同一条）
+        continue;
+      }
+    }
+    body.push(rawLine);
+  }
+  if (body.length === 0) {
+    problems.add(file, lineNo,
+      '::: code 块里没有代码原文——字段行之后写原文（只想留个位置就先别开这个块）', 'code-body');
+  }
+  return {
+    kind: 'directive', name: 'code', lang,
+    text: body.join('\n'), alt: fields.alt ?? '', caption: fields.caption ?? '', line: lineNo,
     alt_line: fieldLines.alt ?? lineNo, caption_line: fieldLines.caption ?? lineNo,
   };
 }
@@ -1371,6 +1448,7 @@ export function renderDirective(
   if (name === 'quiz') return renderQuiz(block as QuizBlock, ctx, indent);
   if (name === 'figure') return renderFigure(block as FigureBlock, ctx, indent);
   if (name === 'svg') return renderSvg(block as SvgBlock, ctx, indent);
+  if (name === 'code') return renderCode(block as CodeBlock, ctx, indent);
   if (name === 'resources' || name === 'related') {
     const node = block as LinksBlock;
     if (name === 'related') {
@@ -1460,6 +1538,33 @@ export function renderSvg(block: SvgBlock, ctx: LessonCtx, indent: string): stri
       + `${renderInline(caption, block.caption_line ?? block.line, ctx)}</figcaption>`);
   }
   lines.push(`${indent}</figure>`);
+  return lines.join('\n');
+}
+
+/** `::: code` 的 HTML：`<div class="lesson-code">` 把 `<pre data-lang>` 与解释槽圈在**同一个框**里。
+ *
+ *  与围栏的分工在这一处最直白：围栏产的是光秃秃一个 `<pre data-lang>`（规范 §2 那一行，
+ *  一个字不改），`::: code` 多一层框，`caption` 就落在这层框里——解释贴着它解释的那一块，
+ *  不再是框外另起的一段正文。
+ *
+ *  `alt:` 落成这一块的**无障碍名字**（`role="group"` + `aria-label`）：代码块不是图，不冒充
+ *  `role="img"`（那是 `::: svg` 的落法）；组名是读屏软件进这一块时会报出来的东西，
+ *  长代码块的「一句话替代文字」就读得到。纯文本，真标签照 `::: svg 的 alt:` 那样拦下。
+ *  `caption:` 走行内语法（与 `::: svg` 的 caption 同一条路），**不编号**——「图 N ·」是图的序列。 */
+export function renderCode(block: CodeBlock, ctx: LessonCtx, indent: string): string {
+  let attr = '';
+  if (block.alt) {
+    checkInlineHtml(block.alt, block.alt_line ?? block.line, '::: code 的 alt:', ctx);
+    attr = ` role="group" aria-label="${escAttr(block.alt)}"`;
+  }
+  const lang = block.lang ? ` data-lang="${escAttr(block.lang)}"` : '';
+  const lines = [`${indent}<div class="lesson-code"${attr}>`,
+    `${indent}  <pre${lang}><code>${escText(block.text)}</code></pre>`];
+  if (block.caption) {
+    lines.push(`${indent}  <p class="lesson-code__caption">`
+      + `${renderInline(block.caption, block.caption_line ?? block.line, ctx)}</p>`);
+  }
+  lines.push(`${indent}</div>`);
   return lines.join('\n');
 }
 
