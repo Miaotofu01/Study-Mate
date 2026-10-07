@@ -20,8 +20,9 @@
        `ref` + `innerHTML` 贴进去的内容（`SvgFrame` 的内联 SVG 就是这么贴的）在真 React 里
        重渲染后还在。重建式渲染会把这份内容连同旧节点一起丢掉，于是夹具里那个图框
        **下一次重渲染就变空壳**——那是夹具与真货的差别，会让「客户端产出的内联 SVG」这类面
-       看着像坏的（#97 报的就是这条）。`draw()` 因此把**无 React 子节点**的元素的 `innerHTML`
-       按路径带到重建后的同位置元素上。`MathSpan` 那条路（`dangerouslySetInnerHTML`）不算：
+       看着像坏的（#97 报的就是这条）。`draw()` 因此把**我们亲眼看见被赋过 `innerHTML`** 的
+       元素的 `innerHTML` 按路径带到重建后的同位置元素上——名单是元素实例，不按「空叶子 +
+       路径」猜（见上面那份名单的注释）。`MathSpan` 那条路（`dangerouslySetInnerHTML`）不算：
        它的内容由 props 每次渲染，搬旧值过去只会把新值盖掉。
      · 状态槽按「位置 + 组件函数」认实例，换视图时同位置换组件不会串槽
        （只按位置会串：踩过，路线图量到了上一个视图的旧 DOM）。
@@ -48,6 +49,31 @@
   let root = null;
   let vnode = null;
   let queued = false;
+
+  /* ── 「手贴内容」的搬运名单（#97 的保真边界） ──────────────────────────────
+     整树重建要替 `ref` + `innerHTML` 那段代码把内容带过重建，但只许带**我们亲眼看见被赋过
+     `innerHTML`** 的元素，不许按「无 React 子节点 + 路径相同」猜：后者会把别人（别的脚本、
+     别的套件、别的视图）塞进空叶子的东西一起搬走，悄悄改掉「这个元素应该是空的」这类预期。
+     所以把 `Element.prototype.innerHTML` 的 setter 包一层，赋值时把**元素实例**记进名单；
+     `applyProps` 里由 props 驱动的 `dangerouslySetInnerHTML` 不记（那份内容每次渲染都会重写）。
+     名单按实例记而不是按路径：元素一脱树就在下一趟被剔出去，不必替它保留猜测出来的位置。
+     补的时候只补**空的 React 叶子、且标签相同**——真正的撞车要「同一个组件类型在同一位置、
+     同一个标签」，而那种情况下那个组件的 effect 本来就会重贴一份新内容。 */
+  const handPainted = new Set();
+  let recordingPaint = true;
+  (function trackHandPainted() {
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+    if (!descriptor || typeof descriptor.set !== 'function') return;
+    Object.defineProperty(Element.prototype, 'innerHTML', {
+      configurable: true,
+      enumerable: descriptor.enumerable,
+      get: descriptor.get,
+      set: function (value) {
+        if (recordingPaint && this.__miniPath !== undefined) handPainted.add(this);
+        descriptor.set.call(this, value);
+      },
+    });
+  }());
 
   /**
    * 组件实例键 = 树里的位置 + 组件函数本身。
@@ -195,7 +221,12 @@
       // 原样透传一段 HTML（React 的那个 prop）：阅读端用它把 KaTeX 的输出放进公式容器里
       // （#91）。不认这个 prop 的话，公式容器在夹具里会是一片空白——而真实 React 里有内容，
       // 这种「夹具与真货不一样」的差别正是套件最该避免的假绿。
-      if (key === 'dangerouslySetInnerHTML') { el.innerHTML = (value && value.__html) || ''; continue; }
+      // 它由 props 每次渲染，所以**不记进手贴名单**（名单只收重建要把旧值搬过来的那一类）。
+      if (key === 'dangerouslySetInnerHTML') {
+        recordingPaint = false;
+        try { el.innerHTML = (value && value.__html) || ''; } finally { recordingPaint = true; }
+        continue;
+      }
       if (key.length > 2 && key.startsWith('on') && key[2] === key[2].toUpperCase() && typeof value === 'function') {
         el.addEventListener(key.slice(2).toLowerCase(), value);
         continue;
@@ -242,12 +273,14 @@
   function draw() {
     if (!root || !vnode) return;
     pendingEffects = [];
-    // 先收下「客户端用 innerHTML 贴进无子节点元素」的那份内容：重建会把旧节点整棵丢掉，
-    // 而 effect 只在 deps 变化时重跑，收不到它就等于夹具凭空把内联 SVG 抹掉（见文件头）。
+    // 先收下「我们手贴过 innerHTML」的那些元素的现状（名单见上面）。脱了树的在下一趟被剔出去：
+    // 新树可能复用了它的路径，但那份内容是上一株的。**不按「空叶子」猜**——只有真的走过
+    // innerHTML setter 的元素才在这份名单里。
     const carried = new Map();
-    root.querySelectorAll('*').forEach((el) => {
+    for (const el of [...handPainted]) {
+      if (!root.contains(el)) { handPainted.delete(el); continue; }
       if (el.__miniLeaf && el.innerHTML) carried.set(el.__miniPath, { tag: el.tagName, html: el.innerHTML });
-    });
+    }
     const next = document.createDocumentFragment();
     renderVNode(vnode, 'root', next);
     root.textContent = '';
@@ -257,6 +290,7 @@
         // 只补空的：有内容的（dangerouslySetInnerHTML 渲出来的）本来就是对的那份
         if (!el.__miniLeaf || el.innerHTML) return;
         const one = carried.get(el.__miniPath);
+        // 名单里没有这个路径就不动它——别人塞进来的东西不跟着搬家
         if (one && one.tag === el.tagName) el.innerHTML = one.html;
       });
     }
@@ -271,7 +305,7 @@
 
   global.MiniReact = {
     createElement, Fragment, useState, useEffect, useMemo, useCallback, useRef, mount,
-    /** 清掉所有 hook 槽与 effect（套件里换株重挂时用）。 */
-    reset() { hooksByPath.clear(); pendingEffects = []; root = null; vnode = null; },
+    /** 清掉所有 hook 槽、effect 与手贴名单（套件里换株重挂时用）。 */
+    reset() { hooksByPath.clear(); pendingEffects = []; handPainted.clear(); root = null; vnode = null; },
   };
 }(window));

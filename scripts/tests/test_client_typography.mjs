@@ -180,8 +180,9 @@ test('窄档（@media）的覆盖写在被覆盖的基础规则之后', () => {
 });
 
 test('面包屑的宽度上限按全角字算（em），不按 ch', () => {
-  // `.smb-crumb` 在文件里出现两处（中栏那一处是早先留下的、顶部那一处才是现在生效的），
-  // 所以这里不认「第几条」，只认**谁声明了 max-width / text-overflow**。
+  // `.smb-crumb` 的 max-width 有两条：基础一条 + 窄档（@media）覆盖一条——#98 已经把中栏那份
+  // 遗留规则删了（原来「中栏那一处 + 顶部那一处」的说法不再成立）。所以这里不认「第几条」，
+  // 只认**谁声明了 max-width**：基础与窄档两档都得按全角字算。
   const widthRules = RULES.filter((rule) => rule.selector === '.smb-crumb' && decl(rule, 'max-width'));
   assert.ok(widthRules.length >= 2,
     `面包屑应该有一条基础宽度上限 + 一条窄档覆盖，实际 ${widthRules.length} 条`);

@@ -22,8 +22,9 @@
    所以客户端那段代码本身是对的）。这条差别一度让这一套只能**现造一个同形状的元素**
    （`div.smb-figure__frame > svg`）去量「随列宽流动」这条 CSS 契约——只证明规则写得对，
    证明不了客户端真的把块里的图形贴了上去（#89 的报告如实记了这条）。
-   现在 `mini-react.js` 的重建把**无 React 子节点**的元素的 innerHTML 按路径带到同位置元素上
-   （等价于真 React「不碰自己没渲染过的子节点」），于是夹具内容里可以写真的 `::: svg` 块，
+   现在 `mini-react.js` 的重建把**我们看见被赋过 `innerHTML`** 的元素的 innerHTML 按路径带到
+   同位置元素上（名单是元素实例，不按「空叶子 + 路径」猜；等价于真 React「不碰自己没渲染过的
+   子节点」），于是夹具内容里可以写真的 `::: svg` 块，
    `lesson-body-*-svg` 那几场断言的就是**客户端产出的那个 `<svg>`**：它在、里面有内容文件里的
    图形、随列宽流动、暗色下被压暗。
 
@@ -748,7 +749,8 @@ try {
        SVG 活不过下一次重渲染；所以主场景里那条「矢量图随列宽流动」量的是**现造的同形状元素**，
        只证明 CSS 规则写得对，证明不了客户端真的把块里的图形贴了上去。
        这里把 `::: svg` 写进夹具内容，断言全部打在**真渲染出来的那个 <svg>**上：
-       它在、里面有内容文件里的图形、随列宽流动、暗色下被压暗。 */
+       它在、里面有内容文件里的图形、随列宽流动、暗色下被压暗。搬运用的是 mini-react 那份
+       「手贴过 innerHTML 的元素」名单，不是「空叶子就搬」——那条边界由 `mini-react-carry` 钉住。 */
     await session.scene('lesson-body-' + viewport.key + '-svg', async (ctx) => {
       await ctx.navigate(fixture, { settle: 1200 });
       await enterLesson(ctx);
@@ -796,6 +798,40 @@ try {
       };
     });
   }
+
+  /* ── 夹具保真的边界：搬运只认「我们确实赋过 innerHTML」的那些元素（#97 的收窄） ──────
+     整树重建要替 `ref` + `innerHTML` 那段代码（`SvgFrame`）把内容带过重建，但这份保真**不许**
+     外溢成「任何空叶子里的东西都被搬走」——否则别的套件对「元素应该是空的」的预期会被悄悄改掉
+     （跨视图路径撞车时没有任何断言挡着）。这里现造一棵小树，把两边都钉住：走过 `innerHTML`
+     那条路的搬，没走过的（`appendChild`）不搬，从没被动过的空叶子重建后依旧是空的。 */
+  await session.scene('mini-react-carry', async (ctx) => {
+    await ctx.navigate(fixture, { settle: 800 });
+    const one = await ctx.evaluate(`(() => {
+      const h = window.MiniReact.createElement;
+      const host = document.createElement('div');
+      host.setAttribute('data-proto', 'carry-host');
+      document.body.appendChild(host);
+      const Tree = () => h('div', { className: 'carry-tree' },
+        h('div', { id: 'carry-ours' }),
+        h('div', { id: 'carry-appended' }),
+        h('div', { id: 'carry-plain' }));
+      window.MiniReact.mount(h(Tree, null), host);
+      // 「我们」的那一份：客户端那段代码就是这么贴的（SvgFrame 的 ref + innerHTML）
+      document.getElementById('carry-ours').innerHTML = '<b>客户端贴的</b>';
+      // 别人从别的门塞进来的：没走过 innerHTML 那条路
+      document.getElementById('carry-appended').appendChild(document.createTextNode('别的门塞的'));
+      window.MiniReact.mount(h(Tree, null), host);   // 再画一遍 = 整树重建
+      const html = (id) => String((document.getElementById(id) || {}).innerHTML || '');
+      return { ours: html('carry-ours'), appended: html('carry-appended'), plain: html('carry-plain') };
+    })()`);
+    check('重建后，客户端用 innerHTML 贴过的空叶子内容还在（#97 的保真没退化）',
+      one.ours.indexOf('客户端贴的') >= 0, JSON.stringify(one));
+    check('重建后，没走过 innerHTML 那条路的空叶子不被搬运（保真只认显式名单，不按「空叶子」猜）',
+      one.appended.indexOf('别的门塞的') < 0, JSON.stringify(one));
+    check('重建后，从没被动过的空叶子依旧是空的',
+      one.plain === '', JSON.stringify(one));
+    return one;
+  });
 
   /* ── 两档对账：窄档不是宽档的截图 ─────────────────────────────────── */
   await session.scene('lesson-body-compare', async (ctx) => {

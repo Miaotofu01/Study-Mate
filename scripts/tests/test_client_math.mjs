@@ -15,15 +15,23 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   clientInternals, findByProp, renderWithState, resetHookState, setHookState, viewText,
 } from './fixtures/client_harness.mjs';
-// 期望值**从唯一出处取**（`lib/math.ts` 是随包 KaTeX dist 的清单与取址判据）：
-// 在这里再抄一份 `katex.min.css` / `/api/studymate/math` 字面量，改真源时这条断言照样绿。
+// 期望值**从唯一出处取**（`lib/math.ts` 是随包 KaTeX dist 的清单与取址判据、也是 #96 那条
+// 文本判据的家）：在这里再抄一份 `katex.min.css` / `/api/studymate/math` 字面量，改真源时这条
+// 断言照样绿。
 import {
-  MATH_CSS, MATH_ENDPOINT as HOST_MATH_ENDPOINT, MATH_JS,
+  MATH_CSS, MATH_ENDPOINT as HOST_MATH_ENDPOINT, MATH_JS, MATH_PLAIN_TEXT_PATTERN,
+  hasMathInPlainText, hasMathInProse,
 } from '../../lib/math.ts';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(HERE, '..', '..');
 
 const internals = clientInternals();
 const { MathSpan, mathNodes, mathSource, MATH_ENDPOINT, Question, SubjectiveBody } = internals;
@@ -141,6 +149,35 @@ test('参考答案与判分要点（主观题）里的公式同样排版', () =>
   assert.deepEqual(spans.map((span) => span.props.tex), ['Ax = b', 'Ax = b']);
   const refs = findByProp(node, 'className', 'smb-ref');
   assert.equal(refs.length, 2, '参考答案与判分要点两块都要在');
+});
+
+test('纯文本字段的判据与阅读端的 MATH_ONLY 同形：改一边忘另一边就红（#96）', () => {
+  /* 同一条判据两端各一份实现：阅读端那份在 `lib/client.js` 里（`MATH_ONLY`，题库字段用它
+     split），引擎那份在 `lib/math.ts` 里（导出按它决定带不带那 272KB）。票里明写「判据与阅读端
+     同口径」，所以这里逐字对账——和 `MATH_ENDPOINT` 的「必须逐字一致」同一种钉法。
+
+     阅读端那条正则**从源码里读出来**，不在这里重抄一份：重抄的话改真源这条断言照样绿，
+     那就不是断言、是复读。形状上只差它自己那层捕获括号与 `/g`（split 要留下分隔段的需要），
+     那是调用点的需要，不是判据的一部分。 */
+  const source = fs.readFileSync(path.join(ROOT, 'lib', 'client.js'), 'utf8');
+  const found = /const MATH_ONLY = \/\(([\s\S]*?)\)\/g;/.exec(source);
+  assert.ok(found, '阅读端那条 MATH_ONLY 的形状变了，套件取不到它——对账就成了空转');
+  assert.equal(MATH_PLAIN_TEXT_PATTERN.source, found[1],
+    `引擎的纯文本判据（${MATH_PLAIN_TEXT_PATTERN.source}）与阅读端的 MATH_ONLY（${found[1]}）不同形：`
+    + '两端各有一份实现，改一边必须同时改另一边');
+
+  // 结论也要一致（每次现编一条，不带 /g——带 g 的 test 有 lastIndex，会一测一个样）
+  const clientJudge = (text) => new RegExp(found[1]).test(text);
+  for (const text of ['解 $x^2 = 4$ 有几个根？', '块级 $$\\sum_{i=1}^{n} i$$ 也算',
+    String.raw`价格是 \$5 与 \$10。`, '行内式不许跨行：$x +\ny$', '一个公式都没有。', '$$$$']) {
+    assert.equal(hasMathInPlainText(text), clientJudge(text),
+      `${JSON.stringify(text)}：引擎与阅读端结论不同（同口径是同一条，不是两条像的）`);
+  }
+
+  // 正文那条**有意**比阅读端宽（行内式允许跨行，理由在 `lib/math.ts`）：它不在逐字对账之列，
+  // 但分叉的方向只能是「多带」——反过来漏掉会让页面降级成 TeX 原文，所以顺手把方向也钉住。
+  assert.equal(hasMathInPlainText('解 $x +\ny$ 的值。'), false, '纯文本字段那条不许跨行');
+  assert.equal(hasMathInProse('解 $x +\ny$ 的值。'), true, '正文那条放宽了换行（宁可多带）');
 });
 
 test('资源位置：默认走 Host 半的投送路由（导出页那条覆盖在浏览器套件里验）', () => {

@@ -141,13 +141,19 @@ window.__STUDYMATE_EXPORT__ = ${json};
  *      树（`assets/<科目>/<相对路径>`）。改写在 **`src` 的 setter** 上——晚一步（比如渲染完再
  *      扫 DOM）浏览器已经按旧地址发过请求了，控制台会多一条失败请求。
  *
- * `math` 说这次导出带没带公式资源（#96）：不带时把 `window.__STUDYMATE_MATH__` 声明成两个空串
- * ——阅读端据此判定「这台宿主没备资源」（不插样式表、不发请求），而不是去默认的 Host 半路由
- * 上撞一个 404。带不带由 `plan.ts` 按快照里的数学式判出来。
+ * `math` 说这次导出带没带公式资源（**#96 的全部理由就写在这里**，别处只给指针）：不带时把
+ * `window.__STUDYMATE_MATH__` 声明成两个空串——阅读端据此判定「这台宿主没备资源」（不插样式表、
+ * 不发请求），而不是去默认的 Host 半路由上撞一个 404。为什么按需：没有数学式的科目（非数学课、
+ * 老课件）不该为一个排不出来的公式背上那批资源（272KB 引擎 + 样式表 + 21 个字体），产物里也就
+ * 不该出现一条去取它的静态引用。带不带由 `plan.ts` 按快照里有没有会被阅读端排版的数学式判出来
+ * （判据在 `lib/math.ts`，与阅读端同口径、宁可多带不可少带）。**参数必填**：默认 `true` 会让
+ * 漏传的调用方悄悄又把 272KB 带上，那正是这条要修的失败方向。
+ *
+ * 这条理由的四处落地（各自只说自己的行为，不重述原因）：本函数里的空串赋值、`boot.js` 的
+ * 「取不到就不挂」、`scriptFiles` 的「不排那条 static script」、`plan.ts` 的「搬不搬资源」。
  */
-export function hostScript(math = true): string {
-  // #96：没带公式资源时两边都给空串（阅读端读到空串就当「这台宿主没备资源」——
-  // 不插样式表、不发请求，也不会去默认的 Host 半路由上撞 404）。
+export function hostScript(math: boolean): string {
+  // 不带就给两个空串（为什么与后果见上面 hostScript 的文档注释）。
   const mathSource = math
     ? `{ css: ${JSON.stringify(`${MATH_ASSET_DIR}/katex.min.css`)}, js: '' }`
     : "{ css: '', js: '' }";
@@ -204,9 +210,8 @@ export function hostScript(math = true): string {
      产物里的位置告诉它。css 给相对路径（相对 index.html，也就是产物根），字体随样式表自己
      的 URL 解析（url(fonts/…)），所以只需要这一个字段；js 给空串 = 引擎必须已经挂在
      window.katex 上（产物里那份走 vendor 包装壳登记进模块表，由 boot.js 取出来挂上）。
-     #96：这次导出里没有数学式就不搬那批资源（272KB 引擎 + 样式表 + 21 个字体），
-     声明成两个空串——阅读端按「宿主没备好」降级（不插样式表、不发请求），而不是去
-     默认的 Host 半路由上撞 404。 */
+     #96：这次导出里没有数学式就是这一处的空串形态——为什么给空串、后果是什么，见
+     hostScript 的文档注释（那是这条理由的落点）。 */
   window.__STUDYMATE_MATH__ = ${mathSource};
 
   /* ③ fetch 应答：形状照 Host 半那几条路由（bin/dsh-plugin.ts 与各子系统自己的路由模块）。 */
@@ -405,8 +410,8 @@ ${scripts}
 `;
 }
 
-/** 产物文件名清单（index.html 里脚本标签的顺序 = 依赖顺序）。 */
-export function scriptFiles(reactFiles: Record<VendorKey, string>, math = true): string[] {
+/** 产物文件名清单（index.html 里脚本标签的顺序 = 依赖顺序）。`math` 必填，理由见 hostScript。 */
+export function scriptFiles(reactFiles: Record<VendorKey, string>, math: boolean): string[] {
   return [
     DATA_FILE,
     HOST_FILE,
@@ -416,8 +421,8 @@ export function scriptFiles(reactFiles: Record<VendorKey, string>, math = true):
     reactFiles.reactDom,
     // 公式引擎（#91）排在阅读端本体之前：它只是往模块表里登记（懒执行），而阅读端渲染到公式
     // 时就要用它——排在后面就来不及（阅读端那次渲染已经在跑了）。
-    // #96：这份快照里没有数学式就**不排它**（那是一条静态 classic script，排了就会真去取
-    // 272KB；登记进模块表不执行也一样占流量）。
+    // #96：这份快照里没有数学式就不排它（那是一条静态 classic script，排了就会真去取 272KB；
+    // 登记进模块表不执行也一样占流量）。为什么与后果见 hostScript 的文档注释。
     ...(math ? [MATH_VENDOR_FILE] : []),
     CLIENT_FILE,
     BOOT_FILE,
