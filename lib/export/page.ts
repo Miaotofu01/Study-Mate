@@ -140,8 +140,17 @@ window.__STUDYMATE_EXPORT__ = ${json};
  *   ⑤ 取图地址：阅读端按宿主路由写 `/api/studymate/asset?…`，离线页面里图与页面同处一个目录
  *      树（`assets/<科目>/<相对路径>`）。改写在 **`src` 的 setter** 上——晚一步（比如渲染完再
  *      扫 DOM）浏览器已经按旧地址发过请求了，控制台会多一条失败请求。
+ *
+ * `math` 说这次导出带没带公式资源（#96）：不带时把 `window.__STUDYMATE_MATH__` 声明成两个空串
+ * ——阅读端据此判定「这台宿主没备资源」（不插样式表、不发请求），而不是去默认的 Host 半路由
+ * 上撞一个 404。带不带由 `plan.ts` 按快照里的数学式判出来。
  */
-export function hostScript(): string {
+export function hostScript(math = true): string {
+  // #96：没带公式资源时两边都给空串（阅读端读到空串就当「这台宿主没备资源」——
+  // 不插样式表、不发请求，也不会去默认的 Host 半路由上撞 404）。
+  const mathSource = math
+    ? `{ css: ${JSON.stringify(`${MATH_ASSET_DIR}/katex.min.css`)}, js: '' }`
+    : "{ css: '', js: '' }";
   return `/* StudyMate 导出的离线页面 —— 最小宿主（reading-end 本体在 studymate-client.js 里，逐字）。 */
 (function () {
   'use strict';
@@ -194,8 +203,11 @@ export function hostScript(): string {
      /api/studymate/math/…），导出页没有 Host 半——与取图那条改写同一个口径，用一个全局把
      产物里的位置告诉它。css 给相对路径（相对 index.html，也就是产物根），字体随样式表自己
      的 URL 解析（url(fonts/…)），所以只需要这一个字段；js 给空串 = 引擎必须已经挂在
-     window.katex 上（产物里那份走 vendor 包装壳登记进模块表，由 boot.js 取出来挂上）。 */
-  window.__STUDYMATE_MATH__ = { css: ${JSON.stringify(`${MATH_ASSET_DIR}/katex.min.css`)}, js: '' };
+     window.katex 上（产物里那份走 vendor 包装壳登记进模块表，由 boot.js 取出来挂上）。
+     #96：这次导出里没有数学式就不搬那批资源（272KB 引擎 + 样式表 + 21 个字体），
+     声明成两个空串——阅读端按「宿主没备好」降级（不插样式表、不发请求），而不是去
+     默认的 Host 半路由上撞 404。 */
+  window.__STUDYMATE_MATH__ = ${mathSource};
 
   /* ③ fetch 应答：形状照 Host 半那几条路由（bin/dsh-plugin.ts 与各子系统自己的路由模块）。 */
   function json(body, status) {
@@ -394,7 +406,7 @@ ${scripts}
 }
 
 /** 产物文件名清单（index.html 里脚本标签的顺序 = 依赖顺序）。 */
-export function scriptFiles(reactFiles: Record<VendorKey, string>): string[] {
+export function scriptFiles(reactFiles: Record<VendorKey, string>, math = true): string[] {
   return [
     DATA_FILE,
     HOST_FILE,
@@ -404,7 +416,9 @@ export function scriptFiles(reactFiles: Record<VendorKey, string>): string[] {
     reactFiles.reactDom,
     // 公式引擎（#91）排在阅读端本体之前：它只是往模块表里登记（懒执行），而阅读端渲染到公式
     // 时就要用它——排在后面就来不及（阅读端那次渲染已经在跑了）。
-    MATH_VENDOR_FILE,
+    // #96：这份快照里没有数学式就**不排它**（那是一条静态 classic script，排了就会真去取
+    // 272KB；登记进模块表不执行也一样占流量）。
+    ...(math ? [MATH_VENDOR_FILE] : []),
     CLIENT_FILE,
     BOOT_FILE,
   ];

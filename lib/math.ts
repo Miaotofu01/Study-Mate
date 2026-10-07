@@ -125,3 +125,56 @@ export function mathAssets(dir = katexDistDir()): MathAsset[] {
 export function mathAssetPath(rel: string): string {
   return `${MATH_ENDPOINT}/${rel}`;
 }
+
+/* ── 「这段文本里有数学式吗」：导出按需携带资源的判据（#96） ──────────────────
+   两个问题要分开答，因为阅读端对这两类文本的处理本来就不同：
+
+     · **正文**（Markdown）：代码围栏与行内代码里的 `$` 不是公式（`lib/core/format.ts`
+       的解析器与 `lib/client.js` 的 `parseBlocks` 都不当公式），先把代码剔掉再找；
+     · **纯文本字段**（题库的题面／选项／解析／参考答案／判分要点，以及 `objective` /
+       `goal` 这种会被 `inlineNodes` 过一遍的字段）：没有代码语义，整串找。
+
+   两条正则与阅读端同一形状（`lib/client.js` 的 `INLINE` / `MATH_ONLY`：`$…$` 行内、
+   `$$…$$` 块级），正文那条还刻意放宽了换行（见下）。**宁可多带不可少带**：这里比阅读端
+   只多不少（比如粗体里的 `$…$` 阅读端不排版、这里算数），分叉时的方向只能是「带了但没用上」
+   ——反过来「该带没带」会让页面降级成 TeX 原文，那是禁止的方向。 */
+
+const MATH_EXPRESSION = /\$\$[\s\S]+?\$\$|\$[^$\n]+\$/;
+
+/**
+ * 正文用的那一条：行内式**允许跨行**。
+ *
+ * 为什么与纯文本字段不同：阅读端把段落的多行拼成一行之后再切行内标记（`lib/client.js` 的
+ * `parseBlocks` 里 `para.join(' ')`，格式规范也要求公式本身不跨行）。所以 `$x +` 换行 `y$`
+ * 这种写法在页面里**是会排版**的；如果这里按「不许换行」判，导出就会少带引擎、页面降级成
+ * TeX 原文——那正是本票禁止的失败方向。放宽的代价是「两个美元号各在一段」也会算成有数学式，
+ * 属于允许的「带了没用上」。
+ */
+const MATH_EXPRESSION_PROSE = /\$\$[\s\S]+?\$\$|\$[^$]+\$/;
+
+/**
+ * 纯文本字段里有没有数学式（题库那种）。
+ * 判据与 `lib/client.js` 的 `MATH_ONLY` 同一个：`$…$` 行内、`$$…$$` 块级。
+ */
+export function hasMathExpression(text: unknown): boolean {
+  return typeof text === 'string' && MATH_EXPRESSION.test(text);
+}
+
+/**
+ * 正文（Markdown）里有没有数学式：剔掉代码围栏与行内代码之后再判。
+ *
+ * 剔代码的口径照 `lib/client.js` 的 `parseBlocks`：` ``` `（可带语言）开、` ``` ` 收；
+ * 行内代码是 `` `…` ``。**有意的偏差**：没收尾的围栏在阅读端会一路吃到结尾，这里
+ * 只把认得出配对的那几段剔掉（剩下照扫）——宁可多认几个 `$`，也不能反过来漏掉。
+ */
+export function hasMathInProse(text: unknown): boolean {
+  if (typeof text !== 'string') return false;
+  const kept: string[] = [];
+  let fenced = false;
+  for (const line of text.split('\n')) {
+    if (/^```\w*\s*$/.test(line)) { fenced = !fenced; kept.push(''); continue; }
+    kept.push(fenced ? '' : line);
+  }
+  return MATH_EXPRESSION_PROSE.test(kept.join('\n').replace(/`[^`\n]*`/g, ' '));
+}
+

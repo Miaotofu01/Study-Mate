@@ -38,7 +38,9 @@ try {
 }
 console.log(`真 React：${react.version}（${react.source}）`);
 
-/* ── 前提二：现造一份工作区并导出（跑完即弃）──────────────────────────── */
+/* ── 前提二：现造两份工作区并导出（跑完即弃）──────────────────────────────
+   一份带数学式、一份一个数学式都没有（#96：非数学课 / 老课件的产物不该带 KaTeX 的
+   JS / CSS / 字体，页面也不该为它发一条请求）。两份都在同一个临时根下，跑完一起删。 */
 
 const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sm-export-file-'));
 const workspace = path.join(root, '学习资料');
@@ -49,6 +51,14 @@ const outcome = await runExport({ workspace, react });
 const entry = pathToFileURL(path.join(outcome.out, 'index.html')).href;
 console.log(`导出：${outcome.out}（${outcome.files.length} 个文件，跑完删）`);
 console.log(`打开：${entry}`);
+
+const plainWorkspace = path.join(root, '无数学的资料');
+fs.mkdirSync(plainWorkspace, { recursive: true });
+writeExportWorkspace(plainWorkspace, { math: false });
+const plainOutcome = await runExport({ workspace: plainWorkspace, react });
+const plainEntry = pathToFileURL(path.join(plainOutcome.out, 'index.html')).href;
+console.log(`导出（没有数学式）：${plainOutcome.out}（${plainOutcome.files.length} 个文件）`);
+console.log(`打开：${plainEntry}`);
 
 let failures = 0;
 function check(label, ok, detail = '') {
@@ -89,7 +99,12 @@ try {
     check('画布撑满视口（1400 宽）', Number(seen.width) >= 1300, String(seen.width));
     check('全部是 classic script（file:// 下 ES 模块加载不了）',
       seen.moduleScripts === 0 && seen.scripts.length === 9, JSON.stringify(seen.scripts));
-    return seen;
+    // #96 的携带那一侧：有数学式的产物里，引擎是静态 classic script，所以它**在首页就被取了**
+    // （懒执行不等于懒请求——正是这条让无数学式的科目白白拖 272KB，也是本票要收掉的那笔账）。
+    const asked = ctx.requests.map((request) => request.url);
+    check('有数学式的产物带着公式引擎，首页就会取它（#96 的另一侧）',
+      asked.some((url) => url.endsWith('vendor/katex.production.js')), JSON.stringify(asked));
+    return { ...seen, requests: asked };
   });
 
   /* 科目页 → 课件页：公式、图片、代码块、题目 */
@@ -175,7 +190,55 @@ try {
       answered.states[0] === 'right' && answered.states[1] === null, JSON.stringify(answered.states));
     check('解析跟着出来', answered.right === 'true' && String(answered.why).includes('变量是名字'),
       JSON.stringify(answered));
-    return { ...seen, answered };
+    // #96 的「数学课照旧」那一侧：资源按需取，而这里真的取到了（样式表 + 字体，全在产物里）
+    const asked = ctx.requests.map((request) => request.url);
+    check('公式资源是阅读端按需从产物里取的（样式表 + woff2 字体都在请求日志里）',
+      asked.some((url) => url.endsWith('assets/katex/katex.min.css'))
+      && asked.some((url) => /assets\/katex\/fonts\/.+\.woff2$/.test(url)), JSON.stringify(asked));
+    return { ...seen, answered, requests: asked };
+  });
+
+  /* #96：没有数学式的产物 —— 产物里不该有 KaTeX 的引用，打开后一个公式资源的请求都不发 */
+  await session.scene('export-no-math', async (ctx) => {
+    await ctx.navigate(plainEntry, { settle: 1500 });
+    const home = await ctx.evaluate(`(() => ({
+      hasRoot: !!document.querySelector('.smb-root'),
+      courses: document.querySelectorAll('[data-proto="nav-subject"]').length,
+      scripts: Array.from(document.querySelectorAll('script[src]')).map((el) => el.getAttribute('src')),
+      mathDecl: JSON.stringify(window.__STUDYMATE_MATH__ || null),
+    }))()`);
+    check('没带公式资源的页面照常起来（不是空白）', home.hasRoot === true && home.courses === 1,
+      JSON.stringify(home));
+    check('脚本表里没有公式引擎（那是一条静态 classic script，排了就会真去取 272KB）',
+      home.scripts.length === 8 && !home.scripts.some((src) => /katex/i.test(src)),
+      JSON.stringify(home.scripts));
+    check('宿主声明里没有指着 KaTeX 的路径（两边都是空串 = 这次导出没带公式资源）',
+      home.mathDecl === '{"css":"","js":""}', String(home.mathDecl));
+
+    // 进课件页 → 打开题库：这一份内容里一个数学式都没有，整场不该有半条公式资源请求
+    await ctx.evaluate(`document.querySelectorAll('[data-proto="nav-subject"]')[0].click()`);
+    await ctx.sleep(400);
+    await ctx.evaluate(`document.querySelectorAll('[data-proto="open-node"]')[0].click()`);
+    await ctx.sleep(600);
+    await ctx.evaluate(`document.querySelector('[data-proto="toggle-quiz"]').click()`);
+    await ctx.sleep(500);
+    const seen = await ctx.evaluate(`(() => ({
+      docText: (document.querySelector('.smb-doc') || document.body).textContent.slice(0, 80),
+      mathElements: document.querySelectorAll('.smb-math, .smb-math-block').length,
+      questions: document.querySelectorAll('.smb-q').length,
+      stylesheets: Array.from(document.styleSheets).map((sheet) => String(sheet.href || 'inline')),
+    }))()`);
+    const asked = ctx.requests.map((request) => request.url);
+    check('课件页与题库都渲染出来了', Number(seen.questions) >= 1 && String(seen.docText).length > 0,
+      JSON.stringify(seen));
+    check('页面里一个数学元素都没有（这份内容本来就没有数学式）', seen.mathElements === 0,
+      String(seen.mathElements));
+    // 判据是 CDP 的请求日志（不是 performance entries：`file://` 下那份读数是空的，实测过）
+    check('零请求：整场没有一条去取 KaTeX 的请求（JS / CSS / 字体）',
+      asked.every((url) => !/katex/i.test(url)), JSON.stringify(asked));
+    check('也没有把 KaTeX 的样式表插进来',
+      seen.stylesheets.every((href) => !/katex/i.test(href)), JSON.stringify(seen.stylesheets));
+    return { home, seen, requests: asked };
   });
 
   /* 写请求与推送：离线页面只读，且不去连那条不存在的推送流 */

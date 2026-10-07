@@ -22,13 +22,13 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { runExport, resolveOutDir, writeUnder, ExportCancelledError } from '../../lib/export/run.ts';
-import { planExport, clientSourceFile } from '../../lib/export/plan.ts';
+import { planExport, clientSourceFile, snapshotHasMath } from '../../lib/export/plan.ts';
 import { resolveReact, ReactMissingError, reactCandidates } from '../../lib/export/react.ts';
 import { readExportDir, checkExport } from '../../lib/export/guard.ts';
 import { assetProductPath, indexHtml, splitVendor } from '../../lib/export/page.ts';
 import { KATEX_VERSION, MATH_JS, katexDistDir } from '../../lib/math.ts';
 import { tempDir } from './fixtures/tools.mjs';
-import { writeExportWorkspace, addSecondSubject, fakeReactRoot } from './fixtures/export_workspace.mjs';
+import { writeExportWorkspace, addSecondSubject, fakeReactRoot, lessonMarkdown, poolJson } from './fixtures/export_workspace.mjs';
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
@@ -140,6 +140,113 @@ test('公式资源随产物走：引擎走 vendor 包装壳 + 哈希，样式表
   assert.match(host, /__STUDYMATE_MATH__\s*=\s*\{\s*css:\s*"assets\/katex\/katex\.min\.css"/,
     '导出页要把公式资源的位置告诉阅读端（css 指产物内的相对路径）');
   assert.match(boot, /__smRequire\('katex'\)/, '引擎要从产物里的模块表取出来挂到 window.katex 上');
+});
+
+/* ── #96：公式资源**按需**携带 ──────────────────────────────────────────────
+   判据与阅读端同口径：正文（代码里的 `$` 不算）与题库纯文本字段都算；**宁可多带不可少带**
+   ——分叉时的失败方向只能是「带了但没用上」，「该带没带」会让页面降级成 TeX 原文。
+   真浏览器里的零请求那一侧在 `scripts/tests/browser/export_file_test.mjs`。 */
+
+test('没有数学式的科目：KaTeX 的 JS / CSS / 字体一个都不带（#96）', async (t) => {
+  const root = tempDir(t, 'studymate-export-nomath-');
+  const workspace = path.join(root, '学习资料');
+  fs.mkdirSync(workspace, { recursive: true });
+  writeExportWorkspace(workspace, { math: false });
+  addSecondSubject(workspace, 'extra', { math: false });
+  const react = resolveReact({
+    env: { ...process.env, STUDYMATE_REACT_DIR: fakeReactRoot(root) },
+    probeGlobal: false,
+  });
+  const outcome = await runExport({ workspace, react });
+  const files = outcome.files;
+
+  assert.deepEqual(files.filter((file) => /katex/i.test(file)), [],
+    `没有数学式的产物里不该有 KaTeX 的文件：${files.join('、')}`);
+  const html = fs.readFileSync(path.join(outcome.out, 'index.html'), 'utf8');
+  assert.ok(!/katex/i.test(html), 'index.html 里不该有 KaTeX 的引用');
+  const order = [...html.matchAll(/<script src="([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(order, [
+    'data.js', 'host.js',
+    'vendor/scheduler.production.js', 'vendor/react.production.js',
+    'vendor/react-dom.production.js', 'vendor/react-dom-client.production.js',
+    'studymate-client.js', 'boot.js',
+  ], '没带公式引擎时脚本表就少它一个');
+  // 宿主也别再指着产物里不存在的样式表：两边都给空串 = 「这次导出没带公式资源」
+  const host = fs.readFileSync(path.join(outcome.out, 'host.js'), 'utf8');
+  assert.match(host, /__STUDYMATE_MATH__\s*=\s*\{\s*css:\s*(?:''|"")\s*,\s*js:\s*(?:''|"")\s*\}/,
+    '没带公式资源时，宿主声明里不该留一条指着 katex.min.css 的路径');
+
+  const { files: onDisk, manifest } = readExportDir(outcome.out);
+  assert.deepEqual(manifest.third_party.filter((entry) => entry.module === 'katex'), []);
+  const report = checkExport(onDisk, manifest, { machinePaths: [workspace, outcome.out] });
+  assert.deepEqual(report.violations, [], '没带公式资源的产物照样要对守卫干净');
+  assert.deepEqual(report.manifestProblems, []);
+});
+
+test('公式只出现在题库字段里：资源照带（宁可多带，不许少带）（#96）', async (t) => {
+  const root = tempDir(t, 'studymate-export-quizmath-');
+  const workspace = path.join(root, '学习资料');
+  fs.mkdirSync(workspace, { recursive: true });
+  // 正文一个数学式都没有，公式只写在题面与解析里（#91 的硬要求：判据要把题库字段算进去）
+  writeExportWorkspace(workspace, { math: false, pool: poolJson() });
+  const react = resolveReact({
+    env: { ...process.env, STUDYMATE_REACT_DIR: fakeReactRoot(root) },
+    probeGlobal: false,
+  });
+  const plan = planExport({ workspace, react });
+  const paths = plan.products.map((product) => product.path);
+  assert.ok(paths.includes('vendor/katex.production.js'), `题库里的公式也是公式：${paths.join('、')}`);
+  assert.ok(paths.includes('assets/katex/katex.min.css'), '样式表要跟着引擎一起走');
+  const html = plan.products.find((product) => product.path === 'index.html').text;
+  assert.match(html, /vendor\/katex\.production\.js/);
+});
+
+test('正文里的美元号写在代码围栏里：不算数学式，不带公式资源（#96）', async (t) => {
+  const root = tempDir(t, 'studymate-export-codedollar-');
+  const workspace = path.join(root, '学习资料');
+  fs.mkdirSync(workspace, { recursive: true });
+  // 老课件 / 非数学课的典型形状：正文里的 `$` 全在代码块里（format.ts 与阅读端都不当公式）
+  const lesson = `${lessonMarkdown('变量', { math: false })}\n\`\`\`sh\necho $HOME $PATH\n\`\`\`\n`;
+  writeExportWorkspace(workspace, { math: false, lesson, pool: poolJson({ math: false }) });
+  const react = resolveReact({
+    env: { ...process.env, STUDYMATE_REACT_DIR: fakeReactRoot(root) },
+    probeGlobal: false,
+  });
+  const outcome = await runExport({ workspace, react });
+  assert.deepEqual(outcome.files.filter((file) => /katex/i.test(file)), [],
+    `代码块里的 $ 不是数学式：${outcome.files.join('、')}`);
+});
+
+test('按需携带的判据本身：正文先剔代码、其余字段整串扫，分叉一律偏向「带」（#96）', async () => {
+  const cases = [
+    // 正文：行内与块级都算
+    ['正文行内公式', { lesson_md: '解 $Ax = b$ 就是这样。' }, true],
+    ['正文块级公式', { lesson_md: '$$\nE = mc^2\n$$' }, true],
+    // 段落里的公式写断在换行处：阅读端把段落各行拼成一行再切（`para.join(' ')`），所以是公式；
+    // 判据若按「不许换行」判就会少带引擎（禁止的失败方向），这条把它钉住。
+    ['行内公式断在换行处也算', { lesson_md: '解 $x +\ny$ 的值。' }, true],
+    // 放宽换行的代价：两个美元号各在一段也会算——「带了没用上」是允许的方向
+    ['美元号分在两段：偏多带', { lesson_md: '价格是 5\\$。\n\n另一处 10\\$。' }, true],
+    // 正文里的代码不算：围栏（含带语言标签的）与行内代码
+    ['围栏里的美元号不算', { lesson_md: '```sh\necho $HOME $PATH\n```' }, false],
+    ['带语言标签的围栏也不算', { lesson_md: '```bash\necho $HOME $PATH\n```' }, false],
+    ['行内代码里的美元号不算', { lesson_md: '把它写成 `$HOME` 与 `$PATH`。' }, false],
+    ['没有美元号', { lesson_md: '价格是 5 元。' }, false],
+    // 题库纯文本字段（题面 / 选项 / 解析）：整串扫，没有代码语义
+    ['题面里的公式算', { pool: { A: [{ q: '解 $x^2 = 4$。', opts: ['甲'] }] } }, true],
+    ['选项里的公式算', { pool: { A: [{ q: '选一个', opts: ['$x = 2$', '乙'] }] } }, true],
+    ['解析里的公式算', { pool: { A: [{ q: '选一个', opts: ['甲'], why: '开了方要带 $\\pm$。' }] } }, true],
+    // 会被 inlineNodes 过一遍的字段：大纲目标也算
+    ['大纲 objective 里的公式算', { nodes: [{ objective: '记住 $E = mc^2$' }] }, true],
+  ];
+  for (const [label, value, expected] of cases) {
+    assert.equal(snapshotHasMath(value), expected, label);
+  }
+  // 转义的美元号：文档说该写 `\$`，但阅读端那套朴素正则照样会切出一段「公式」去排版——
+  // 判据因此也算它（宁可多带；少带会让页面降级成 TeX 原文）。
+  assert.equal(snapshotHasMath({ lesson_md: '花了 \\$5 和 \\$10 才对。' }), true, '转义美元号也要偏向带');
+  assert.equal(snapshotHasMath({ lesson_md: '**$x$** 这种粗体里的公式' }), true, '粗体里的公式阅读端不排，但判据偏向带');
+  assert.equal(snapshotHasMath({ lesson_md: '**粗体**，没有公式。' }), false);
 });
 
 test('index.html 的属性位置按属性口径转义：双引号与单引号都转，标题走文本口径', () => {

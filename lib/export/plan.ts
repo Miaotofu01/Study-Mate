@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { readLibrary } from '../library.ts';
 import { readReference } from '../reference.ts';
 import { cmpCodePoints } from '../core/format.ts';
-import { KATEX_VERSION, LICENSE_FILE, MATH_FONT_DIR, MATH_JS, katexDistDir, mathAssets } from '../math.ts';
+import { KATEX_VERSION, LICENSE_FILE, MATH_FONT_DIR, MATH_JS, hasMathExpression, hasMathInProse, katexDistDir, mathAssets } from '../math.ts';
 import type { ReactSources } from './react.ts';
 import { ASSETS_DIR } from './page.ts';
 import type { VendorKey } from './page.ts';
@@ -129,6 +129,27 @@ function walkFiles(dir: string, prefix = ''): string[] {
 }
 
 /**
+ * 这份快照里有没有会被阅读端排版的数学式（#96 的按需判据）。
+ *
+ * 判据与阅读端同口径（`lib/client.js` 那套「渲染出数学元素才去取资源」），**宁可多带不可少带**：
+ *   · 正文（`lesson_md`）：先剔掉代码围栏与行内代码再找——两边的解析器都不把代码里的 `$` 当公式；
+ *   · 其余一切字符串（题库纯文本字段、`objective` / `goal` 这类会被 `inlineNodes` 过一遍的字段）：
+ *     整串找。少扫一个字段就是「该带没带」，那会让页面降级成 TeX 原文。
+ *
+ * 分叉时的方向只能是「带了但没用上」：这条判据比阅读端只多不少（例如粗体里的 `$…$` 阅读端
+ * 不排版、这里算数），绝不会出现「页面要排版却拿不到引擎」那条。只看快照本身——离线页面渲染的
+ * 就是这一份（`data.js`），参考资料的正文在阅读端是 `<pre>` 原样显示，不走排版器，因此不算。
+ */
+export function snapshotHasMath(value: unknown, key = ''): boolean {
+  if (typeof value === 'string') {
+    return key === 'lesson_md' ? hasMathInProse(value) : hasMathExpression(value);
+  }
+  if (value === null || typeof value !== 'object') return false;
+  return Object.entries(value as Record<string, unknown>)
+    .some(([childKey, child]) => snapshotHasMath(child, childKey));
+}
+
+/**
  * 算一份导出计划。
  *
  * @throws ExportPlanError 工作区读不出来、科目挑不出来、阅读端本体不在。
@@ -164,6 +185,9 @@ export function planExport(options: PlanExportOptions): ExportPlan {
   // 所以抹成一个标记（阅读端只在「读不到数据」那张错误卡上显示过它）。
   library.workspace = '（离线导出副本）';
   library.subjects = chosen;
+
+  // #96：这次导出带不带公式资源，只看这份快照（页面渲染的就是它）。判据见 snapshotHasMath。
+  const withMath = snapshotHasMath(library);
 
   const reference: Record<string, Record<string, string>> = {};
   const subjects: ManifestSubject[] = [];
@@ -221,38 +245,42 @@ export function planExport(options: PlanExportOptions): ExportPlan {
 
   products.push({ path: CLIENT_FILE, role: 'client', text: clientText, bytes: Buffer.byteLength(clientText) });
 
-  /* 公式（#91）：随包发的 KaTeX dist 也搬进产物——离线页面要能自己排版，不联网、不引 CDN。
+  /* 公式（#91 / #96）：随包发的 KaTeX dist **只在这次导出真的出现数学式时**搬进产物——
+     离线页面要能自己排版，不联网、不引 CDN；没有数学式的科目（非数学课、老课件）一个字节都不带，
+     产物里也就不会有一条去取 272KB 引擎的静态引用。判据与阅读端同口径，宁可多带不可少带。
      两处落点的判据不同（见 page.ts 的 MATH_VENDOR_FILE）：引擎走 vendor 包装壳 + 哈希，
      样式表与字体落 assets/。字体与 CSS 的相对位置不能改：CSS 里的 `url(fonts/…)` 相对样式表
      自己的 URL 解析。 */
-  const mathEngineFile = path.join(katexDistDir(), MATH_JS);
-  const mathEngineBody = fs.readFileSync(mathEngineFile, 'utf8');
-  const mathEngineText = vendorFile('katex', mathEngineBody);
-  products.push({ path: MATH_VENDOR_FILE, role: 'vendor', text: mathEngineText, bytes: Buffer.byteLength(mathEngineText) });
-  thirdParty.push({
-    path: MATH_VENDOR_FILE,
-    module: 'katex',
-    upstream: `lib/katex/${MATH_JS}`,
-    version: KATEX_VERSION,
-    sha256: sha256(mathEngineBody),
-  });
-  for (const asset of mathAssets()) {
-    products.push({
-      path: `${MATH_ASSET_DIR}/${asset.rel}`,
-      // asset：**二进制/原样拷贝**那一档（守卫不扫内容、也不按 utf8 比字节）。CSS 也是这么走的。
-      role: 'asset',
-      from: asset.file,
-      bytes: asset.bytes,
+  if (withMath) {
+    const mathEngineFile = path.join(katexDistDir(), MATH_JS);
+    const mathEngineBody = fs.readFileSync(mathEngineFile, 'utf8');
+    const mathEngineText = vendorFile('katex', mathEngineBody);
+    products.push({ path: MATH_VENDOR_FILE, role: 'vendor', text: mathEngineText, bytes: Buffer.byteLength(mathEngineText) });
+    thirdParty.push({
+      path: MATH_VENDOR_FILE,
+      module: 'katex',
+      upstream: `lib/katex/${MATH_JS}`,
+      version: KATEX_VERSION,
+      sha256: sha256(mathEngineBody),
     });
-  }
-  /* 许可证随副本分发：产物就是 KaTeX 的一份副本，而这里**是两份不同的许可**——
-     代码与 CSS 是 MIT，字体是 SIL OFL 1.1（带保留字体名）。两份都要带，别合成一份。 */
-  for (const rel of [LICENSE_FILE, `${MATH_FONT_DIR}/${LICENSE_FILE}`]) {
-    const licenseFile = path.join(katexDistDir(), rel);
-    if (!fs.existsSync(licenseFile)) continue;
-    products.push({
-      path: `${MATH_ASSET_DIR}/${rel}`, role: 'asset', from: licenseFile, bytes: fs.statSync(licenseFile).size,
-    });
+    for (const asset of mathAssets()) {
+      products.push({
+        path: `${MATH_ASSET_DIR}/${asset.rel}`,
+        // asset：**二进制/原样拷贝**那一档（守卫不扫内容、也不按 utf8 比字节）。CSS 也是这么走的。
+        role: 'asset',
+        from: asset.file,
+        bytes: asset.bytes,
+      });
+    }
+    /* 许可证随副本分发：产物就是 KaTeX 的一份副本，而这里**是两份不同的许可**——
+       代码与 CSS 是 MIT，字体是 SIL OFL 1.1（带保留字体名）。两份都要带，别合成一份。 */
+    for (const rel of [LICENSE_FILE, `${MATH_FONT_DIR}/${LICENSE_FILE}`]) {
+      const licenseFile = path.join(katexDistDir(), rel);
+      if (!fs.existsSync(licenseFile)) continue;
+      products.push({
+        path: `${MATH_ASSET_DIR}/${rel}`, role: 'asset', from: licenseFile, bytes: fs.statSync(licenseFile).size,
+      });
+    }
   }
 
   const generatedAt = now().toISOString();
@@ -268,7 +296,7 @@ export function planExport(options: PlanExportOptions): ExportPlan {
   });
   products.push({ path: DATA_FILE, role: 'data', text: dataText, bytes: Buffer.byteLength(dataText) });
 
-  const host = hostScript();
+  const host = hostScript(withMath);
   products.push({ path: HOST_FILE, role: 'page', text: host, bytes: Buffer.byteLength(host) });
 
   const title = pageTitle(subjects.map((subject) => subject.name));
@@ -280,7 +308,7 @@ export function planExport(options: PlanExportOptions): ExportPlan {
   const entry = indexHtml({
     title,
     note: `StudyMate 离线导出 · ${subjects.map((subject) => subject.name).join('、')} · ${generatedAt.slice(0, 10)}`,
-    scripts: scriptFiles(reactFiles),
+    scripts: scriptFiles(reactFiles, withMath),
   });
   products.push({ path: 'index.html', role: 'page', text: entry, bytes: Buffer.byteLength(entry) });
 
@@ -300,7 +328,8 @@ export function planExport(options: PlanExportOptions): ExportPlan {
   const assets = subjects.reduce((total, subject) => total + subject.assets, 0);
   const summary = `导出 ${subjects.length} 门科目 / ${nodes} 个节点 / ${assets} 张配图，`
     + `共 ${products.length} 个文件（阅读端本体 ${Math.round(Buffer.byteLength(clientText) / 1024)}KB，`
-    + `React ${options.react.version} 来自 ${options.react.source}，KaTeX ${KATEX_VERSION} 随包）`;
+    + `React ${options.react.version} 来自 ${options.react.source}，`
+    + (withMath ? `KaTeX ${KATEX_VERSION} 随包）` : '这份快照里没有数学式，不带 KaTeX）');
 
   return { products, manifest, summary };
 }
