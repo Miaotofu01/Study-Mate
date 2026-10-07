@@ -365,3 +365,30 @@
   `frontend/e2e-run*.log`。全部落 `feat/study-mate-web` 并 push 至 fork；PR #43 描述同步更新。
 - **提交前门禁（本次实测）**：后端 pytest **474 passed / 1 skipped**；组件 **119 passed（16 文件）**。
 - **运行产物不入库**：`e2e-run*.log` 与 `docs/archive/*.md` 均为 gitignore 忽略项。
+
+---
+
+## 2026-10-06 · PR #43 首轮审查响应（密钥掩码 + 路径判定修复，已定稿）
+
+> 性质：**只追加**。上游维护者在 PR #43 留三条审查意见（密钥泄漏 / CI 红 / TS 引擎迁移对齐），
+> 本轮落实前两条的修复；第三条属方向声明，回复口径见 PR。
+
+- **GET /api/settings 不再回明文密钥（P0）**：`settings_router.get_settings` 改回**掩码 `********` +
+  `has_key`**——原「明文回填输入框」设计叠加 `allow_origins=["*"] + allow_credentials=True` 的 CORS
+  （Starlette 会反射请求方 Origin）后，用户浏览器里任意网页都可跨域读到本机密钥明文，与后端绑
+  127.0.0.1 无关。PUT 与 `/test` 本就认掩码/空串为「保持原值」，故前端只把回填值换成掩码即可，
+  ProvidersView 组件测试三处断言同步改口径（`fixtures.makeProvider` 默认值改为掩码形状）。
+  **CORS 收紧为显式来源白名单**（本机 3800/3801/3810 × localhost/127.0.0.1，`allow_credentials=False`）
+  ——前端所有 `/api` 走 Next 同源代理，浏览器从不直连 8101，白名单只兜「直连」场景。
+- **快改 / 草稿文件读取路径判定接 `tools.unsafe_relative_reason`**：`PUT /tickets/{id}/artifact` 与
+  `GET /drafts/{slug}/files` 原先只靠 `resolve()` + 包含关系，Linux 上 `C:\Windows\evil.md` 会被当成
+  base 下的普通文件名放过（404 而非 400）——即 CI（Web checks · Backend tests）红的那条
+  `test_quick_edit_rejects_absolute_path`。改后 Windows 语义（盘符 / UNC / 反斜杠上跳 / ADS）跨平台
+  一致拒绝，`resolve()` 包含关系仍作兜底；快改为 `for_write=True`（额外拒反斜杠与冒号），草稿读取
+  为读侧口径。补三条后端测试（快改 Windows 语义变体、草稿读取守卫、GET 掩码）。
+- **验证（本轮实测）**：后端 pytest 全量绿（含新增 3 条）；组件 vitest **119 passed**；`tsc --noEmit` 零错。
+- **文档落点**：PRD §1.3 连接区 + §1.4 连接测试（掩码回显口径）、《开发与计划》settings v3 条目；
+  明文回填设计就此废弃。
+- **第三条（TS 引擎迁移）回复口径**：本版对齐 main 上现行 Python 脚本（0.7.0-beta 当日全部有效）；
+  `refactor/reading-end-and-ts-engine` 落地后 Web 需一轮调用面适配（已记 backlog）；并请上游在
+  阶段 2（工具注册）/ 阶段 7（CLI 与导出）定调用面时把 Web 这一「第二前台」消费方列入考量。

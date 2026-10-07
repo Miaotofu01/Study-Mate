@@ -344,6 +344,45 @@ def test_quick_edit_rejects_absolute_path(client, produce_subject):
     assert r.status_code == 400
 
 
+def test_quick_edit_rejects_windows_semantic_paths(client, produce_subject):
+    """快改路径判定走 unsafe_relative_reason（Windows 语义，Linux 上结论一致）。
+
+    这三类只靠 resolve() 包含关系在 Linux 全部放过（反斜杠/冒号不是分隔与盘符语义，
+    会把输入当 base 下的普通文件名，落到 404 而非 400）——正是 Linux CI 抓到的那类漏。
+    """
+    slug, _ = produce_subject
+    client.post(f"/api/courses/{slug}/nodes/demo.intro/produce", json={})
+    ticket = tickets_svc.create_ticket(
+        kind="produce",
+        slug=slug,
+        node_id="demo.intro",
+        base_label="workspace",
+        problems=[],
+        artifacts=["lessons/0001-demo.intro.md"],
+        workspace=str(cs.workspace_dir()),
+    )
+    for bad in ("..\\..\\evil.md", "C:evil.md", "file.txt:ads"):
+        r = client.put(
+            f"/api/tickets/{ticket['id']}/artifact",
+            json={"path": bad, "content": "x"},
+        )
+        assert r.status_code == 400, f"{bad!r} 应被拒绝"
+
+
+def test_draft_file_read_rejects_windows_semantic_paths(client):
+    """草稿文件读取（快改的读取根）与快改同一套路径判定：越界一律 400。"""
+    slug = draft_svc.create_draft("路径守卫草稿")
+    try:
+        (draft_svc.draft_dir(slug) / "hello.txt").write_text("hi", encoding="utf-8")
+        ok = client.get(f"/api/drafts/{slug}/files/hello.txt")
+        assert ok.status_code == 200
+        for bad in ("..\\..\\evil.txt", "C:\\Windows\\evil.txt"):
+            r = client.get(f"/api/drafts/{slug}/files/{bad}")
+            assert r.status_code == 400, f"{bad!r} 应被拒绝"
+    finally:
+        client.delete(f"/api/drafts/{slug}")
+
+
 def _real_dispatch_mode(monkeypatch):
     """关掉 fixture 短路，让 dispatch 走 roles.dispatch_role 真路径（该函数再被 monkeypatch）。
 

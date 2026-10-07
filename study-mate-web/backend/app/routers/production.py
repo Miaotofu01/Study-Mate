@@ -26,6 +26,7 @@ from .. import curriculum_store as cs
 from .. import draft as draft_svc
 from .. import produce as produce_svc
 from .. import tickets as tickets_svc
+from .. import tools
 from .. import workspace_ctx
 from ..common import optional_workspace, require_provider
 from ..llm import is_fixture_mode
@@ -516,6 +517,11 @@ def get_draft_file(slug: str, file_path: str, workspace: str | None = None) -> A
 
     with _request_scope(workspace):
         _require_draft(slug)
+        # 先按 Windows 语义判越界（盘符/UNC/反斜杠/../ADS 跨平台结论一致），
+        # 再用 resolve() 包含关系兜底——只靠后者在 Linux 上会把 `C:\x` 当普通文件名放过。
+        reason = tools.unsafe_relative_reason(file_path)
+        if reason:
+            raise HTTPException(400, reason)
         base = draft_svc.draft_dir(slug).resolve()
         target = (base / file_path).resolve()
         if target != base and base not in target.parents:
@@ -753,6 +759,12 @@ def quick_edit_artifact(
             if ticket is None:
                 raise HTTPException(404, f"工单不存在：{ticket_id}")
             _assert_ticket_workspace(ticket, bound)
+            # 同 get_draft_file：Windows 语义先判（for_write 额外拒反斜杠与冒号），
+            # resolve() 包含关系兜底——否则 Linux 上 `C:\Windows\evil.md` 会被当成
+            # base 下的普通文件名放过（落到 404 而非 400）。
+            reason = tools.unsafe_relative_reason(payload.path, for_write=True)
+            if reason:
+                raise HTTPException(400, reason)
             base = tickets_svc.ticket_dir_base(ticket).resolve()
             target = (base / payload.path).resolve()
             if target != base and base not in target.parents:
