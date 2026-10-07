@@ -42,6 +42,13 @@
        条目 22 有一处**假绿要记一笔**：`.smb-agroup` 自己带 `overflow: hidden`，题干被长 token
        顶宽时不是出横向滚动条、而是被裁掉——只看 `scrollWidth` 会把「字被裁」判成「没有横向
        滚动条」，所以这一条连着量「内容右边缘有没有越过裁切线」（metrics 里的 `overhang`）。
+     · #98（测试质量）把「有没有滚动条」这一族判据逐个过了一遍：**量的是不是失败形态本身**。
+       搜索那条改成量**行级**格子（`.smb-hit__text` 自己的 `scrollWidth − clientWidth`）——
+       结果行看不见格子内部那点溢出（去掉 `overflow-wrap` 后行读数在宽窄两档仍是 0），
+       并配一条反证（把这一格的折行拿掉，行级量法必须看得见溢出）。右栏题库那一面的结论
+       相反：那里格子是弹性项、会自己长到 min-content 宽，`scrollWidth` 读数恒为 0，
+       承重的是「内容右边缘 vs 裁切线」（`overhang`）——逐条清单与结论在
+       `scripts/tests/README.md` 的「横向溢出判据」一节。
 
    浏览器二进制由 harness 探测；找不到时明确跳过（退出码 3），不是静默绿。
 */
@@ -52,6 +59,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { readLibrary } from '../../../lib/library.ts';
 import { extractCss } from '../fixtures/client-css.mjs';
+import { CONTRAST_PROBE } from '../fixtures/contrast-probe.mjs';
 import { openSession, finishSuite } from './harness.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -639,6 +647,10 @@ const LESSON_PROBE = `(() => {
  *   · 「当前组」取 `aria-current`，同时量它的边与编号圈（光有属性、看不见不算「明显的标记」）；
  *   · 上次作答取 `.smb-review`，并量它**在不在右栏里**（在正文里出现不算数）；
  *   · 滚动条取滚动容器的 `scrollWidth/clientWidth` 与计算出来的 `overflow-x`；
+ *     但「有没有滚动条」不是失败形态本身（`.smb-agroup` 会把溢出裁掉），所以长 token
+ *     那几条同时量**内容右边缘 vs 裁切线**（`overhang`）。#98 顺查实测：这一面上
+ *     `pane/stem/每一行/选项` 的 `scrollWidth − clientWidth` 恒为 0（题干格是弹性项，
+ *     自己长到 min-content 宽），承重的是 `overhang` 那一条；清单见 `scripts/tests/README.md`；
  *   · 品牌色不写死：现造一个只设 `color` 的元素让浏览器把 `--smb-brand` 解出来，
  *     之后只比「相等 / 不相等」，不钉任何具体色值。
  */
@@ -777,69 +789,17 @@ const SEARCH_PROBE = `(() => {
     kinds: hits.map((el) => el.querySelector('.smb-hit__kind').textContent.trim()),
     texts: hits.map((el) => el.querySelector('.smb-hit__text').textContent.trim().slice(0, 24)).slice(0, 6),
     where: hits.map((el) => { const w = el.querySelector('.smb-hit__where'); return w ? w.textContent.trim() : null; }),
-    // 结果行与列表各有横向溢出多少：长 URL 撑破版面时这两个数会大于 0（#90）
-    hitOverflowX: hits.map((el) => el.scrollWidth - el.clientWidth),
+    /* 长 URL 撑没撑破：量**行级**那一格（.smb-hit__text 就是必须折行的那段文字），
+       不是量结果行本身。结果行的 scrollWidth 看不见格子内部这点溢出——溢出还留在行的
+       内边距里时行读数恒为 0（#98 的反证：去掉 overflow-wrap 后，行级 6/6/42，而行读数
+       在宽窄两档仍是 0）。列表那一格单列，它量的是「面板里真的冒出一根横向滚动条」这个
+       症状，与行级那一条一起断。 */
+    hitTextOverflowX: hits.map((el) => { const t = el.querySelector('.smb-hit__text'); return t ? t.scrollWidth - t.clientWidth : null; }),
     listOverflowX: (() => { const list = q('.smb-palette__list'); return list ? list.scrollWidth - list.clientWidth : null; })(),
     boxRect: boxEl ? { w: Math.round(boxEl.getBoundingClientRect().width), left: Math.round(boxEl.getBoundingClientRect().left) } : null,
     bodyText: document.body.innerText.slice(0, 300),
   };
 })()`;
-
-/**
- * 真浏览器里的对比度：拿元素**实际用上的**前景色，再沿 DOM 往上把背景合成出来。
- * 与 reading_test.mjs 里那条同源（同一套合成算法）：套件之间不互相 import，
- * 所以这里留一份自己的——两处量的是同一件事，改一处要想着另一处。
- */
-const CONTRAST_PROBE = `(function (targets) {
-  const channels = (text) => {
-    const raw = String(text);
-    const nums = (raw.match(/-?[\\d.]+(?:e-?\\d+)?/g) || []).map(Number);
-    if (nums.length < 3) return null;
-    const scale = /^color\\(/i.test(raw.trim()) ? 255 : 1;
-    return { r: nums[0] * scale, g: nums[1] * scale, b: nums[2] * scale, a: nums.length > 3 ? nums[3] : 1 };
-  };
-  const over = (fg, bg) => ({
-    r: fg.r * fg.a + bg.r * (1 - fg.a),
-    g: fg.g * fg.a + bg.g * (1 - fg.a),
-    b: fg.b * fg.a + bg.b * (1 - fg.a),
-    a: 1,
-  });
-  const lum = (c) => {
-    const ch = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
-    return 0.2126 * ch(c.r) + 0.7152 * ch(c.g) + 0.0722 * ch(c.b);
-  };
-  const ratio = (a, b) => {
-    const la = lum(a); const lb = lum(b);
-    const hi = Math.max(la, lb); const lo = Math.min(la, lb);
-    return (hi + 0.05) / (lo + 0.05);
-  };
-  const solid = (el) => {
-    const stack = [];
-    let node = el;
-    while (node && node.nodeType === 1) {
-      const bg = channels(getComputedStyle(node).backgroundColor);
-      if (bg && bg.a > 0) stack.push(bg);
-      node = node.parentElement;
-    }
-    let base = { r: 255, g: 255, b: 255, a: 1 };
-    for (let i = stack.length - 1; i >= 0; i--) base = over(stack[i], base);
-    return base;
-  };
-  const out = [];
-  for (const [sel, name] of targets) {
-    const el = document.querySelector(sel);
-    if (!el) { out.push({ name, missing: true }); continue; }
-    const fg = channels(getComputedStyle(el).color);
-    if (!fg) { out.push({ name, missing: true, color: getComputedStyle(el).color }); continue; }
-    const bg = solid(el);
-    out.push({
-      name, color: getComputedStyle(el).color,
-      bg: 'rgb(' + Math.round(bg.r) + ',' + Math.round(bg.g) + ',' + Math.round(bg.b) + ')',
-      ratio: Math.round(ratio(over(fg, bg), bg) * 100) / 100,
-    });
-  }
-  return out;
-})`;
 
 /** 四个面各取几个真会出现的取样点（一面里只有其中一些在）。 */
 const CONTRAST_TARGETS = {
@@ -1226,7 +1186,12 @@ try {
 
          两条一起断才算数：① 右栏那个滚动容器自己没有横向溢出；② 题干与选项的右边缘都在
          裁切线以内（`.smb-agroup` 带 overflow: hidden，只断 ① 的话「文字被裁掉」也会绿——
-         这条夹具刚写出来时量到的就是那个假绿：题干被顶宽、被组卡片裁掉，滚动条一根没有）。 */
+         这条夹具刚写出来时量到的就是那个假绿：题干被顶宽、被组卡片裁掉，滚动条一根没有）。
+         #98 顺查把这一族逐个量过：右栏里 `pane/stem/每一行/选项` 那四个 `scrollWidth −
+         clientWidth` 读数**在这一面上恒为 0**——题干格是弹性项、默认 `min-width: auto`，
+         它自己会**长到 min-content 宽**（去掉 `overflow-wrap` 后实测 471px），格子里反而没有
+         溢出；失败形态落在「这一格长过了裁切线」上，只有 ② 的 `overhang` 看得见。
+         所以 ② 是承重的那一条，① 只是症状（滚动条一根没有不等于字没被裁）。 */
       const stems = seen.cards.map((one) => one.stemOverflowX);
       const lines = seen.cards.flatMap((one) => one.stemLinesOverflowX);
       const options = seen.cards.flatMap((one) => one.optionOverflowX);
@@ -1391,16 +1356,41 @@ try {
         && seen.where.some((one) => String(one).includes('变量')),
         JSON.stringify(seen.where.slice(0, 4)));
 
-      /* 无断点的长 URL：折在自己那一格，结果行与列表都不出横向滚动条。
-         查询词取 `example.com`——那条命中在**第二门**科目里，所以顺带证明出处那一段
-         跨科目也对（`第二科目 · 列表 · 参考`）。 */
+      /* 无断点的长 URL：折在自己那一格里（**行级**量法，见 SEARCH_PROBE），也不给列表
+         顶出横向滚动条。查询词取 `example.com`——那条命中在**第二门**科目里，所以顺带
+         证明出处那一段跨科目也对（`第二科目 · 列表 · 参考`）。 */
       await ctx.evaluate(typeSearch('example.com'));
       await ctx.sleep(400);
       const long = await ctx.evaluate(SEARCH_PROBE);
-      check(`${tag} 无断点的长 URL 撑不破结果行，也不给列表顶出横向滚动条`,
-        long.hits >= 1 && long.listOverflowX <= 0 && long.hitOverflowX.every((one) => one <= 0)
+      const longLines = long.hitTextOverflowX;
+      check(`${tag} 无断点的长 URL 折在自己那一格里（行级 ${JSON.stringify(longLines)}），也不给列表顶出横向滚动条`,
+        long.hits >= 1 && longLines.length === long.hits
+        && longLines.every((one) => one !== null && one <= 0)
+        && long.listOverflowX <= 0
         && long.where.every((one) => String(one).startsWith('第二科目 · 列表')),
-        `hits=${long.hits} list=${long.listOverflowX} rows=${JSON.stringify(long.hitOverflowX)} where=${JSON.stringify(long.where)}`);
+        `hits=${long.hits} list=${long.listOverflowX} lines=${JSON.stringify(longLines)} where=${JSON.stringify(long.where)}`);
+      /* 反证（#98 条目 1）：同一处量法必须**看得见溢出**——否则「没溢出」只是没量到。
+         做法是把这一格的折行拿掉、并把文字换成整条长 URL（夹具那条被应用层截到 96 字、
+         贴着列宽，施展不开），判据必须读到 > 0。行级量的是 `.smb-hit__text` 自己的
+         `scrollWidth − clientWidth`，所以只要那一格里真的顶出内容，它就会红。 */
+      const noWrap = await ctx.evaluate(`(() => {
+        const cell = document.querySelector('.smb-hit__text');
+        const row = cell && cell.closest('.smb-hit');
+        if (!cell || !row) return null;
+        const original = cell.textContent;
+        const style = document.createElement('style');
+        style.textContent = '.smb-hit__text{overflow-wrap:normal}';
+        document.head.appendChild(style);
+        cell.textContent = 'https://example.com/' + 'pathSegmentWithoutAnyBreakPointInside'.repeat(4);
+        void cell.offsetWidth;
+        const seen = { line: cell.scrollWidth - cell.clientWidth, row: row.scrollWidth - row.clientWidth };
+        cell.textContent = original;
+        style.remove();
+        void cell.offsetWidth;
+        return seen;
+      })()`);
+      check(`${tag} 反证：把这一格的折行拿掉，行级量法看得见溢出（行级 ${noWrap && noWrap.line} > 0）`,
+        !!noWrap && noWrap.line > 0, JSON.stringify(noWrap));
       // 取景回到「变量」那一组：这一场的截图要的是正常结果，不是这条极端样例
       await ctx.evaluate(typeSearch('变量'));
       await ctx.sleep(400);
@@ -1409,7 +1399,8 @@ try {
         opened: { open: opened.open, focused: opened.focused, emptyState: opened.empty },
         query: seen.inputValue, hits: seen.hits, kinds: seen.kinds,
         texts: seen.texts, where: seen.where, boxWidth: seen.boxRect && seen.boxRect.w,
-        longText: { hits: long.hits, where: long.where, listOverflowX: long.listOverflowX, rowOverflowX: long.hitOverflowX },
+        longText: { hits: long.hits, where: long.where, listOverflowX: long.listOverflowX, lineOverflowX: longLines },
+        noWrapProof: noWrap,
       };
     });
 
