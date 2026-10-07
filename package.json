@@ -62,6 +62,7 @@
     "guard:export": "node scripts/release/export_guard.mjs",
     "test:release": "node --test scripts/release/release.test.mjs",
     "test:dsh": "node --test scripts/tests/test_dsh_runtime.mjs",
+    "test:dsh-contract": "node --test scripts/tests/test_dsh_contract.mjs",
     "test:dsh-cli": "node --test scripts/tests/test_dsh_plugin_cli.mjs"
   },
   "engines": {

@@ -158,6 +158,13 @@ test('#105 建会话：resolve(qa) → acquireScope → create(带预设 id 与 
   // ★ 会话的 provider/model 只能在这儿给：程序化建会话不经过客户端的模型选择。
   //   少了这个字段，真宿主里 agent 会在第一次请求时抛「has no provider/model」（实测踩过）。
   assert.deepEqual(options.agentOptions, { provider: 'fake-provider', model: 'fake-model' });
+  // 载荷的**键**也要逐个对上参考实现（宿主的 `createWebhookSession`）：`sessionId / meta /
+  // agentOptions / setup`。少一个字段的代价实测过——漏掉 `agentOptions` 时会话照样建得出来，
+  // 一按发送才报「has no provider/model」；多出来的键宿主不认识，同样不要。
+  // 字段清单的出处是 docs/规范/工程约束.md §三「宿主契约」；真宿主在场时的漂移检查在
+  // `scripts/tests/test_dsh_contract.mjs`（按需跑：`npm run test:dsh-contract`）。
+  assert.deepEqual(Object.keys(options).sort(), ['agentOptions', 'meta', 'sessionId', 'setup'],
+    'agents.create 的载荷键变了：参考实现那四个一个都不能少，也不该多');
   assert.equal(host.calls.currentSelection.length, 1, '默认模型要现取一次');
   assert.equal(typeof options.setup, 'function');
   // setup 真的挂了预设（不是只写在 meta 里），而且挂的就是解析出来的那个 id
