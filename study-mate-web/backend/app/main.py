@@ -43,11 +43,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="StudyMate Web Runtime", version="0.7.0-beta", lifespan=lifespan)
 
-# 开发阶段允许前端 dev server 跨域；生产由 Next.js 同源代理，CORS 不生效
+# CORS 只服务「浏览器直连后端」的跨域场景：前端所有 /api 一律走 Next 同源代理，
+# 正常使用不会命中这里，故白名单只收本机三个前端端口的来源。
+# 绝不允许 allow_origins=["*"] 与 allow_credentials=True 组合：Starlette 会把
+# Access-Control-Allow-Origin 反射成请求方 Origin，等价对任意网站放开——用户浏览器里
+# 的任何网页都能跨域读本机 API（含 GET /api/settings）。
+_CORS_ORIGINS = [
+    f"http://{host}:{port}"
+    for host in ("localhost", "127.0.0.1")
+    for port in (3800, 3801, 3810)  # dev / 生产 / E2E 前端
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

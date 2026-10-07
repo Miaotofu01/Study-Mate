@@ -32,15 +32,20 @@ def _stored_api_key(provider_id: str) -> str:
 
 @router.get("")
 def get_settings() -> dict[str, Any]:
-    """api_key 明文返回（供前端回填输入框），另带 has_key 便于判空。
+    """api_key 不出后端：掩码 + has_key 便于判空；输入框回填用掩码展示。
 
-    `default_system_prompt` 是只读元信息（后端唯一默认文案来源），不进 settings、
-    不影响 PUT——前端「恢复默认」据此回填，避免跨端硬编码漂移。
+    PUT 与 /test 本就认掩码与空串（留空保持原值），故明文只在写入与连接测试时
+    经请求体进入。`default_system_prompt` 是只读元信息（后端唯一默认文案来源），
+    不进 settings、不影响 PUT——前端「恢复默认」据此回填，避免跨端硬编码漂移。
     """
     settings = load_settings()
     return {
         "providers": [
-            {**provider, "has_key": bool(provider.get("api_key"))}
+            {
+                **provider,
+                "api_key": KEY_MASK if provider.get("api_key") else "",
+                "has_key": bool(provider.get("api_key")),
+            }
             for provider in settings.get("providers") or []
         ],
         "active": settings.get("active") or {"provider_id": "", "model": ""},

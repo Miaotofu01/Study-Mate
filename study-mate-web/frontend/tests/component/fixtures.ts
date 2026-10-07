@@ -22,7 +22,8 @@ export function makeProvider(over: Partial<ProviderEntry> = {}): ProviderEntry {
     kind: "custom",
     preset_key: null,
     base_url: "https://api.example.com/v1",
-    api_key: "sk-stored",
+    // GET /api/settings 的真实形状：明文不出后端，有 key 时只回掩码（后端 KEY_MASK）
+    api_key: "********",
     has_key: true,
     api_format: "openai_chat",
     models: [makeModel("model-a"), makeModel("model-b")],

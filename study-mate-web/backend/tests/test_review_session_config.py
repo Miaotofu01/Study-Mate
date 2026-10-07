@@ -319,6 +319,38 @@ def test_list_sessions_skips_malformed_structure(client):
 # 系统提示词：显式空串可保存 + 默认值只读元字段
 # --------------------------------------------------------------------------- #
 
+def test_settings_get_masks_api_keys(client):
+    """GET 不回明文密钥：有 key 只回掩码 + has_key（明文只在 PUT / /test 请求体出现）。"""
+    current = client.get("/api/settings").json()
+    kept = [p for p in current["providers"] if p["id"] != "p-mask-test"]
+    client.put(
+        "/api/settings",
+        json={
+            "providers": [
+                *kept,
+                {
+                    "id": "p-mask-test",
+                    "name": "掩码渠道",
+                    "base_url": "https://api.example.com/v1",
+                    "api_key": "sk-secret-value",
+                    "api_format": "openai_chat",
+                    "models": [],
+                },
+            ],
+            "active": current["active"],
+        },
+    )
+    body = client.get("/api/settings").json()
+    masked = next(p for p in body["providers"] if p["id"] == "p-mask-test")
+    assert masked["api_key"] == "********"
+    assert masked["has_key"] is True
+    assert "sk-secret-value" not in json.dumps(body)
+    # 掩码回传 PUT 不丢 key（keep-existing 口径）
+    client.put("/api/settings", json={"providers": body["providers"], "active": body["active"]})
+    again = client.get("/api/settings").json()
+    assert next(p for p in again["providers"] if p["id"] == "p-mask-test")["has_key"] is True
+
+
 def test_explicit_empty_system_prompt_is_saved(client):
     current = client.get("/api/settings").json()
     resp = client.put(

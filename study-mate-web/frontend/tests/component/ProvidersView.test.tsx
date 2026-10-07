@@ -39,21 +39,21 @@ beforeEach(() => {
 });
 
 describe("ProvidersView 空 key 分支（E2E 从未观测「有 key」状态，在此下沉）", () => {
-  it("有 key 渠道：API Key 输入框回填真实 Key（非掩码）", async () => {
+  it("有 key 渠道：API Key 输入框回填掩码（明文不出后端，PUT 留空/掩码即保持原值）", async () => {
     api.getSettings.mockResolvedValue(makeSettings([makeProvider()]));
     await renderView();
     const input = screen.getByLabelText("API Key") as HTMLInputElement;
-    expect(input.value).toBe("sk-stored");
+    expect(input.value).toBe("********");
     // 默认以密码点显示（另有「显示密钥」切换明文）
     expect(input.type).toBe("password");
   });
 
-  it("清空 Key 输入后防抖落盘：回落到已存 Key，不会把 key 清没", async () => {
+  it("清空 Key 输入后防抖落盘：提交掩码（后端口径=保持已存 Key），不会把 key 清没", async () => {
     api.getSettings.mockResolvedValue(makeSettings([makeProvider()]));
     await renderView();
     await userEvent.clear(screen.getByLabelText("API Key"));
     const saved = await waitForSave();
-    expect(saved.providers[0]).toMatchObject({ api_key: "sk-stored", has_key: true });
+    expect(saved.providers[0]).toMatchObject({ api_key: "********", has_key: true });
   });
 
   it("无 key 渠道填入新 Key：has_key 翻转为 true", async () => {
@@ -68,7 +68,7 @@ describe("ProvidersView 空 key 分支（E2E 从未观测「有 key」状态，�
     expect(saved.providers[0]).toMatchObject({ api_key: "sk-new", has_key: true });
   });
 
-  it("模型行「测试」：携带回填的真实 Key 与模型名，成功后显示延迟", async () => {
+  it("模型行「测试」：携带掩码 Key（后端 /test 按 provider_id 用已存 Key）与模型名，成功后显示延迟", async () => {
     api.getSettings.mockResolvedValue(makeSettings([makeProvider()]));
     api.testConnection.mockResolvedValue({ latency_ms: 123, sample: "pong" });
     await renderView();
@@ -76,7 +76,7 @@ describe("ProvidersView 空 key 分支（E2E 从未观测「有 key」状态，�
     await waitFor(() => expect(api.testConnection).toHaveBeenCalledTimes(1));
     expect(api.testConnection.mock.calls[0][0]).toEqual({
       base_url: "https://api.example.com/v1",
-      api_key: "sk-stored",
+      api_key: "********",
       api_format: "openai_chat",
       model: "model-a",
       provider_id: "p1",
