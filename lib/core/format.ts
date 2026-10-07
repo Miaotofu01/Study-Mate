@@ -1069,8 +1069,9 @@ export function buildSvg(
  *  三条口径（规范 `docs/规范/课件内容格式.md` §4 是唯一出处）：
  *   · 指令参数**只当一个语言标签**用，可选（与围栏同一条：不写就不产出 `data-lang`）；
  *     认不出的标签报 `code-lang`——把 `caption:` 写到指令头也走这一条。
- *   · `alt:` / `caption:` **只在原文之前认**：原文一开始，`caption: …` 那一行就是原文本身
- *     （照 `::: svg` 的先例）。两个字段都可选，写了但没值报 `code-field`。
+ *   · `alt:` / `caption:` **只在原文开始之前认**：原文开始之后，长得像字段的行逐字照收
+ *     （照 `::: svg` 的先例）。**首行是例外**：它自己长得像字段就会被吃掉——规范 §4
+ *     记了这条边界与唯一可行的规避（改用普通围栏）。两个字段都可选，写了但没值报 `code-field`。
  *   · 字段之后没有任何原文报 `code-body`（只写字段等于留了个空框）。 */
 export function buildCode(
   args: string, lines: string[], start: number, end: number, lineNo: number, ctx: LessonCtx,
@@ -1349,6 +1350,14 @@ export function numberedCaption(caption: string, ctx: LessonCtx): string {
 
 const BLOCK_MATH_RE = /^\$\$(.+)\$\$$/s;
 
+/** 一个代码块的核心那一行 HTML：`<pre data-lang="…"><code>转义后的原文</code></pre>`。
+ *
+ *  围栏产的就是这一行，`::: code` 的框内那一层也是它（外面再套 `<div class="lesson-code">`）。
+ *  规范要求围栏那侧「一个字不改」——两处各写一份迟早会分叉，所以只留这一份写法。 */
+function preCodeHtml(lang: string, text: string): string {
+  return `<pre${lang ? ` data-lang="${escAttr(lang)}"` : ''}><code>${escText(text)}</code></pre>`;
+}
+
 /** 把块列表渲染成 HTML 片段（缩进两格一层，与 Python 的 `Renderer.render` 同形）。 */
 export function renderBlocks(blocks: Block[], ctx: LessonCtx, indent = '  '): string {
   return blocks.map((block) => renderBlock(block, ctx, indent)).filter(Boolean).join('\n\n');
@@ -1372,8 +1381,7 @@ export function renderBlock(block: Block, ctx: LessonCtx, indent: string): strin
   }
   if (kind === 'code') {
     const node = block as { lang: string; text: string };
-    const attr = node.lang ? ` data-lang="${escAttr(node.lang)}"` : '';
-    return `${indent}<pre${attr}><code>${escText(node.text)}</code></pre>`;
+    return `${indent}${preCodeHtml(node.lang, node.text)}`;
   }
   if (kind === 'ul' || kind === 'ol') {
     return renderList(block as { kind: 'ul' | 'ol'; items: ListItem[] }, ctx, indent);
@@ -1557,9 +1565,8 @@ export function renderCode(block: CodeBlock, ctx: LessonCtx, indent: string): st
     checkInlineHtml(block.alt, block.alt_line ?? block.line, '::: code 的 alt:', ctx);
     attr = ` role="group" aria-label="${escAttr(block.alt)}"`;
   }
-  const lang = block.lang ? ` data-lang="${escAttr(block.lang)}"` : '';
   const lines = [`${indent}<div class="lesson-code"${attr}>`,
-    `${indent}  <pre${lang}><code>${escText(block.text)}</code></pre>`];
+    `${indent}  ${preCodeHtml(block.lang, block.text)}`];
   if (block.caption) {
     lines.push(`${indent}  <p class="lesson-code__caption">`
       + `${renderInline(block.caption, block.caption_line ?? block.line, ctx)}</p>`);
