@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import { clientInternals, loadClient, renderWithState } from './fixtures/client_harness.mjs';
 
 const internals = clientInternals();
-const { buildIndex, lessonFragments, blockFragments, KIND_ORDER, SearchPalette, hitWhere } = internals;
+const { buildIndex, lessonFragments, blockFragments, parseLesson, KIND_ORDER, SearchPalette, hitWhere } = internals;
 
 /** 一节课件：`#78` 点名的六类块 + 未点名的四类，各来一条，标题都带可搜的独有词。 */
 const LESSON = [
@@ -58,6 +58,16 @@ const LESSON = [
   '',
   '::: tip 提示标题甲',
   '提示正文甲',
+  ':::',
+  '',
+  '## 小节·代码解释槽',
+  '',
+  // #116：`::: code` 的 alt / caption 是这一块的检索串，代码原文才是正文文本。
+  // 故意排在配图之前——代码块的 caption 若误占图的编号，下面「配图题注」那条会红。
+  '::: code term',
+  'alt: 代码替代文字甲',
+  'caption: 代码解释甲',
+  '> echo 代码解释槽内容甲',
   ':::',
   '',
   '## 小节·配图题注',
@@ -176,6 +186,36 @@ test('#78 配图的图号与 alt 进检索串，题注才是文本', () => {
   assert.ok(hit, '配图题注没进索引');
   assert.ok(hit.search.includes('配图替代文字甲'), 'alt 没有进检索串');
   assert.ok(hit.search.includes('图 1'), '图号没有进检索串');
+});
+
+test('#116 `::: code` 的 alt 与 caption 进检索串，代码原文才是正文文本', () => {
+  const hit = findHits(demoIndex, 'echo 代码解释槽内容甲')[0];
+  assert.ok(hit, '::: code 的原文没进索引');
+  assert.ok(hit.search.includes('代码替代文字甲'), 'alt 没有进检索串');
+  assert.ok(hit.search.includes('代码解释甲'), 'caption 没有进检索串');
+  assert.equal(hit.text.includes('代码替代文字甲'), false, 'alt 不该冒充正文文本');
+  // 两者各自也搜得到（进的是检索串，不另起一条正文）
+  assert.ok(findHits(demoIndex, '代码解释甲').length > 0, '搜不到代码槽的 caption');
+  assert.ok(findHits(demoIndex, '代码替代文字甲').length > 0, '搜不到代码槽的 alt');
+});
+
+test('#116 阅读端切 `::: code` 的原文与应用侧同一条：围栏里的 ::: 不算收尾', () => {
+  // 这一条钉的是**两套解析器的口径一致**：代码块贴的正文本身就常是一段围栏（Markdown 例子），
+  // 里面出现单独的 `:::` 时，应用侧的 parseDirective 会跳过去（围栏态里不判收尾）。
+  // 阅读端不跟着跳的话，同一条内容校验器放行、课件页却被切短——静默丢内容。
+  const lesson = parseLesson([
+    '## 一节', '',
+    '::: code markdown',
+    'caption: 把指令块本身当例子贴出来',
+    '',
+    '```markdown', '::: tip 提示', ':::', '```',
+    ':::', '',
+  ].join('\n'));
+  const block = lesson.sections.flatMap((section) => section.blocks)
+    .find((one) => one.type === 'code' && one.caption);
+  assert.ok(block, '::: code 块没有解析出来');
+  assert.equal(block.code, '```markdown\n::: tip 提示\n:::\n```', JSON.stringify(block.code));
+  assert.equal(block.caption, '把指令块本身当例子贴出来');
 });
 
 test('#78 锚点标记本身不进正文索引（题干走题库那一类，不重复）', () => {

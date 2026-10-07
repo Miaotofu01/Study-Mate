@@ -1,7 +1,7 @@
 /* 解析层核心 · 格式规则（lib/core/format.ts）
 
    钉的是 `docs/规范/课件内容格式.md` 的**每一条判定**在 JS 侧的落点：块语法、行内语法、
-   围栏、9 个 `:::` 指令、front matter 两个字段。断言面是「块树 / 错误 / 渲染片段」，
+   围栏、10 个 `:::` 指令、front matter 两个字段。断言面是「块树 / 错误 / 渲染片段」，
    不是内部函数——换实现照样该过。
 
    为什么还断言渲染片段：Python 侧的判定发生在渲染器里（`Renderer.inline`），
@@ -62,13 +62,13 @@ function inline(text) {
   return { html: renderInline(text, 7, ctx), errors: ctx.problems.errors };
 }
 
-/* ── 词汇表：9 个指令（不是 8 个） ─────────────────────────────────────── */
+/* ── 词汇表：10 个指令（#116 之前是 9 个） ─────────────────────────────── */
 
-test('DIRECTIVES 是 9 个名字——ticket 与实施路线写的「8 个」是计数错', () => {
+test('DIRECTIVES 是 10 个名字（#116 加了 ::: code 解释槽）', () => {
   assert.deepEqual([...DIRECTIVES], [
-    'practice', 'quiz', 'figure', 'svg', 'tip', 'warn', 'note', 'resources', 'related',
+    'practice', 'quiz', 'figure', 'svg', 'code', 'tip', 'warn', 'note', 'resources', 'related',
   ]);
-  assert.equal(DIRECTIVES.length, 9);
+  assert.equal(DIRECTIVES.length, 10);
 });
 
 test('语言标签两张表：会着色 13 个、不上色 14 个，互不重叠', () => {
@@ -356,7 +356,7 @@ test('未知指令带行号报错，未知指令块内的内容不再二次报�
   const result = run(['::: fancy 标题', '块里的东西 <b>粗</b>', ':::']);
   assert.equal(result.errors.length, 1);
   assert.equal(result.errors[0].message,
-    '未知指令 ::: fancy（可用：practice、quiz、figure、svg、tip、warn、note、resources、related）');
+    '未知指令 ::: fancy（可用：practice、quiz、figure、svg、code、tip、warn、note、resources、related）');
   assert.equal(result.errors[0].line, 6);
   assert.deepEqual(result.blocks, []);
 });
@@ -510,6 +510,117 @@ test('::: svg —— alt: 写两遍后者覆盖、写在原文之后整行进 ra
   assert.deepEqual(after.errors, []);
   assert.equal(after.blocks[0].alt, '');
   assert.equal(after.blocks[0].raw, '<svg/>\nalt: 写在后面');
+});
+
+/* ── `::: code`（#116：解释槽写在框内） ────────────────────────────────── */
+
+test('::: code —— 语言可选、字段行只在原文之前、原文逐字保留', () => {
+  const ok = run(['::: code term', 'alt: 终端回放', 'caption: 先看当前目录，再列文件', '',
+    '> pwd', '/Users/studymate/demo', '> ls -l', '  drwxr-xr-x  2 studymate', ':::']);
+  assert.deepEqual(ok.errors, []);
+  const block = ok.blocks[0];
+  assert.equal(block.kind, 'directive');
+  assert.equal(block.name, 'code');
+  assert.equal(block.lang, 'term');
+  assert.equal(block.text, '> pwd\n/Users/studymate/demo\n> ls -l\n  drwxr-xr-x  2 studymate');
+  assert.equal(block.alt, '终端回放');
+  assert.equal(block.caption, '先看当前目录，再列文件');
+  // 字段行号是独立字段（照 alt_line / caption_line 那一套：指到字段那一行）
+  assert.equal(block.line, 6);
+  assert.equal(block.alt_line, 7);
+  assert.equal(block.caption_line, 8);
+  // 渲染：`<div class="lesson-code">` 包住与围栏同形的 `<pre data-lang>`，槽在**框内**同一个 div 里
+  assert.match(ok.html, /<div class="lesson-code" role="group" aria-label="终端回放">/);
+  assert.match(ok.html, /<pre data-lang="term"><code>&gt; pwd\n/);
+  assert.match(ok.html, /<p class="lesson-code__caption">先看当前目录，再列文件<\/p>/);
+
+  // 不写语言与不写字段都可以——与围栏同一条：不写语言就不产出 data-lang
+  const bare = run(['::: code', '原文一行', ':::']);
+  assert.deepEqual(bare.errors, []);
+  assert.equal(bare.blocks[0].lang, '');
+  assert.equal(bare.blocks[0].text, '原文一行');
+  assert.equal(bare.blocks[0].alt, '');
+  assert.equal(bare.blocks[0].caption, '');
+  assert.equal(bare.html, '  <div class="lesson-code">\n'
+    + '    <pre><code>原文一行</code></pre>\n  </div>');
+
+  // 字段行只在原文之前认：原文一开始，`caption:` 那一行就是原文本身（照 `::: svg` 的先例）
+  const after = run(['::: code term', '> pwd', 'caption: 写在原文之后就是原文', ':::']);
+  assert.deepEqual(after.errors, []);
+  assert.equal(after.blocks[0].caption, '');
+  assert.equal(after.blocks[0].text, '> pwd\ncaption: 写在原文之后就是原文');
+
+  // caption 走行内语法（与 `::: svg` 的 caption 同一条路），alt 是纯文本属性
+  const inlineCaption = run(['::: code js', 'caption: 看 `pwd` 的输出', 'console.log(1)', ':::']);
+  assert.match(inlineCaption.html, /<p class="lesson-code__caption">看 <code>pwd<\/code> 的输出<\/p>/);
+});
+
+test('::: code —— 块里能贴一段带 ::: 的围栏（围栏里的 ::: 不算收尾）', () => {
+  const result = run(['::: code markdown', 'caption: 把指令块本身当例子贴出来', '',
+    '```markdown', '::: tip 提示', ':::', '```', ':::']);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.blocks[0].text, '```markdown\n::: tip 提示\n:::\n```');
+  assert.equal(result.blocks[0].caption, '把指令块本身当例子贴出来');
+  assert.match(result.html, /<pre data-lang="markdown"><code>```markdown\n::: tip 提示\n:::\n```<\/code><\/pre>/);
+});
+
+test('::: code —— 坏写法带行号：语言标签、只有字段没有原文、字段没值', () => {
+  // 把字段写到指令头（槽写在块外的一种）：指令头只当一个语言标签用
+  const onHeader = run(['::: code term caption: 说明', '> pwd', ':::']);
+  assert.equal(onHeader.errors[0].code, 'code-lang');
+  assert.equal(onHeader.errors[0].line, 6);
+  assert.match(onHeader.errors[0].message, /alt: \/ caption: 写在块里的单独两行/);
+
+  // 不认识的语言标签（与围栏同一条白名单）
+  const unknown = run(['::: code python extra', 'x', ':::']);
+  assert.equal(unknown.errors[0].code, 'code-lang');
+  assert.equal(unknown.errors[0].line, 6);
+  assert.match(unknown.errors[0].message, /不认识的语言标签/);
+
+  // 只写了字段、没有原文
+  const noBody = run(['::: code term', 'caption: 只写了字段', ':::']);
+  assert.equal(noBody.errors[0].code, 'code-body');
+  assert.equal(noBody.errors[0].line, 6);
+
+  // 槽缺值
+  const empty = run(['::: code term', 'alt:', '> pwd', ':::']);
+  assert.equal(empty.errors.length, 1);
+  assert.equal(empty.errors[0].code, 'code-field');
+  assert.equal(empty.errors[0].line, 7);
+  assert.match(empty.errors[0].message, /alt: 后面没写内容/);
+
+  const emptyCaption = run(['::: code term', 'caption:   ', '> pwd', ':::']);
+  assert.equal(emptyCaption.errors[0].code, 'code-field');
+  assert.equal(emptyCaption.errors[0].line, 7);
+});
+
+test('::: code —— caption 不占图的编号（「图 N ·」是图序列，代码块不编号）', () => {
+  const result = run(['::: code term', 'caption: 一段解释', '> pwd', ':::', '',
+    '::: svg', 'alt: 一', 'caption: 收拢', '<svg viewBox="0 0 4 2"/>', ':::']);
+  const rendered = renderBody(result, 'a.md');
+  assert.match(rendered.html, /<p class="lesson-code__caption">一段解释<\/p>/);
+  assert.match(rendered.html, /<figcaption>图 1 · 收拢<\/figcaption>/);
+  assert.equal((rendered.html.match(/图 \d/g) || []).length, 1);
+  // caption 里手写的「图 N ·」原样保留（不剥——编号那套只服务 `::: figure` / `::: svg`）
+  const literal = run(['::: code term', 'caption: 图 9 · 手写的', 'x', ':::']);
+  assert.match(literal.html, /<p class="lesson-code__caption">图 9 · 手写的<\/p>/);
+});
+
+test('::: code —— alt 落成无障碍名字，真标签按报错拦下', () => {
+  const ok = run(['::: code term', 'alt: 终端回放', '> pwd', ':::']);
+  assert.match(ok.html, /role="group" aria-label="终端回放"/);
+
+  // 不写 alt 就不产出无障碍名字（与围栏无 caption 时同一条：不强加属性）
+  assert.equal(run(['::: code term', '> pwd', ':::']).html.includes('aria-label'), false);
+
+  const bad = run(['::: code term', 'alt: <b>粗</b>', '> pwd', ':::']);
+  assert.equal(bad.errors[0].code, 'html-inline');
+  assert.equal(bad.errors[0].line, 7);
+  assert.match(bad.errors[0].message, /::: code 的 alt:/);
+
+  const badCaption = run(['::: code term', 'caption: <b>粗</b>', '> pwd', ':::']);
+  assert.equal(badCaption.errors[0].code, 'html-inline');
+  assert.equal(badCaption.errors[0].line, 7);
 });
 
 test('::: tip / warn / note —— 标题可省，块里是普通块', () => {
