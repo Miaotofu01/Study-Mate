@@ -21,6 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { readLibrary } from '../../../lib/library.ts';
 import { extractCss } from '../fixtures/client-css.mjs';
+import { CONTRAST_PROBE } from '../fixtures/contrast-probe.mjs';
 import { openSession, finishSuite } from './harness.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -231,66 +232,6 @@ const PROBE = `(() => {
     bodyText: document.body.innerText.slice(0, 400),
   };
 })()`;
-
-/**
- * 真浏览器里的对比度：拿元素**实际用上的**前景色，再沿 DOM 往上把背景合成出来。
- * 这一条验的是「CSS 里的 color-mix 在这个引擎里真的解出来了」——解不出来时
- * 自定义属性会变成无效值、文字悄悄退回继承色，控制台一声不响。
- */
-const CONTRAST_PROBE = `(function (targets) {
-  // Chrome 对 color-mix 的结果回的是 \`color(srgb 0.76 0.77 0.79)\`——三个分量是 0..1 的浮点，
-  // 不是 0..255。按 255 解会把每个颜色都算成近黑，于是「亮色下全过、暗色下全错」。
-  const channels = (text) => {
-    const raw = String(text);
-    const nums = (raw.match(/-?[\\d.]+(?:e-?\\d+)?/g) || []).map(Number);
-    if (nums.length < 3) return null;
-    const scale = /^color\\(/i.test(raw.trim()) ? 255 : 1;
-    return { r: nums[0] * scale, g: nums[1] * scale, b: nums[2] * scale, a: nums.length > 3 ? nums[3] : 1 };
-  };
-  const over = (fg, bg) => ({
-    r: fg.r * fg.a + bg.r * (1 - fg.a),
-    g: fg.g * fg.a + bg.g * (1 - fg.a),
-    b: fg.b * fg.a + bg.b * (1 - fg.a),
-    a: 1,
-  });
-  const lum = (c) => {
-    const ch = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
-    return 0.2126 * ch(c.r) + 0.7152 * ch(c.g) + 0.0722 * ch(c.b);
-  };
-  const ratio = (a, b) => {
-    const la = lum(a); const lb = lum(b);
-    const hi = Math.max(la, lb); const lo = Math.min(la, lb);
-    return (hi + 0.05) / (lo + 0.05);
-  };
-  const solid = (el) => {
-    // 从根往下把所有背景层压成一层；alpha=0 的层跳过
-    const stack = [];
-    let node = el;
-    while (node && node.nodeType === 1) {
-      const bg = channels(getComputedStyle(node).backgroundColor);
-      if (bg && bg.a > 0) stack.push(bg);
-      node = node.parentElement;
-    }
-    let base = { r: 255, g: 255, b: 255, a: 1 };
-    for (let i = stack.length - 1; i >= 0; i--) base = over(stack[i], base);
-    return base;
-  };
-
-  const out = [];
-  for (const [sel, name] of targets) {
-    const el = document.querySelector(sel);
-    if (!el) { out.push({ name, missing: true }); continue; }
-    const fg = channels(getComputedStyle(el).color);
-    if (!fg) { out.push({ name, missing: true, color: getComputedStyle(el).color }); continue; }
-    const bg = solid(el);
-    out.push({
-      name, color: getComputedStyle(el).color,
-      bg: 'rgb(' + Math.round(bg.r) + ',' + Math.round(bg.g) + ',' + Math.round(bg.b) + ')',
-      ratio: Math.round(ratio(over(fg, bg), bg) * 100) / 100,
-    });
-  }
-  return out;
-})`;
 
 /** 三个层级各取几个真的会出现的选择器（一个视图里只有其中一些）。 */
 const CONTRAST_TARGETS = {
