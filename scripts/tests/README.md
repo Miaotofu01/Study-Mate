@@ -22,6 +22,7 @@ npm test
 | `npm run test:static` | 技能调用面与提示词规则归属、词表与发布元数据、文档悬空引用、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
 | `npm run test:browser` | 十套真实浏览器渲染测试（阅读端本体、阅读位置、作答落盘、监听推送、跑一次、导出产物、公式排版、四路由 × 三档视口、课件页正文与页头、问答会话与引用），浏览器二进制自动探测 |
 | `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录；native 安装下还验八个原生工具的注册、body 可调用（走真 dispatch）与越权抛，以及 #70 的引擎路径：`root` 指向已安装的包、`~/.dsh/studymate/engine/` 不再出现 |
+| `npm run test:dsh-contract` | **宿主契约守门**：拿真宿主自己的 schema 校验器（`dsh-tools` 的 `assertSupportedJsonSchema`）扫注册点上全部工具的 `parameters` 与 `output.schema`，并核对参考调用 `createWebhookSession` 的字段清单没漂；附一条反证（已知不合规的 schema 必须报错）。同一个 `STUDYMATE_DSH_PACKAGE`，没设就跳过。指针与纪律在 [工程约束](../规范/工程约束.md) §三「宿主契约」 |
 | `npm run test:dsh-cli` | 真实 DSH CLI 安装、更新、卸载，还需要 `pnpm` |
 
 提示词与文档契约、两个宿主的技能转换这一层（`--static`）**已并入 `npm test`**，CI 每次都会跑；保留为本地按需命令的只剩真实宿主（`test:dsh` / `test:dsh-cli`）与真实 Chrome（`test:browser`）——它们要外部环境，不适合当默认门禁。`scripts/release/checks.mjs` 显式列出各层套件——**显式的代价是新增套件会静默地永远不跑**，所以那里有一条覆盖断言：`scripts/tests/` 下的每个文件必须属于某个组（core / `--static` / `--browser`）、package.json 的按需入口（`test:dsh` 等），或在 `MANUAL_ONLY` 里明确登记为手动脚本。漏登记时跑门禁会直接报出文件名并以退出码 2 停下。
