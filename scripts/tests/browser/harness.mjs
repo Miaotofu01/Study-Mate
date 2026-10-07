@@ -8,6 +8,8 @@
          Runtime.exceptionThrown  → pageerror（未捕获的页面错误）
          Log.entryAdded           → log（浏览器自己记的错误，比如资源与安全策略）
          Network.loadingFailed    → requestfailed（请求挂了：404 之外还有被拦、被中断）
+       另收 `Network.requestWillBeSent` 进 `ctx.requests`（场景维度、不算问题）：断「零请求 /
+       发的是哪些」的套件用它——`file://` 下 `performance.getEntriesByType('resource')` 是空的。
      · summary.json 的形状：每个场景一条，带 metrics + problems + warnings。
 
    为什么不用 `chrome --screenshot`：那个开关拿不到控制台，也点不动东西。
@@ -170,6 +172,7 @@ export async function openSession({ suite, width = 1440, height = 960, port } = 
   let id = 0;
   const pending = new Map();
   const events = [];
+  const requests = [];
   try {
     const page = await target();
     ws = new WebSocket(page.webSocketDebuggerUrl);
@@ -193,6 +196,13 @@ export async function openSession({ suite, width = 1440, height = 960, port } = 
     }
     if (m.method === 'Network.loadingFailed') {
       events.push({ kind: 'requestfailed', text: m.params.errorText + ' ' + (m.params.requestId || '') });
+    }
+    // 请求日志单独一条数组，**不进 problems**（每个成功的请求都是一条记录，混进去会把所有场景
+    // 判红）。要断「一个请求都没发 / 发的是哪些」的套件从 `ctx.requests` 取（每个场景自己清零）。
+    // 为什么不用 `performance.getEntriesByType('resource')`：`file://` 下它返回空数组（实测）。
+    if (m.method === 'Network.requestWillBeSent') {
+      const request = m.params.request || {};
+      requests.push({ url: String(request.url || ''), type: String(m.params.type || '') });
     }
   };
 
@@ -259,14 +269,17 @@ export async function openSession({ suite, width = 1440, height = 960, port } = 
      * 一个用例 = 一段步骤 + 一张截图 + 一条 summary 记录。
      * 事件缓冲在场景开始时清空，所以每条记录里的 problems/warnings 只属于这个场景。
      * `run` 返回一个对象就当作本场景的 metrics 记下来。`run` 里可以用 ctx.note 主动记一条问题。
+     * `ctx.requests` 是本场景发出去的请求日志（`{url, type}`，场景开始时清空）。
      */
     async scene(name, run) {
       events.length = 0;
+      requests.length = 0;
       const notes = [];
       const ctx = {
         evaluate,
         navigate,
         sleep,
+        requests,
         note: (kind, text) => notes.push({ kind, text: String(text) }),
       };
       const metrics = await run(ctx);
