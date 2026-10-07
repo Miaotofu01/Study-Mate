@@ -237,6 +237,79 @@ test('GitHub release creation and retry update only missing installation informa
   await assert.rejects(ensureGithubRelease(state, '版本说明', async () => ({ ...release, draft: true })), /expected stable release/);
 });
 
+test('GitHub body limit includes installation notes and preserves short notes exactly', async () => {
+  const { release } = assetFixture();
+  const state = { tag: 'v0.2.0', version: '0.2.0', commit: 'a'.repeat(40) };
+  const overhead = withInstallationNotes('', state.version).length;
+  for (const length of [125000, 125001]) {
+    const notes = '云'.repeat(length - overhead);
+    const original = withInstallationNotes(notes, state.version);
+    assert.equal(original.length, length);
+    const created = await ensureGithubRelease(state, notes, async (path, options) => {
+      if (path.includes('/tags/')) return null;
+      assert.equal(path, '/releases');
+      assert.ok(options.body.body.length <= 125000);
+      return { ...release, body: options.body.body };
+    });
+    if (length === 125000) assert.equal(created.body, original);
+    else assert.match(created.body, /blob\/v0\.2\.0\/CHANGELOG\.md/);
+    assert.match(created.body, /studymate@0\.2\.0 install/);
+    assert.match(created.body, /releases\/download\/v0\.2\.0\/studymate-openai\.zip/);
+    let reads = 0;
+    await ensureGithubRelease(state, notes, async (path, options) => {
+      reads += 1;
+      assert.equal(path, '/releases/tags/v0.2.0');
+      assert.deepEqual(options, { missing: true });
+      return created;
+    });
+    assert.equal(reads, 1);
+  }
+});
+
+test('oversized GitHub notes retain summaries while the full changelog keeps commit bodies', async () => {
+  const { release } = assetFixture();
+  const state = { tag: 'v0.2.0', version: '0.2.0', commit: 'a'.repeat(40) };
+  for (const subject of ['fix(发布): 保留提交标题', '云😀'.repeat(50000)]) {
+    const notes = releaseNotes({ version: state.version, baseTag: 'v0.1.5', date: '2026-10-08',
+      pulls: [{ number: 8, title: '发布摘要' }],
+      commits: [{ sha: 'b'.repeat(40), subject, body: '详细说明😀'.repeat(30000) }] });
+    const changelog = addChangelog('# 更新记录\n\n', state.version, notes);
+    const created = await ensureGithubRelease(state, notes, async (path, options) => {
+      if (path.includes('/tags/')) return null;
+      assert.ok(options.body.body.length <= 125000);
+      return { ...release, body: options.body.body };
+    });
+    assert.match(created.body, /pull\/8/);
+    assert.match(created.body, /blob\/v0\.2\.0\/CHANGELOG\.md/);
+    assert.doesNotMatch(created.body, /详细说明/);
+    if (subject.length < 125000) assert.ok(created.body.includes(subject));
+    assert.equal(notesFromChangelog(changelog, state.version), notes.trim());
+  }
+});
+
+test('GitHub retry bounds expanded installation notes and an oversized PR overview', async () => {
+  const { release } = assetFixture();
+  const state = { tag: 'v0.2.0', version: '0.2.0', commit: 'a'.repeat(40) };
+  const notes = releaseNotes({ version: state.version, baseTag: 'v0.1.5', date: '2026-10-08',
+    commits: [{ sha: 'b'.repeat(40), subject: '修复发布', body: '' }],
+    pulls: [{ number: 9, title: '云😀'.repeat(50000) }] });
+  for (const existing of ['云'.repeat(125000), notes]) {
+    const updated = await ensureGithubRelease(state, notes, async (path, options) => {
+      if (path.includes('/tags/')) return { ...release, body: existing };
+      assert.equal(path, '/releases/12');
+      assert.equal(options.method, 'PATCH');
+      assert.deepEqual(Object.keys(options.body), ['body']);
+      assert.ok(options.body.body.length <= 125000);
+      assert.match(options.body.body, /blob\/v0\.2\.0\/CHANGELOG\.md/);
+      return { ...release, body: options.body.body };
+    });
+    assert.match(updated.body, /studymate@0\.2\.0 install/);
+  }
+  await assert.rejects(ensureGithubRelease(state, notes, async () => ({
+    ...release, body: '<!-- studymate-installation -->\n坏标记',
+  })), /incomplete markers/);
+});
+
 test('new release assets upload ZIP bytes with the API media type and verified digest', async () => {
   const { local, release, remote } = assetFixture();
   let uploads = 0;

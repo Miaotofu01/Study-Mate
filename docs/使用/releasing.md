@@ -39,6 +39,8 @@ GitHub 发布 job 引用 `npm` environment，不要求设置审批人。仓库�
 
 检查通过后，流程读取自上一版本 tag 以来的全部 commit，以及 GitHub 关联到这些 commit、已经合入 `main` 的 PR。提交标题和正文都会原样保留（提交写法见 [参与 StudyMate](../../CONTRIBUTING.md)；发布流程只做归类，不校验格式）。现有 `CHANGELOG.md` 内容保留，新条目放在前面。兼容历史 `v0.1` tag；若仓库没有版本 tag，则首次记录完整提交历史。
 
+GitHub Release 正文最多 125,000 字符，安装说明也计入。超限时先省略提交正文，仍超限则只保留 PR 摘要；摘要本身也超限时只显示版本标题、完整记录链接与安装说明。完整提交记录始终保存在 `CHANGELOG.md`，Release 的链接固定到该版本 tag。
+
 随后更新 `package.json`（若有 npm lockfile，也同步根版本），原子推送版本 commit 和 `vX.Y.Z` tag。若 `main` 在检查期间发生变化，发布会停止，需要从最新 `main` 重新触发。正式发包前构建并核对同版本 OpenAI ZIP。包内容经过清单与完整性检查后，使用 `npm pack` 的同一个 tarball 发布到官方 npm registry，附带 provenance；确认 registry 的 SHA-512 完整性相同后创建 GitHub Release，并上传 `studymate-openai.zip`。
 
 ## 失败后重试
@@ -46,6 +48,8 @@ GitHub 发布 job 引用 `npm` environment，不要求设置审批人。仓库�
 重跑旧任务仍使用当时的 commit，不会包含后来推送的修复。如果检查失败后已修复代码，且本次版本 tag 尚未创建，请在 **Actions → Release → Run workflow** 从最新 `main` 新建一次发布。
 
 如果只是网络等临时故障，代码没有变化，或本次版本 commit/tag 已经推送，在原任务点击 **Re-run failed jobs**。版本 tag 保存了源 commit 和发布信息，流程会继续这个版本；如果 npm 已经发布相同 tarball，则跳过发布并补齐 Release 和 ZIP。已有同名 ZIP 必须通过 SHA-256 内容核对；相同则复用，冲突则停止，不删除或覆盖。若同一 npm 版本内容不同、tag 来源不同、registry 状态不明，流程也会失败并保留现场。
+
+若旧任务因 Release 正文超限而失败，后续修复不会进入旧任务使用的脚本。npm 已发布且 tag 已创建时，可先为原 tag 创建带安装说明和该 tag 完整记录链接的短正文 Release，再重跑原任务；流程会核对已有 npm 包并补齐同版本 ZIP。不要移动原 tag，也不要新建一次版本递增发布来补齐原版本。
 
 如果 npm 的 `latest` 已经是更高版本，旧任务不会补发较低版本并把 `latest` 降回去。
 
