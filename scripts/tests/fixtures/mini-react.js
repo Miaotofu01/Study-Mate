@@ -16,6 +16,13 @@
        还去量它的代码（路线图的 ResizeObserver → draw()）在重建后量到的是旧节点。
        真 React 里节点不换，所以那段代码本身是对的——夹具因此不断言路线图**连线几何**，
        只断言元素与属性（aria-label / 视觉隐藏的 table / 卡片）。
+       **一处例外**：真 React 不碰「自己没渲染过子节点」的元素的内部，所以客户端用
+       `ref` + `innerHTML` 贴进去的内容（`SvgFrame` 的内联 SVG 就是这么贴的）在真 React 里
+       重渲染后还在。重建式渲染会把这份内容连同旧节点一起丢掉，于是夹具里那个图框
+       **下一次重渲染就变空壳**——那是夹具与真货的差别，会让「客户端产出的内联 SVG」这类面
+       看着像坏的（#97 报的就是这条）。`draw()` 因此把**无 React 子节点**的元素的 `innerHTML`
+       按路径带到重建后的同位置元素上。`MathSpan` 那条路（`dangerouslySetInnerHTML`）不算：
+       它的内容由 props 每次渲染，搬旧值过去只会把新值盖掉。
      · 状态槽按「位置 + 组件函数」认实例，换视图时同位置换组件不会串槽
        （只按位置会串：踩过，路线图量到了上一个视图的旧 DOM）。
      · 没有 useLayoutEffect / context / portal / Suspense / 错误边界；
@@ -222,6 +229,11 @@
     const el = SVG.has(type)
       ? document.createElementNS('http://www.w3.org/2000/svg', type)
       : document.createElement(type);
+    // 「无 React 子节点」= 真 React 不会去动这个元素的内部（见文件头那处例外）。
+    // 路径与这份标记留给 draw() 的重建搬运用；有 dangerouslySetInnerHTML 的不算——
+    // 那份内容由 props 每次渲染，搬旧值过去只会把新值盖掉。
+    el.__miniPath = path;
+    el.__miniLeaf = children.length === 0 && !(props && props.dangerouslySetInnerHTML);
     applyProps(el, props);
     children.forEach((kid, index) => renderVNode(kid, childPath(path, kid, index), el));
     parent.appendChild(el);
@@ -230,10 +242,24 @@
   function draw() {
     if (!root || !vnode) return;
     pendingEffects = [];
+    // 先收下「客户端用 innerHTML 贴进无子节点元素」的那份内容：重建会把旧节点整棵丢掉，
+    // 而 effect 只在 deps 变化时重跑，收不到它就等于夹具凭空把内联 SVG 抹掉（见文件头）。
+    const carried = new Map();
+    root.querySelectorAll('*').forEach((el) => {
+      if (el.__miniLeaf && el.innerHTML) carried.set(el.__miniPath, { tag: el.tagName, html: el.innerHTML });
+    });
     const next = document.createDocumentFragment();
     renderVNode(vnode, 'root', next);
     root.textContent = '';
     root.appendChild(next);
+    if (carried.size) {
+      root.querySelectorAll('*').forEach((el) => {
+        // 只补空的：有内容的（dangerouslySetInnerHTML 渲出来的）本来就是对的那份
+        if (!el.__miniLeaf || el.innerHTML) return;
+        const one = carried.get(el.__miniPath);
+        if (one && one.tag === el.tagName) el.innerHTML = one.html;
+      });
+    }
     commitEffects();
   }
 
