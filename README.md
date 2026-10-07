@@ -64,6 +64,13 @@ node bin/studymate.mjs build-antigravity --install
 
 或者通过 `npm run build:antigravity` 构建 ZIP 包手动导入（详见 [Antigravity 说明](docs/使用/Antigravity.md)）。
 
+### StudyMate Web
+
+> 尚在开发测试中，相关功能可能不如插件途径稳定
+
+仓库还包含子项目 [`study-mate-web/`](study-mate-web/)：StudyMate 的**独立 Web 运行时**（FastAPI 后端 + Next.js 16 前端），把课程图谱、掌握度状态机与流式对话搬进浏览器；可通过 `STUDYMATE_WORKSPACE` 直接挂载已有的 `.learning` 静态工作区，在网页里零改动学习已有课件（页内判分、开放题判分、评估记录与静态工作区导出）。自包含工程，与上方的插件安装方式互不依赖。**部署与使用**见其 [README](study-mate-web/README.md)（一键启动脚本 + 手动启动 + E2E 测试）。
+
+
 ## 它是什么
 
 StudyMate 是一套**数学/计算机学习工作流、SKILL 与 HTML 课件引擎**，支持 DSH（DeepSeek Harness）的「学习模式」预设、Google Antigravity 原生多智能体插件，也可打包为 Codex 和 ChatGPT Work 插件。它按需组织收集资料、采图、课程设计、讲解、练习评估五个角色；宿主支持时可委派给子代理，否则依次完成各角色工作。
@@ -117,6 +124,8 @@ npm test
 
 目录树、每个目录干什么、哪个文件归谁维护，见[工程约束](docs/规范/工程约束.md) §二 目录与规则归属
 与[文件归属](docs/规范/文件归属.md)——两处各有唯一出处，这里不再抄一份。
+
+子项目 `study-mate-web/`（独立 Web 运行时）自包含，结构与归属见它自己的 [README](study-mate-web/README.md)。
 
 DSH 安装到 `~/.dsh/studymate/engine/`，预设与工作区配置也由安装器管理。学习数据默认位于独立的 `~/StudyMate`，无需保留源码仓库；详见 [安装说明](docs/使用/安装.md)。
 

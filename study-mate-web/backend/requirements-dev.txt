@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# 测试用（生产部署不需要）：后端 TestClient 单测
+pytest>=8
+httpx>=0.27

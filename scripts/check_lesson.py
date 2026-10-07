@@ -56,6 +56,8 @@ r"""课件质量检查：只阻断工程/结构缺项；内容风格类问题只
        lab 链接指错了文件名，检查照样全绿而学生点开是白板 / 404。
        跳过三类：外链与锚点（http(s)、协议相对 //、mailto:、data:、`#…`）；HTML 注释里的
        示例路径；上/下节课指针（落空是设计内的，第 8 项只提示）。
+       只取**真实元素**上的 href/src：`<pre>/<code>` 里转义的教学示例（`&lt;img src=…&gt;`）
+       与 `<script>` 字符串内容都不是引用，不算——否则示例里的假路径会被误报成断链。
        另有一条**生成产物**：指向 `index.html`（壳里那条「返回课程」回链，目标是 gen_home.py
        的产物）而它还没生成时只提示——作者产不出这个文件，缺了是流水线顺序问题，不是课件缺陷。
    11 数学式：页面里有 `.math-inline` / `.math-block` **或**题库数据（`data-quiz`）里带 `$…$`
@@ -149,7 +151,6 @@ LESSONS_DIR_MARK = '/lessons/'
 
 # ── 公共正则 ────────────────────────────────────────────────────────────
 
-REF_ATTR_RE = re.compile(r'(?:href|src)\s*=\s*["\']([^"\']*)["\']', re.I)
 COMMENT_RE = re.compile(r'<!--.*?-->', re.S)
 LAB_LINK_RE = re.compile(r'href\s*=\s*["\'][^"\']*lab/', re.I)
 INPUT_RE = re.compile(r'<input\b[^>]*>', re.I)
@@ -160,9 +161,34 @@ def strip_comments(text):
     return COMMENT_RE.sub('', text)
 
 
+class RefScanner(HTMLParser):
+    """收集**真实 HTML 元素**上的 href/src 属性值（顺序与文档一致）。
+
+    为什么不能用裸正则扫全文：渲染后的教学示例是**转义文本**——内容文件里 ``` 围栏或行内
+    代码里的 `<img src="photo.png">` 会渲染成 `<pre><code>&lt;img src="photo.png"&gt;</code></pre>`，
+    尖括号转义了、引号还在，形如 `src="photo.png"` 的子串照样被正则命中，于是把教学示例里的
+    假路径当成真引用报「文件不存在」（真实发生过：html-elements 课的 photo.png 误报）。
+
+    HTMLParser 是浏览器口径：转义文本是数据、注释是注释、`<script>`/`<style>` 内容是 CDATA，
+    都不是元素属性；顺带还支持单/双引号与未加引号的真实属性、属性值里的 HTML 实体。只收
+    `href` 与 `src` 两个属性名（与检查项 2/3/9/10/11 的原口径一致，CSS `url()` 与 `srcset` 不在内）。
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.refs = []
+
+    def handle_starttag(self, tag, attrs):
+        for name, value in attrs:
+            if name.lower() in ('href', 'src') and value is not None:
+                self.refs.append(value)
+
+
 def ref_values(text):
-    """取出所有 href/src 属性值，供引用类检查比对。"""
-    return REF_ATTR_RE.findall(text)
+    """取出所有**真实元素**的 href/src 属性值，供引用类检查比对。"""
+    scanner = RefScanner()
+    scanner.feed(text)
+    return scanner.refs
 
 
 def local_target(path, value):
@@ -882,6 +908,7 @@ def check_local_refs(text, path):
 
     跳过：外链与锚点（任何 scheme: 或协议相对 //、`#…`）；上/下节课指针（落空是设计内的，
     检查项 8 单独提示）。注释里的路径不会走到这里——`check_file` 传进来的已经是剥过注释的文本。
+    转义文本与脚本内容也不会：`ref_values` 只取真实元素上的属性，代码示例里的 `src="…"` 不是引用。
 
     **生成产物单算**：`index.html`（壳里那条「返回课程」回链的目标）由 gen_home.py 产出，
     作者产不出来——还没生成时只提示，不阻断（否则每门新科目在跑生成器之前都过不了检查）。

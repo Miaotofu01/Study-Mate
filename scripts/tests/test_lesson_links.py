@@ -171,7 +171,69 @@ def main():
     failures += not ok6
     fixtures.check('方程组带了大括号（不再提示）', ok6, out_ok)
 
-    total = len(CASES) + 7
+    # ── 代码示例不是引用：转义文本里的 href/src 字面值不该被当成真引用 ──────────────
+    # 内容文件里 ``` 围栏与行内代码里的 `<img src="photo.png">` 渲染成
+    # `<pre><code>&lt;img src="photo.png"&gt;</code></pre>`——尖括号转义了、引号还在，
+    # 裸正则扫全文会命中 `src="photo.png"`，把教学示例里的假路径报成「文件不存在」
+    # （真实发生过：html-elements 课的 photo.png 误报）。
+    subject7 = fixtures.write_subject(tmp)
+    fixtures.clear_lessons(subject7)
+    fixtures.write_content(subject7, 1, 'overview-map',
+                           body='## 骨架\n\n```html\n<img src="photo.png">\n```\n\n'
+                                '行内也可以写 `<img src="photo.png">`。\n\n'
+                                '::: quiz 理解 锚点：本节校验\n:::\n')
+    fixtures.write_quiz(subject7, 1, 'overview-map',
+                        {'本节校验': [{'q': '题干', 'opts': ['A', 'B'], 'ans': 0, 'why': '解释'}]})
+    fixtures.run_render(subject7, 'overview-map')
+    page7 = fixtures.lesson_html(subject7, 1, 'overview-map')
+    code7, out7 = fixtures.run_gate(page7, subject7, 'overview-map')
+    ok7 = code7 == 0 and 'photo.png' not in out7
+    failures += not ok7
+    fixtures.check('围栏/行内代码里的 src 字面值（教学示例，放行）', ok7, out7)
+
+    # <script> 里的字符串不是页面引用：JS 字符串里的 href/src 不该被扫出来
+    subject8 = fixtures.write_subject(tmp)
+    fixtures.clear_lessons(subject8)
+    script = '  <script>var tpl = \'<a href="ghost-from-script.html">x</a>\';</script>\n'
+    path8 = fixtures.write_lesson(subject8, 1, 'overview-map', extra=script)
+    code8, out8 = fixtures.run_gate(path8, subject8, 'overview-map')
+    ok8 = code8 == 0 and 'ghost-from-script.html' not in out8
+    failures += not ok8
+    fixtures.check('脚本字符串里的 href/src 字面值（不是引用，放行）', ok8, out8)
+
+    # 真实元素（哪怕在 <pre> 里）仍然是真引用：缺文件必须拦，不能因为修误报就放松
+    subject9 = fixtures.write_subject(tmp)
+    fixtures.clear_lessons(subject9)
+    real = ('  <pre><code>代码文本</code></pre>\n'
+            '  <pre><img src="../assets/img/pool/never-there.png" alt="真图"></pre>\n')
+    path9 = fixtures.write_lesson(subject9, 1, 'overview-map', extra=real)
+    code9, out9 = fixtures.run_gate(path9, subject9, 'overview-map')
+    ok9 = code9 != 0 and 'never-there.png' in out9
+    failures += not ok9
+    fixtures.check('真实 <pre> 里的 <img> 缺文件（仍拦）', ok9, out9)
+
+    # 真实属性的各种合法写法都要照样核对：单引号 / 未加引号 / 实体编码的 href
+    subject10 = fixtures.write_subject(tmp)
+    prepare_reference(subject10)
+    quote_cases = [
+        ('单引号真 href 指向缺失文件（拦）',
+         "<p>见 <a href='../lab/0001-ghost/README.md'>说明</a></p>", True),
+        ('未加引号真 href 指向缺失文件（拦）',
+         '<p>见 <a href=../lab/0001-ghost/README.md>说明</a></p>', True),
+        ('实体编码真 href 解码后存在（放行）',
+         '<p>见 <a href="../reference/cheatsheet&#46;html">速查</a></p>', False),
+        ('实体编码真 href 解码后缺失（拦）',
+         '<p>见 <a href="../reference/nope&#46;html">缺页</a></p>', True),
+    ]
+    for label, html, want_fail in quote_cases:
+        fixtures.clear_lessons(subject10)
+        path10 = fixtures.write_lesson(subject10, 1, 'overview-map', extra=html + '\n')
+        code10, out10 = fixtures.run_gate(path10, subject10, 'overview-map')
+        ok10 = (code10 != 0) == want_fail
+        failures += not ok10
+        fixtures.check(label, ok10, out10)
+
+    total = len(CASES) + 7 + 7
     print(f'\n{total - failures}/{total} 通过')
     shutil.rmtree(tmp, ignore_errors=True)
     return 1 if failures else 0

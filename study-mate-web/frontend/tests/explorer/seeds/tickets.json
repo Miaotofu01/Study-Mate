@@ -1,0 +1,32 @@
+[
+  {
+    "id": "e1a0c7f2b934",
+    "kind": "produce",
+    "slug": "computer-networks",
+    "node_id": "net.layers",
+    "base_label": "workspace",
+    "problems": [
+      {
+        "owner": "讲解",
+        "path": "lessons/0001-net.layers.md",
+        "line": "7",
+        "message": "探索用例：讲解缺少「封装开销」的算例，请补一处逐层首部字节数的计算。"
+      },
+      {
+        "owner": "出题",
+        "path": "lessons/0001-net.layers.quiz.json",
+        "line": "1",
+        "message": "探索用例：选择题只有 1 道，建议补一道开放性练习。"
+      }
+    ],
+    "artifacts": [
+      "lessons/0001-net.layers.md",
+      "lessons/0001-net.layers.quiz.json",
+      "GLOSSARY.md"
+    ],
+    "retries": 1,
+    "status": "待处理",
+    "created_at": 1759450000,
+    "updated_at": 1759450000
+  }
+]
