@@ -555,6 +555,15 @@ test('::: code —— 语言可选、字段行只在原文之前、原文逐字�
   assert.match(inlineCaption.html, /<p class="lesson-code__caption">看 <code>pwd<\/code> 的输出<\/p>/);
 });
 
+test('::: code —— 块里能贴一段带 ::: 的围栏（围栏里的 ::: 不算收尾）', () => {
+  const result = run(['::: code markdown', 'caption: 把指令块本身当例子贴出来', '',
+    '```markdown', '::: tip 提示', ':::', '```', ':::']);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.blocks[0].text, '```markdown\n::: tip 提示\n:::\n```');
+  assert.equal(result.blocks[0].caption, '把指令块本身当例子贴出来');
+  assert.match(result.html, /<pre data-lang="markdown"><code>```markdown\n::: tip 提示\n:::\n```<\/code><\/pre>/);
+});
+
 test('::: code —— 坏写法带行号：语言标签、只有字段没有原文、字段没值', () => {
   // 把字段写到指令头（槽写在块外的一种）：指令头只当一个语言标签用
   const onHeader = run(['::: code term caption: 说明', '> pwd', ':::']);
