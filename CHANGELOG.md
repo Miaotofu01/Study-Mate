@@ -1,5 +1,40 @@
 # 更新日志
 
+<!-- studymate-release:v1.2.0 -->
+## [1.2.0](https://github.com/Miaotofu01/Study-Mate/releases/tag/v1.2.0) - 2026-10-07
+
+### 已合并的 Pull Request
+
+- fix(发布):避免GitHub Release正文超限 ([#119](https://github.com/Miaotofu01/Study-Mate/pull/119))
+
+### 所有提交
+
+- fix(发布):避免GitHub Release正文超限 ([daf424d](https://github.com/Miaotofu01/Study-Mate/commit/daf424deb7e3409b33efeaf35f7a514d460a0ca8))
+
+  > v1.1.0 已成功发布到 npm，但 GitHub Release 的正文达到 217671 字符，超过 125000 字符上限，导致发布流程在创建 Release 时失败。
+  > 
+  > 为 POST 和 PATCH 共用最终正文长度处理：普通正文保持原样，超长记录逐级精简，始终保留同版本完整 CHANGELOG 链接与安装说明。补充长度边界、巨量记录和重试幂等回归，并说明旧版本的恢复路径。
+  > 
+  > 验证：Linux / Node 24 下 npm test 全部通过，零失败。
+  > 
+  > Fixes \#118
+
+- fix(发布):仅保留发布脚本修复 ([fadf1e1](https://github.com/Miaotofu01/Study-Mate/commit/fadf1e114adfe49feb7b88d027ea215591d52237))
+
+  > 按维护者要求，将发布回归测试文件和发布说明恢复到修复前的原样。分支相对原版本只保留 release.mjs 的 GitHub Release 正文长度处理。
+  > 
+  > 验证：原发布回归测试 19/19 通过；发布脚本与此前完整门禁通过的版本一致。
+  > 
+  > Refs \#118
+
+- Merge pull request \#119 from Miaotofu01/fix/release-body-limit ([c7c3929](https://github.com/Miaotofu01/Study-Mate/commit/c7c3929509ad71c47c5e12ee2d8397f426f7b472))
+
+  > fix(发布):避免GitHub Release正文超限
+
+
+[完整比较](https://github.com/Miaotofu01/Study-Mate/compare/v1.1.0...v1.2.0)
+<!-- /studymate-release:v1.2.0 -->
+
 <!-- studymate-release:v1.1.0 -->
 ## [1.1.0](https://github.com/Miaotofu01/Study-Mate/releases/tag/v1.1.0) - 2026-10-07
 
