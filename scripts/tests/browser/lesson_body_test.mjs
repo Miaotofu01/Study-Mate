@@ -745,24 +745,26 @@ try {
         !!term && term.boxW <= column + 1 && term.boxW >= column - 1,
         `${term && term.boxW} vs ${column}`);
 
-      // 三档行：档位按行首前缀判，命令档比另外两档亮、还垫着一条命令带。
-      // 亮色下「输出」与「注释」两档的色差极小（宿主的文字阶梯在亮色下 2/3/4 档塌到同一支灰，
-      // 再暗一档就够不到 AA），所以严格的「注释比输出暗」这一步由下面暗色场景守着。
+      // 三档行：档位按行首前缀判，命令档比另外两档亮、还垫着一条命令带；关系式在亮暗两套各跑一遍。
       const tierOf = (name) => (term ? term.rows.filter((r) => r.tier === name) : []);
       const cmdRow = tierOf('cmd')[0], cmtRow = tierOf('cmt')[0], outRow = tierOf('out')[0];
       const against = (row) => (row && term ? contrastRatio(row.color, term.bodyBg) : null);
+      const fmt = (v) => (v === null ? 'n/a' : v.toFixed(2));
+      const gap = (a, b) => (a === null || b === null ? null : a / b);
+      const pct = (g) => (g === null ? 'n/a' : ((g - 1) * 100).toFixed(1) + '%');
       check(`${tag} 三档行按行首前缀判定（命令 ${tierOf('cmd').length} / 输出 ${tierOf('out').length} / 注释 ${tierOf('cmt').length}，合起来 ${term ? term.rows.length : 0} 行）`,
         !!cmdRow && !!outRow && !!cmtRow && tierOf('cmd').length === 2 && tierOf('out').length === 2
         && tierOf('cmt').length === 1, JSON.stringify(term && term.rows.map((r) => [r.tier, r.text])));
-      check(`${tag} 命令行比输出行亮一档（对比度 ${against(cmdRow) && against(cmdRow).toFixed(2)} > ${against(outRow) && against(outRow).toFixed(2)}）`,
-        !!cmdRow && !!outRow && against(cmdRow) > against(outRow),
-        JSON.stringify(term && { cmd: [cmdRow && cmdRow.color, against(cmdRow)], out: [outRow && outRow.color, against(outRow)] }));
       check(`${tag} 命令行垫着一条命令带（行底 ${cmdRow && cmdRow.background} ≠ 块底 ${term && term.bodyBg}）`,
         !!cmdRow && !!term && cmdRow.background !== term.bodyBg,
         JSON.stringify({ band: cmdRow && cmdRow.background, block: term && term.bodyBg }));
-      check(`${tag} 输出行与注释行是两支不同的色，但亮色下只差一线（对比度 ${against(outRow) && against(outRow).toFixed(2)} / ${against(cmtRow) && against(cmtRow).toFixed(2)}；严格的「注释比输出暗」在暗色场景守）`,
-        !!outRow && !!cmtRow && outRow.color !== cmtRow.color,
-        JSON.stringify({ out: outRow && outRow.color, cmt: cmtRow && cmtRow.color }));
+      // 三档的关系式：命令 > 输出 > 注释，相邻两档的对比度差 ≥ 20%，三档都达 AA。
+      // 亮暗两套各跑一遍（这一场是亮色，暗色那一份在下面的 dark 场景）。
+      check(`${tag} 三档都达 AA、且相邻两档差 ≥ 20%（对比度 命令 ${fmt(against(cmdRow))} / 输出 ${fmt(against(outRow))} / 注释 ${fmt(against(cmtRow))}；命令/输出 +${pct(gap(against(cmdRow), against(outRow)))}、输出/注释 +${pct(gap(against(outRow), against(cmtRow)))}）`,
+        !!cmdRow && !!outRow && !!cmtRow
+        && against(cmdRow) >= 4.5 && against(outRow) >= 4.5 && against(cmtRow) >= 4.5
+        && gap(against(cmdRow), against(outRow)) >= 1.2 && gap(against(outRow), against(cmtRow)) >= 1.2,
+        JSON.stringify(term && { cmd: against(cmdRow), out: against(outRow), cmt: against(cmtRow) }));
 
       /* 条目 15：长标识符 / URL / 宽表格不撑出横向滚动条 */
       check(`${tag} 长标识符与长 URL 在段落里断行（段落不溢出：${one.longText.scrollW} ≤ ${one.longText.clientW}）`,
@@ -900,17 +902,20 @@ try {
       check(`${themeTag} 暗色下正文列与页面依旧没有横向溢出（${dark.overflow.center} / ${dark.overflow.page}）`,
         dark.overflow.center === 0 && dark.overflow.page === 0, JSON.stringify(dark.overflow));
 
-      // #115 三档行在暗色下的严格分档：命令 > 输出 > 注释（亮色下后两档的 token 塌到同一支灰，
-      // 那一步在亮色场景里只断言到「两支不同的色」，原因写在那条断言的注释里）。
+      // #115 三档行在暗色下的关系式：与亮色场景同一条——三档都达 AA、相邻两档差 ≥ 20%，
+      // 顺序是命令 > 输出 > 注释（亮色那一份在上面主场景，两套主题都必须成立）。
       const dt = dark.code115 && dark.code115.term;
       const dRow = (name) => (dt ? dt.rows.find((r) => r.tier === name) : null);
       const dAgainst = (name) => {
         const row = dRow(name);
         return row && dt ? contrastRatio(row.color, dt.bodyBg) : null;
       };
-      check(`${themeTag} 命令 > 输出 > 注释三档在暗色下严格分开（${dAgainst('cmd') && dAgainst('cmd').toFixed(2)} > ${dAgainst('out') && dAgainst('out').toFixed(2)} > ${dAgainst('cmt') && dAgainst('cmt').toFixed(2)}）`,
+      const dGap = (a, b) => (a === null || b === null ? null : a / b);
+      const dPct = (g) => (g === null ? 'n/a' : ((g - 1) * 100).toFixed(1) + '%');
+      check(`${themeTag} 三档都达 AA、且相邻两档差 ≥ 20%（对比度 命令 ${dAgainst('cmd') && dAgainst('cmd').toFixed(2)} / 输出 ${dAgainst('out') && dAgainst('out').toFixed(2)} / 注释 ${dAgainst('cmt') && dAgainst('cmt').toFixed(2)}；命令/输出 +${dPct(dGap(dAgainst('cmd'), dAgainst('out')))}、输出/注释 +${dPct(dGap(dAgainst('out'), dAgainst('cmt')))}）`,
         !!dRow('cmd') && !!dRow('out') && !!dRow('cmt')
-        && dAgainst('cmd') > dAgainst('out') && dAgainst('out') > dAgainst('cmt'),
+        && dAgainst('cmd') >= 4.5 && dAgainst('out') >= 4.5 && dAgainst('cmt') >= 4.5
+        && dGap(dAgainst('cmd'), dAgainst('out')) >= 1.2 && dGap(dAgainst('out'), dAgainst('cmt')) >= 1.2,
         JSON.stringify(dt && { cmd: dAgainst('cmd'), out: dAgainst('out'), cmt: dAgainst('cmt') }));
       check(`${themeTag} 暗色下顶栏与块体分得开（顶栏 ${dt && dt.barBg} ≠ 块底 ${dt && dt.bodyBg}）`,
         !!dt && !!dt.barBg && dt.barBg !== dt.bodyBg,
