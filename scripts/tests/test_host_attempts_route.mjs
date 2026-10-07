@@ -1,14 +1,14 @@
 /* 特征化测试：Host 半路由 · `POST /api/studymate/attempts`（#72 的 Host 半）
    ────────────────────────────────────────────────────────────────────────
    数据层（`lib/attempts.ts`）的栅栏已经由 test_host_attempts_fence.mjs 钉住；这里钉的是
-   **前端真正打到的那一层**：路由怎么挂、请求体什么形状、状态码怎么映射、错误怎么说话。
+   **阅读端真正打到的那一层**：路由怎么挂、请求体什么形状、状态码怎么映射、错误怎么说话。
 
    验收标准逐条对应：
      1. **跨请求**：POST 落盘之后，另起一次 `readLibrary`（= 浏览器刷新后那次
         `GET /api/studymate/library`）仍带得回「上次选了 X」；重放同一个 operationId
         不产生第二条记录（文件字节不变）；
      2. **另一个写入者改过之后**：POST 被 409 拒绝、**不写盘**，回执里带回当前内容与版本号
-        （前端据此重读，不必再跑一趟），学生看得到冲突原文；
+        （阅读端据此重读，不必再跑一趟），学生看得到冲突原文；
      3. **主观题自评**（答对了 / 答了一半 / 没答上）同样落盘，字段是 `自评`；
      4. **题库逐字不变**：`.quiz.json` 与课件正文在整轮写入前后逐字节相等。
 
@@ -17,7 +17,7 @@
    两处刻意的写法：
      · `DSH_HOME` 指向临时目录——`resolveWorkspace()` 读的就是它，走真路径而不是给路由开后门；
      · 路由**通过 `registerAttemptRoutes` 挂一遍再取出来调**，不是直接调 handler：
-       验收项「前端 → Host 半 → 落盘」里的第一跳就是这次注册。 */
+       验收项「阅读端 → Host 半 → 落盘」里的第一跳就是这次注册。 */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -107,7 +107,7 @@ function countFiles(dir) {
   }
 }
 
-/** 一次完整的作答请求体：`expectedVersion` 默认取当前盘上的版本号（等于前端刚读到的那个）。 */
+/** 一次完整的作答请求体：`expectedVersion` 默认取当前盘上的版本号（等于阅读端刚读到的那个）。 */
 function submission(workspace, overrides = {}) {
   return Object.assign({
     subject: SUBJECT,
@@ -125,7 +125,7 @@ test('路由挂得上：路径、方法、请求体，以及缺 connection 时�
   assert.equal(routes.length, 1);
   const [route] = routes;
   assert.equal(route.path, ATTEMPTS_PATH);
-  assert.equal(route.path, '/api/studymate/attempts', '前端 lib/client.js 的 ATTEMPTS_ENDPOINT 必须与它逐字一致');
+  assert.equal(route.path, '/api/studymate/attempts', '阅读端 lib/client.js 的 ATTEMPTS_ENDPOINT 必须与它逐字一致');
   assert.deepEqual(route.methods, ['POST'], '只开写；读走 payload 的 node.attempts，不另开一条读路径');
   assert.equal(route.requestBody, 'buffered');
   assert.equal(typeof route.fetch, 'function');
@@ -225,7 +225,7 @@ test('再答一次是追加：history 里两条，上次结果是新的那条', 
 
 /* ── 2. 另一个写入者 ──────────────────────────────────────────────────── */
 
-test('另一个写入者改过之后：409 拒绝、不写盘、带回当前内容（前端据此重读）', async () => {
+test('另一个写入者改过之后：409 拒绝、不写盘、带回当前内容（阅读端据此重读）', async () => {
   const { home, workspace, attemptsDir } = makeHome();
   process.env.DSH_HOME = home;
   const { route } = connect();
@@ -245,12 +245,12 @@ test('另一个写入者改过之后：409 拒绝、不写盘、带回当前内�
   const refused = await stale.json();
   assert.equal(refused.ok, false);
   assert.equal(refused.error.code, 'version-conflict');
-  assert.match(refused.error.message, /版本号对不上/, '拒绝的原因要是一句人话，前端原样带给学生');
+  assert.match(refused.error.message, /版本号对不上/, '拒绝的原因要是一句人话，阅读端原样带给学生');
   assert.equal(refused.version, 甲.version, '冲突时顺手带回当前版本号 = 已经重读过了');
   assert.deepEqual(refused.attempts, 甲.attempts, '带回来的是甲写的那份：乙的数据没丢也没覆盖');
   assert.deepEqual(fs.readFileSync(file), bytes, '被拒绝的那次不写盘');
 
-  // 前端按带回的版本号重来：这次成功，甲那条历史还在
+  // 阅读端按带回的版本号重来：这次成功，甲那条历史还在
   const retried = await (await post(route, submission(workspace, {
     questions: { [OBJECTIVE]: { 选: 3, 对: false } },
     expectedVersion: refused.version,
