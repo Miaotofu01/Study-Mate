@@ -152,7 +152,13 @@ function fakeHost() {
     get: (id) => created.get(id),
   };
   const sessionTitle = { rename: () => ({}) };
-  return { agentPresets, agents, sessionTitle, llm: { listProviders: () => [{ id: 'fake-provider' }] }, calls };
+  // 会话的 provider/model 从这儿来（`lib/ask/session.ts` 的「模型只能自己带」）：
+  // 少了它这条路由会如实回 503，而不是建出一条跑不动的会话
+  const agentDefaultModel = { currentSelection: () => ({ provider: 'fake-provider', model: 'fake-model' }) };
+  return {
+    agentPresets, agents, sessionTitle, agentDefaultModel, calls,
+    llm: { listProviders: () => [{ id: 'fake-provider' }] },
+  };
 }
 
 /** 把插件那条注册路跑起来：`bin/dsh-plugin.ts` 就是拿这几件去调注册入口的。 */
@@ -167,9 +173,10 @@ function registerRoute(host) {
         effect: (fn) => fn(),
         get: (name) => (name === 'agents' ? host.agents
           : name === 'sessionTitle' ? host.sessionTitle
-            : name === 'llm' ? host.llm
-              : name === 'agentPresets' ? host.agentPresets
-                : undefined),
+            : name === 'agentDefaultModel' ? host.agentDefaultModel
+              : name === 'llm' ? host.llm
+                : name === 'agentPresets' ? host.agentPresets
+                  : undefined),
       });
     },
   };
@@ -299,6 +306,8 @@ test('#107 走一遍新会话链路：整个工作区逐字节不变（一个字
   const view = await response.json();
   assert.equal(view.ok, true, JSON.stringify(view));
   assert.equal(host.calls.create.length, 1);
+  // 这条会话带上了 provider/model（少了它真宿主里一按发送就抛 has no provider/model）
+  assert.deepEqual(host.calls.create[0].agentOptions, { provider: 'fake-provider', model: 'fake-model' });
   assert.equal(host.calls.inject.length, 1, '共享记忆该注入一条');
 
   assert.deepEqual(snapshotWorkspace(workspace), before, '建会话这条链路碰了工作区');

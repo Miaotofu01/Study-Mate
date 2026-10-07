@@ -9,11 +9,13 @@
    一次请求做五件事，顺序照宿主的 `createWebhookSession`（`@deepseek-ai/dsh-webhook` 里唯一
    一份完整的程序化建会话范例）：
 
-     1. 探模型：`probeModel` 说没有可用模型就**不建会话**、如实返回 `{available:false, reason}`；
+     1. 探模型：`probeModel` 说没有可用模型、或 `agentDefaultModel.currentSelection()` 给不出
+        provider/model，就**不建会话**、如实返回 `{available:false, reason}`；
      2. `agentPresets.resolve('qa')` → `acquireScope(preset.id)`（把预设 revision 钉到创建窗口
         结束，用完就还——照 webhook 的 `using`/`__addDisposableResource`）；
-     3. `agents.create({ sessionId, meta:{cwd, agentPreset:'qa'}, setup: mount })`——`meta` 的
-        字段名就是 `agentPreset`，`setup` 里 `mount` 必须先跑（scope 后续注册都依赖它）；
+     3. `agents.create({ sessionId, meta:{cwd, agentPreset:'qa'}, agentOptions, setup: mount })`
+        ——`meta` 的字段名就是 `agentPreset`；`agentOptions` 是这条会话的 provider/model
+        （见下面「模型只能自己带」那一段）；`setup` 里 `mount` 必须先跑（scope 后续注册都依赖它）；
      4. 标题写成「答疑 · 科目 · 节点」：走 `ctx.sessionTitle.rename(agent.session, title)`；
         这个服务**可能没挂**（宿主自己的报错文案是「renaming is unavailable: this deployment
         mounts no session-title service」）——缺了就如实降级（`renamed:false`），不抛、也不假装改过；
@@ -21,11 +23,16 @@
         next-step 桶、不唤醒 driver」，**可能错过已经领走本批的那次 pre-step**——已知竞态，接受
         （spec #102 Further Notes 第 4 条）。
 
-   两处刻意的写法，别顺手改回去：
+   三处刻意的写法，别顺手改回去：
 
      · **不 dispose `AgentHandle`。** `agents.create` 返回的是 `{agent, dispose}`，而 `dispose()`
        会把刚建好的会话拆掉（webhook 也把它留给 ctx 生命周期）。健康的做法是「建完就撒手」：
        agent 归宿主 ctx 所有，会话由此活得比这次请求久。
+     · **模型只能自己带。** 正常会话的 provider/model 是客户端选出来的（`dsh-api-session-controller`
+       建会话时给 `agentOptions()`），而这条会话**不经过客户端**——少了它，agent 在第一次请求
+       时抛 `agent "<id>" has no provider/model: set AgentOptions.provider and AgentOptions.model
+       or supply both via the agent/request waterfall`，会话建起来了却答不出一句（实测踩过）。
+       取法照 webhook 与那个 controller 的同一份：`ctx.agentDefaultModel.currentSelection()`。
      · **不 import 宿主的任何包**（`createUserMessage` 也不行）：本仓库的 Host 半是**零依赖**
        插件（`bin/dsh-plugin.ts` 的文件头写明）。共享记忆那条消息照 `createUserMessage` 的形状
        自己造（`{id, role:'user', content, source}`）——宿主那边它做的就是「补一个随机身份 +
@@ -105,6 +112,15 @@ export interface AskSessionTitle {
   rename?: (session: unknown, title: string) => unknown;
 }
 
+/**
+ * 部署默认模型：`ctx.agentDefaultModel.currentSelection()`（`dsh-agent-default-model` 的服务，
+ * 名字就是 `agentDefaultModel`）。返回 `{provider, model, reasoningEffort?}`；没配默认模型时
+ * 两个字段可能是空串——那种情况当成「取不到」，见 `agentOptionsOf`。
+ */
+export interface AskDefaultModel {
+  currentSelection?: () => unknown;
+}
+
 /** 路由依赖。全部可注入：套件里换成假工作区、假预设表、假 agents，**不建真会话**。 */
 export interface AskSessionDeps {
   /** 工作区目录（会话的 `meta.cwd`） */
@@ -115,6 +131,8 @@ export interface AskSessionDeps {
   agents?: AskAgents | null;
   /** `ctx.sessionTitle`（可能没挂——缺了就如实降级） */
   sessionTitle?: AskSessionTitle | null;
+  /** `ctx.agentDefaultModel`（会话的 provider/model 从这儿来；缺了就不建会话） */
+  agentDefaultModel?: AskDefaultModel | null;
   /** `ctx.llm` 拿到的模型服务（可能没有） */
   llm?: unknown;
   /** 读共享记忆（`.learning/MEMORY.md`） */
@@ -166,6 +184,28 @@ function messageOf(error: unknown): string {
 }
 
 /**
+ * 从部署默认里取 `agents.create` 的 `agentOptions`（`{provider, model}`，可选 `reasoningEffort`）。
+ * 取不到一个能用的组合就返回 `null`——**不**退化成「不带这个字段再试一次」：那样建出来的会话
+ * 看着是好的，学生一按发送就抛 `has no provider/model`，比当场说「没模型」更坑。
+ */
+function agentOptionsOf(service?: AskDefaultModel | null): { provider: string; model: string; reasoningEffort?: string } | null {
+  let selection: unknown;
+  try {
+    selection = service?.currentSelection?.();
+  } catch {
+    return null;
+  }
+  if (!selection || typeof selection !== 'object') return null;
+  const record = selection as Record<string, unknown>;
+  const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+  const provider = text(record.provider);
+  const model = text(record.model);
+  if (provider === '' || model === '') return null;
+  const reasoningEffort = text(record.reasoningEffort);
+  return { provider, model, ...(reasoningEffort === '' ? {} : { reasoningEffort }) };
+}
+
+/**
  * 造一条 UserMessage（`inject` 要的是完整消息，不是字符串）。
  *
  * 宿主那边 `createUserMessage({content, source})` 做的就是「补一个 `randomUUID` 身份 +
@@ -209,6 +249,14 @@ export async function openAskSession(deps: AskSessionDeps, input: AskSessionInpu
   const capability = probeModel({ get: (name: string) => (name === 'llm' ? deps.llm : undefined) });
   if (!capability.available) return unavailableView(capability.reason ?? '模型能力不可用');
 
+  // 1′ 会话的 provider/model（见文件头「模型只能自己带」）：这一步与上面那条探测是两回事——
+  //    上面问「这条链路上有没有模型」，这里问「这条会话用哪一个」。少一个都不建。
+  const agentOptions = agentOptionsOf(deps.agentDefaultModel);
+  if (!agentOptions) {
+    return unavailableView('宿主没给出可用的默认模型（ctx.agentDefaultModel.currentSelection() 里没有 '
+      + 'provider/model）——先在模型设置里选一个默认模型，再开答疑会话');
+  }
+
   // 2. 预设：没有注册表 / 没有「答疑模式」就建不出来（这不是「没有模型」，是配置缺了）
   const presets = deps.agentPresets;
   if (!presets || typeof presets.resolve !== 'function' || typeof presets.mount !== 'function') {
@@ -247,6 +295,8 @@ export async function openAskSession(deps: AskSessionDeps, input: AskSessionInpu
       sessionId,
       // meta.agentPreset 是 durable session metadata（落盘）：侧边栏/设置页据此认这条会话按哪条预设跑
       meta: { cwd: deps.workspace, agentPreset: presetId },
+      // 这条会话的 provider/model：不给它，agent 第一次请求就抛「has no provider/model」
+      agentOptions,
       // setup 里 mount 必须**先于**别的 scoped 注册（restrict 的合法名字集依赖已挂上的层，见 #104）
       setup: async (agentCtx: unknown) => { await mountPreset(agentCtx, presetId); },
     });
@@ -333,6 +383,8 @@ export function registerAskSessionRoute(ctx: AskSessionRouteContext): void {
             agents: child.get?.('agents') as AskAgents | undefined,
             // 可能没挂：拿不到就是如实降级（见 openAskSession 第 4 步）
             sessionTitle: child.get?.('sessionTitle') as AskSessionTitle | undefined,
+            // 会话的 provider/model 从这儿来（`dsh-agent-default-model` 的服务名就是它）
+            agentDefaultModel: child.get?.('agentDefaultModel') as AskDefaultModel | undefined,
             llm: child.get?.('llm'),
           }, body as AskSessionInput);
           // 面板按状态码区分「没模型」与「建不出来」

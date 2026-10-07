@@ -7,10 +7,12 @@
    钉的是我们能钉的那一半：
 
      · 建会话真的带了 `meta.agentPreset = 'qa'`（答疑预设）与当前工作区当 cwd；
+     · 建会话真的带了 `agentOptions = {provider, model}`（部署默认模型）——少了它，真宿主里
+       会话建得起来、学生一按发送就抛 `has no provider/model`（实测踩过，见本套件末三条）；
      · `setup` 里真的 `mount` 了预设（顺序：resolve → acquireScope → create(setup: mount)）；
      · 标题拼成「答疑 · 科目 · 节点」并交给 `ctx.sessionTitle.rename`；
      · 共享记忆**注入一条且只注入一次**（多条消息就是重复注入）；
-     · 没有可用模型时**一条会话都不建**、如实说明；
+     · 没有可用模型 / 没有部署默认模型时**一条会话都不建**、如实说明；
      · 宿主没挂 `sessionTitle` 时如实降级（`renamed:false`，会话照样建起来）；
      · 预设读不到 / 会话服务不在 → 走 `lib/route-envelope.ts` 的唯一信封；
      · 路由：路径在 `/api/studymate` 命名空间下、坏请求体 400、没工作区 500、没模型 503。
@@ -47,8 +49,8 @@ function makeWorkspace({ withMemory = true } = {}) {
 /* ── 假宿主半：预设注册表 / agents / sessionTitle / llm ─────────────────── */
 
 /** 记下每一次调用的假 ctx 服务。 */
-function fakeHost({ memory = MEMORY_MD, preset = { id: QA_AGENT_PRESET }, failResolve = null, withTitle = true, withAgents = true } = {}) {
-  const calls = { resolve: [], acquireScope: [], create: [], mount: [], disposeScope: 0, inject: [], rename: [] };
+function fakeHost({ memory = MEMORY_MD, preset = { id: QA_AGENT_PRESET }, failResolve = null, withTitle = true, withAgents = true, withDefaultModel = true, selection = { provider: 'fake-provider', model: 'fake-model' } } = {}) {
+  const calls = { resolve: [], acquireScope: [], create: [], mount: [], disposeScope: 0, inject: [], rename: [], currentSelection: [] };
   const messages = [];
   const created = new Map();
   const handle = {
@@ -81,7 +83,13 @@ function fakeHost({ memory = MEMORY_MD, preset = { id: QA_AGENT_PRESET }, failRe
   const sessionTitle = withTitle ? {
     rename: (session, title) => { calls.rename.push({ session, title }); return { title }; },
   } : null;
-  return { agentPresets, agents, sessionTitle, llm: { listProviders: () => [{ id: 'fake-provider' }] }, calls, messages, handle };
+  const agentDefaultModel = withDefaultModel ? {
+    currentSelection: () => { calls.currentSelection.push(true); return selection; },
+  } : null;
+  return {
+    agentPresets, agents, sessionTitle, agentDefaultModel, calls, messages, handle,
+    llm: { listProviders: () => [{ id: 'fake-provider' }] },
+  };
 }
 
 /** 一份完整的 deps：把假服务与工作区拼起来。 */
@@ -91,6 +99,7 @@ function depsFor(workspace, host, overrides = {}) {
     agentPresets: host.agentPresets,
     agents: host.agents,
     sessionTitle: host.sessionTitle,
+    agentDefaultModel: host.agentDefaultModel,
     llm: host.llm,
     createId: () => 'studymate-qa-fixed',
     ...overrides,
@@ -146,6 +155,10 @@ test('#105 建会话：resolve(qa) → acquireScope → create(带预设 id 与 
   assert.equal(options.sessionId, 'studymate-qa-fixed');
   // ★ 这就是「按答疑预设跑」的全部证据：meta.agentPreset（durable media）与 mount 的 id
   assert.deepEqual(options.meta, { cwd: workspace, agentPreset: QA_AGENT_PRESET });
+  // ★ 会话的 provider/model 只能在这儿给：程序化建会话不经过客户端的模型选择。
+  //   少了这个字段，真宿主里 agent 会在第一次请求时抛「has no provider/model」（实测踩过）。
+  assert.deepEqual(options.agentOptions, { provider: 'fake-provider', model: 'fake-model' });
+  assert.equal(host.calls.currentSelection.length, 1, '默认模型要现取一次');
   assert.equal(typeof options.setup, 'function');
   // setup 真的挂了预设（不是只写在 meta 里），而且挂的就是解析出来的那个 id
   await options.setup({ scoped: true });
@@ -223,6 +236,58 @@ test('#105 无模型：一条会话都不建，available:false + reason（一个
   assert.equal(host.calls.resolve.length, 0, '没有模型却去解析了预设');
 });
 
+test('#105 没有部署默认模型：不建会话（别建一条一按发送就报错的死会话）', async () => {
+  const { workspace } = makeWorkspace();
+  const host = fakeHost({ withDefaultModel: false });
+  const view = await openAskSession(depsFor(workspace, host), { subject: '网络' });
+
+  assert.equal(view.available, false);
+  assert.equal(view.ok, false);
+  assert.equal(view.error.code, 'model-unavailable');
+  assert.match(view.reason, /默认模型/, 'reason 要说清缺的是「默认模型」，不是含糊的「没有模型」');
+  assert.equal(host.calls.create.length, 0, '没有默认模型却把会话建出来了');
+  assert.equal(host.calls.resolve.length, 0, '没有默认模型却去解析了预设');
+});
+
+test('#105 默认模型是空的（provider / model 空串或不是字符串）：同样当取不到', async () => {
+  for (const selection of [{ provider: '', model: 'm' }, { provider: 'p', model: '   ' }, {}, null, 'nonsense']) {
+    const { workspace } = makeWorkspace();
+    const host = fakeHost({ selection });
+    const view = await openAskSession(depsFor(workspace, host), { subject: '网络' });
+    assert.equal(view.available, false, JSON.stringify(selection));
+    assert.equal(host.calls.create.length, 0, JSON.stringify(selection));
+  }
+  // 服务在、但没长 currentSelection（更老的宿主 / 形状不对）：同样当取不到
+  for (const service of [{}, { currentSelection: 'not a function' }]) {
+    const { workspace } = makeWorkspace();
+    const host = fakeHost();
+    host.agentDefaultModel = service;
+    const view = await openAskSession(depsFor(workspace, host), { subject: '网络' });
+    assert.equal(view.available, false, JSON.stringify(service));
+    assert.equal(host.calls.create.length, 0, JSON.stringify(service));
+  }
+});
+
+test('#105 默认模型带 reasoningEffort：原样带进 agentOptions（站上学生选的那一档）', async () => {
+  const { workspace } = makeWorkspace();
+  const host = fakeHost({ selection: { provider: 'p', model: 'm', reasoningEffort: 'high' } });
+  const view = await openAskSession(depsFor(workspace, host), { subject: '网络' });
+
+  assert.equal(view.ok, true, JSON.stringify(view));
+  assert.deepEqual(host.calls.create[0].agentOptions, { provider: 'p', model: 'm', reasoningEffort: 'high' });
+});
+
+test('#105 取默认模型时服务抛错：当取不到，不把异常漏出去', async () => {
+  const { workspace } = makeWorkspace();
+  const host = fakeHost();
+  host.agentDefaultModel = { currentSelection: () => { throw new Error('boom'); } };
+  const view = await openAskSession(depsFor(workspace, host), { subject: '网络' });
+
+  assert.equal(view.available, false);
+  assert.equal(view.error.code, 'model-unavailable');
+  assert.equal(host.calls.create.length, 0);
+});
+
 /* ══ 建不出来时走唯一信封 ═══════════════════════════════════════════════ */
 
 test('#105 预设读不到：preset-unavailable 信封 + 能照做的一句话，不建会话', async () => {
@@ -284,9 +349,10 @@ function fakeCtx({ host = fakeHost() } = {}) {
     effect: (fn) => { const dispose = fn(); return () => { if (typeof dispose === 'function') dispose(); }; },
     get: (name) => (name === 'agents' ? host.agents
       : name === 'sessionTitle' ? host.sessionTitle
-        : name === 'agentPresets' ? host.agentPresets
-          : name === 'llm' ? host.llm
-            : undefined),
+        : name === 'agentDefaultModel' ? host.agentDefaultModel
+          : name === 'agentPresets' ? host.agentPresets
+            : name === 'llm' ? host.llm
+              : undefined),
   };
   const ctx = {
     agentPresets: host.agentPresets,
@@ -366,6 +432,20 @@ test('#105 路由：坏请求体 400、没工作区 500、没模型 503——每
   assert.equal(view.ok, false);
   assert.ok(typeof view.reason === 'string' && view.reason.length > 0);
   assert.equal(noModel.calls.create.length, 0, '没有模型却把会话建出来了');
+
+  // 有模型、但没有部署默认模型：同样 503（这条专钉路由把 `agentDefaultModel` 转交进去了——
+  // 漏了它，路由会返回 200 而真宿主里会话是死的）
+  const noDefault = fakeHost({ withDefaultModel: false });
+  const { ctx: noDefaultCtx, routes: noDefaultRoutes } = fakeCtx({ host: noDefault });
+  registerAskSessionRoute(noDefaultCtx);
+  const noDefaultResponse = await noDefaultRoutes[0].fetch(new Request('http://localhost' + QA_SESSION_PATH, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ subject: '网络' }),
+  }));
+  assert.equal(noDefaultResponse.status, 503);
+  const noDefaultView = await noDefaultResponse.json();
+  assert.equal(noDefaultView.available, false);
+  assert.equal(noDefaultView.error.code, 'model-unavailable');
+  assert.equal(noDefault.calls.create.length, 0, '没有默认模型却把会话建出来了');
 });
 
 test('#105/#107 注册入口：问答域的出口只挂建会话这一条路由（bin/dsh-plugin.ts 那一行调的就是它）', () => {
