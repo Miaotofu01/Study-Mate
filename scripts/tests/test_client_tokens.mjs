@@ -34,8 +34,8 @@ const AA_NORMAL = 4.5;
 const TEXT_TOKENS = [
   '--smb-text',            // 主文字
   '--smb-text-2',          // 次级
-  '--smb-text-3',          // 三级
-  '--smb-text-4',          // 四级（最小号）
+  '--smb-text-3',          // 三级（#115 起也是代码块顶栏那行语言标记）
+  '--smb-text-4',          // 四级（最小号；#115 起也是代码行号槽与注释档）
   '--smb-text-done',       // 语义色的文字档（饱和档达不到 AA，见 token 块的注释）
   '--smb-text-learning',
   '--smb-text-info',
