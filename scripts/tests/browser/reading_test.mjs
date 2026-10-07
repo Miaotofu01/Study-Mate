@@ -9,7 +9,7 @@
        body[data-ds-dark-theme]{…} 两块原样铺进页面——亮暗两套都要能测，且取值与宿主一致；
      · 插件本体：CSS 与 JS 都**从 lib/client.js 里现取**（CSS 用正则取出内联串），
        不手抄一份标记——抄一份就等于测另一份实现；
-     · 数据：临时工作区现造、`readLibrary()` 读成 payload、stub 掉 fetch 喂给前端，
+     · 数据：临时工作区现造、`readLibrary()` 读成 payload、stub 掉 fetch 喂给阅读端，
        跑完即弃（仓库里不存样例数据）。
 
    浏览器二进制由 harness 探测；找不到时明确跳过（退出码 3），不是静默绿。
