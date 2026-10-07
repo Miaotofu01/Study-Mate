@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { readLibrary } from '../library.ts';
 import { readReference } from '../reference.ts';
 import { cmpCodePoints } from '../core/format.ts';
-import { KATEX_VERSION, LICENSE_FILE, MATH_FONT_DIR, MATH_JS, hasMathExpression, hasMathInProse, katexDistDir, mathAssets } from '../math.ts';
+import { KATEX_VERSION, LICENSE_FILE, MATH_FONT_DIR, MATH_JS, hasMathInPlainText, hasMathInProse, katexDistDir, mathAssets } from '../math.ts';
 import type { ReactSources } from './react.ts';
 import { ASSETS_DIR } from './page.ts';
 import type { VendorKey } from './page.ts';
@@ -129,10 +129,19 @@ function walkFiles(dir: string, prefix = ''): string[] {
 }
 
 /**
+ * 快照里带 **Markdown 语义** 的字段名（`lib/library.ts` 把课件正文内联在这个字段上）：只有它
+ * 先剔代码围栏与行内代码再找；其余一切字符串（题库纯文本字段、`objective` / `goal` 这类会被
+ * `inlineNodes` 过一遍的字段）没有代码语义，整串找。分派用这张名单，不写裸字符串比较——
+ * 改字段名时至少能找到一处「这里认得它」。
+ */
+const MARKDOWN_FIELDS: ReadonlySet<string> = new Set(['lesson_md']);
+
+/**
  * 这份快照里有没有会被阅读端排版的数学式（#96 的按需判据）。
  *
  * 判据与阅读端同口径（`lib/client.js` 那套「渲染出数学元素才去取资源」），**宁可多带不可少带**：
- *   · 正文（`lesson_md`）：先剔掉代码围栏与行内代码再找——两边的解析器都不把代码里的 `$` 当公式；
+ *   · 正文（`lesson_md`，见 `MARKDOWN_FIELDS`）：先剔掉代码围栏与行内代码再找——两边的解析器
+ *     都不把代码里的 `$` 当公式；
  *   · 其余一切字符串（题库纯文本字段、`objective` / `goal` 这类会被 `inlineNodes` 过一遍的字段）：
  *     整串找。少扫一个字段就是「该带没带」，那会让页面降级成 TeX 原文。
  *
@@ -140,13 +149,22 @@ function walkFiles(dir: string, prefix = ''): string[] {
  * 不排版、这里算数），绝不会出现「页面要排版却拿不到引擎」那条。只看快照本身——离线页面渲染的
  * 就是这一份（`data.js`），参考资料的正文在阅读端是 `<pre>` 原样显示，不走排版器，因此不算。
  */
-export function snapshotHasMath(value: unknown, key = ''): boolean {
+export function snapshotHasMath(snapshot: unknown): boolean {
+  return fieldHasMath(snapshot, '');
+}
+
+/**
+ * 递归那一半：`field` 是**必填**的（原来有 `= ''` 的默认值，那正是 #96 要修的失败方向——漏传
+ * 字段名就把所有字符串都当纯文本整串扫，没有数学式的科目也会悄悄带上 272KB）。顶层不是任何
+ * 字段，所以公开入口 `snapshotHasMath` 只收快照，这个「字段名」不外泄给调用方。
+ */
+function fieldHasMath(value: unknown, field: string): boolean {
   if (typeof value === 'string') {
-    return key === 'lesson_md' ? hasMathInProse(value) : hasMathExpression(value);
+    return MARKDOWN_FIELDS.has(field) ? hasMathInProse(value) : hasMathInPlainText(value);
   }
   if (value === null || typeof value !== 'object') return false;
   return Object.entries(value as Record<string, unknown>)
-    .some(([childKey, child]) => snapshotHasMath(child, childKey));
+    .some(([childField, child]) => fieldHasMath(child, childField));
 }
 
 /**
@@ -245,12 +263,11 @@ export function planExport(options: PlanExportOptions): ExportPlan {
 
   products.push({ path: CLIENT_FILE, role: 'client', text: clientText, bytes: Buffer.byteLength(clientText) });
 
-  /* 公式（#91 / #96）：随包发的 KaTeX dist **只在这次导出真的出现数学式时**搬进产物——
-     离线页面要能自己排版，不联网、不引 CDN；没有数学式的科目（非数学课、老课件）一个字节都不带，
-     产物里也就不会有一条去取 272KB 引擎的静态引用。判据与阅读端同口径，宁可多带不可少带。
-     两处落点的判据不同（见 page.ts 的 MATH_VENDOR_FILE）：引擎走 vendor 包装壳 + 哈希，
-     样式表与字体落 assets/。字体与 CSS 的相对位置不能改：CSS 里的 `url(fonts/…)` 相对样式表
-     自己的 URL 解析。 */
+  /* 公式（#91 / #96）：随包发的 KaTeX dist **只在这次导出真的出现数学式时**搬进产物——离线页面
+     要能自己排版，不联网、不引 CDN。为什么按需、代价是什么，见 `page.ts` 的 hostScript 文档注释
+     （#96 的理由只有那一处）；判据本身见 `snapshotHasMath`。两处落点的判据不同（见 page.ts 的
+     MATH_VENDOR_FILE）：引擎走 vendor 包装壳 + 哈希，样式表与字体落 assets/。字体与 CSS 的相对
+     位置不能改：CSS 里的 `url(fonts/…)` 相对样式表自己的 URL 解析。 */
   if (withMath) {
     const mathEngineFile = path.join(katexDistDir(), MATH_JS);
     const mathEngineBody = fs.readFileSync(mathEngineFile, 'utf8');
