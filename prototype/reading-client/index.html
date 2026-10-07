@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     阅读端原型 · 一次性代码，不要合进主干
+     ═══════════════════════════════════════════════════════════════════════════
+     要回答的问题只有一个：**阅读端该长什么样**。
+     目标态（docs/设计/目标态规格.md §4）定了信息架构——今天学什么 / 科目路线图 /
+     课件 / 搜索 / 问答面板——没定这些界面长什么样、主要动作是什么。这个原型把同一份
+     真数据摆成三种结构不同的版式，用底部那条切换（?variant=A|B|C）来回翻。
+
+     怎么跑：仓库根 `npm run prototype`，然后打开它打印的地址。
+     （直接双击本文件不行：浏览器不许 file:// 页面读同目录的 JSON。）
+     数据从哪来：data/workspace.json 由 tools/build-data.py 从 examples/ 的示例学习
+     工作区抽出，正文一个字没改；作答与问答回答是内存里的桩。
+
+     合入真代码时：整个 prototype/ 目录走一次性分支，主干只留选中的那套版式。
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>阅读端原型 · StudyMate</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%237aa2f7'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='%2314161b'%3E%E5%AD%A6%3C/text%3E%3C/svg%3E">
+<script>try { var t = localStorage.getItem('sm-proto-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/content.css">
+<link rel="stylesheet" href="css/switcher.css">
+<link rel="stylesheet" href="css/variant-a.css">
+<link rel="stylesheet" href="css/variant-b.css">
+<link rel="stylesheet" href="css/variant-c.css">
+</head>
+<body>
+
+<main id="app" aria-live="polite">
+  <div class="sm-empty" style="padding-top:20vh">正在读学习工作区…</div>
+</main>
+
+<noscript>
+  <div class="sm-empty" style="padding-top:20vh">这个原型要用 JavaScript 渲染学习内容。</div>
+</noscript>
+
+<script src="js/util.js"></script>
+<script src="js/content.js"></script>
+<script src="js/data.js"></script>
+<script src="js/quiz.js"></script>
+<script src="js/switcher.js"></script>
+<script src="js/variant-a.js"></script>
+<script src="js/variant-b.js"></script>
+<script src="js/variant-c.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>

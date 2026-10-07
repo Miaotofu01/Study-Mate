@@ -1,0 +1,173 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   token 层：名字照着宿主的别名 token 起（--dsw-alias-*），值在这里兜底。
+
+   真阅读端里这些变量由宿主注入，插件不自己造色；原型离开宿主跑，所以给一份
+   本地兜底值，但**名字一个都不改**——将来换回宿主 token 时不用动任何一处引用。
+   亮暗两套都给：目标态要求每个文本 token 在每个表面上都达 WCAG AA。
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: dark;
+
+  --dsw-alias-bg-base: #14161b;
+  --dsw-alias-bg-layer-1: #1a1d24;
+  --dsw-alias-bg-layer-2: #21252e;
+  --dsw-alias-bg-layer-3: #292e39;
+  --dsw-alias-bg-overlay: #2f3541;
+  --dsw-alias-bg-skeleton: #262b35;
+
+  --dsw-alias-label-primary: #e9ecf1;
+  --dsw-alias-label-secondary: #aab2c0;
+  --dsw-alias-label-tertiary: #828b9b;
+  --dsw-alias-label-caption: #6d7686;
+  --dsw-alias-label-primary-inverted: #14161b;
+
+  --dsw-alias-border-l1: #262b35;
+  --dsw-alias-border-l2: #333a47;
+  --dsw-alias-border-l3: #46506180;
+  --dsw-alias-separator-primary: #262b35;
+
+  --dsw-alias-brand-primary: #7aa2f7;
+  --dsw-alias-brand-text: #a8c2ff;
+  --dsw-alias-link: #7aa2f7;
+
+  --dsw-alias-state-success-primary: #4ec27a;
+  --dsw-alias-state-success-secondary: #4ec27a26;
+  --dsw-alias-state-warn-primary: #e0a94a;
+  --dsw-alias-state-warn-secondary: #e0a94a26;
+  --dsw-alias-state-error-primary: #f07a72;
+  --dsw-alias-state-error-secondary: #f07a7226;
+  --dsw-alias-state-idle-primary: #7d8695;
+  --dsw-alias-state-business-primary: #8f9dff;
+
+  --dsw-alias-interactive-bg-hover: #ffffff0d;
+  --dsw-alias-interactive-bg-active: #ffffff17;
+  --dsw-alias-fill-l1: #ffffff0a;
+  --dsw-alias-fill-l2: #ffffff14;
+  --dsw-alias-fill-tertiary: #ffffff08;
+
+  --dsw-alias-markdown-inline-code: #ffffff14;
+  --dsw-alias-markdown-code-block-banner: #ffffff08;
+
+  --dsw-alias-button-primary-fill: #7aa2f7;
+  --dsw-alias-button-primary-hover: #93b4ff;
+  --dsw-alias-button-ghost-active-fill: #ffffff14;
+  --dsw-alias-button-ghost-active-border: #ffffff26;
+  --dsw-alias-tooltip-bg: #39404e;
+  --dsw-alias-tooltip-label: #eef1f6;
+
+  --dsw-alias-scrollbar-bg-l1: #ffffff14;
+  --dsw-alias-scrollbar-hover-l1: #ffffff2b;
+
+  /* 三档进度：数据语义，三个变体共用同一套色，避免看的人要重新学一遍颜色 */
+  --sm-tier-todo: var(--dsw-alias-state-idle-primary);
+  --sm-tier-learning: var(--dsw-alias-state-warn-primary);
+  --sm-tier-done: var(--dsw-alias-state-success-primary);
+  --sm-tier-todo-bg: #ffffff0a;
+  --sm-tier-learning-bg: var(--dsw-alias-state-warn-secondary);
+  --sm-tier-done-bg: var(--dsw-alias-state-success-secondary);
+
+  --sm-radius-sm: 6px;
+  --sm-radius-md: 10px;
+  --sm-radius-lg: 14px;
+  --sm-radius-pill: 999px;
+
+  --sm-shadow-1: 0 1px 2px #0006;
+  --sm-shadow-2: 0 6px 20px -6px #000000a6, 0 2px 6px #00000059;
+  --sm-shadow-3: 0 22px 60px -18px #000000cc, 0 4px 14px #00000073;
+
+  --sm-font-sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+  --sm-font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", "SF Mono", Menlo,
+    Consolas, "Liberation Mono", monospace;
+
+  --sm-text-xs: 12px;
+  --sm-text-sm: 13px;
+  --sm-text-base: 14px;
+  --sm-text-md: 15px;
+  --sm-text-lg: 17px;
+  --sm-text-xl: 21px;
+  --sm-text-2xl: 27px;
+  --sm-text-3xl: 34px;
+
+  --sm-line-tight: 1.35;
+  --sm-line-normal: 1.7;
+  --sm-line-loose: 1.85;
+
+  --sm-space-1: 4px;
+  --sm-space-2: 8px;
+  --sm-space-3: 12px;
+  --sm-space-4: 16px;
+  --sm-space-5: 22px;
+  --sm-space-6: 30px;
+  --sm-space-7: 44px;
+
+  --sm-dur: 140ms;
+  --sm-ease: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+
+  --dsw-alias-bg-base: #f6f7f9;
+  --dsw-alias-bg-layer-1: #ffffff;
+  --dsw-alias-bg-layer-2: #f4f5f8;
+  --dsw-alias-bg-layer-3: #eceef3;
+  --dsw-alias-bg-overlay: #ffffff;
+  --dsw-alias-bg-skeleton: #e9ebf0;
+
+  --dsw-alias-label-primary: #1b1f27;
+  --dsw-alias-label-secondary: #4d5666;
+  --dsw-alias-label-tertiary: #6b7484;
+  --dsw-alias-label-caption: #7e8798;
+  --dsw-alias-label-primary-inverted: #ffffff;
+
+  --dsw-alias-border-l1: #e6e8ee;
+  --dsw-alias-border-l2: #d5d9e2;
+  --dsw-alias-border-l3: #b9c0cd;
+  --dsw-alias-separator-primary: #e6e8ee;
+
+  --dsw-alias-brand-primary: #2f6fdc;
+  --dsw-alias-brand-text: #245bb8;
+  --dsw-alias-link: #245bb8;
+
+  --dsw-alias-state-success-primary: #1a7f43;
+  --dsw-alias-state-success-secondary: #1a7f431a;
+  --dsw-alias-state-warn-primary: #9a6700;
+  --dsw-alias-state-warn-secondary: #9a67001f;
+  --dsw-alias-state-error-primary: #c3352b;
+  --dsw-alias-state-error-secondary: #c3352b1a;
+  --dsw-alias-state-idle-primary: #79808f;
+  --dsw-alias-state-business-primary: #4a58d6;
+
+  --dsw-alias-interactive-bg-hover: #00000008;
+  --dsw-alias-interactive-bg-active: #00000012;
+  --dsw-alias-fill-l1: #00000006;
+  --dsw-alias-fill-l2: #0000000d;
+  --dsw-alias-fill-tertiary: #00000004;
+
+  --dsw-alias-markdown-inline-code: #0000000f;
+  --dsw-alias-markdown-code-block-banner: #00000006;
+
+  --dsw-alias-button-primary-fill: #2f6fdc;
+  --dsw-alias-button-primary-hover: #245bb8;
+  --dsw-alias-button-ghost-active-fill: #0000000d;
+  --dsw-alias-button-ghost-active-border: #0000001f;
+  --dsw-alias-tooltip-bg: #2b3240;
+  --dsw-alias-tooltip-label: #f2f4f8;
+
+  --dsw-alias-scrollbar-bg-l1: #00000021;
+  --dsw-alias-scrollbar-hover-l1: #00000038;
+
+  --sm-tier-todo-bg: #00000008;
+  --sm-shadow-1: 0 1px 2px #0b12201a;
+  --sm-shadow-2: 0 6px 20px -8px #0b122026, 0 2px 6px #0b122014;
+  --sm-shadow-3: 0 22px 60px -20px #0b122033, 0 4px 14px #0b12201a;
+}
+
+/* 动效分档（目标态 §4.4）：auto 跟系统，其余三档由原型顶栏手动切 */
+:root { --sm-motion: 1; }
+html[data-motion="reduced"] { --sm-motion: 0.35; }
+html[data-motion="off"] { --sm-motion: 0; }
+@media (prefers-reduced-motion: reduce) { :root { --sm-motion: 0.35; } }
+html[data-motion="full"] { --sm-motion: 1; }
