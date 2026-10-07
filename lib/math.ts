@@ -145,8 +145,11 @@ export function mathAssetPath(rel: string): string {
 
 /**
  * 纯文本字段那条判据的正则：`$…$` 行内、`$$…$$` 块级。
+ *
+ * **导出是为了让 `scripts/tests/test_client_math.mjs` 与阅读端的 `MATH_ONLY` 逐字对账**
+ * （两端各一份实现、必须同形）；域外要判「有没有数学式」用下面两个谓词，别引这个正则自己拼。
  */
-const MATH_PLAIN_TEXT_PATTERN = /\$\$[\s\S]+?\$\$|\$[^$\n]+\$/;
+export const MATH_PLAIN_TEXT_PATTERN = /\$\$[\s\S]+?\$\$|\$[^$\n]+\$/;
 
 /**
  * 正文用的那一条：行内式**允许跨行**。
