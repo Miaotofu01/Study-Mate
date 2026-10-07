@@ -1,8 +1,7 @@
 // 亮色模式下把所有 hover 态的计算样式列出来（背景/边框/阴影），找"米色底 + 绿色滤镜"
 import { spawn } from 'node:child_process';
 import { rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { requireBrowser, tempProfile } from './harness.mjs';
 
 async function killChrome() {
   // 等 chrome 真的退出再删 profile：kill() 只是发信号，进程还在写盘时删会被它重建
@@ -18,8 +17,9 @@ async function killChrome() {
 
 const pages = process.argv.slice(2);
 const PORT = 9400 + Math.floor(Math.random() * 300);
-const PROFILE = join(tmpdir(), 'smtest-hover-' + Date.now());
-const chrome = spawn('google-chrome', ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
+const PROFILE = tempProfile('hover');
+// 浏览器二进制探测（环境变量 / PATH / macOS .app），不写死 google-chrome
+const chrome = spawn(requireBrowser('hovers').path, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
   `--user-data-dir=${PROFILE}`, `--remote-debugging-port=${PORT}`,
   '--window-size=1280,900', 'about:blank'], { stdio: 'ignore' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

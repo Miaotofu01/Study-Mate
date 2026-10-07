@@ -1,8 +1,21 @@
 {
   "reaches": {
-    "learning-system": ["record-keeping", "local-qa", "learning-discovery"],
-    "learning-coach": ["lesson-design"],
-    "practice-evaluator": ["layered-practice", "evidence-check"]
+    "learning-system": [
+      "record-keeping",
+      "local-qa",
+      "learning-discovery"
+    ],
+    "learning-coach": [
+      "lesson-design"
+    ],
+    "practice-evaluator": [
+      "layered-practice",
+      "evidence-check"
+    ]
   },
-  "moved": {}
+  "moved": {
+    "learning-coach": {
+      "文件名规则": "lesson-design"
+    }
+  }
 }

@@ -32,7 +32,7 @@ Issue 作者的个人原型在 [yulaoshizuikeai/Study-Mate-vue](https://github.c
 
 **做：**
 
-- 新增独立前端目录（建议 `site/`），不改 `.dsh/skills/` 的职责划分；
+- 新增独立前端目录（建议 `site/`），不改 `preset/skills/` 的职责划分；
 - 只读消费学习工作区里已经存在的结构化数据；
 - 用 Vue 组件承接路线图、练习、进度、课元信息和「继续学习」；
 - 暗色模式、目录、搜索、移动端由 VitePress 主题提供，不再各页复制一套；
@@ -91,7 +91,7 @@ Issue 作者的个人原型在 [yulaoshizuikeai/Study-Mate-vue](https://github.c
 - 用一个同步或加载脚本把 `curriculum.yaml` 映射成侧边栏，不把工作区 Markdown 复制进 git；
 - `examples/` 仍由 `python3 scripts/build_examples.py` 生成 HTML。阅读端是平行入口，不是替换品。
 
-阶段 1 的验收：clone 后 `npm --prefix site run docs:dev` 能点开 `examples/` 里的线性代数与计算机网络；不改任何 `.dsh/skills/`。
+阶段 1 的验收：clone 后 `npm --prefix site run docs:dev` 能点开 `examples/` 里的线性代数与计算机网络；不改任何 `preset/skills/`。
 
 ### 阶段 2：组件对齐现有交互
 

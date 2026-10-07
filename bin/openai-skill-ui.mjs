@@ -51,9 +51,9 @@ const skills = new Map([
     default_prompt: '请用 $learning-discovery 的内部协议帮我从几个候选学习方向里选一个。',
   }],
   ['record-keeping', {
-    description: 'StudyMate 档案维护内部规范：由学习总控读取并执行，规定工作区根与落点交付、共享记忆、学习进度、评估记录与会话恢复的文件归属和更新规则。',
+    description: 'StudyMate 档案维护内部规范：由学习总控读取并执行，规定共享记忆、三档学习进度、误解记录、作答数据的只读视角与学习记录的文件归属和更新规则。',
     display_name: 'StudyMate · 学习档案',
-    short_description: '供学习总控落盘交付并维护共享记忆、科目进度、评估记录与会话恢复状态',
+    short_description: '供学习总控维护共享记忆、三档进度、误解记录与学习记录',
     default_prompt: '请用 $record-keeping 的内部规范核对并更新当前学习工作区的档案。',
   }],
   ['lesson-design', {
@@ -75,9 +75,9 @@ const skills = new Map([
     default_prompt: '请用 $evidence-check 的内部规范核验当前学习任务的真实作答和运行证据。',
   }],
   ['local-qa', {
-    description: 'StudyMate 局部答疑内部规范：由学习总控读取并执行，处理学习过程中学生贴回的局部疑问并记录误解；不接管普通编程问答。',
+    description: 'StudyMate 局部答疑内部规范：阅读端那段答疑会话就地回答选中内容的边界，不派角色、不安排课程、也不写误解记录；面板不可用时由学习总控按同一套规则就地答。',
     display_name: 'StudyMate · 学习答疑',
-    short_description: '供学习总控处理课程中的局部疑问，记录误解并引导学生回到学习位置',
+    short_description: '供阅读端答疑会话与学习总控就地回答局部疑问，不写记录、不派角色',
     default_prompt: '请用 $local-qa 的内部规范解答我在当前 StudyMate 课程中的局部疑问。',
   }],
 ]);

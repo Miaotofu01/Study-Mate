@@ -174,18 +174,18 @@ export function validatePack(pack) {
   const files = pack.files.map(file => file.path);
   // lib/ 是 Client 半（阅读端）与 Host 半的共享模块：package.json 的 exports["./client"]
   // 指向 lib/client.js，宿主按这个字段取 bundle，所以它必须随包发出去。
-  const allowed = /^(?:package\.json|cordis\.patch\.yml|README\.md|LICENSE|CHANGELOG\.md|bin\/[^/]+\.mjs|lib\/.+|openai\/studymate\/(?:\.codex-plugin\/plugin\.json|requirements\.txt|scripts\/[^/]+\.py|skills\/learning-system\/references\/[^/]+\.md)|\.dsh\/skills\/.+|antigravity\/studymate\/.+|preset\/learning\/.+|scripts\/[^/]+\.py|schemas\/[^/]+\.json|templates\/.+|docs\/(?:[^/]+\/)*[^/]+\.md|docs\/images\/.+)$/;
+  const allowed = /^(?:package\.json|cordis\.patch\.yml|README\.md|LICENSE|CHANGELOG\.md|bin\/[^/]+\.(?:mjs|ts)|lib\/.+|openai\/studymate\/(?:\.codex-plugin\/plugin\.json|scripts\/[^/]+\.mjs|skills\/learning-system\/references\/[^/]+\.md)|antigravity\/studymate\/.+|preset\/(?:learning|qa|skills)\/.+|schemas\/[^/]+\.json|templates\/.+|docs\/(?:[^/]+\/)*[^/]+\.md|docs\/images\/.+)$/;
   for (const file of files) {
     if (!allowed.test(file) || /(^|\/)(?:\.env(?:\..*)?|\.npmrc|\.git|node_modules|__pycache__|\.DS_Store|[^/]+\.pyc)(\/|$)/.test(file)) {
       throw new Error(`Unexpected or private file in npm tarball: ${file}`);
     }
   }
-  for (const required of ['cordis.patch.yml', 'bin/dsh-plugin.mjs', 'bin/studymate.mjs', 'bin/skill-compat.mjs', 'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'openai/studymate/.codex-plugin/plugin.json', 'openai/studymate/requirements.txt', 'docs/使用/Codex与ChatGPT.md', 'preset/learning/agent.cordis.yml', 'scripts/install_preset.py', 'scripts/gen_home.py', '.dsh/skills/learning-system/SKILL.md', 'antigravity/studymate/plugin.json']) {
+  for (const required of ['cordis.patch.yml', 'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs', 'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'lib/preset.ts', 'openai/studymate/.codex-plugin/plugin.json', 'docs/使用/Codex与ChatGPT.md', 'preset/learning/agent.cordis.yml', 'preset/qa/agent.cordis.yml', 'preset/skills/learning-system/SKILL.md', 'antigravity/studymate/plugin.json']) {
     if (!files.includes(required)) throw new Error(`npm tarball is missing ${required}.`);
   }
   for (const prefix of ['schemas/', 'templates/', 'docs/']) if (!files.some(file => file.startsWith(prefix))) throw new Error(`npm tarball is missing ${prefix}.`);
   for (const required of ['bin/openai-interaction.mjs', 'bin/openai-skill-ui.mjs',
-    'openai/studymate/scripts/interaction_state.py', 'openai/studymate/skills/learning-system/references/codex-interaction.md']) {
+    'openai/studymate/scripts/interaction_state.mjs', 'openai/studymate/skills/learning-system/references/codex-interaction.md']) {
     if (!files.includes(required)) throw new Error(`npm tarball is missing ${required}.`);
   }
 }
@@ -396,6 +396,19 @@ async function publish() {
   const state = jsonFile(STATE());
   if (state.source !== process.env.GITHUB_SHA || git(['rev-parse', 'HEAD']) !== state.commit || git(['rev-parse', `${state.tag}^{commit}`]) !== state.commit) {
     throw new Error('Release state, checkout and tag do not agree.');
+  }
+  // 导出泄漏守卫（#82 / F11）：现造一份工作区跑一遍真导出，产物里漏进 Node 专用东西就不发布。
+  // 用夹具 React（scripts/tests/fixtures/export_workspace.mjs），所以发布机上不需要装 React。
+  // 放在插件构建与 npm 发布**之前**：一条泄漏就该拦住整次发布。
+  const { exportGuardRun } = await import('./export_guard.mjs');
+  const guard = await exportGuardRun({});
+  if (!guard.ok) {
+    const problems = [
+      ...guard.violations.map(violation => `${violation.path}:${violation.line} [${violation.rule}] ${violation.what}`),
+      ...guard.problems,
+    ];
+    throw new Error(`导出泄漏守卫失败（${problems.length} 条）：${problems.join('；')}。`
+      + '修掉导出器再发布；本地用 `npm run guard:export` 复现。');
   }
   // A plugin build failure must happen before the immutable npm publication.
   const plugin = buildReleasePlugin(state.version);

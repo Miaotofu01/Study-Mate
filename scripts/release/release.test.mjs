@@ -122,13 +122,13 @@ test('npm status distinguishes unpublished from registry failure and immutable c
   assert.throws(() => verifyPublishOrder('0.1.2', { version: '1.0.0-beta' }), /not a stable version/);
 });
 
-const tarballFiles = ['package.json', 'README.md', 'cordis.patch.yml', 'bin/dsh-plugin.mjs', 'bin/studymate.mjs', 'bin/skill-compat.mjs',
+const tarballFiles = ['package.json', 'README.md', 'cordis.patch.yml', 'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs',
   'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'bin/openai-interaction.mjs', 'bin/openai-skill-ui.mjs',
-  'openai/studymate/scripts/interaction_state.py', 'openai/studymate/skills/learning-system/references/codex-interaction.md',
-  'openai/studymate/.codex-plugin/plugin.json', 'openai/studymate/requirements.txt', 'docs/使用/Codex与ChatGPT.md',
-  'preset/learning/agent.cordis.yml', 'scripts/install_preset.py', 'scripts/gen_home.py', '.dsh/skills/learning-system/SKILL.md',
+  'openai/studymate/scripts/interaction_state.mjs', 'openai/studymate/skills/learning-system/references/codex-interaction.md',
+  'openai/studymate/.codex-plugin/plugin.json', 'docs/使用/Codex与ChatGPT.md',
+  'preset/learning/agent.cordis.yml', 'preset/qa/agent.cordis.yml', 'lib/preset.ts', 'preset/skills/learning-system/SKILL.md',
   'antigravity/studymate/plugin.json', 'antigravity/studymate/rules/AGENTS.md',
-  'schemas/subject.json', 'templates/home.html', 'docs/使用/使用说明.md'];
+  'schemas/subject.json', 'templates/MEMORY.md', 'docs/使用/使用说明.md'];
 const tarballPack = () => ({ name, version: '0.1.2', files: tarballFiles.map(path => ({ path })) });
 
 // package.json 的 files 是「打包清单」，validatePack 的白名单是「发放清单」——两张表分开维护，
@@ -150,11 +150,11 @@ test('every package.json files pattern passes the tarball allowlist', () => {
 test('tarball inspection rejects personal workspace, credentials and incomplete payloads', () => {
   const pack = tarballPack();
   validatePack(pack);
-  for (const path of ['workspace/我的科目/private.md', '.npmrc', 'templates/.env', 'scripts/release/release.mjs']) {
+  for (const path of ['workspace/我的科目/private.md', '.npmrc', 'templates/.env', 'scripts/release/release.mjs', '迁移前的 Python 渲染脚本']) {
     assert.throws(() => validatePack({ ...pack, files: [...pack.files, { path }] }), /Unexpected or private/);
   }
   assert.throws(() => validatePack({ ...pack, files: pack.files.filter(file => !file.path.startsWith('schemas/')) }), /missing schemas/);
-  for (const required of ['cordis.patch.yml', 'bin/dsh-plugin.mjs']) {
+  for (const required of ['cordis.patch.yml', 'bin/dsh-plugin.ts']) {
     assert.throws(() => validatePack({ ...pack, files: pack.files.filter(file => file.path !== required) }),
       error => error.message === `npm tarball is missing ${required}.`);
   }

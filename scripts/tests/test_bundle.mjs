@@ -6,11 +6,13 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { findPython } from '../../bin/studymate.mjs';
+import { parseYaml } from '../../lib/yaml.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const python = findPython();
-const plugin = pathToFileURL(path.join(root, 'bin/dsh-plugin.mjs')).href;
+const plugin = pathToFileURL(path.join(root, 'bin/dsh-plugin.ts')).href;
+// 原生加载下引擎就是**已安装的包自身**——package.json 与 package.json 里 files 带的
+// scripts/、templates/、schemas/、docs/、preset/skills 都在这个目录里。
+const packageSkills = path.join(root, 'preset', 'skills').split(path.sep).join('/');
 
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-bundle-'));
@@ -21,20 +23,23 @@ function fixture(t) {
   const env = { ...process.env, HOME: home, USERPROFILE: home, DSH_HOME: dshHome, LEARN_WORKSPACE: workspace };
   const patch = path.join(dshHome, 'profiles', 'web', 'cordis.patch.yml');
   const config = path.join(dshHome, 'studymate-config.yaml');
-  const engine = path.join(dshHome, 'studymate', 'engine');
   const run = (code, overrides = {}) => spawnSync(process.execPath, ['--input-type=module', '-e', code], {
     env: { ...env, ...overrides }, encoding: 'utf8', timeout: 30000,
   });
   function boot(overrides = {}, scenario = 'normal', url = plugin) {
     return run(`import { apply } from ${JSON.stringify(url)};
       const scenario = ${JSON.stringify(scenario)};
-      const state = {registered: 0, disposed: 0, warnings: []};
+      const state = {registered: 0, disposed: 0, warnings: [], configs: []};
       console.warn = message => {state.warnings.push(String(message));};
       const effects = [];
       const ctx = {
         get: () => ({name: 'web', home: process.env.DSH_HOME}),
         agentPresets: {register: async config => {
-          state.config = config; state.registered++;
+          state.configs.push(config);
+          // #104 起这里注册两条（学习 + 答疑）：state.config 仍是**学习模式**那一条，
+          // 答疑那条在 state.configs 里（既有断言因此一个字都不用改）。
+          state.config = state.configs.find(item => item.id === 'learning') ?? config;
+          state.registered++;
           if (scenario === 'duplicate') throw new Error('Duplicate agent preset: learning');
           return async () => { state.disposed++; };
         }},
@@ -45,12 +50,11 @@ function fixture(t) {
       console.log(JSON.stringify(state));`, overrides);
   }
   function yaml(file) {
-    const result = spawnSync(python.command, [...python.prefix, '-c',
-      'import json,sys,yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1],encoding="utf-8"))))', file], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-    return JSON.parse(result.stdout);
+    return parseYaml(fs.readFileSync(file, 'utf8'),
+      { file, tags: 'scalar', blockScalars: true, documentMarkers: true });
   }
-  return { dir, env, dshHome, workspace, patch, config, engine, run, boot, yaml };
+  // 原生加载下引擎 = 已安装的包自身，所以这份夹具里没有 <dshHome>/studymate/engine
+  return { dir, env, dshHome, workspace, patch, config, run, boot, yaml };
 }
 
 function snapshot(dir) {
@@ -68,29 +72,47 @@ test('native loading initializes portable skills and owns the preset lifetime wi
   const result = f.boot();
   assert.equal(result.status, 0, result.stderr + result.stdout);
   const state = JSON.parse(result.stdout);
-  assert.equal(state.registered, 1);
-  assert.equal(state.disposed, 1);
+  // #104：两条预设各注册一次（学习模式 + 答疑模式），各有自己的 disposer。
+  assert.equal(state.registered, 2);
+  assert.equal(state.disposed, 2);
   assert.deepEqual(state.warnings, []);
   assert.equal(state.config.id, 'learning');
   assert.deepEqual(state.config.plugins.find(row => row.id === 'tool-bash').disabled,
     { __jsExpr: "process.platform === 'win32'" });
   assert.deepEqual(state.config.plugins.find(row => row.id === 'skill-filesystem').config.customSkillDirs,
-    [path.join(f.engine, '.dsh', 'skills').split(path.sep).join('/')]);
-  const skills = fs.readFileSync(path.join(f.engine, '.dsh/skills/learning-system/SKILL.md'), 'utf8');
-  assert.ok(skills.includes(process.platform === 'win32' ? 'PowerShell' : 'python'));
+    [packageSkills]);
+  // 第二条是答疑模式：名字/顺序与学习并列，技能目录只指包内的 local-qa，工具面是四行最小面。
+  const qa = state.configs.find(item => item.id === 'qa');
+  assert.ok(qa, '答疑模式必须与学习模式一起注册');
+  assert.equal(qa.name, '答疑模式');
+  assert.notEqual(qa.order, state.config.order);
+  assert.deepEqual(qa.plugins.find(row => row.id === 'skill-filesystem').config.customSkillDirs,
+    [`${packageSkills}/local-qa`]);
+  assert.ok(qa.plugins.some(row => row.id === 'studymate-qa-tools'
+    && row.name === '@yunmiao/studymate/qa-preset'));
+  // 原生加载的引擎 = 已安装的包自身：<root> 是包目录，技能随包发布，摆在包里的 preset/skills
+  // （不是 `.dsh/skills`——那是宿主默认项目根扫描会命中的位置，见 test_skill_visibility.mjs）
+  assert.ok(fs.statSync(path.join(root, 'preset/skills/learning-system/SKILL.md')).isFile());
   assert.equal(fs.existsSync(f.patch), false);
   assert.equal(fs.existsSync(path.join(f.dshHome, '.agent-presets')), false);
+  // ~/.dsh/studymate/ 里不再有源码树副本——连空壳目录都不留
+  assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate')), false);
+  assert.equal(f.yaml(f.config).root, root);
   assert.equal(f.yaml(f.config).workspace, fs.realpathSync(f.workspace));
   const data = path.join(f.workspace, '.learning', 'subjects', 'keep.txt');
   fs.writeFileSync(data, 'my learning data');
   const config = { ...f.yaml(f.config), custom: 'keep' };
   fs.writeFileSync(f.config, JSON.stringify(config));
-  fs.writeFileSync(path.join(f.engine, 'obsolete.txt'), 'old package');
+  const skillSentinel = path.join(root, 'preset', 'skills', 'obsolete.txt');
+  fs.writeFileSync(skillSentinel, 'old package');
   const again = f.boot({ LEARN_WORKSPACE: '' });
   assert.equal(again.status, 0, again.stderr + again.stdout);
   assert.equal(f.yaml(f.config).custom, 'keep');
   assert.equal(fs.readFileSync(data, 'utf8'), 'my learning data');
-  assert.equal(fs.existsSync(path.join(f.engine, 'obsolete.txt')), false);
+  // 启动不许往包目录里写：装好的包是随包发的只读材料（link: 安装下更是学生自己的检出）
+  assert.equal(fs.readFileSync(skillSentinel, 'utf8'), 'old package');
+  assert.equal(fs.existsSync(path.join(f.dshHome, 'studymate')), false);
+  fs.rmSync(skillSentinel);
 });
 
 test('native startup leaves installer-managed registration and payload unchanged', t => {
@@ -118,7 +140,7 @@ test('standalone installation in another profile preserves native Web ownership'
   const f = fixture(t);
   const initial = f.boot();
   assert.equal(initial.status, 0, initial.stdout + initial.stderr);
-  assert.equal(JSON.parse(initial.stdout).registered, 1);
+  assert.equal(JSON.parse(initial.stdout).registered, 2);
   assert.deepEqual(f.yaml(f.config).installModes, { web: 'native' });
   const cliUrl = pathToFileURL(path.join(root, 'bin/studymate.mjs')).href;
   const installed = f.run(`import {installPayload} from ${JSON.stringify(cliUrl)};
@@ -132,7 +154,7 @@ test('standalone installation in another profile preserves native Web ownership'
   const restarted = f.boot();
   assert.equal(restarted.status, 0, restarted.stdout + restarted.stderr);
   const state = JSON.parse(restarted.stdout);
-  assert.equal(state.registered, 1);
+  assert.equal(state.registered, 2);
   assert.deepEqual(state.warnings, []);
   assert.deepEqual(f.yaml(f.config).installModes, { web: 'native', headless: 'standalone' });
   assert.deepEqual(fs.readFileSync(headlessPatch), originalPatch);
@@ -188,59 +210,20 @@ test('registry failures are reported without stopping the host or deleting learn
   assert.equal(fs.readFileSync(data, 'utf8'), 'my learning data');
 });
 
-test('missing Python is reported without stopping the host or creating installation files', t => {
+test('an install-boundary failure is reported without stopping the host or creating installation files', t => {
   const f = fixture(t);
-  const copied = path.join(f.dir, 'dsh-plugin.mjs');
-  fs.copyFileSync(path.join(root, 'bin/dsh-plugin.mjs'), copied);
-  // Simulate dependency failure at the installer boundary; Windows launchers
-  // may find Python even with an empty PATH.
+  const copied = path.join(f.dir, 'dsh-plugin.ts');
+  fs.copyFileSync(path.join(root, 'bin/dsh-plugin.ts'), copied);
+  // 把插件入口单独拷到一个没有 lib/ 的目录里：顶层静态 import 会让这条用例在解析期就崩，
+  // 这里的桩模拟的是**安装器边界失败**（老宿主 / 缺依赖），插件该只警告、不建安装文件。
   fs.writeFileSync(path.join(f.dir, 'studymate.mjs'),
-    'export function installPayload() { throw new Error("需要 Python 3.9+ 和 PyYAML"); }');
+    'export function installPayload() { throw new Error("安装器边界失败：宿主不支持原生加载"); }');
   const result = f.boot({}, 'normal', pathToFileURL(copied).href);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const state = JSON.parse(result.stdout);
   assert.equal(state.registered, 0);
-  assert.match(state.warnings.join('\n'), /Python 3\.9\+ 和 PyYAML/);
+  assert.match(state.warnings.join('\n'), /安装器边界失败/);
   assert.equal(fs.existsSync(f.dshHome), false);
-});
-
-test('unavailable Python reports the prerequisite on every supported platform', () => {
-  for (const platform of ['darwin', 'linux', 'win32']) {
-    assert.throws(() => findPython(platform, () => ({ status: 1 })), /没有找到可用的 Python 3\.9\+/);
-  }
-});
-
-test('Python discovery prefers an interpreter that already has PyYAML', () => {
-  const result = findPython('linux', command => {
-    if (command === 'python3' || command === 'python') {
-      return { status: 0, stdout: JSON.stringify({ executable: `/opt/${command}`, version: [3, 14, 5] }) };
-    }
-    return { status: command === '/opt/python' ? 0 : 1 };
-  });
-  assert.deepEqual(result, { command: '/opt/python', prefix: ['-X', 'utf8'] });
-});
-
-test('missing PyYAML reports the detected Windows interpreter and its pip command', () => {
-  const executable = 'C:\\Python 3.14\\python.exe';
-  for (const launcher of ['python3', 'python', 'py']) {
-    const invocation = launcher === 'py' ? 'py -3' : launcher;
-    assert.throws(() => findPython('win32', command => command === launcher
-      ? { status: 0, stdout: JSON.stringify({ executable, version: [3, 14, 5] }) }
-      : { status: 1 }), error => {
-      assert.match(error.message, /已找到 Python 3\.14\.5/);
-      assert.match(error.message, /缺少 PyYAML/);
-      assert.ok(error.message.includes(executable));
-      assert.ok(error.message.includes(`${invocation} -m pip install PyYAML`));
-      assert.ok(error.message.includes(`${invocation} -m ensurepip --upgrade`));
-      return true;
-    });
-  }
-});
-
-test('an unsupported Python version is distinguished from a missing interpreter', () => {
-  assert.throws(() => findPython('linux', command => command === 'python3'
-    ? { status: 0, stdout: JSON.stringify({ executable: '/opt/python3', version: [3, 8, 20] }) }
-    : { status: 1 }), /检测到 Python 3\.8\.20，需要 Python 3\.9\+/);
 });
 
 test('an old host skips unsupported native loading without blocking startup', async () => {

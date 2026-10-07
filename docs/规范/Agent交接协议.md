@@ -68,7 +68,7 @@
     {"path": "curriculum.yaml", "kind": "file"}
   ],
   "checks": [
-    {"name": "check_curriculum.py", "status": "passed"}
+    {"name": "studymate_validate_curriculum", "status": "passed"}
   ],
   "gaps": []
 }
@@ -78,14 +78,18 @@
 
 ## 总控验收
 
-任何 staged deliver 在 `cp` / 合并到正式科目目录之前，先跑：
+任何 staged deliver 在合并到正式科目目录之前，先过交接门禁：
 
 ```text
-python3 -B <root>/scripts/check_handoff.py '<stage_dir>' --role '<角色>' [--node '<节点id>']
+DSH：调原生工具 studymate_validate_handoff（参数与返回形状见 preset/skills/learning-system/references/tools.md）
+无头宿主（Antigravity / Codex）：按 deliver/ 清单逐项自查——manifest 与交付文件一一对应、角色与节点
+对得上、路径不越界、没有符号链接；逐条结论随报告交回
 ```
 
-- 退出 `0`：只说明**交接边界**合法，可以继续原有的复制、领域校验、渲染与档案更新。
-- 退出 `1`：**不复制、不删 stage、不把任务说成完成**；把原始错误交回同一角色修正，或由总控处理明确的输入/环境缺口。
-- 参数错误由命令行解析器报错；先修总控调用，不把它当角色失败。
+- 放行（工具 `verdict: 'pass'` / 自查逐条通过）：只说明**交接边界**合法，可以继续原有的复制、领域校验与档案更新。
+- 阻断（工具 `verdict: 'block'` / 自查报出问题）：**不复制、不删 stage、不把任务说成完成**；把原始问题交回同一角色修正，或由总控处理明确的输入/环境缺口。
+- 工具报的是**逐条问题 + 结论**，不是退出码；无头侧的自查也要报出逐条结论，说不清的不算通过。
 
-`check_handoff.py` 不替代 `check_curriculum.py`、`check_pool.py`、`render_lesson.py --check`、`check_lesson.py` 或真实代码测试。前者验证“谁交了什么、盘上是不是那一份”，后者验证“内容本身是否满足领域合同”。
+交接门禁不替代大纲、图片库、课件与内容格式的领域校验（DSH 侧是四个 `studymate_validate_*` 工具；
+无头侧按 `<root>/schemas/*.schema.json` 与技能里的格式要求逐项自查）或真实代码测试。前者验证
+"谁交了什么、盘上是不是那一份"，后者验证"内容本身是否满足领域合同"。

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Assessment",
-  "description": "一次评估的记录：practice-evaluator 出的题、学生的作答、逐题结论与依据。YAML frontmatter 承载本 schema 的字段（日期加引号），正文写题面与作答原文；落盘、命名与搬运规则见 `record-keeping` 的「评估记录」。",
+  "description": "【已退役 · #71】assessments/ 不再产生新文件（目标态规格 §5.1／§7.5），实验课验收结论写进 learning-records/。这份 schema 保留是为了让盘上已有的旧评估记录仍读得进、仍能被校验器解释（旧技能正文还引它，技能清洗归 #80/#81）；不要照它写新文件。一次评估的记录：practice-evaluator 出的题、学生的作答、逐题结论与依据。YAML frontmatter 承载本 schema 的字段（日期加引号），正文写题面与作答原文；落盘、命名与搬运规则见 `record-keeping` 的「评估记录」。",
   "type": "object",
   "required": ["node", "date", "questions", "verdict"],
   "properties": {

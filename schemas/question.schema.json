@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Question",
+  "description": "题库（lessons/<NNNN>-<节点id>.quiz.json）里的一道题。题库的值是「锚点文本 → 题目数组」，本 schema 描述数组里的一项。四种题型的词表与「服务哪一层」的匹配是 lib/core/rules.ts 的 QUESTION_RULES，这里只描述字段形状；作答数据绝不写回本文件（ADR-0007）。",
+  "type": "object",
+  "required": ["q"],
+  "properties": {
+    "kind": {
+      "enum": ["客观题", "预测验证", "开放题", "交付物"],
+      "description": "题型。可省：旧题库按字段推断（opts/ans 认作客观题，answer/criteria 认作开放题）。写了就必须是这四个之一，且字段要满足该题型的要求。"
+    },
+    "q": { "type": "string", "description": "题面（纯文本；多行代码写进 ``` 围栏）" },
+    "opts": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "type": "string" },
+      "description": "客观题：选项，至少两项"
+    },
+    "ans": { "type": "integer", "minimum": 0, "description": "客观题：正确选项下标，从 0 开始" },
+    "why": { "type": "string", "description": "客观题：答完显示的一句解释" },
+    "预测": { "type": "string", "description": "预测验证：先写下的预测——没写预测就等于没做这一层" },
+    "比对": { "type": "string", "description": "预测验证：跑完之后的比对（实测是什么、与预测差在哪）" },
+    "answer": { "type": "string", "description": "开放题：参考答案（学生自评时对照的那一段）" },
+    "criteria": { "type": "string", "description": "开放题：判分要点——凭什么算答对了" },
+    "交付物": { "type": "string", "description": "交付物：要造出什么（可运行的成品）" },
+    "证据": { "type": "string", "description": "交付物：可运行证据（测试 / 断言 / 期望输出），Host 半代跑它" }
+  }
+}

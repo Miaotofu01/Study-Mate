@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { adaptOpenAiSkill } from '../../bin/openai-skill-compat.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const skillRoot = path.join(root, '.dsh', 'skills');
+const skillRoot = path.join(root, 'preset', 'skills');
 const skills = fs.readdirSync(skillRoot, { withFileTypes: true })
   .filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
 const sources = new Map(skills.map(name => [name,
@@ -32,7 +32,7 @@ test('all bundled skills export only portable metadata and no DSH tool requireme
     assert.match(content, /<root>\/skills\/<技能名>\/SKILL\.md/, name);
     assert.match(content, /没有委派工具时.*串行执行/, name);
     assert.match(content, /ChatGPT Work.*临时沙箱/, name);
-    assert.match(content, /环境变量、工作目录与 shell 状态不保证跨工具调用保留/, name);
+    assert.match(content, /宿主有命令执行工具时按它的字面值引用与转义规则拼路径/, name);
   }
 });
 
@@ -47,25 +47,38 @@ test('bootstrap initializes a separate workspace without requiring legacy config
   assert.doesNotMatch(adapted.get('record-keeping'), /开场从.*config\.yaml/);
 });
 
-test('renderer commands quote paths and always give gen_home an explicit workspace', () => {
-  let homeCalls = 0;
+test('无头侧不留引擎脚本命令：正文里的原生工具名换成可照做的做法', () => {
   for (const [name, content] of adapted) {
-    // `-B` 之类的标志可出现在 `-X utf8` 之后（源技能要求跑引擎脚本一律加 `-B`），
-    // 所以这里不能假定 `utf8` 后面紧跟脚本路径的引号。
-    for (const match of content.matchAll(/`(<python> -X utf8(?: -[A-Za-z]+)* '[^`]+)`/g)) {
-      const command = match[1];
-      if (command.includes('/gen_home.py')) {
-        homeCalls += 1;
-        assert.match(command, /gen_home\.py' '<LEARN_WORKSPACE>'$/, name);
-      }
-      assert.doesNotMatch(command, /(?<!')<(?:subject_path|节点id|页面路径|curriculum\.yaml|tsv)>/, name);
+    // 引擎脚本随 #83 退役：导出稿里**一处命令都不该有**——落点要么是本宿主做得到的
+    // 具体做法，要么是 Node CLI（`npx -y @yunmiao/studymate@latest export`）。
+    // 「每个点名的工具都有落点」由 test_skill_contracts.mjs 逐条对账。
+    assert.doesNotMatch(content, /python3/, `${name}: 导出稿里不该再有 python3`);
+    assert.doesNotMatch(content, /scripts\/[\w-]+\.py/, `${name}: 导出稿里不该再有引擎脚本文件名`);
+    // 插件自己带一件 Node 脚本（Codex 的交互断点），所以只禁**退役的引擎脚本名**，不禁目录。
+    for (const retired of ['check_curriculum', 'check_pool', 'check_lesson', 'check_handoff',
+      'render_lesson', 'renumber_lessons', 'apply_empty_reasons', 'build_examples',
+      'gen_home', 'preview_templates', 'install_preset']) {
+      assert.ok(!content.includes(retired), `${name}: 导出稿里还留着引擎脚本名 ${retired}`);
     }
   }
-  // 每个出现的 gen_home 调用都已在上面断言过「必须带显式工作区」；这里只钉住
-  // 「学习系统总控 + 档案维护」两处主场，档案里的收尾（落点搬完刷根主页）会再引一次（当前共 3 处）。
-  assert.ok(homeCalls >= 2, `gen_home 调用偏少：${homeCalls}`);
-  assert.match(adapted.get('learning-system'), /hashlib\.md5\(pathlib\.Path\(sys\.argv\[1\]\)\.read_bytes\(\)\)/);
-  assert.match(adapted.get('learning-system'), /practice-evaluator-<节点id>\/deliver\/.*目录内容原样合并复制/);
+  // 校验器那一档如实写成「按 schema 与格式要求逐项自查」，并且**不假称跑过工具**。
+  assert.match(adapted.get('image-scout'), /按图片库规范逐项自查/);
+  assert.match(adapted.get('curriculum-designer'), /按 `<root>\/schemas\/curriculum\.schema\.json` 与 `progress\.schema\.json` 逐项自查/);
+  assert.match(adapted.get('learning-system'), /按「OpenAI 宿主约定」逐项自查并把结论如实报出/);
+  // 阅读体验全靠导出：这条命令必须写在宿主约定里，且是**没有参数也能跑**的那一条。
+  assert.match(adapted.get('learning-system'), /npx -y @yunmiao\/studymate@latest export/);
+});
+
+test('DSH 侧技能正文不再自己跑引擎脚本（脚本只留给无头降级表）', () => {
+  // #80 的验收：总控与档案不再跑脚本、不看退出码。这三个技能是本张票的靶子；
+  // 角色侧（#81）的脚本调用由那一张票清，这里不越界断言。
+  for (const name of ['learning-system', 'record-keeping', 'local-qa']) {
+    const body = sources.get(name);
+    assert.doesNotMatch(body, /python3/, `${name}: DSH 侧正文不该再出现 python3`);
+    assert.doesNotMatch(body, /<root>\/scripts\//, `${name}: DSH 侧正文不该再出现引擎脚本路径`);
+    assert.doesNotMatch(body, /exit code|cp -a/, `${name}: DSH 侧正文不该再出现退出码与 cp -a`);
+    assert.doesNotMatch(body, /md5|\.studymate-stage/, `${name}: 暂存模式与摘要比对已删`);
+  }
 });
 
 test('teaching contracts and role ownership survive export', () => {
@@ -78,11 +91,25 @@ test('teaching contracts and role ownership survive export', () => {
     ['learning-coach', ['你只写内容、留题目位置', '尤其别补 `empty_reason`', '**内容文件里只有内容格式。**']],
     ['practice-evaluator', ['全系统的题都由你出', '作答原文', '题目的唯一 owner']],
     ['learning-system', ['锚点是讲解的产物', '题面与答案一个字都不改', '同一科目同时只有一个写入者']],
-    ['record-keeping', ['建课时的初始快照', '已通过项目验证', '写一条当且仅当出现可观察的证据']],
+    // 这条断言原先钉的是术语「已通过项目验证」——那是旧六档里的词，#71 把词表收成三档之后
+    // 它必然与 schema 分叉。改成钉同一节的稳定标记（项目与实验课的置位规则），词表本身
+    // 由下面那条「跟 schema 走」的守卫负责：它检查 skills 里出现的状态词**只在 schema 的词表内**。
+    ['record-keeping', ['建课时的初始快照', '项目与实验课', '写一条当且仅当出现可观察的证据']],
     ['layered-practice', ['参考解必须自包含', '只有 `::: quiz` 的层级是元信息', '每条结论必须指向一条具体证据']],
   ]) {
     for (const term of terms) assert.ok(adapted.get(name).includes(term), `${name}: ${term}`);
   }
+  // 状态词表跟 schema 走（别在这里手抄第二份）：三档词表落地后，「初步理解 / 能独立应用 /
+  // 需要复习 / 已通过项目验证」这四个旧档位不该再出现在技能正文里——技能清洗归 #80/#81，
+  // 但 schema 这边一旦把旧档位写回词表，这条会先红，不至于静默漂回去。
+  const progressSchema = JSON.parse(fs.readFileSync(path.join(root, 'schemas', 'progress.schema.json'), 'utf8'));
+  const statuses = progressSchema.properties.nodes.additionalProperties.properties.status.enum;
+  assert.deepEqual(statuses, ['未开始', '学习中', '已学完'], '进度词表就是三档（规格 §5.2）');
+  for (const stale of ['初步理解', '能独立应用', '需要复习', '已通过项目验证']) {
+    assert.equal(statuses.includes(stale), false, `${stale} 是旧六档的词，不该在写侧词表里`);
+  }
+  assert.equal(Object.hasOwn(progressSchema.properties.nodes.additionalProperties.properties, 'mastery'), false,
+    'mastery 已从 schema 移除（规格 §5.2）');
   // Export must never mutate the DSH source files or depend on their line endings.
   for (const [name, source] of sources) {
     assert.equal(fs.readFileSync(path.join(skillRoot, name, 'SKILL.md'), 'utf8'), source);

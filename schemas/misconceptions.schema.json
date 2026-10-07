@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Misconceptions",
+  "description": "误解记录的唯一落点（目标态规格 §5.4）：`<科目>/misconceptions.yaml`。progress.yaml 不再重复存一份——双落点只会带来不同步。旧文件里的 date / node / question / misunderstanding / answer_summary / follow_up / importance 仍读得进（额外键不拦），写回时按本 schema 的字段收敛。",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["topic", "source", "evidence", "status", "at"],
+    "properties": {
+      "topic": {
+        "type": "string",
+        "description": "卡在哪：一句话说清那个知识点，与正文的锚点/节点标题对得上，别写成一句抱怨"
+      },
+      "source": {
+        "enum": ["问答面板", "讲解反馈", "实验课验收"],
+        "description": "从哪来：讲解过程中的反馈 / 实验课验收的结论。「问答面板」是读侧兼容的既有值——旧学科里已落盘的记录还按它校验得过，#107 起阅读端面板不再写它"
+      },
+      "evidence": {
+        "type": "string",
+        "description": "证据：提问原文、作答引用或验收结论——没有证据的误解记录下次开场读不出任何可用的东西"
+      },
+      "status": {
+        "enum": ["未处理", "已补练", "已消解"],
+        "description": "处置到哪一步。默认「未处理」；补练过还没重验是「已补练」；学生在新情境里自己走通了才是「已消解」"
+      },
+      "at": {
+        "type": "string",
+        "description": "时间：YYYY-MM-DD（与 learning-records 的日期写法一致；YAML 里加引号）"
+      }
+    }
+  }
+}

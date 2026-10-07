@@ -100,9 +100,13 @@ try {
   const configFile = path.join(dshHome, 'studymate-config.yaml');
   // The native installer writes a JSON object with one YAML comment header.
   const config = JSON.parse(fs.readFileSync(configFile, 'utf8').replace(/^#[^\r\n]*\r?\n/, ''));
-  assert.equal(canonical(config.root), canonical(path.join(dshHome, 'studymate', 'engine')));
+  // #70：原生加载的引擎就是已安装的包自身；~/.dsh/studymate/engine/ 不再是去处
+  assert.equal(canonical(config.root), canonical(project));
+  assert.equal(fs.existsSync(path.join(dshHome, 'studymate', 'engine')), false);
   assert.equal(canonical(config.workspace), canonical(process.env.LEARN_WORKSPACE));
-  for (const file of ['scripts/gen_home.py', '.dsh/skills/learning-system/SKILL.md']) {
+  // 引擎就是包自身：技能、预设、schema 与数据骨架都在包里（#83 之后没有可执行脚本）
+  for (const file of ['preset/learning/agent.cordis.yml', 'schemas/curriculum.schema.json',
+    'preset/skills/learning-system/SKILL.md']) {
     assert.ok(fs.statSync(path.join(config.root, file)).isFile());
   }
   assert.ok(fs.statSync(path.join(config.workspace, '.learning', 'subjects')).isDirectory());

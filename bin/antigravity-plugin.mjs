@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 import { adaptAntigravitySkill, adaptAntigravityAgent, AGENT_ROLES } from './antigravity-skill-compat.mjs';
 import { writeDocsPayload } from './docs-payload.mjs';
+import { writeZip } from './zip.mjs';
 
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const marker = '.studymate-build.json';
@@ -42,8 +42,7 @@ function assertReplaceable(directory) {
 }
 
 /** Build an Antigravity plugin with native agents and skills. */
-export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity'), python } = {}) {
-  if (!python?.command) throw new Error('构建插件需要 Python 3.9+。');
+export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity') } = {}) {
   const outputDir = path.resolve(output);
   let existing = outputDir;
   const suffix = [];
@@ -53,7 +52,8 @@ export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity
     existing = path.dirname(existing);
   }
   const realOutput = path.join(fs.realpathSync(existing), ...suffix);
-  for (const name of ['.dsh', 'bin', 'scripts', 'schemas', 'templates', 'docs', 'antigravity']) {
+  // 技能源在 preset/skills：产物不许落进构建输入里（原来这条列的是 .dsh，技能搬家后跟着走）
+  for (const name of ['preset', 'bin', 'scripts', 'schemas', 'templates', 'docs', 'antigravity']) {
     if (inside(path.join(fs.realpathSync(source), name), realOutput)) {
       throw new Error(`输出目录不能位于构建源文件内：${outputDir}`);
     }
@@ -89,7 +89,7 @@ export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity
     // 2. Generate agents/*.md for each role
     fs.mkdirSync(path.join(plugin, 'agents'), { recursive: true });
     for (const role of AGENT_ROLES) {
-      const skillPath = path.join(source, '.dsh', 'skills', role, 'SKILL.md');
+      const skillPath = path.join(source, 'preset', 'skills', role, 'SKILL.md');
       if (!fs.existsSync(skillPath)) {
         // 静默跳过会建出「没有这个 agent」的插件，而总控照样会按 AGENT_ROLES 派工。
         throw new Error(`Antigravity 插件缺少角色规格：${skillPath}`);
@@ -99,8 +99,8 @@ export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity
     }
 
     // 3. Copy and adapt skills/
-    for (const name of fs.readdirSync(path.join(source, '.dsh', 'skills')).sort()) {
-      const skillSource = path.join(source, '.dsh', 'skills', name);
+    for (const name of fs.readdirSync(path.join(source, 'preset', 'skills')).sort()) {
+      const skillSource = path.join(source, 'preset', 'skills', name);
       if (!fs.statSync(skillSource).isDirectory()) continue;
       const destination = path.join(plugin, 'skills', name);
       copyTree(skillSource, destination);
@@ -110,9 +110,6 @@ export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity
 
     // 4. Copy templates, schemas, scripts, docs
     for (const name of ['templates', 'schemas']) copyTree(path.join(source, name), path.join(plugin, name));
-    for (const name of fs.readdirSync(path.join(source, 'scripts')).filter(name => name.endsWith('.py') && name !== 'install_preset.py')) {
-      copyTree(path.join(source, 'scripts', name), path.join(plugin, 'scripts', name));
-    }
     writeDocsPayload(source, plugin);
 
     copyTree(path.join(source, 'docs', 'images', 'logo.png'), path.join(plugin, 'assets', 'logo.png'));
@@ -121,21 +118,9 @@ export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity
     fs.writeFileSync(path.join(plugin, marker), `${JSON.stringify({ generator: packageInfo.name, version: packageInfo.version })}\n`);
 
     // 5. Build ZIP archive
-    const zipFile = path.join(staging, 'studymate-antigravity.zip');
-    const zipCode = `import pathlib,sys,zipfile
-root=pathlib.Path(sys.argv[1])
-with zipfile.ZipFile(sys.argv[2], 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-    for file in sorted(root.rglob('*')):
-        if file.is_file():
-            info=zipfile.ZipInfo(file.relative_to(root.parent).as_posix(), date_time=(2020,1,1,0,0,0))
-            info.compress_type=zipfile.ZIP_DEFLATED
-            info.external_attr=0o100644 << 16
-            archive.writestr(info, file.read_bytes())
-`;
-    const result = spawnSync(python.command, [...(python.prefix || []), '-X', 'utf8', '-c', zipCode, plugin, zipFile], {
-      encoding: 'utf8', windowsHide: true, timeout: 120000,
-    });
-    if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr || 'ZIP 构建失败。');
+    const zipFile = path.join(staging, path.basename(archive));
+    // 确定性归档：固定时间戳、固定条目顺序、固定压缩档（见 bin/zip.mjs）。
+    writeZip(plugin, zipFile);
 
     // 6. Atomic swap
     const replacements = [];
