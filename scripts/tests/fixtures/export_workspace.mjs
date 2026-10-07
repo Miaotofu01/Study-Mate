@@ -30,7 +30,9 @@ const PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAADAAAAAYCAIAAAAzn+mLAAAANUlEQVR42mO4
 /** 题库里与正文锚点**逐字相同**的那个键（锚点四态里的 resolved 一态）。 */
 export const ANCHOR_KEY = '什么是变量';
 
-export function lessonMarkdown(title = '变量') {
+export function lessonMarkdown(title = '变量', options = {}) {
+  // `math: false` 造一份**没有任何数学式**的正文（#96：非数学课 / 老课件导出后不该带 KaTeX）。
+  const math = options.math !== false;
   return [
     '---',
     `title: ${title}`,
@@ -39,11 +41,10 @@ export function lessonMarkdown(title = '变量') {
     '',
     '## 一节',
     '',
-    '正文一段，行内公式 $a^2 + b^2 = c^2$ 在这里；下面还有一个块级公式。',
-    '',
-    '$$',
-    'E = mc^2',
-    '$$',
+    math
+      ? '正文一段，行内公式 $a^2 + b^2 = c^2$ 在这里；下面还有一个块级公式。'
+      : '正文一段，里面没有任何数学式。',
+    ...(math ? ['', '$$', 'E = mc^2', '$$'] : []),
     '',
     '::: figure ../assets/img/pool/dot.png',
     'alt: 一个小点',
@@ -60,32 +61,38 @@ export function lessonMarkdown(title = '变量') {
   ].join('\n');
 }
 
-export function poolJson() {
+export function poolJson(options = {}) {
+  // `math: false`：题面 / 选项 / 解析里也没有数学式（#96 的「非数学课」那一侧）。
+  const math = options.math !== false;
   return JSON.stringify({
     [ANCHOR_KEY]: [{
       kind: '客观题',
       // 题面与解析里各放一处公式（#91）：题库字段走同一个排版器，只接数学式。
       // 导出套件据此断言「题面/选项里的 $…$ 也排出来了」，而正文那一处是 `$$E = mc^2$$`。
-      q: '变量 $x$ 最接近下面哪个说法？',
+      q: math ? '变量 $x$ 最接近下面哪个说法？' : '变量最接近下面哪个说法？',
       opts: ['一个名字', '一个数字', '一段内存'],
       ans: 0,
-      why: '变量是名字，值可以换：写了 $x = 3$ 之后还能改成 $4$。',
+      why: math ? '变量是名字，值可以换：写了 $x = 3$ 之后还能改成 $4$。' : '变量是名字，值可以换。',
     }],
   }, null, 2);
 }
 
 /**
  * 造一个能导出的最小工作区。
+ * @param {object} [options] `math: false` 造一份**没有数学式**的科目（#96）；
+ *   `lesson` / `pool` 直接覆盖正文与题库（用 `null` 表示「没有题库文件」）。
  * @returns {{workspace: string, subjectDir: string, slug: string, nodes: object[]}}
  */
 export function writeExportWorkspace(workspace, options = {}) {
   const slug = options.slug ?? 'demo';
   const nodes = options.nodes ?? [{ id: 'var', title: '变量' }, { id: 'fn', title: '函数' }];
+  const math = options.math !== false;
   fs.mkdirSync(path.join(workspace, '.learning', 'subjects'), { recursive: true });
   const { dir } = writeSubject(workspace, slug, {
     nodes,
-    lesson: lessonMarkdown(nodes[0].title),
-    pool: poolJson(),
+    lesson: options.lesson ?? lessonMarkdown(nodes[0].title, { math }),
+    // `undefined` 与 `null` 是两回事：null = 这门科目没有题库文件（见 writeSubject）
+    pool: options.pool === undefined ? poolJson({ math }) : options.pool,
     // 第二课只为「节点数」存在（主页上多一行），内容与断言无关
     secondLesson: options.secondLesson !== false,
   });
@@ -99,12 +106,13 @@ export function writeExportWorkspace(workspace, options = {}) {
 }
 
 /** 再加一门科目（验「--subject 只导一门」与主页的多科目列表）。 */
-export function addSecondSubject(workspace, slug = 'extra') {
+export function addSecondSubject(workspace, slug = 'extra', options = {}) {
   const nodes = [{ id: 'io', title: '输入输出' }];
+  const math = options.math !== false;
   const { dir } = writeSubject(workspace, slug, {
     nodes,
-    lesson: lessonMarkdown(nodes[0].title),
-    pool: poolJson(),
+    lesson: options.lesson ?? lessonMarkdown(nodes[0].title, { math }),
+    pool: options.pool === undefined ? poolJson({ math }) : options.pool,
     secondLesson: false,
   });
   return { workspace, subjectDir: dir, slug, nodes };

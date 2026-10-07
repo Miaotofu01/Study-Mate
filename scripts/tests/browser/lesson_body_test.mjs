@@ -16,14 +16,17 @@
        宿主 token 快照 + 现抠的内联 CSS + stub 掉 fetch/EventSource + ResizeObserver 垫片）。
        差别只有夹具内容：这一条要「刚好越界」的那一份。
 
-   **一处夹具边界，记在这里**（与 #86 那两处同类）：矢量图那条路（`::: svg` → SvgFrame 用
-   innerHTML 把 SVG 贴进图框）在 mini-react 下**渲染不出来**——mini-react 每次重渲染都整树重建
-   DOM，而 effect 只在 deps 变化时重跑，于是「挂载之后才贴进去的 innerHTML」被下一次重渲染抹掉
-   （真 React 会 diff、节点不换，所以客户端那段代码本身是对的）。所以这一套里矢量图那条路
-   在页面里现造一个**与客户端产出的形状完全一致**的元素（`div.smb-figure__frame > svg`），
-   量的是「随列宽流动」这条 CSS 契约本身。
-   **客户端产出的内联 SVG 现在没有任何浏览器套件覆盖**（导出套件的夹具里也没有 `::: svg` 块，
-   所以那条路也不量它）——这条缺口写进了 #89 的报告，没装作验过。
+   **矢量图那条路以前量不到，现在能量真货了**（#97 结掉的缺口）：`::: svg` → `SvgFrame` 用
+   innerHTML 把 SVG 贴进图框，而 mini-react 每次重渲染都整树重建 DOM、effect 只在 deps 变化时
+   重跑，于是「挂载之后才贴进去的 innerHTML」会被下一次重渲染抹掉（真 React 会 diff、节点不换，
+   所以客户端那段代码本身是对的）。这条差别一度让这一套只能**现造一个同形状的元素**
+   （`div.smb-figure__frame > svg`）去量「随列宽流动」这条 CSS 契约——只证明规则写得对，
+   证明不了客户端真的把块里的图形贴了上去（#89 的报告如实记了这条）。
+   现在 `mini-react.js` 的重建把**我们看见被赋过 `innerHTML`** 的元素的 innerHTML 按路径带到
+   同位置元素上（名单是元素实例，不按「空叶子 + 路径」猜；等价于真 React「不碰自己没渲染过的
+   子节点」），于是夹具内容里可以写真的 `::: svg` 块，
+   `lesson-body-*-svg` 那几场断言的就是**客户端产出的那个 `<svg>`**：它在、里面有内容文件里的
+   图形、随列宽流动、暗色下被压暗。
 
    浏览器二进制由 harness 探测；找不到时明确跳过（退出码 3），不是静默绿。
 */
@@ -43,6 +46,13 @@ let failures = 0;
 function check(label, ok, detail = '') {
   failures += ok ? 0 : 1;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : `  — ${detail}`}`);
+}
+
+/** 从一段 computed `filter` 里读出 brightness 的倍数（没有就当中性 1）。
+    配图的亮暗断言一律走这一条**关系式**：暗色 < 亮色、且暗色 < 1，不钉具体像素。 */
+function brightness(filter) {
+  const m = /brightness\(([\d.]+)\)/.exec(String(filter));
+  return m ? Number(m[1]) : 1;
 }
 
 /* ── 两档视口 ──────────────────────────────────────────────────────────────
@@ -77,8 +87,22 @@ const BITMAP_SVG = [
 ].join('');
 const BITMAP_SRC = 'data:image/svg+xml;base64,' + Buffer.from(BITMAP_SVG, 'utf8').toString('base64');
 
-/* 矢量图那块**不写进夹具内容**：`::: svg` 走 SvgFrame 的 innerHTML，在 mini-react 下会被
-   下一次重渲染抹掉（文件头那段夹具边界）。它的 CSS 契约由探针现造同形状元素来量。 */
+/** 内联矢量图（`::: svg`）：块里的 SVG 由客户端**原样透传**（`SvgFrame` 把 `block.svg` 用
+    innerHTML 贴进图框），与位图那条 `<img>` 是两条独立的路。这一块以前不写进夹具内容——
+    mini-react 会把贴进去的 innerHTML 在下一次重渲染时抹掉（文件头那段夹具边界），于是
+    「客户端产出的内联 SVG」零浏览器覆盖（#97 结掉的就是这条）。
+    3:1 的 viewBox 与 900×300 的属性宽高是刻意写的：「属性宽高被 CSS 压过、比例靠 viewBox
+    保住」这件事才有东西可断。那条弧线的 `d` 逐字进断言，用来证明贴进来的是**内容文件里的
+    图形**，而不是一个空壳。 */
+const INLINE_SVG_PATH = 'M80 226 C 300 60, 600 60, 820 226';
+const INLINE_SVG = [
+  '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300" viewBox="0 0 900 300">',
+  '<rect width="900" height="300" fill="#ffffff"/>',
+  '<path d="' + INLINE_SVG_PATH + '" fill="none" stroke="#4c6ef5" stroke-width="12"/>',
+  '<circle cx="80" cy="226" r="14" fill="#4c6ef5"/>',
+  '<circle cx="820" cy="226" r="14" fill="#12b886"/>',
+  '</svg>',
+].join('');
 
 /** 一行真的比列宽长很多的代码（宽档列约 712px，这行约 1000px）。 */
 const LONG_CODE_LINE = 'const binding = resolveNestedScopeBinding(outer, inner, { strict: true, fallback: "outer-binding-name-that-is-really-long" });';
@@ -104,6 +128,13 @@ function subjectFiles(dirName, { slug, name, touched }) {
     `::: figure ${BITMAP_SRC}`,
     'alt: 名字与值的对应示意（宽图）',
     'caption: 图 1 · 绑定示意',
+    ':::', '',
+    // 内联矢量图（#97）：块里的 SVG 原样透传，走的是与上面那张位图完全不同的另一条路
+    '::: svg',
+    'alt: 名字与值之间的一条连线（内联矢量图）',
+    'caption: 内联画的那条线',
+    '',
+    INLINE_SVG,
     ':::', '',
     // 宽表格：表头是 nowrap 的，六列都写成一句完整的话——表格的 min-content 于是真的比列宽大，
     // 「在表格这一层里横向滚动、不往外撑」这件事才被验到（表头写成两个字的话，表格会自己缩进列宽里）
@@ -323,32 +354,19 @@ const PROBE = `(() => {
 
   const root = q('.smb-root');
 
-  // 矢量图那条路：mini-react 下客户端产出的内联 SVG 活不过一次重渲染（见文件头那段边界），
-  // 所以这里在正文里现造一个**与 SvgFrame 产出的形状完全一致**的元素来量 CSS 契约：
-  // div.smb-figure__frame > svg（viewBox 3:1，且带 width/height 属性——属性必须被 CSS 压过，
-  // 这正是「随列宽流动」的含义）。量完立刻摘掉，不留痕。
-  const vector = (() => {
-    const host = doc || document.body;
-    const figure = document.createElement('div');
-    figure.className = 'smb-figure';
-    const box = document.createElement('div');
-    box.className = 'smb-figure__frame';
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 900 300');
-    svg.setAttribute('width', '900');
-    svg.setAttribute('height', '300');
-    box.appendChild(svg);
-    figure.appendChild(box);
-    host.appendChild(figure);
-    const line = svg.getBoundingClientRect();
-    const out = {
-      frameInner: px(inner(box)), w: px(line.width), h: px(line.height),
-      display: getComputedStyle(svg).display, filter: getComputedStyle(svg).filter,
+  // 内联矢量图那条路（#97）：量的是**真渲染出来的那个 <svg>**——课件内容里的 ::: svg 块
+  // 由客户端 SvgFrame 用 innerHTML 原样贴进图框。以前这里现造一个同形状的元素来量 CSS 契约，
+  // 那只证明「规则写得对」，证明不了「客户端真的把块里的图形贴上去了」（#89 报告里如实记了这条）。
+  const svgEl = q('.smb-figure__frame > svg');
+  const svgBox = svgEl ? svgEl.parentElement : null;
+  const vector = svgEl ? (() => {
+    const line = svgEl.getBoundingClientRect();
+    return {
+      frameInner: px(inner(svgBox)), w: px(line.width), h: px(line.height),
+      display: getComputedStyle(svgEl).display, filter: getComputedStyle(svgEl).filter,
       ratio: Math.round((line.height / line.width) * 1000) / 1000,
     };
-    figure.remove();
-    return out;
-  })();
+  })() : null;
 
   return {
     width: window.innerWidth,
@@ -444,6 +462,46 @@ const PROBE = `(() => {
   };
 })()`;
 
+/* 内联 SVG 那一场的专用探针：只量那张矢量图与它所在的一圈，读的是**真渲染出来的** `<svg>`
+   （`::: svg` 块由 SvgFrame 原样贴进图框）。「不是空壳」就看三样：命名空间是 SVG、
+   里面有内容文件里那几个图形、弧线的 d 逐字相同。 */
+const SVG_PROBE = `(() => {
+  const svg = document.querySelector('.smb-figure__frame > svg');
+  if (!svg) return null;
+  const frame = svg.parentElement;
+  const fig = frame.closest('figure');
+  const doc = document.querySelector('article.smb-doc');
+  const cs = getComputedStyle(svg);
+  const px = (value) => Math.round(parseFloat(value) * 100) / 100;
+  const inner = (el) => {
+    if (!el) return 0;
+    const s = getComputedStyle(el);
+    return el.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
+  };
+  const box = svg.getBoundingClientRect();
+  return {
+    ns: svg.namespaceURI,
+    viewBox: svg.getAttribute('viewBox'),
+    attrWidth: svg.getAttribute('width'), attrHeight: svg.getAttribute('height'),
+    shapes: svg.querySelectorAll('path, rect, circle, ellipse, line, polyline, polygon, text').length,
+    pathD: svg.querySelector('path') ? svg.querySelector('path').getAttribute('d') : null,
+    display: cs.display, filter: cs.filter,
+    w: px(box.width), h: px(box.height),
+    ratio: box.width > 0 ? Math.round((box.height / box.width) * 1000) / 1000 : 0,
+    frameInner: px(inner(frame)),
+    frameRole: frame.getAttribute('role'), frameLabel: frame.getAttribute('aria-label'),
+    caption: fig && fig.querySelector('figcaption') ? fig.querySelector('figcaption').textContent.trim() : null,
+    docInner: px(inner(doc)),
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+  };
+})()`;
+
+/** 把那张内联矢量图滚到视口中间，场景末尾的截图才「可判」。 */
+const SCROLL_TO_INLINE_SVG = `(() => {
+  const svg = document.querySelector('.smb-figure__frame > svg');
+  if (svg) svg.scrollIntoView({ block: 'center' });
+})()`;
+
 /* ── 页面上的几步操作（都靠真点击） ─────────────────────────────────────── */
 
 const OPEN_SUBJECT = `(() => {
@@ -529,13 +587,14 @@ try {
         `img=${imgW} doc=${column} natural=${one.figure.img.natural}`);
       check(`${tag} 位图是「缩到列宽」而不是「本来就小」（原图 ${one.figure.img.natural} 比列宽大）`,
         one.figure.img.natural > column, `${one.figure.img.natural} vs ${column}`);
-      const svgW = one.vector.w;
-      check(`${tag} 矢量图随列宽流动（铺满图框内容宽 ${one.vector.frameInner}，实际 ${svgW}；图上写的 width=900 被 CSS 压过）`,
-        one.vector.display === 'block' && Math.abs(svgW - one.vector.frameInner) <= 2,
+      const svgW = one.vector ? one.vector.w : 0;
+      check(`${tag} 矢量图随列宽流动（铺满图框内容宽 ${one.vector && one.vector.frameInner}，实际 ${svgW}；图上写的 width=900 被 CSS 压过）`,
+        !!one.vector && one.vector.display === 'block' && Math.abs(svgW - one.vector.frameInner) <= 2,
         JSON.stringify(one.vector));
-      check(`${tag} 矢量图保持自己的比例、没被拉伸或裁掉（高/宽 ${one.vector.ratio} ≈ 300/900）`,
-        Math.abs(one.vector.ratio - 300 / 900) < 0.01, JSON.stringify(one.vector));
-      check(`${tag} 矢量图也不超正文列宽（${svgW} ≤ ${column}）`, svgW <= column + 1, `${svgW} vs ${column}`);
+      check(`${tag} 矢量图保持自己的比例、没被拉伸或裁掉（高/宽 ${one.vector && one.vector.ratio} ≈ 300/900）`,
+        !!one.vector && Math.abs(one.vector.ratio - 300 / 900) < 0.01, JSON.stringify(one.vector));
+      check(`${tag} 矢量图也不超正文列宽（${svgW} ≤ ${column}）`,
+        !!one.vector && svgW <= column + 1, `${svgW} vs ${column}`);
 
       /* 条目 11：代码块带语言标签、超长行在块内滚动 */
       check(`${tag} 代码块带语言标签`, one.code.lang === 'js', String(one.code.lang));
@@ -661,32 +720,118 @@ try {
       const light = seen[viewport.key];
       const themeTag = `[dark·${viewport.key}]`;
 
-      const brightness = (filter) => {
-        const m = /brightness\(([\d.]+)\)/.exec(String(filter));
-        return m ? Number(m[1]) : 1;
-      };
+      const svgFilter = (one) => (one.vector ? one.vector.filter : 'none');
       check(`${themeTag} 位图配图在暗色下被压暗（${light.figure.img.filter} → ${dark.figure.img.filter}）`,
         brightness(dark.figure.img.filter) < brightness(light.figure.img.filter)
         && brightness(dark.figure.img.filter) < 1,
         JSON.stringify({ light: light.figure.img.filter, dark: dark.figure.img.filter }));
-      check(`${themeTag} 矢量图在暗色下同样被压暗（${light.vector.filter} → ${dark.vector.filter}）`,
-        brightness(dark.vector.filter) < brightness(light.vector.filter)
+      check(`${themeTag} 矢量图在暗色下同样被压暗（${svgFilter(light)} → ${svgFilter(dark)}）`,
+        !!dark.vector && brightness(dark.vector.filter) < brightness(svgFilter(light))
         && brightness(dark.vector.filter) < 1,
-        JSON.stringify({ light: light.vector.filter, dark: dark.vector.filter }));
+        JSON.stringify({ light: svgFilter(light), dark: svgFilter(dark) }));
       check(`${themeTag} 亮色下不压暗（默认不给图加滤镜）`,
-        brightness(light.figure.img.filter) === 1 && brightness(light.vector.filter) === 1,
-        JSON.stringify({ img: light.figure.img.filter, svg: light.vector.filter }));
+        brightness(light.figure.img.filter) === 1 && brightness(svgFilter(light)) === 1,
+        JSON.stringify({ img: light.figure.img.filter, svg: svgFilter(light) }));
       check(`${themeTag} 暗色下正文列与页面依旧没有横向溢出（${dark.overflow.center} / ${dark.overflow.page}）`,
         dark.overflow.center === 0 && dark.overflow.page === 0, JSON.stringify(dark.overflow));
 
       return {
         viewport: viewport.key, theme: 'dark', size: [dark.width, viewport.height],
-        figureFilter: { img: dark.figure.img.filter, svg: dark.vector.filter },
-        lightFilter: { img: light.figure.img.filter, svg: light.vector.filter },
+        figureFilter: { img: dark.figure.img.filter, svg: svgFilter(dark) },
+        lightFilter: { img: light.figure.img.filter, svg: svgFilter(light) },
         overflow: dark.overflow,
       };
     });
+
+    /* ── 内联矢量图（#97）：课件里的 `::: svg` 真被客户端贴出来了 ──────────
+       这一场就是「把句号画上」的那一场。之前这一面**零浏览器覆盖**：夹具内容里没有 `::: svg`，
+       而 mini-react 每次重渲染整树重建 DOM、effect 不重跑，SvgFrame 用 innerHTML 贴进去的
+       SVG 活不过下一次重渲染；所以主场景里那条「矢量图随列宽流动」量的是**现造的同形状元素**，
+       只证明 CSS 规则写得对，证明不了客户端真的把块里的图形贴了上去。
+       这里把 `::: svg` 写进夹具内容，断言全部打在**真渲染出来的那个 <svg>**上：
+       它在、里面有内容文件里的图形、随列宽流动、暗色下被压暗。搬运用的是 mini-react 那份
+       「手贴过 innerHTML 的元素」名单，不是「空叶子就搬」——那条边界由 `mini-react-carry` 钉住。 */
+    await session.scene('lesson-body-' + viewport.key + '-svg', async (ctx) => {
+      await ctx.navigate(fixture, { settle: 1200 });
+      await enterLesson(ctx);
+      await ctx.evaluate(SCROLL_TO_INLINE_SVG);
+      await ctx.sleep(300);
+      const light = await ctx.evaluate(SVG_PROBE);
+
+      check(`${tag} 课件里的 ::: svg 渲染成了一个真 SVG 元素、不是空壳（图形 ${light && light.shapes} 个，弧线 d=${light && light.pathD}）`,
+        !!light && light.ns === 'http://www.w3.org/2000/svg'
+        && light.shapes >= 3 && light.pathD === INLINE_SVG_PATH,
+        JSON.stringify(light && { ns: light.ns, shapes: light.shapes, d: light.pathD }));
+      check(`${tag} 贴进来的是块里那张图：viewBox 与属性宽高原样在（${light && light.viewBox} / width=${light && light.attrWidth}）`,
+        !!light && light.viewBox === '0 0 900 300' && light.attrWidth === '900', JSON.stringify(light && {
+          viewBox: light.viewBox, width: light.attrWidth, height: light.attrHeight }));
+      check(`${tag} 图框按 alt: 报出角色与标签（role=${light && light.frameRole} label=${light && light.frameLabel}）`,
+        !!light && light.frameRole === 'img'
+        && light.frameLabel === '名字与值之间的一条连线（内联矢量图）',
+        JSON.stringify(light && { role: light.frameRole, label: light.frameLabel }));
+      check(`${tag} 内联图与位图共用一条编号序列（这一张是图 2：${light && light.caption}）`,
+        !!light && /^图 2 · /.test(String(light.caption)), String(light && light.caption));
+      check(`${tag} 内联 SVG 随列宽流动、又不超列宽（铺满 ${light && light.frameInner}、实际 ${light && light.w}、列 ${light && light.docInner}）`,
+        !!light && light.display === 'block' && light.w > 0
+        && Math.abs(light.w - light.frameInner) <= 2 && light.w <= light.docInner + 1,
+        JSON.stringify(light && { w: light.w, frameInner: light.frameInner, docInner: light.docInner }));
+      check(`${tag} 比例来自 viewBox、没被拉伸也没被裁掉（高/宽 ${light && light.ratio} ≈ 300/900）`,
+        !!light && Math.abs(light.ratio - 300 / 900) < 0.01, JSON.stringify(light && { ratio: light.ratio }));
+      check(`${tag} 内联 SVG 亮色下不压暗（${light && light.filter}）`,
+        !!light && brightness(light.filter) === 1, String(light && light.filter));
+
+      await setTheme(ctx, 'dark');
+      await ctx.sleep(250);
+      const dark = await ctx.evaluate(SVG_PROBE);
+      check(`${tag} 内联 SVG 暗色下被压暗（${light && light.filter} → ${dark && dark.filter}）`,
+        !!dark && brightness(dark.filter) < 1 && brightness(dark.filter) < brightness(light.filter),
+        JSON.stringify({ light: light && light.filter, dark: dark && dark.filter }));
+      check(`${tag} 内联 SVG 在暗色下依旧不撑破页面（横向溢出 ${dark && dark.overflow}）`,
+        !!dark && dark.overflow === 0 && dark.w <= dark.docInner + 1,
+        JSON.stringify(dark && { overflow: dark.overflow, w: dark.w, docInner: dark.docInner }));
+
+      return {
+        viewport: viewport.key, size: [viewport.width, viewport.height],
+        light: light && { w: light.w, h: light.h, ratio: light.ratio, frameInner: light.frameInner,
+          shapes: light.shapes, pathD: light.pathD, viewBox: light.viewBox, filter: light.filter },
+        dark: dark && { filter: dark.filter, overflow: dark.overflow, w: dark.w },
+      };
+    });
   }
+
+  /* ── 夹具保真的边界：搬运只认「我们确实赋过 innerHTML」的那些元素（#97 的收窄） ──────
+     整树重建要替 `ref` + `innerHTML` 那段代码（`SvgFrame`）把内容带过重建，但这份保真**不许**
+     外溢成「任何空叶子里的东西都被搬走」——否则别的套件对「元素应该是空的」的预期会被悄悄改掉
+     （跨视图路径撞车时没有任何断言挡着）。这里现造一棵小树，把两边都钉住：走过 `innerHTML`
+     那条路的搬，没走过的（`appendChild`）不搬，从没被动过的空叶子重建后依旧是空的。 */
+  await session.scene('mini-react-carry', async (ctx) => {
+    await ctx.navigate(fixture, { settle: 800 });
+    const one = await ctx.evaluate(`(() => {
+      const h = window.MiniReact.createElement;
+      const host = document.createElement('div');
+      host.setAttribute('data-proto', 'carry-host');
+      document.body.appendChild(host);
+      const Tree = () => h('div', { className: 'carry-tree' },
+        h('div', { id: 'carry-ours' }),
+        h('div', { id: 'carry-appended' }),
+        h('div', { id: 'carry-plain' }));
+      window.MiniReact.mount(h(Tree, null), host);
+      // 「我们」的那一份：客户端那段代码就是这么贴的（SvgFrame 的 ref + innerHTML）
+      document.getElementById('carry-ours').innerHTML = '<b>客户端贴的</b>';
+      // 别人从别的门塞进来的：没走过 innerHTML 那条路
+      document.getElementById('carry-appended').appendChild(document.createTextNode('别的门塞的'));
+      window.MiniReact.mount(h(Tree, null), host);   // 再画一遍 = 整树重建
+      const html = (id) => String((document.getElementById(id) || {}).innerHTML || '');
+      return { ours: html('carry-ours'), appended: html('carry-appended'), plain: html('carry-plain') };
+    })()`);
+    check('重建后，客户端用 innerHTML 贴过的空叶子内容还在（#97 的保真没退化）',
+      one.ours.indexOf('客户端贴的') >= 0, JSON.stringify(one));
+    check('重建后，没走过 innerHTML 那条路的空叶子不被搬运（保真只认显式名单，不按「空叶子」猜）',
+      one.appended.indexOf('别的门塞的') < 0, JSON.stringify(one));
+    check('重建后，从没被动过的空叶子依旧是空的',
+      one.plain === '', JSON.stringify(one));
+    return one;
+  });
 
   /* ── 两档对账：窄档不是宽档的截图 ─────────────────────────────────── */
   await session.scene('lesson-body-compare', async (ctx) => {
@@ -697,7 +842,8 @@ try {
       check('两档的正文列宽确实不同（窄档不是宽档的截图）',
         wide.doc.inner > narrow.doc.inner + 100, `${wide.doc.inner} vs ${narrow.doc.inner}`);
       check('矢量图在两档下跟着列宽变（同一张图，宽档更宽）',
-        wide.vector.w > narrow.vector.w + 50, `${wide.vector.w} vs ${narrow.vector.w}`);
+        !!wide.vector && !!narrow.vector && wide.vector.w > narrow.vector.w + 50,
+        `${wide.vector && wide.vector.w} vs ${narrow.vector && narrow.vector.w}`);
       check('面包屑的窄档覆盖真的生效了（两档的上限不同）',
         wide.crumb.maxWidth !== narrow.crumb.maxWidth,
         `wide=${wide.crumb.maxWidth} narrow=${narrow.crumb.maxWidth}`);
@@ -713,7 +859,7 @@ try {
     await ctx.navigate(fixture, { settle: 800 });   // 这一场只为对账，别留一张空白页
     return wide && narrow ? {
       docInner: { wide: wide.doc.inner, narrow: narrow.doc.inner },
-      svg: { wide: wide.vector.w, narrow: narrow.vector.w },
+      svg: { wide: wide.vector && wide.vector.w, narrow: narrow.vector && narrow.vector.w },
       crumb: { wide: wide.crumb, narrow: narrow.crumb },
       proseSizes: {
         wide: [...new Set(wide.prose.map((row) => row.size))],

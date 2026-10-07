@@ -77,7 +77,7 @@ const groups = {
       // 边界值（同前缀兄弟目录、root 带尾分隔符、软链指出去、断链）逐条钉住。特征化测试测的
       // 是「取址/落盘的结果」，判据换一种写法照样可能绿——所以判据自己也要有一条。
       'scripts/tests/test_host_paths.mjs',
-      // 阅读端五条 /api/studymate/* 路由的**错误信封**：形状（`{ok:false, error:{code,message}}`）、
+      // 阅读端 /api/studymate/* 路由的**错误信封**：形状（`{ok:false, error:{code,message}}`）、
       // 机读码词表（源码里用了表外的码就红）、以及两端一致（lib/client.js 是手写 JS，不进 tsc）。
       'scripts/tests/test_host_route_envelope.mjs',
       // 性能预算（目标态规格 §10.3）：**相对规模的比例**，不写绝对秒数。数 readLibrary()

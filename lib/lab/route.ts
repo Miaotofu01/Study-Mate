@@ -35,7 +35,7 @@ import {
 import type { LabRunOutcome } from './tools.ts';
 import { taskService, UNOWNED } from '../tasks/index.ts';
 
-/** 路由路径：前端 `lib/client.js` 的 `LAB_ENDPOINT` 必须与它逐字一致。 */
+/** 路由路径：阅读端 `lib/client.js` 的 `LAB_ENDPOINT` 必须与它逐字一致。 */
 export const LAB_RUN_PATH = '/api/studymate/lab-run';
 
 /**

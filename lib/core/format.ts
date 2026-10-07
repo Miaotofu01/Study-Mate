@@ -225,7 +225,7 @@ export function isFenceLine(line: string): boolean {
   return fenceMarker(line) !== null;
 }
 
-/** 语言标签认不认；空串算认（不写标签就让前端按内容猜）。 */
+/** 语言标签认不认；空串算认（不写标签就让阅读端按内容猜）。 */
 export function isKnownLang(lang: string): boolean {
   if (!lang) return true;
   return (COLORED_LANGS as readonly string[]).includes(lang)
@@ -688,7 +688,7 @@ export function parseFence(
       `不认识的语言标签 \`${language}\`——会着色的写 `
       + `${COLORED_LANGS.join(' / ')}；不上色写 text`
       + `（${PLAIN_LANGS.slice(1).join(' / ')} 也认），`
-      + '或者干脆不写语言标签（前端按内容猜）', 'fence-unknown-lang');
+      + '或者干脆不写语言标签（阅读端按内容猜）', 'fence-unknown-lang');
   }
   const body: string[] = [];
   let cursor = index + 1;
