@@ -15,6 +15,7 @@ const TAG_MARKER = 'StudyMate release metadata\n';
 const OPENAI_ASSET = 'studymate-openai.zip';
 const INSTALLATION_START = '<!-- studymate-installation -->';
 const INSTALLATION_END = '<!-- /studymate-installation -->';
+const GITHUB_RELEASE_BODY_LIMIT = 125_000;
 const STATE = () => join(process.env.RUNNER_TEMP || tmpdir(), 'studymate-release-state.json');
 
 function command(name, args, { cwd = process.cwd(), input, allowFailure = false } = {}) {
@@ -227,18 +228,34 @@ export function withInstallationNotes(body, version) {
   return body.slice(0, start) + installation + body.slice(end + INSTALLATION_END.length);
 }
 
+function githubReleaseBody(notes, version) {
+  const body = withInstallationNotes(notes, version);
+  if (body.length <= GITHUB_RELEASE_BODY_LIMIT) return body;
+  // Keep full commit bodies in CHANGELOG; GitHub limits the complete API body,
+  // including installation instructions. Summarize at section boundaries only.
+  const notice = `本页因 GitHub 正文长度限制省略部分详情，请查看[完整更新记录](https://github.com/${REPOSITORY}/blob/v${version}/CHANGELOG.md)。`;
+  const compact = notes.split('\n').filter(line => !line.startsWith('  > ')).join('\n');
+  const commits = compact.indexOf('\n### 所有提交\n');
+  const overview = commits < 0 ? `## ${version}` : compact.slice(0, commits).trim();
+  for (const summary of [compact, overview, `## ${version}`]) {
+    const candidate = withInstallationNotes(`${summary.trim()}\n\n${notice}`, version);
+    if (candidate.length <= GITHUB_RELEASE_BODY_LIMIT) return candidate;
+  }
+  throw new Error('GitHub release installation information exceeds the body limit.');
+}
+
 export async function ensureGithubRelease(state, notes, request = github) {
   let release = await request(`/releases/tags/${state.tag}`, { missing: true });
   if (!release) {
     return request('/releases', { method: 'POST', body: {
       tag_name: state.tag, target_commitish: state.commit, name: state.tag, make_latest: 'legacy',
-      body: withInstallationNotes(notes, state.version), draft: false, prerelease: false,
+      body: githubReleaseBody(notes, state.version), draft: false, prerelease: false,
     } });
   }
   if (release.draft || release.prerelease || release.tag_name !== state.tag) {
     throw new Error(`GitHub ${state.tag} is not the expected stable release; inspect it before retrying.`);
   }
-  const body = withInstallationNotes(release.body || notes, state.version);
+  const body = githubReleaseBody(release.body || notes, state.version);
   if (body !== release.body) {
     release = await request(`/releases/${release.id}`, { method: 'PATCH', body: { body } });
   }
