@@ -59,9 +59,24 @@ const SURFACE_TOKENS = [
   '--dsw-alias-markdown-code-segment-selected',
 ];
 
+/** 解算用的调色板 = 宿主快照 + 我们自己的 `--smb-*` 包装。
+    为什么要把本地那半边并进来（#114 评审 3）：`--smb-code-out` / `--smb-code-cmt` 混的是
+    `--smb-text` / `--smb-bg` 这两支**带兜底的本地包装**，不是裸 alias——解 color-mix 时要能
+    顺着包装走到宿主取值。本地值原样放进去（`var(--dsw-…, 兜底)`），链式解析还是 resolve 那一支。 */
+function paletteFor(mode) {
+  const palette = new Map(PALETTES[mode]);
+  for (const [name, spec] of TOKENS) {
+    if (palette.has(name)) continue;
+    palette.set(name, spec.alias
+      ? `var(${spec.alias}${spec.fallback ? `, ${spec.fallback}` : ''})`
+      : String(spec.fallback));
+  }
+  return palette;
+}
+
 /** 把 token 名解成具体颜色；解不出来就抛，别让 null 混进对比度算式。 */
 function color(name, mode) {
-  const palette = PALETTES[mode];
+  const palette = paletteFor(mode);
   const spec = TOKENS.get(name);
   if (spec) {
     const value = spec.alias ? resolve(`var(${spec.alias})`, palette) : null;
