@@ -2,13 +2,13 @@
    ────────────────────────────────────────────────────────────────────────
    这条套件走 #102 Testing Decisions 的第二条缝：**宿主半 + 假 ctx**（`test_skill_visibility.mjs`、
    `test_preset_install.mjs`、`test_host_ask_session.mjs` 的先例）。真宿主的 `agentPresets.mount`
-   与 `tools.restrict` 认不认这条配置，只有在真 DSH 里才证得了——那一条**不进默认门禁**
-   （spec 的 Testing Decisions 已接受这个口径）；这里钉的是我们能钉的那一半：
+   认不认这条配置，只有在真 DSH 里才证得了——那一条**不进默认门禁**（spec 的 Testing Decisions
+   已接受这个口径）；这里钉的是我们能钉的那一半：
 
      · 预设的形状：id/名/order 与「学习模式」并列且互不相同；插件行**只有四行**，工具面最小；
        技能目录只指包内真实存在的 `preset/skills/local-qa`；
-     · 工具面行真的调了 `restrict({ deny: profile 根注册的全部原生工具 })`（假 ctx 抓调用），
-       而且只读工具注册进了**本作用域**（作用域自己那层不受 restriction 影响）；
+     · 工具面行只把只读工具注册进**本作用域**——#138 之后 StudyMate 的原生工具住在「学习模式」
+       预设作用域里，这条会话继承不到，所以那半份 `restrict({ deny })` 已经拆了；
      · 只读工具的外部行为：正常节点给得出正文与这一节点的题；不存在的节点、越界的 id 给「没有」；
        跑一遍工作区文件清单逐字不变（`writes` 空）；
      · 占位符：`preset/qa/agent.cordis.yml` 少了 `__STUDYMATE_SKILLS__` 时安装必须抛。
@@ -34,13 +34,6 @@ const { STUDY_TOOL_NAMES } = await import(pathToFileURL(
   path.join(ROOT, 'lib', 'tools', 'index.ts')).href);
 const { LESSON_READ_TOOL_NAME } = await import(pathToFileURL(
   path.join(ROOT, 'lib', 'tools', 'lesson-read.ts')).href);
-const tasks = await import(pathToFileURL(path.join(ROOT, 'lib', 'tasks', 'index.ts')).href);
-const lab = await import(pathToFileURL(path.join(ROOT, 'lib', 'lab', 'index.ts')).href);
-
-/** profile 根（`bin/dsh-plugin.ts` 的 `ctx.inject(['tools'], …)`）注册的全部 StudyMate 工具。 */
-const PROFILE_ROOT_TOOL_NAMES = [
-  ...STUDY_TOOL_NAMES, ...tasks.TASK_TOOL_NAMES, ...lab.LAB_TOOL_NAMES,
-];
 
 function pluginsOf(file) {
   const rows = parseYaml(fs.readFileSync(file, 'utf8'),
@@ -56,7 +49,7 @@ function metadataOf(file) {
 /* ── 假 ctx：收注册、抓 restrict 调用 ─────────────────────────────────── */
 
 /** 一条 falsy 的「宿主服务」ctx：这条行只用得到 tools / effect / get。 */
-function fakeQaContext({ failFirstRestrict = false } = {}) {
+function fakeQaContext() {
   const definitions = new Map();
   const restrictCalls = [];
   const warnings = [];
@@ -68,9 +61,6 @@ function fakeQaContext({ failFirstRestrict = false } = {}) {
       },
       restrict: (filter) => {
         restrictCalls.push(filter);
-        if (failFirstRestrict && restrictCalls.length === 1) {
-          throw new Error('tools.restrict() names unknown global tool "studymate_lab_run"');
-        }
         return () => {};
       },
     },
@@ -162,39 +152,23 @@ test('学习模式那一侧的插件行没被这次改动碰到（两条预设�
   assert.ok(!qa.includes('agent-instructions'), '答疑模式不留 agent-instructions（最小面）');
 });
 
-/* ── 二、工具面：deny 掉 profile 根的原生工具 + 只读工具进本作用域 ──────── */
+/* ── 二、工具面：只读工具进本作用域，原生工具不再需要 deny（#138）──────── */
 
-test('答疑预设的工具面行把 profile 根的原生工具全部 deny 掉，并把只读工具注册进本作用域', async () => {
+test('答疑预设的工具面行只把只读工具注册进本作用域，不再调 restrict', async () => {
   const { definitions, restrictCalls, warnings } = await mountQa();
   assert.deepEqual(warnings, [], '正常路径不该有警告');
-  assert.equal(restrictCalls.length, 1, '只调一次 restrict');
-  const filter = restrictCalls[0];
-  assert.ok(Array.isArray(filter.deny), '必须用 deny：allow 会把预设自己那层的只读工具与 skill 一起剪掉');
-  assert.equal(filter.allow, undefined, '不许用 allow（host.md Q5：预设层的工具会被一起过滤）');
-  for (const name of STUDY_TOOL_NAMES) {
-    assert.ok(filter.deny.includes(name), `${name} 必须被 deny 掉`);
-  }
-  assert.deepEqual([...filter.deny].sort(), [...PROFILE_ROOT_TOOL_NAMES].sort(),
-    'profile 根注册的 StudyMate 工具一个都不留（九个学习工具 + 任务 + 实验）');
+  // #138：原生工具搬进「学习模式」预设作用域之后，这条会话继承不到它们——deny 那一半拆了
+  assert.deepEqual(restrictCalls, [], '不再需要 restrict({ deny })');
 
-  // 只读工具落在本作用域：它不受上面那条 restriction 影响，必须注册成功
   assert.deepEqual([...definitions.keys()], [LESSON_READ_TOOL_NAME]);
   const definition = definitions.get(LESSON_READ_TOOL_NAME);
   assert.deepEqual(definition.declaration.writes, {}, '只读：一个写域都不声明');
   assert.deepEqual([...definition.declaration.reads], ['lessons', 'pool']);
   assert.equal(definition.parameters.required.includes('node'), true);
 
-  // 它**不**进那九个原生工具的面（registerStudyMate 的清单一字不动）
+  // 它**不**进学习面那九个原生工具的名字表（两张表并列、不混）
   assert.equal(STUDY_TOOL_NAMES.length, 9);
   assert.ok(!STUDY_TOOL_NAMES.includes(LESSON_READ_TOOL_NAME));
-});
-
-test('原生工具没在注册名册里时退到九个学习工具再试一次，并给出可读警告', async () => {
-  const { restrictCalls, warnings } = await mountQa({ failFirstRestrict: true });
-  assert.equal(restrictCalls.length, 2, '第一遍失败后要退到九个学习工具再试');
-  assert.deepEqual([...restrictCalls[1].deny].sort(), [...STUDY_TOOL_NAMES].sort());
-  assert.equal(warnings.length, 1, '退化要如实说，不静默');
-  assert.match(warnings[0], /答疑模式/);
 });
 
 /* ── 三、只读工具的外部行为（现造现弃的工作区）────────────────────────── */

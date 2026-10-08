@@ -114,7 +114,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 
 测试创建临时 HOME、DSH_HOME 和工作区，启动仅监听本机随机端口的 Web，不调用模型。CLI 测试通过临时本地 registry 安装、更新和卸载实际打包的 StudyMate，检查普通模式、学习模式、安装方式切换与学习数据保留。
 
-`test:dsh` 的探针在**插件真的被加载**时（native 安装）还验一遍原生工具：九个 `studymate_*` 在 `ctx.tools` 上按名字查得到、模型侧投影只有一句话说明，走真 dispatch 调 `studymate_workspace_context` / 两个校验器 / 导出占位，并反证越权读、越权写会抛 `[DOMAIN_VIOLATION]`。**它验的不是「模型在真实会话里调了工具」**——那要花额度，默认门禁不跑（结果里的 `modelRequestsIssued` 恒为 0）。standalone 安装写的是声明式预设、插件包不进 profile，那种安装下没有原生工具，探针按 `nativeTools: null` 照实断言。
+`test:dsh` 的探针在**插件真的被加载**时（native 安装）还验一遍原生工具：九个 `studymate_*` 在**「学习模式」预设作用域**里按名字查得到（读法带 scope：`get(name, scope)` / `schemas(scope)`；**profile 根上一个都不留**，见 #138）、模型侧投影只有一句话说明，走真 dispatch 调 `studymate_workspace_context` / 两个校验器 / 导出占位，并反证越权读、越权写会抛 `[DOMAIN_VIOLATION]`。这条 dispatch 会**先开一条真「学习模式」会话**（`tools.execute` 的权限策略要读 `exec.agent.session`，光有预设那条常驻挂载的 scope key 不行）——但那**不是「模型在真实会话里调了工具」**：一次模型请求都不发，结果里的 `modelRequestsIssued` 恒为 0。standalone 安装写的是声明式预设、插件包不进 profile，那种安装下没有原生工具，探针按 `nativeTools: null` 照实断言。
 
 同一套探针也钉 #70 的引擎路径：**native 安装下 `root` 指向已安装的包自身**（技能、预设、schema、数据骨架都在包里），`~/.dsh/studymate/engine/` 不再出现源码树副本；standalone 安装照旧把那份**只读材料**落在那里、`root` 也照旧指向它。另有一条从 standalone 交接（`--mode native`）到原生启动的用例，验 `root` 从 `engine/` 换成包目录。
 

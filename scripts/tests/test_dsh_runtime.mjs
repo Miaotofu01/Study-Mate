@@ -45,11 +45,16 @@ const modern = version => atLeastRelease(version, 1, 7);
 
    这一段验的是三件事，报告里也照这个口径写：
 
-     1. 插件在真 DSH 里加载后，九个 `studymate_*` 工具**在 ctx.tools 上按名字查得到**，
-        而且模型侧投影里只有一句话说明（没有参数表）；
-     2. 直接走**真 dispatch**（`ctx.tools.execute`，含参数校验与输出契约校验）调
-        `studymate_workspace_context` / `studymate_validate_curriculum` /
-        `studymate_validate_lesson`，拿到结构化返回；
+     1. 插件在真 DSH 里加载后，「学习模式」预设里那条工具面行
+        （`@yunmiao/studymate/learning-preset`）把九个 `studymate_*` 工具注册进**预设作用域**：
+        在那条行自己的 `ctx.tools` 上按名字查得到，而且模型侧投影里只有一句话说明（没有参数表）；
+        同时**反证**——profile 根上一个都不留（#138 之前它们全在 profile 根上，别的预设也看得见）；
+        **读法必须带 scope**：`get(name, scope)` / `schemas(scope)`，省略 scope 读的是全局视图
+        （`dsh-tools` 的 `view(scope)`），那会把它们误报成「没注册」；
+     2. 直接走**真 dispatch**（含参数校验与输出契约校验）调 `studymate_workspace_context` /
+        `studymate_validate_curriculum` / `studymate_validate_lesson`，拿到结构化返回。
+        这一步**先开一条真「学习模式」会话**（`openLearningAgent`）：工具在预设作用域里，
+        而 `tools.execute` 要一条真 agent（权限策略读 `exec.agent.session`），光给 scope key 不行；
      3. 反证：越权读、越权写、无模型协商 —— 都通过真 dispatch 走一遍。
 
    **不验**的是「模型在真实会话里自己调了它」：那要花模型额度，默认门禁里不跑
@@ -79,25 +84,79 @@ const PROBE_TOOLS = [
     body: 'write-mastery' },
 ];
 
-function dispatch(app, name, args = {}) {
-  return app.ctx.tools.execute({
+function dispatch(tools, name, args = {}, agent) {
+  return tools.execute({
     callId: `studymate-probe-${name}`,
     name,
     arguments: args,
     signal: new AbortController().signal,
+    // 这里的 `agent` 必须是一条**真 agent**，不是 scope key（见 openLearningAgent）。
+    ...agent === undefined ? {} : { agent },
   });
+}
+
+/* ── #138：真 dispatch 要一条真会话 ────────────────────────────────────────
+
+   工具搬进「学习模式」预设作用域之后，**调用**它们需要一个真 agent，光有 scope key 不够：
+   宿主的 `tools.execute` 把 `exec.agent.session` 交给权限策略（`dsh-tools/lib/index.js` 的
+   `policy.resolve(exec.agent === void 0 ? {} : { session: exec.agent.session })`），而预设那条
+   **常驻挂载**的 scope key 是个光杆对象（`dsh-agent-preset-registry/lib/index.js` 的
+   `const key = {}`）——没有 `.session`，拿它当 `exec.agent` 会在权限层抛
+   `Cannot read properties of undefined (reading 'id')`。#138 之前工具注册在 profile 根上、
+   探针不传 agent，这条前提是这次才浮出来的。
+
+   开会话照 `lib/ask/session.ts`（宿主 `createWebhookSession` 的同一形状）：读部署默认模型 →
+   解析预设 id → 建会话并在 `setup` 里 `mountPreset(agentCtx, presetId)`（`mount` 把这条 agent 的
+   scope 挂进预设那条常驻挂载的**子级**，所以预设作用域里的工具对它可见）→ 从回执或注册表拿那条
+   agent。**一条模型请求都不发**：这里要的只是一个真身份（`modelRequestsIssued` 仍是 0）。 */
+async function openLearningAgent(app, workspace) {
+  const agents = app.ctx.get('agents');
+  const presets = app.ctx.get('agentPresets');
+  assert.ok(typeof agents?.create === 'function', '这个宿主没把 agents 服务交给探针');
+  assert.ok(typeof presets?.resolve === 'function' && typeof presets?.mount === 'function',
+    '这个宿主没把 agentPresets 服务交给探针');
+  const preset = await presets.resolve('learning');
+  const presetId = typeof preset?.id === 'string' && preset.id.trim() !== '' ? preset.id.trim() : 'learning';
+  // 部署默认模型：建会话要 provider/model（与 lib/ask/session.ts 同一条口径）。探针一次请求都
+  // 不发，所以宿主没配默认模型时不拦——那是探针的隔离 HOME，本来也不该有凭据。
+  let agentOptions;
+  try {
+    const selection = app.ctx.get('agentDefaultModel')?.currentSelection?.();
+    if (typeof selection?.provider === 'string' && selection.provider.trim() !== ''
+      && typeof selection?.model === 'string' && selection.model.trim() !== '') {
+      agentOptions = { provider: selection.provider, model: selection.model };
+    }
+  } catch { agentOptions = undefined; }
+  const sessionId = 'studymate-probe-learning';
+  const handle = await agents.create({
+    sessionId,
+    meta: { cwd: workspace, agentPreset: presetId },
+    ...agentOptions === undefined ? {} : { agentOptions },
+    setup: async (agentCtx) => { await presets.mount(agentCtx, presetId); },
+  });
+  const agent = handle?.agent ?? agents.get?.(sessionId);
+  assert.ok(agent, '学习模式会话建起来了，但拿不到它那条 agent');
+  return agent;
 }
 
 function textOf(result) {
   return (result.content || []).map((block) => block.text ?? '').join('\n');
 }
 
-async function probeNativeTools(app, home) {
-  const missing = STUDY_TOOL_NAMES.filter((name) => !app.ctx.tools.get(name));
+async function probeNativeTools(app, home, presetTools, presetScope) {
+  // ① 反证：profile 根上一个 StudyMate 工具都不留（#138 之前它们全在这儿，别的预设也看得见）
+  // 这里的 `app.ctx.tools.get(name)` **不带 scope**，读的正是全局视图——判据就落在这上面。
+  const leaked = STUDY_TOOL_NAMES.filter((name) => app.ctx.tools.get(name) !== undefined);
+  assert.deepEqual(leaked, [], `这些原生工具不该注册在 profile 根上：${leaked.join('、')}`);
+
+  // ② 学习模式预设作用域里九个工具按名字都查得到
+  assert.ok(presetTools, '学习模式预设里要拿得到那条工具面行的 ctx');
+  assert.ok(presetScope, '学习模式预设那条插件行要拿得到自己的 scope（不带 scope 读的是全局视图）');
+  const missing = STUDY_TOOL_NAMES.filter((name) => !presetTools.get(name, presetScope));
   assert.deepEqual(missing, [], `这些原生工具没注册：${missing.join('、')}`);
 
   // 模型真正看到的那一份：只白名单 name / description / parameters，且说明只有一句
-  const exposed = app.ctx.tools.schemas().filter((schema) => STUDY_TOOL_NAMES.includes(schema.name));
+  const exposed = presetTools.schemas(presetScope).filter((schema) => STUDY_TOOL_NAMES.includes(schema.name));
   assert.equal(exposed.length, STUDY_TOOL_NAMES.length, '九个工具都要出现在模型侧投影里');
   for (const schema of exposed) {
     assert.deepEqual(Object.keys(schema).sort(), ['description', 'name', 'parameters'],
@@ -119,10 +178,13 @@ async function probeNativeTools(app, home) {
 
   const previousDshHome = process.env.DSH_HOME;
   process.env.DSH_HOME = probeDsh;
+  // 真 dispatch 要一条真「学习模式」会话（见 openLearningAgent 那段）：工作区先造好再建会话，
+  // 会话的 `meta.cwd` 就是它。
+  const agent = await openLearningAgent(app, probeWorkspace);
   const outcome = {};
   try {
     // ① 工作区摘要（结构化，不是 exit code）
-    const context = await dispatch(app, 'studymate_workspace_context');
+    const context = await dispatch(presetTools, 'studymate_workspace_context', {}, agent);
     assert.equal(context.isError, false, textOf(context));
     const summary = context.value;
     assert.equal(summary.workspace.path, probeWorkspace);
@@ -145,12 +207,12 @@ async function probeNativeTools(app, home) {
     //     DSH_HOME。探针不碰真实 DSH HOME，所以由 harness（外层测试）读那份配置逐条断言。
 
     // ② 两个校验器也走真 dispatch：参数校验 + 输出契约（含嵌套 oneOf）都由宿主盖章
-    const curriculum = await dispatch(app, 'studymate_validate_curriculum', { paths: ['demo'] });
+    const curriculum = await dispatch(presetTools, 'studymate_validate_curriculum', { paths: ['demo'] }, agent);
     assert.equal(curriculum.isError, false, textOf(curriculum));
     assert.equal(curriculum.value.blocking, false, textOf(curriculum));
     assert.deepEqual(curriculum.value.reports.map((report) => report.kind),
       ['curriculum', 'progress', 'subject']);
-    const lesson = await dispatch(app, 'studymate_validate_lesson', { paths: ['demo/lessons/0001-var.md'] });
+    const lesson = await dispatch(presetTools, 'studymate_validate_lesson', { paths: ['demo/lessons/0001-var.md'] }, agent);
     assert.equal(lesson.isError, false, textOf(lesson));
     assert.equal(lesson.value.reports[0].node.id, 'var');
     assert.deepEqual(lesson.value.reports[0].anchors.map((anchor) => anchor.resolution), ['resolved']);
@@ -164,7 +226,7 @@ async function probeNativeTools(app, home) {
     //     用真 React + 真 Chrome 在 file:// 下验）。探针的 DSH_HOME 是隔离的，所以解析顺序里
     //     的 profile 那一跳指不到东西，这里显式给一个候选根。
     process.env.STUDYMATE_REACT_DIR = fakeReactRoot(root);
-    const exported = await dispatch(app, 'studymate_export', {});
+    const exported = await dispatch(presetTools, 'studymate_export', {}, agent);
     assert.equal(exported.isError, false, textOf(exported));
     assert.equal(exported.value.settled, true, textOf(exported));
     assert.equal(exported.value.status, '完成', textOf(exported));
@@ -198,7 +260,7 @@ async function probeNativeTools(app, home) {
         },
       });
       app.ctx.tools.register(definition);
-      const result = await dispatch(app, probe.name);
+      const result = await dispatch(app.ctx.tools, probe.name);
       assert.equal(result.isError, true, `${probe.name} 越权居然成功了`);
       assert.match(textOf(result), /DOMAIN_VIOLATION/, textOf(result));
       outcome[probe.body === 'read-pool' ? 'domainReadViolation' : 'domainWriteViolation'] =
@@ -223,7 +285,7 @@ async function probeNativeTools(app, home) {
       execute: async () => { ran = true; return { ran: true }; },
     });
     app.ctx.tools.register(requiresModel);
-    const negotiated = await dispatch(app, 'studymate_probe_requires_model');
+    const negotiated = await dispatch(app.ctx.tools, 'studymate_probe_requires_model');
     assert.equal(negotiated.isError, false, textOf(negotiated));
     assert.equal(negotiated.value.available, false);
     assert.equal(typeof negotiated.value.reason, 'string');
@@ -464,6 +526,9 @@ async function probe() {
     });
     assert.ok(app.ctx.get('webServer')?.port > 0, 'Web must listen on an ephemeral port');
     const fresh = process.env.STUDYMATE_RUNTIME_SCENARIO === 'fresh';
+    let presetTools;
+    let presetScope;
+
     const nativeEntries = [...app.ctx.loader.entries()].filter(entry => entry.options.name === '@yunmiao/studymate');
     assert.equal(nativeEntries.length, fresh ? 0 : 1, 'Only native installations should have a native entry');
     const downgraded = process.env.STUDYMATE_RUNTIME_SCENARIO === 'downgraded';
@@ -498,6 +563,19 @@ async function probe() {
       const workflowName = `@deepseek-ai/dsh-workflow-${atLeastRelease(manifest.version, 1, 6) ? 'ptc' : 'worker-thread'}`;
       const workflow = [...mounts[0].tree.entries()].find(entry => entry.options.name === workflowName);
       assert.equal(workflow?.fiber?.state, 2, 'The correct workflow must be Active');
+      // #138：那条工具面行**只在原生安装时加**——声明式安装下本包不在 profile 里，模块解析不到，
+      // 而一行起不来会让整条预设 broken（真 DSH 里验过）。所以按插件是否真的加载来判。
+      if (nativeEntries.length === 1 && !nativeEntries[0].disabled) {
+        const toolsEntry = [...mounts[0].tree.entries()]
+          .find(entry => entry.options.name === '@yunmiao/studymate/learning-preset');
+        assert.ok(toolsEntry, '「学习模式」预设里要有那条工具面行（@yunmiao/studymate/learning-preset）');
+        assert.equal(toolsEntry.fiber?.state, 2, '那条工具面行要 Active');
+        presetTools = toolsEntry.fiber?.ctx?.get?.('tools');
+        // 那条行自己的 scope：`view(scope)` 把「全局层 + 链上每个祖先层 + own」合起来看，
+        // 所以从这一层读才读得到它注册的九个工具（从全局视图读永远是空的）。
+        const { scopeOf } = await fromRuntime('dsh-scope');
+        presetScope = scopeOf(toolsEntry.fiber?.ctx) ?? scopeOf(mounts[0].fiber?.ctx);
+      }
     }
     // #68：原生工具在真 DSH 里的注册与调用。
     //
@@ -507,7 +585,7 @@ async function probe() {
     // 老宿主（<0.1.7）没有 tools 服务，也跳过。
     const pluginLoaded = nativeEntries.length === 1 && !nativeEntries[0].disabled;
     const nativeTools = modern(manifest.version) && pluginLoaded
-      ? await probeNativeTools(app, home) : null;
+      ? await probeNativeTools(app, home, presetTools, presetScope) : null;
     // #74：监听与推送（两条路）——同样只在插件真的加载了的时候跑
     const watch = watchProbe && pluginLoaded && modern(manifest.version)
       ? await probeWatch(app, watchProbe) : null;

@@ -588,6 +588,7 @@ export function installPreset(options: InstallPresetOptions): PresetRegistration
   let updated = native ? original : clean;
   const configs: unknown[] = [];
   const managed: unknown[] = [];
+  const [mainPreset] = presets;
   if (modern) {
     for (const preset of staged) {
       const metadataFile = path.join(preset.dir, 'preset.yml');
@@ -600,6 +601,13 @@ export function installPreset(options: InstallPresetOptions): PresetRegistration
         .filter(key => key in source).map(key => [key, source[key]]));
       const plugins = parseYaml(preset.agent, { file: preset.file, tags: 'expression', blockScalars: true });
       if (!Array.isArray(plugins)) throw new Error(`${preset.id} 预设必须是插件列表；未修改配置`);
+      // #138：StudyMate 的原生工具住在**主预设（学习模式）的作用域**里，不在 profile 根上——
+      // 那样别的预设（含宿主内置的 standard）看不见它们。这条行**只在原生安装时加**：
+      // 声明式安装（standalone）下本包不在 profile 里，模块解析不到，而 `dsh-agent-presets`
+      // 把「有一行起不来」判成**整条预设 broken**，连学习模式都会挂不上。
+      if (bundle && preset.id === mainPreset.id) {
+        plugins.push({ id: 'studymate-tools', name: `${BUNDLE}/learning-preset` });
+      }
       config.id = preset.id;
       config.plugins = plugins;
       configs.push(config);

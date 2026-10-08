@@ -98,6 +98,19 @@
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
 
+# ── StudyMate 的原生工具（#138）─────────────────────────────────────────────
+
+# 九个学习工具 + 五个 `studymate_task_*` + 一个 `studymate_lab_run` **注册在「学习模式」预设的
+# 作用域里**，于是别的预设（含宿主内置的 standard）看不见它们。那条插件行
+# （`studymate-tools → @yunmiao/studymate/learning-preset`）**由安装器在原生安装时加**——
+# 见 `lib/preset.ts` 的 `installPreset`：声明式安装下本包不在 profile 里，这一行解析不到，而
+# `dsh-agent-presets` 把「有一行起不来」判成**整条预设 broken**，连学习模式都会挂不上。
+#
+# 这一行之前，那批工具注册在插件所在的 profile 根上（`docs/规范/工程约束.md` §二 记的
+# #87 已知偏离）；宿主没有「按预设注册工具」的接口，能收窄的只有预设自己这条插件行。
+# 宿主层的东西（导出的任务类型、任务与实验的阅读端路由、文件监听）仍留在 profile 根，
+# 由 `bin/dsh-plugin.ts` 的 `registerStudyMateHost` 挂。
+
 # ── goals ───────────────────────────────────────────────────────────────────
 
 # The goal service and session driver stay on the host plane, where the Gateway

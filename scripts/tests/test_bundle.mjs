@@ -300,7 +300,7 @@ test('packed npm package loads CLI and both plugins inside node_modules', t => {
   assert.equal(f.yaml(f.config).root, installed);
   run(['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
-    import { inject, apply, QA_DENIED_TOOL_NAMES } from '@yunmiao/studymate/qa-preset';
+    import { inject, apply } from '@yunmiao/studymate/qa-preset';
     assert.deepEqual(inject, ['tools']);
     const definitions = [], restrictions = [];
     apply({
@@ -312,9 +312,24 @@ test('packed npm package loads CLI and both plugins inside node_modules', t => {
     });
     assert.deepEqual(definitions.map(definition => definition.name), ['studymate_lesson_read']);
     assert.deepEqual(definitions[0].declaration.writes, {});
-    assert.equal(QA_DENIED_TOOL_NAMES.length, 15);
-    assert.ok(QA_DENIED_TOOL_NAMES.includes('studymate_lab_run'));
-    assert.ok(QA_DENIED_TOOL_NAMES.includes('studymate_task_cancel'));
-    assert.deepEqual(restrictions, [{ deny: [...QA_DENIED_TOOL_NAMES] }]);
+    // #138：原生工具搬进「学习模式」预设作用域之后，答疑这条不再需要 deny 那一半
+    assert.deepEqual(restrictions, []);
+
+    // #138：学习模式那条插件行把全部原生工具注册进**预设作用域**
+    const learning = await import('@yunmiao/studymate/learning-preset');
+    assert.deepEqual(learning.inject, ['tools']);
+    const learningDefinitions = [];
+    learning.apply({
+      tools: { register: definition => { learningDefinitions.push(definition); return () => {}; } },
+      effect: fn => fn(),
+    });
+    const learningNames = learningDefinitions.map(definition => definition.name);
+    assert.equal(learningNames.length, 15);
+    for (const name of ['studymate_workspace_context', 'studymate_verify_sources',
+      'studymate_task_cancel', 'studymate_lab_run']) {
+      assert.ok(learningNames.includes(name), name + ' 要由学习预设那条插件行注册');
+    }
+    // 答疑那条自己一个都不注册（工具面只有只读的取课件工具）
+    assert.deepEqual(learningNames.filter(name => definitions.some(item => item.name === name)), []);
   `]);
 });
