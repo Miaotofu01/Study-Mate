@@ -16,8 +16,8 @@
    那层的 `skill` 与 `studymate_lesson_read` 一起剪掉（而且 `allow` 里写预设自己那层的名字
    会被校验判成 unknown 直接抛）。`deny` 只点名全局层的名字，只读工具与 `skill` 都不受影响。
 
-   为什么 deny 的是「全部 14 个」而不是只有八个：`registerStudyMate` 在 profile 根注册的
-   八个学习工具之外还有五个 `studymate_task_*` 与一个 `studymate_lab_run`（三份名字表各自的
+   为什么 deny 的是「全部 15 个」而不是只有九个：`registerStudyMate` 在 profile 根注册的
+   九个学习工具之外还有五个 `studymate_task_*` 与一个 `studymate_lab_run`（三份名字表各自的
    出处见下）。它们同样是 profile 根的工具，留下的活等于一个能写作答台账、能代跑命令的后门——
    「工具面上只有只读的取课件工具」是 #104 的验收，所以按三份名字表全量收窄。
 
@@ -25,7 +25,7 @@
    的 `TASK_TOOL_NAMES`、`../lab/index.ts` 的 `LAB_TOOL_NAMES`）——不在这里手抄第二份。
 
    失败面：`restrict` 只认「此刻已挂在 scope 链上的名字」，某个名字不在册（那个子系统注册失败、
-   或旧宿主）会**整条抛**。那时先退到八个学习工具再试一次，仍不行就如实警告——不静默、
+   或旧宿主）会**整条抛**。那时先退到九个学习工具再试一次，仍不行就如实警告——不静默、
    也不改成 `allow`（那会把只读工具剪掉）。
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -75,7 +75,7 @@ export function apply(ctx: QaPresetContext): void {
   } catch (error) {
     try {
       ctx.tools.restrict({ deny: [...STUDY_TOOL_NAMES] });
-      console.warn('StudyMate 答疑模式：任务与实验那批原生工具没在注册名册里，只收掉了八个学习工具。'
+      console.warn('StudyMate 答疑模式：任务与实验那批原生工具没在注册名册里，只收掉了九个学习工具。'
         + `${error instanceof Error ? error.message : String(error)}`);
     } catch (retryError) {
       console.warn('StudyMate 答疑模式：原生工具的收窄没做上（restrict 报错），'

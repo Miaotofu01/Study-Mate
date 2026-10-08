@@ -133,7 +133,7 @@ const groups = {
       'scripts/tests/test_tools_validate.mjs',
       'scripts/tests/test_tools_rewrite.mjs',
       // 工具 schema 的**宿主子集**：多一个关键字、或把 `type` 写成数组，整批工具在真宿主里
-      // 注册不上（真发生过一次，而 test:dsh 的探针只按名字查八个学习工具、抓不住）。
+      // 注册不上（真发生过一次，而 test:dsh 的探针只按名字查九个学习工具、抓不住）。
       // 这条直接逐个走 schema，不看名字。
       'scripts/tests/test_tools_schema_subset.mjs',
       // 任务域 lib/tasks/**（#73）：六态状态机、owner 句柄与越权、durable 落盘的**跨进程**接上、
@@ -145,6 +145,11 @@ const groups = {
       // （cwd / 可写范围 / 参数里的路径 / 软链）。命令从哪来也是断言的一部分：只有题库里那道
       // 交付物题的「证据」字段能提供命令，模型与学生都没有第二个入口。
       'scripts/tests/test_lab_runner.mjs',
+      // 核验域 lib/reach/**（#125）：核「资源清单」里的链接。真 loopback HTTP 服务器当目标站与
+      // 代理（不发一个到仓外的请求）：计数与失败清单、全局并发 ≤8 且同站不并发、第二遍零请求、
+      // 离线不开 socket、墙上预算到点交回去再调一次能接着做完、路由表只探一次（直连失败换代理）。
+      // 纯函数那一半（清单摘链接、按 URL 去重、1 起行号）也在里面。
+      'scripts/tests/test_reach_verify.mjs',
       // 阅读端（lib/client.js 是零构建的浏览器插件，没有 export）：跨科目搜索的索引覆盖与
       // 四个附件折叠块的空态。套件在 Node 里伪造 window.__ModuleLoader__ + react 桩把头文件
       // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。

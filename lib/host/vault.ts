@@ -551,6 +551,21 @@ export function createWorkspaceVault(): Vault {
         return readFileView(resolveTarget(target));
       }
 
+      case 'resources': {
+        // #125：核验域要读的就是这一份资源清单。**只认 `RESOURCES.md` 这一个文件名**——
+        // 这不是「顺手能读任意文件」的入口：核验工具的定位那一步会把目录展开成
+        // `<目录>/RESOURCES.md`（或 `<暂存目录>/deliver/RESOURCES.md`），交给这里的永远是这一份。
+        // 放开文件名等于给一个「按路径读工作区任何文件」的读法，而这份读法只需要一份清单。
+        if (target === undefined) throw new Error('「resources」域要指定资源清单文件');
+        const file = resolveTarget(target);
+        if (path.basename(file) !== 'RESOURCES.md') {
+          throw new Error(`「resources」域只认 RESOURCES.md 这一份文件，不读 ${path.basename(file)}`
+            + `（收到的是 ${file}）：要读别的文件请用对应的域。`);
+        }
+        const view = readFileView(file);
+        return { file, present: view.present, markdown: view.text, bytes: view.bytes };
+      }
+
       case 'misconceptions': {
         if (target === undefined) {
           return library(domain).subjects.map((subject) => ({

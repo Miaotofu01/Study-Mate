@@ -8,7 +8,7 @@
      unsupported JSON schema: schema.properties.跑.oneOf[0].properties.退出码.type
      must be a single type string (type arrays are not supported)
 
-   真 DSH 探针（`test_dsh_runtime.mjs`）没抓住它：那条探针只按名字查八个学习工具，而炸的是
+   真 DSH 探针（`test_dsh_runtime.mjs`）没抓住它：那条探针只按名字查九个学习工具，而炸的是
    实验域与任务域的 schema；而且注册是逐工具挂 `ctx.effect` 的，一个工具炸不代表整批查不到。
    所以这里**不看名字、直接逐个走 schema**，把宿主那套子集在门禁里重述一遍。
 

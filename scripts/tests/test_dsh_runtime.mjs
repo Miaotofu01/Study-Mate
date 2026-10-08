@@ -45,7 +45,7 @@ const modern = version => atLeastRelease(version, 1, 7);
 
    这一段验的是三件事，报告里也照这个口径写：
 
-     1. 插件在真 DSH 里加载后，八个 `studymate_*` 工具**在 ctx.tools 上按名字查得到**，
+     1. 插件在真 DSH 里加载后，九个 `studymate_*` 工具**在 ctx.tools 上按名字查得到**，
         而且模型侧投影里只有一句话说明（没有参数表）；
      2. 直接走**真 dispatch**（`ctx.tools.execute`，含参数校验与输出契约校验）调
         `studymate_workspace_context` / `studymate_validate_curriculum` /
@@ -66,6 +66,9 @@ const STUDY_TOOL_NAMES = [
   'studymate_renumber_lessons',
   'studymate_apply_empty_reasons',
   'studymate_export',
+  // #125：核验「资源清单」里的链接。它要发真网络请求，所以这一套只验「按名字注册得到、
+  // 模型侧投影只有一句话」；真实探测在 `test_reach_verify.mjs` 的 loopback 上验。
+  'studymate_verify_sources',
 ];
 
 const PROBE_TOOLS = [
@@ -95,7 +98,7 @@ async function probeNativeTools(app, home) {
 
   // 模型真正看到的那一份：只白名单 name / description / parameters，且说明只有一句
   const exposed = app.ctx.tools.schemas().filter((schema) => STUDY_TOOL_NAMES.includes(schema.name));
-  assert.equal(exposed.length, STUDY_TOOL_NAMES.length, '八个工具都要出现在模型侧投影里');
+  assert.equal(exposed.length, STUDY_TOOL_NAMES.length, '九个工具都要出现在模型侧投影里');
   for (const schema of exposed) {
     assert.deepEqual(Object.keys(schema).sort(), ['description', 'name', 'parameters'],
       `${schema.name} 的模型侧投影多了字段`);
@@ -686,7 +689,7 @@ if (process.argv.includes('--probe')) {
       // 原生加载的引擎就是包自身：技能、预设、schema 与数据骨架都在包里
       assert.equal(fs.existsSync(path.join(config.root, 'preset', 'learning', 'agent.cordis.yml')), true);
       assert.equal(fs.existsSync(path.join(config.root, 'preset', 'skills', 'learning-system', 'SKILL.md')), true);
-      // ① #68：插件在真 DSH 里加载后，八个原生工具注册得上、body 调得动、越权会抛
+      // ① #68：插件在真 DSH 里加载后，九个原生工具注册得上、body 调得动、越权会抛
       const tools = outcome.nativeTools;
       assert.ok(tools, `原生工具探针没跑：${JSON.stringify(outcome.studyMateWarnings || [])}`);
       assert.equal(tools.workspaceContext.path, tools.workspaceContext.path);

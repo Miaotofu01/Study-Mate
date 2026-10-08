@@ -149,7 +149,7 @@ test('预设里少了技能目录占位符就装不上（搬家没把这条守�
 
 test('工具与面板的注册面在预设之外（现状：标准预设的会话里也看得见）', async () => {
   // 这一段是**特征化**测试：它钉住的是宿主当前给得起的形状，不是理想形状。
-  // 口径（#104 之后）：这里钉的是**注册面**——`registerStudyMate` 那八个学习工具落在插件所在的
+  // 口径（#104 之后）：这里钉的是**注册面**——`registerStudyMate` 那九个学习工具落在插件所在的
   // profile 根 ctx 上，插件没有「按预设注册工具/面板」的接口可用。可见边界是另一件事：
   // 「答疑模式」预设住在 agent 作用域里，可以用 `ctx.tools.restrict({ deny })` 把**继承来的**
   // 那批原生工具从自己这条会话的工具面上收掉（`lib/tools/qa-preset.ts`）。两者不矛盾，
@@ -190,7 +190,7 @@ test('工具与面板的注册面在预设之外（现状：标准预设的会�
     fs.rmSync(temporary, { recursive: true, force: true });
   }
   assert.ok(injected.includes('tools'), '工具注册走的是插件自己的注入面，不经过预设');
-  // 注册面 = profile 根 ctx，判据是「八个学习工具按名字都查得到」——名字表以
+  // 注册面 = profile 根 ctx，判据是「九个学习工具按名字都查得到」——名字表以
   // lib/tools/index.ts 为唯一出处，这里不抄第二份。
   const { STUDY_TOOL_NAMES } = await import(pathToFileURL(path.join(ROOT, 'lib', 'tools', 'index.ts')).href);
   for (const name of STUDY_TOOL_NAMES) {

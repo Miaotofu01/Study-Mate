@@ -2,13 +2,13 @@
 
 **这份文件是给总控与角色按需读的参考，不是常驻指令**：参数表、返回形状、域边界、错误形状与旧命令对照都在这里；技能正文只留「这件事为什么要做、做到什么算好」。**别把它背进上下文**——要用哪个工具时再读它那一节。
 
-**唯一出处是代码**：八个学习数据工具在 [`lib/tools/index.ts`](../../../../lib/tools/index.ts) 的注册点注册，名字表 `STUDY_TOOL_NAMES` 与注册顺序同在那一份里（另有任务域五个与实验域一个，见各自的目录）。本文件与代码不一致时以代码为准，并回来改这一份。
+**唯一出处是代码**：九个学习数据工具在 [`lib/tools/index.ts`](../../../../lib/tools/index.ts) 的注册点注册，名字表 `STUDY_TOOL_NAMES` 与注册顺序同在那一份里（另有任务域五个与实验域一个，见各自的目录）。本文件与代码不一致时以代码为准，并回来改这一份。
 
 ## 一、先读这一节：宿主差异
 
 | 宿主 | 怎么执行 |
 |---|---|
-| **DSH** | 有原生工具：直接调下面这八个 `studymate_*`（以及任务域五个、实验域一个），拿结构化返回 |
+| **DSH** | 有原生工具：直接调下面这九个 `studymate_*`（以及任务域五个、实验域一个），拿结构化返回 |
 | **Antigravity / Codex / ChatGPT Work** | **没有原生工具，也没有引擎脚本**——下面这些名字在那些宿主里一个都不存在。正文里点名它们的地方，导出时已换成**本宿主的做法**：按 `<root>/schemas/*.schema.json` 与技能里的格式要求逐项自查，并把自查结论如实报出；导出走 `npx -y @yunmiao/studymate@latest export`。映射表在两个适配器的 `NATIVE_TOOL_FALLBACK`，导出稿由各自的「宿主约定」写明这一点 |
 
 无头侧**不要把工具名当成能调用的东西**，也不要假装调用过；缺的能力按宿主约定如实说明。
@@ -29,6 +29,7 @@
 | `studymate_renumber_lessons` | **`subject`**（科目目录或 slug）、`dryRun?` | 大纲插/删节点之后重排课件位次；不确定就先 `dryRun` 只算不改 |
 | `studymate_apply_empty_reasons` | **`subject`**、**`node`**（节点 id）、**`reasons`**（数组：每项一个 `anchor` 与它的 `reason`，锚点与正文逐字匹配）、`dryRun?` | 出题角色交回无题理由时：把 `empty_reason:` 打进内容文件（**别手工开文件改**） |
 | `studymate_export` | `subject?`（slug；省略＝全部科目） | 学生要一份能离线看的；**#82 落地前是占位**，见 §9 |
+| `studymate_verify_sources` | **`manifest`**（「资源清单」的路径：`RESOURCES.md` 本身、含它的科目目录，或暂存目录里的 `deliver/RESOURCES.md`）、`offline?`（只用缓存、不发请求）、`refresh?`（忽略缓存重核） | 角色交回清单、或搬进科目之后：把清单里的链接并发探一遍，报出打得开／打不开，结论按 URL 记在插件缓存里（再核只补增量）。`offline` 时一个请求都不发；`refresh` 时忽略缓存重核 |
 | `studymate_lab_run` | **`subject`**（slug）、**`node`**（节点 id）、**`question`**（题 id：`<锚点文本>#<题号>`）、`cwd?`（相对这一课的 lab 实验目录，默认 `.`）、`writable?`（数组：声明这次会写的相对路径）、`predicted?`（学生先写下的预测）、`selfAssessment?`（`答对了` / `答了一半` / `没答上`，**只有学生能选**） | 判分三轨的第三轨（规格 §7.3）：`交付物` 题要**可运行证据**时，Host 半在学生本机上代跑那道题里**声明过的**命令。读 §3 的那一节，先看清「命令从哪来」与边界 |
 
 > 任务域（`studymate_task_status` / `_wait` / `_cancel` / `_destroy` / `_resume`）不在本表：那是插件自己跑的后台工作（导出、格式转换、索引重建）的句柄，契约见 `lib/tasks/tools.ts`。它只有一条常驻纪律——**状态查询从不阻塞，等待有上限，超时会告诉你下一步**。
@@ -38,8 +39,8 @@
 **它不在上面那张表里，也不在学习会话的工具面上**：它由「答疑模式」预设那条插件行
 （[`lib/tools/qa-preset.ts`](../../../../lib/tools/qa-preset.ts)）注册进**预设自己的作用域**，
 只有阅读端右栏那条答疑会话看得见（`local-qa` 那条链上唯一的工具）。名字表在
-[`lib/tools/index.ts`](../../../../lib/tools/index.ts) 的 `QA_TOOL_NAMES`，与学习面那八条并列、
-不混——**别把它当成总控能调的第九个工具**。
+[`lib/tools/index.ts`](../../../../lib/tools/index.ts) 的 `QA_TOOL_NAMES`，与学习面那九条并列、
+不混——**别把它算进总控能调的那批工具**。
 
 | 工具 | 参数 | 什么时候用 |
 |---|---|---|
@@ -121,6 +122,22 @@ apply_empty_reasons → { subject, node, file, dryRun, ok,
 - `duplicates` 与 `untouched` 是**如实报出的不确定**（同名两份、认不出的命名），不是静默跳过。
 - `ok: false` 时看 `problems` 与 `summary`，别把它当"跑完了"。
 
+### `studymate_verify_sources`
+
+```text
+{ manifest, total, ok, failed, cached, probed, pending,
+  route: '直连' | '代理' | '未探',
+  hosts: [ { host, entries, ok, failed } ],
+  failures: [ { line, url, status, note } ],
+  summary, next, cache }
+```
+
+- `failures` 只列**这一轮真探过且打不开**的那几条（`line` 是清单里 1 起的行号、`status` 是 HTTP 状态码或 0、`note` 是一句原因）；缓存里带回来的旧结论**不在这里**，要全量明细去读 `cache` 指的台账。
+- `cached` 是这一轮直接用的缓存条数，`probed` 是真发出去的条数，`pending` 是没轮到的。`route` 是这一轮实际走的路：先直连，**连接层**失败（DNS／连接被拒／证书）且有代理才换代理，换通了就把表用到队尾；HTTP 4xx／5xx 不换路。
+- `pending > 0` 时 `next` 会让你**用同一个 manifest 再调一次**——缓存让第二遍只探剩下的；都探完还有打不开的，`next` 会叫你去掉或换成等价来源。
+- **返回值刻意短**：不列 118 条明细。宿主对工具结果有 8192 字符的截断，长清单的逐条明细会被悄悄切掉（读起来像"只核了前 60 条"），所以明细留在缓存里、报告只给计数与打不开的那几条。
+- `offline: true` 时不发一个请求：只拿缓存里还新鲜的结论，其余原样进 `pending`。
+
 ## 四、域声明表与「越权即抛」
 
 每个工具在定义里**写死**自己读哪些域、写哪个域的哪些字段（`lib/host/domains.ts` 是域词表）。**声明之外的读写当场抛 `DomainViolationError`**——不是文档约定，是执行点：写越权时回调一次都不跑。
@@ -135,9 +152,10 @@ apply_empty_reasons → { subject, node, file, dryRun, ok,
 | `studymate_renumber_lessons` | workspace / curriculum / lessons | `lessons/*` |
 | `studymate_apply_empty_reasons` | workspace / curriculum / lessons | `lessons/*#empty_reason` |
 | `studymate_export` | —（一份学习数据都不读） | `export/**` |
+| `studymate_verify_sources` | workspace / resources（只读 `RESOURCES.md` 这一份清单） | —（结论缓存落在 `<DSH_HOME>/studymate/reach/cache.json`，那不是学习数据的域） |
 | `studymate_lab_run` | workspace / pool / lab / attempts | `attempts/**`（只写「跑」那一格，走 `lib/attempts.ts` 的栅栏） |
 
-域词表（`DOMAINS`）：`workspace`（路径、配置、今天、时区、找科目）、`memory`、`subjects`、`curriculum`、`progress`、`lessons`、`pool`、`assets`、`records`、`reference`（学生自加的资料，ADR-0010）、`misconceptions`、`lab`（`subjects/<slug>/lab/<NNNN>-<短名>/`，读它要同时给 `node`）、`attempts`（`subjects/<slug>/attempts/<NNNN>-<节点id>.json`，读它也要给 `node`）、`handoff`、`export`（**只写**，读它会抛）。新增一个域要同时改域词表与 vault 的读法——词表、guard 与读法的实现在 `lib/host/{domains,access,vault}.ts`（`lib/tools/` 下那三份只做转发，别再往转发处加逻辑）。
+域词表（`DOMAINS`）：`workspace`（路径、配置、今天、时区、找科目）、`memory`、`subjects`、`curriculum`、`progress`、`lessons`、`pool`、`assets`、`records`、`reference`（学生自加的资料，ADR-0010）、`misconceptions`、`lab`（`subjects/<slug>/lab/<NNNN>-<短名>/`，读它要同时给 `node`）、`attempts`（`subjects/<slug>/attempts/<NNNN>-<节点id>.json`，读它也要给 `node`）、`handoff`、`export`（**只写**，读它会抛）、`resources`（`RESOURCES.md` 这一份，科目目录里或暂存目录的 `deliver/` 下；不认别的文件名）。新增一个域要同时改域词表与 vault 的读法——词表、guard 与读法的实现在 `lib/host/{domains,access,vault}.ts`（`lib/tools/` 下那三份只做转发，别再往转发处加逻辑）。
 
 **对技能的意味**：一个工具读不到的东西，就是它**不该**碰的东西。需要越界时不是绕开 guard，而是把域加进工具定义——那是改代码，不是改提示词。
 
@@ -145,7 +163,7 @@ apply_empty_reasons → { subject, node, file, dryRun, ok,
 
 - 工具可以声明 `requires: ['model']`。**没有可用模型时它不跑 body**，直接返回 `{ available: false, reason }`——这是**协商结果，不是失败**：别的工具照常可用，阅读端仍能读、能导出。
 - 调用方拿到这个形状时：把 `reason` 如实告诉学生，换一条不依赖模型的路，别重试、别假装答过。
-- **今天八个工具都没有声明 `requires`**（它们都是纯数据操作）；机制在 `lib/tools/define.ts`，将来需要模型的工具按它协商。
+- **今天这九个工具都没有声明 `requires`**：这批里只有核验那个（`studymate_verify_sources`）会发网络请求，其余都是纯数据操作，核验那个也不需要模型，所以一个都不协商；机制在 `lib/tools/define.ts`，将来需要模型的工具按它协商。
 
 ## 六、错误形状
 

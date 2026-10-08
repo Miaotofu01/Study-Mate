@@ -175,7 +175,7 @@ test('答疑预设的工具面行把 profile 根的原生工具全部 deny 掉�
     assert.ok(filter.deny.includes(name), `${name} 必须被 deny 掉`);
   }
   assert.deepEqual([...filter.deny].sort(), [...PROFILE_ROOT_TOOL_NAMES].sort(),
-    'profile 根注册的 StudyMate 工具一个都不留（八个学习工具 + 任务 + 实验）');
+    'profile 根注册的 StudyMate 工具一个都不留（九个学习工具 + 任务 + 实验）');
 
   // 只读工具落在本作用域：它不受上面那条 restriction 影响，必须注册成功
   assert.deepEqual([...definitions.keys()], [LESSON_READ_TOOL_NAME]);
@@ -184,14 +184,14 @@ test('答疑预设的工具面行把 profile 根的原生工具全部 deny 掉�
   assert.deepEqual([...definition.declaration.reads], ['lessons', 'pool']);
   assert.equal(definition.parameters.required.includes('node'), true);
 
-  // 它**不**进那八个原生工具的面（registerStudyMate 的清单一字不动）
-  assert.equal(STUDY_TOOL_NAMES.length, 8);
+  // 它**不**进那九个原生工具的面（registerStudyMate 的清单一字不动）
+  assert.equal(STUDY_TOOL_NAMES.length, 9);
   assert.ok(!STUDY_TOOL_NAMES.includes(LESSON_READ_TOOL_NAME));
 });
 
-test('原生工具没在注册名册里时退到八个学习工具再试一次，并给出可读警告', async () => {
+test('原生工具没在注册名册里时退到九个学习工具再试一次，并给出可读警告', async () => {
   const { restrictCalls, warnings } = await mountQa({ failFirstRestrict: true });
-  assert.equal(restrictCalls.length, 2, '第一遍失败后要退到八个学习工具再试');
+  assert.equal(restrictCalls.length, 2, '第一遍失败后要退到九个学习工具再试');
   assert.deepEqual([...restrictCalls[1].deny].sort(), [...STUDY_TOOL_NAMES].sort());
   assert.equal(warnings.length, 1, '退化要如实说，不静默');
   assert.match(warnings[0], /答疑模式/);

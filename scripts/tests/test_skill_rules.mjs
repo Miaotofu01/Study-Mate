@@ -410,6 +410,7 @@ const RULES = {
     ['本地教材转完留 Local 指针 + 一行用途（PR #27 起就在，本轮补钉）', '`- [Local: 教材名](reference/<文件名>.md)`'],
     ['检索与转换并行（派完自己先做检索，去重后只剩这一处）', '自己先做第 1 步的检索，两边并行'],
     ['缺一项不算一条：第三项对三类来源各写什么', '网页来源写 `url`；本地教材写 `reference/…` 指针'],
+    ['交稿前用 studymate_verify_sources 核一遍清单里的链接', '`studymate_verify_sources`'],
   ],
   'image-scout': [
     ['输入节标题统一', '## 输入（总控在 prompt 里给）'],
