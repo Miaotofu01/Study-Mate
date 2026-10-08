@@ -107,3 +107,69 @@ export function resourceSections(markdown: string): ResourceSection[] {
   });
   return out;
 }
+
+/* ── 条目：每条来源服务哪几个节点 ───────────────────────────────────────── */
+
+/** 一条来源条目。行号 1 起，与校验器的 `line` 口径一致。 */
+export interface ResourceEntry {
+  /** 这一条所在行的 1 起行号。 */
+  line: number;
+  /** 所属小节标题。 */
+  heading: string;
+  /** 这一条声明的服务节点（去重、按出现序）；没写就是空数组。 */
+  nodes: string[];
+}
+
+/** 条目行末的「服务」标记：`… · 服务 node.a、node.b`（`·` 也认 `・` 与 `|`）。 */
+const SERVE_RE = /[·・|]\s*服务[：:]?\s*(.+?)\s*$/;
+
+/** 标记里的节点列表：`、`／`，`／`,`／空白 都算分隔。 */
+function servedNodes(line: string): string[] {
+  const marker = SERVE_RE.exec(line);
+  if (marker === null) return [];
+  const out: string[] = [];
+  for (const token of (marker[1] ?? '').split(/[、，,\s]+/)) {
+    if (token === '' || out.includes(token)) continue;
+    out.push(token);
+  }
+  return out;
+}
+
+/**
+ * 摘出清单里的条目（顶格列表项）与它声明的服务节点。
+ *
+ * 只做「哪一行、属于哪一节、服务哪些节点」——**节点是否真在大纲里、id 形状对不对**都是
+ * 校验器的判断（这里不认大纲，也不悄悄丢掉认不出的 token）。`## Gaps` 里的条目也是条目，
+ * 由调用方按标题筛；**第一处 `##` 之前的引言里就算有列表项也不算条目**（那里是这份文件的
+ * 定位说明，不是资源）。
+ */
+export function resourceEntries(markdown: string): ResourceEntry[] {
+  const lines = splitLines(markdown);
+  const fenced = fenceFlags(lines);
+  const out: ResourceEntry[] = [];
+  for (const section of resourceSections(markdown)) {
+    for (let index = section.from; index < section.to; index += 1) {
+      if (fenced[index]) continue;
+      const line = lines[index] ?? '';
+      if (!ITEM_RE.test(line)) continue;
+      out.push({
+        line: index + 1,
+        heading: section.heading,
+        nodes: servedNodes(line),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * 这一节算不算「来源条目」。
+ *
+ * 清单是**给学生的延伸阅读 + 易变内容的官方核对来源**两部分，所以社区与缺口不算来源：
+ * 社区不是知识来源，缺口记的是「没有来源」这件事本身。别的小节一律算来源（新增一节
+ * 就会被算进覆盖率，不会悄悄漏掉）。
+ */
+export function isSourceSection(heading: string): boolean {
+  return !/^(wisdom|gaps)\b/i.test(heading.trim()) && !/社区|缺口/.test(heading);
+}
+

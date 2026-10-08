@@ -39,7 +39,8 @@ const DECLARATIONS = {
     writes: {},
   },
   studymate_validate_curriculum: {
-    reads: ['workspace', 'curriculum', 'progress', 'subjects'],
+    // #130：「资源清单」的覆盖率也在这一支（读大纲拿节点 id、读清单拿条目），所以多一个域。
+    reads: ['workspace', 'curriculum', 'progress', 'subjects', 'resources'],
     writes: {},
   },
   studymate_validate_lesson: {

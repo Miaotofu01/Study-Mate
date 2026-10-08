@@ -22,7 +22,7 @@
 | 工具 | 参数 | 什么时候用 |
 |---|---|---|
 | `studymate_workspace_context` | `subject?`（slug；省略＝全部科目） | **开场只调这一次**：拿工作区路径、今天、科目现状、最近学习记录、共享记忆与可用能力 |
-| `studymate_validate_curriculum` | **`paths`**（数组：数据文件或科目目录） | 大纲／进度／科目档案写完、角色报回规模之后核对；给目录就校验它的三份数据文件 |
+| `studymate_validate_curriculum` | **`paths`**（数组：数据文件、`RESOURCES.md` 或科目目录） | 大纲／进度／科目档案写完、角色报回规模之后核对；给目录就校验它的三份数据文件，**并在「资源清单」在盘上时一并判覆盖率**（每个节点至少一处来源、条数不超过节点数 × 2，全是提示） |
 | `studymate_validate_lesson` | **`paths`**（数组：内容文件、`lessons/` 目录或科目目录）、`subject?`（用来取这一课的标题） | 内容文件与题库写完、搬入之后过内容层：格式、锚点四态对账、图片存在性 |
 | `studymate_validate_pool` | **`paths`**（数组：科目目录或它的 `assets/img/pool.md`） | 采图角色交回、或讲解自产图追加索引之后 |
 | `studymate_validate_handoff` | **`stage`**（暂存目录）、**`role`**（期望的角色名）、`node?`（节点级任务给节点 id） | **任何 `deliver/` 合并之前**：交接边界过不过 |
@@ -106,6 +106,7 @@
 - `problems` 每条带 `file` 与 `line`（1 起），`blocking: true` 是阻断、`false` 是提示——**打回按它，不按你自己的判断**。
 - `validate_lesson` 另给两份对账清单：`anchors: [{ text, resolution, line, keys }]`（`resolution` 四态：`resolved` / `stale` / `ambiguous` / `missing`，**多匹配绝不静默取第一个**）与 `orphans: [{ key, line, count }]`（题库里没有对应锚点的键）。
 - 空值口径：没问题时 `problems: []`、`blockingCount: 0`、`summary: "放行——没有问题"`；文件不存在是**一条阻断问题**（`line: 1`），不是异常。
+- `validate_curriculum` 给科目目录（或 `RESOURCES.md` 本身）时，`reports` 里可能多一份 `kind: 'resources'`：判的是**「资源清单」对大纲节点的覆盖率**——每条来源在行末写 `· 服务 node.id`（多条用「、」分隔），于是「还有 N 个节点指不出一处来源」与「条数超过节点数 × 2」都报得出来。这几条**全是提示**（`blocking: false`）：这个标记是新加的写法，现存清单一条都没有，判成阻断等于升级即整片变红——但看到它们就该派「资料收集」补收集，别自己数。那一份报告另带 `hosts`（**站点分布，只报不卡**：`[ { host, entries } ]`，如「7 个站点——oi-wiki 12 条」）。
 - `validate_handoff` 的形状不同：`{ stage, verdict: 'pass' | 'block', blocking, blockingCount, role: string | null, outputs: <产物条数>, sections: [ { heading, entries, hosts: [ { host, entries } ], sha256, verified } ], summary, problems }`。`verdict: 'block'` 时**不搬、不删 stage**。
   - `sections` 是 `deliver/RESOURCES.md` 的**逐节摘要**（`##` 小节，标题行原文）：这一节几条、来自哪些域名、内容指纹、以及**这一份内容核过没有**。不是资源清单的交接就是 `[]`。总控要的「几节、几条、都来自哪些站点」看这里，**不必把清单读进上下文**。
   - `verified` 问的是核验工具的指纹台账（插件私有），不是角色说了什么；**按节冻结**：某一节已定稿、`verified: true`，采图与课设就能被派出去，不必等整份核完。
@@ -149,7 +150,7 @@ apply_empty_reasons → { subject, node, file, dryRun, ok,
 | 工具 | 读域 | 写字段 |
 |---|---|---|
 | `studymate_workspace_context` | workspace / memory / subjects / curriculum / progress / records | — |
-| `studymate_validate_curriculum` | workspace / curriculum / progress / subjects | — |
+| `studymate_validate_curriculum` | workspace / curriculum / progress / subjects / resources（`resources` 只读 `RESOURCES.md` 这一份清单） | — |
 | `studymate_validate_lesson` | workspace / curriculum / lessons / pool / assets | — |
 | `studymate_validate_pool` | workspace / assets | — |
 | `studymate_validate_handoff` | handoff（只读盘上快照）／ resources（`deliver/RESOURCES.md` 这一份，只为逐节摘要） | — |

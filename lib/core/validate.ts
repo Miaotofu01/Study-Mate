@@ -1,8 +1,9 @@
 /* ─────────────────────────────────────────────────────────────────────────
-   StudyMate · 纯函数域 —— 四类校验
+   StudyMate · 纯函数域 —— 数据层校验与交接门禁
 
    目标态规格 §10.1 的「数据层门禁」：`schemas/*.json` 校验、引用完整性、大纲 DAG 无环与
-   位次不倒挂、实验课前置非空；外加 Agent 交接协议那道机器门禁。这一层把四类校验都做成
+   位次不倒挂、实验课前置非空；外加 Agent 交接协议那道机器门禁，以及「资源清单」对大纲节点的
+   覆盖率（「够了」的判据）。这一层把这几类校验都做成
    **纯函数**：出入都是已经解析好的值 + 调用方注入的盘上快照，**不碰文件系统**
    （`decisions.md` §2）。好处是每一条规则都能拿内联字符串当输入断言，现造即弃。
 
@@ -20,6 +21,8 @@ import type { PositionHit } from './yamlpos.ts';
 import { indexJson, JsonSyntaxError } from './jsonpos.ts';
 // 进度词表（三档 + 旧六档映射）的唯一实现在规则层；这里只读它的判据，不另写一份
 import { LEGACY_TIERS, LEGACY_TIER_MAP, isTier } from './rules.ts';
+// 「资源清单」的分节与条目解析在 resources.ts（纯函数，无依赖）；这里只做覆盖率判断
+import { isSourceSection, resourceEntries } from './resources.ts';
 
 /* ── 统一的回报形状 ───────────────────────────────────────────────────── */
 
@@ -559,7 +562,102 @@ export function validateSubject(input: SubjectInput): ValidationReport {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   四、交接门禁（Agent 交接协议 + deliver/ 盘上快照）
+   四、资源清单的覆盖率（「够了」的判据）
+   ══════════════════════════════════════════════════════════════════════ */
+
+export interface ResourcesInput {
+  /** 调用方注入的展示路径，进 `StudyProblem.file`。 */
+  file: string;
+  /** 「资源清单」的正文。 */
+  markdown: string;
+  /** 大纲里的节点 id（顺序照大纲）。 */
+  nodeIds: readonly string[];
+}
+
+/** 清单条数的上限倍数：超过「节点数 × 这个数」就是膨胀（实测五门科目是节点数的 2.8–7.1 倍）。 */
+export const RESOURCE_ENTRY_LIMIT = 2;
+
+/**
+ * 「够了」的机器判据：**每个节点至少一处来源**（不少）、**条数不超过节点数 × 2**（不膨胀）。
+ *
+ * 判据全落在**提示**（`blocking: false`）上，不阻断——「服务 <节点 id>」这个标记是这一批
+ * 新加的写法，现存清单一条都没有；判成阻断等于升级即整片变红（与图片完整性那一条同一个
+ * 口径）。总控看这几条提示决定要不要派「资料收集」补收集。
+ *
+ * 站点分布**不在这里**报：它在交接门禁的 `sections[].hosts` 里（只报不卡，见 #129）。
+ */
+export function validateResources(input: ResourcesInput): ValidationReport {
+  const problems: StudyProblem[] = [];
+  const entries = resourceEntries(input.markdown).filter((entry) => isSourceSection(entry.heading));
+  const known = new Set(input.nodeIds);
+  const served = new Set<string>();
+  const unknown = new Set<string>();
+  let unmarked = 0;
+
+  for (const entry of entries) {
+    if (entry.nodes.length === 0) {
+      unmarked += 1;
+      continue;
+    }
+    for (const node of entry.nodes) {
+      if (known.has(node)) {
+        served.add(node);
+      } else if (!unknown.has(node)) {
+        unknown.add(node);
+        problems.push({
+          file: input.file,
+          line: entry.line,
+          message: `「服务」里写了不存在的节点 id: ${node}（节点 id 照「课程大纲」，别自己造）`,
+          blocking: false,
+        });
+      }
+    }
+  }
+
+  const missing = input.nodeIds.filter((id) => !served.has(id));
+  if (missing.length > 0) {
+    problems.push({
+      file: input.file,
+      line: 1,
+      message: `还有 ${missing.length} 个节点指不出一处来源（共 ${input.nodeIds.length} 个节点）：${missing.join('、')}`,
+      blocking: false,
+    });
+    for (const node of missing) {
+      problems.push({
+        file: input.file,
+        line: 1,
+        message: `节点 ${node} 指不出一处来源：清单里没有任何一条声明「服务 ${node}」`,
+        blocking: false,
+      });
+    }
+  }
+
+  const limit = input.nodeIds.length * RESOURCE_ENTRY_LIMIT;
+  if (entries.length > limit) {
+    problems.push({
+      file: input.file,
+      line: 1,
+      message: `清单条目 ${entries.length} 条 > 节点数 ${input.nodeIds.length} × ${RESOURCE_ENTRY_LIMIT} = ${limit}：`
+        + '清单在膨胀——每条来源都该服务到节点，别拿条目充长度',
+      blocking: false,
+    });
+  }
+
+  if (unmarked > 0) {
+    problems.push({
+      file: input.file,
+      line: 1,
+      message: `${unmarked} 条来源条目没写「服务 <节点 id>」（条目行末加 \`· 服务 node.id\`，多条用「、」分隔）：`
+        + '它们不参与覆盖率',
+      blocking: false,
+    });
+  }
+
+  return summarize(input.file, problems);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   五、交接门禁（Agent 交接协议 + deliver/ 盘上快照）
    ══════════════════════════════════════════════════════════════════════ */
 
 /** `deliver/` 与 `handoff.json` 的盘上快照。由调用方走盘得到——这一层不碰文件系统。 */

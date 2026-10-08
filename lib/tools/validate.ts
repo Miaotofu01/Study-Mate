@@ -5,7 +5,9 @@
    （文件 + 行号 + 是否阻断）与一句明确结论，不是 exit code。校验逻辑一行都不在这里重写：
 
      · `studymate_validate_curriculum` → `lib/core/validate.ts` 的 validateCurriculum /
-       validateProgress / validateSubject（按文件名分派；也可以直接给科目目录，一次校验三份）
+       validateProgress / validateSubject（按文件名分派；也可以直接给科目目录，一次校验三份）。
+       给科目目录（或 `RESOURCES.md` 本身）时另判**「资源清单」对大纲节点的覆盖率**：每个节点
+       至少一处来源、条数不超过节点数 × 2（#130，判据全在提示上，不阻断）
      · `studymate_validate_lesson`     → `lib/core/lesson.ts` 的 parseLesson（内容格式 +
        锚点四态对账 + 图片存在性；DOM 结构检查随静态渲染一起退役）
      · `studymate_validate_pool`       →迁移前的 Python 图片库校验器的**行为移植**（图片库索引
@@ -24,11 +26,12 @@
 import path from 'node:path';
 
 import {
-  validateCurriculum, validateHandoff, validateProgress, validateSubject,
+  validateCurriculum, validateHandoff, validateProgress, validateResources, validateSubject,
 } from '../core/validate.ts';
 import type { HandoffSection, StudyProblem, ValidationReport } from '../core/validate.ts';
-import { decodeImageSrc, FormatProblems } from '../core/format.ts';
+import { decodeImageSrc, FormatProblems, cmpCodePoints } from '../core/format.ts';
 import { parseLesson, poolJsonError, reportPoolShape } from '../core/lesson.ts';
+import { isSourceSection } from '../core/resources.ts';
 import { fingerprintSections, sectionLine } from '../reach/sections.ts';
 import { loadVerified } from '../reach/cache.ts';
 import { joinPath, lessonFilesUnder, pathFactsOf, resolveGiven } from './paths.ts';
@@ -140,8 +143,11 @@ const DATA_FILES = [
   { name: 'subject.yaml', kind: 'subject' },
 ];
 
+const RESOURCES_FILE = 'RESOURCES.md';
+
 function kindOfFile(file: string): string | null {
   const base = path.basename(file);
+  if (base === RESOURCES_FILE) return 'resources';
   const found = DATA_FILES.find((entry) => entry.name === base);
   return found === undefined ? null : found.kind;
 }
@@ -155,12 +161,53 @@ function nodeIdsOf(curriculum: unknown): string[] {
     .filter((id): id is string => typeof id === 'string');
 }
 
+/**
+ * 「资源清单」的覆盖率报告（#130）：读清单拿条目、读大纲拿节点 id。
+ *
+ * 返回 `null` = **没什么可判**：清单不在（它由「资料收集」在建课早期产出，工作区里可能
+ * 还没有）、大纲不在或读不出节点（那三份数据文件那边已经各自报过问题了）。这时候不编一份
+ * 空报告——「没得判」与「判过没问题」是两件事。
+ *
+ * 报告里另带一份 `hosts`（**站点分布，只报不卡**）：来自核验域的分节摘取，聚合的是
+ * 「来源条目」那几节——总控要的「几节、几条、都来自哪些站点」在这一份报告里看全。
+ */
+function resourcesReport(access: DomainAccess, file: string): Record<string, unknown> | null {
+  const view = access.read<{ file: string; present: boolean; markdown: string }>('resources', file);
+  if (!view.present) return null;
+  const curriculum = access.read<YamlView>('curriculum', joinPath(path.dirname(view.file), 'curriculum.yaml'));
+  if (!curriculum.present) return null;
+  const nodeIds = nodeIdsOf(curriculum.value);
+  if (nodeIds.length === 0) return null;
+  const report = validateResources({ file: view.file, markdown: view.markdown, nodeIds });
+
+  const counts = new Map<string, number>();
+  for (const section of fingerprintSections(view.markdown)) {
+    if (!isSourceSection(section.heading)) continue;
+    for (const row of section.hosts) counts.set(row.host, (counts.get(row.host) ?? 0) + row.entries);
+  }
+  const hosts = [...counts.entries()]
+    .map(([host, entries]) => ({ host, entries }))
+    .sort((a, b) => (b.entries - a.entries) || cmpCodePoints(a.host, b.host));
+  const base = reportOf(view.file, 'resources', report.problems);
+  if (hosts.length === 0) return { ...base, hosts };
+  const shown = hosts.slice(0, 5).map((row) => `${row.host} ${row.entries} 条`).join('、');
+  return {
+    ...base,
+    hosts,
+    summary: `${String(base.summary)}；站点分布（只报不卡）：${hosts.length} 个站点——${shown}`
+      + `${hosts.length > 5 ? '…' : ''}`,
+  };
+}
+
 async function validateOneDataFile(access: DomainAccess, file: string): Promise<Record<string, unknown>> {
   const kind = kindOfFile(file);
   if (kind === null) {
     return reportOf(file, 'unknown', [blockingProblem(file, 1,
       '认不出这份文件该按哪类校验——数据层只有 curriculum.yaml / progress.yaml / subject.yaml '
-      + '三份（也可以直接给科目目录）')]);
+      + '三份与 RESOURCES.md（也可以直接给科目目录）')]);
+  }
+  if (kind === 'resources') {
+    return resourcesReport(access, file) ?? reportOf(file, kind, []);
   }
   if (kind === 'curriculum') {
     const view = access.read<YamlView>('curriculum', file);
@@ -210,7 +257,7 @@ function dataFilesIn(access: DomainAccess, dir: string): { files: string[]; prob
 export function validateCurriculumTool(): StudyToolSpec {
   return {
     name: 'studymate_validate_curriculum',
-    description: '校验科目数据文件（大纲、进度、科目档案），逐条回报文件、行号与是否阻断。',
+    description: '校验科目数据文件（大纲、进度、科目档案）与「资源清单」对节点的覆盖率，逐条回报文件、行号与是否阻断。',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -223,7 +270,7 @@ export function validateCurriculumTool(): StudyToolSpec {
         },
       },
     },
-    reads: ['workspace', 'curriculum', 'progress', 'subjects'],
+    reads: ['workspace', 'curriculum', 'progress', 'subjects', 'resources'],
     output: {
       schema: {
         type: 'object',
@@ -236,7 +283,20 @@ export function validateCurriculumTool(): StudyToolSpec {
               type: 'object',
               additionalProperties: false,
               required: ['file', 'kind', 'summary', 'blocking', 'blockingCount', 'problems'],
-              properties: { kind: TEXT, ...REPORT_KEYS },
+              properties: {
+                kind: TEXT,
+                ...REPORT_KEYS,
+                // #130：只有 `kind: 'resources'` 那一份带它（站点分布，只报不卡）。
+                hosts: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['host', 'entries'],
+                    properties: { host: TEXT, entries: INTEGER },
+                  },
+                },
+              },
             },
           },
           blocking: { type: 'boolean' },
@@ -264,6 +324,9 @@ export function validateCurriculumTool(): StudyToolSpec {
             reports.push(reportOf(problem.file, 'missing', [problem]));
           }
           for (const file of files) reports.push(await validateOneDataFile(run.access, file));
+          // 「资源清单」是第四份（可选）：在就一并判覆盖率，不在就不编一份空报告。
+          const resources = resourcesReport(run.access, joinPath(facts.path, RESOURCES_FILE));
+          if (resources !== null) reports.push(resources);
         } else {
           reports.push(await validateOneDataFile(run.access, facts.path));
         }
