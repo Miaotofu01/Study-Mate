@@ -573,6 +573,23 @@ export interface StageEntry {
   target?: string;
 }
 
+/** 一节资源的规模与指纹（`RESOURCES.md` 的一节）。
+ *
+ *  由调用方算好递进来，因为算指纹要 `node:crypto`（纯函数域不许碰），而分节与「指纹的
+ *  输入文本」在 `lib/core/resources.ts` 里定义一次、核验域与这里共用同一份。 */
+export interface HandoffSection {
+  /** `## ` 之后的标题正文。 */
+  heading: string;
+  /** 这一节的条目数。 */
+  entries: number;
+  /** 按域名的分布（只报不卡）。 */
+  hosts: { host: string; entries: number }[];
+  /** 这一节内容（含标题行）的 SHA-256，十六进制小写。 */
+  sha256: string;
+  /** 这一份指纹在核验台账里有没有记录。 */
+  verified: boolean;
+}
+
 export interface HandoffInput {
   stagePath: string;
   manifestText: string;
@@ -581,6 +598,8 @@ export interface HandoffInput {
   /** 不传 = 科目级任务，此时 manifest 的 `node_id` 必须是 `null`。 */
   expectedNode?: string | null;
   schema: unknown;
+  /** `deliver/RESOURCES.md` 的分节摘要；不是资源清单的交接就不传（= 空列表）。 */
+  sections?: readonly HandoffSection[];
 }
 
 export interface HandoffVerdict {
@@ -592,6 +611,8 @@ export interface HandoffVerdict {
   summary: string;
   role: string | null;
   outputs: number;
+  /** 逐节的规模、出处与指纹；总控看这份摘要就不必把清单读进上下文。 */
+  sections: HandoffSection[];
 }
 
 const DRIVE_RE = /^[A-Za-z]:/;
@@ -620,6 +641,7 @@ export function validateHandoff(input: HandoffInput): HandoffVerdict {
   const byPath = new Map<string, StageEntry>();
   for (const entry of input.entries) byPath.set(entry.path, entry);
 
+  const sections = input.sections ?? [];
   const block = (file: string, line: number, message: string, column?: number): void => {
     problems.push({ file, ...withColumn(line, column), message, blocking: true });
   };
@@ -637,7 +659,7 @@ export function validateHandoff(input: HandoffInput): HandoffVerdict {
 
   const manifestReadable = manifestEntry !== undefined && manifestEntry.kind === 'file';
   if (!manifestReadable) {
-    return finishHandoff(stage, problems, null, 0);
+    return finishHandoff(stage, problems, null, 0, sections);
   }
 
   let positions: ReturnType<typeof indexJson> | null = null;
@@ -646,7 +668,7 @@ export function validateHandoff(input: HandoffInput): HandoffVerdict {
   } catch (error) {
     if (error instanceof JsonSyntaxError) {
       block(manifestFile, error.line, `${HANDOFF} 不是合法 JSON：${error.message}`, error.column);
-      return finishHandoff(stage, problems, null, 0);
+      return finishHandoff(stage, problems, null, 0, sections);
     }
     throw error;
   }
@@ -661,7 +683,7 @@ export function validateHandoff(input: HandoffInput): HandoffVerdict {
     manifest = JSON.parse(input.manifestText);
   } catch (error) {
     block(manifestFile, 1, `${HANDOFF} 不是合法 JSON：${(error as Error).message}`);
-    return finishHandoff(stage, problems, null, 0);
+    return finishHandoff(stage, problems, null, 0, sections);
   }
 
   const lookup: Lookup = (path) => positions.at(path);
@@ -669,7 +691,7 @@ export function validateHandoff(input: HandoffInput): HandoffVerdict {
 
   if (!isPlainObject(manifest)) {
     block(manifestFile, 1, `${HANDOFF} 顶层必须是对象`);
-    return finishHandoff(stage, problems, null, 0);
+    return finishHandoff(stage, problems, null, 0, sections);
   }
 
   // schema 已经把类型报过一遍了；这里只在类型可用时才做语义判断，避免连环报错。
@@ -801,7 +823,7 @@ export function validateHandoff(input: HandoffInput): HandoffVerdict {
     }
   }
 
-  return finishHandoff(stage, problems, role, outputs.length);
+  return finishHandoff(stage, problems, role, outputs.length, sections);
 }
 
 function finishHandoff(
@@ -809,12 +831,15 @@ function finishHandoff(
   problems: StudyProblem[],
   role: string | null,
   outputs: number,
+  sections: readonly HandoffSection[],
 ): HandoffVerdict {
   const blocking = problems.some((problem) => problem.blocking);
   const blockingCount = problems.filter((problem) => problem.blocking).length;
   const summary = blocking
     ? `阻断：${stage} 的交接边界不合法——${blockingCount} 条阻断问题（共 ${problems.length} 条）。不复制、不删 stage、不把任务说成完成。`
-    : `放行：${stage} 的交接边界合法（${role ?? '角色未知'}，${outputs} 个 output）。这只说明边界合法，领域校验仍要各跑各的。`;
+    : `放行：${stage} 的交接边界合法（${role ?? '角色未知'}，${outputs} 个 output`
+      + `${sections.length === 0 ? '' : `；资源清单 ${sections.length} 节：${describeSections(sections)}`}）。`
+      + '这只说明边界合法，领域校验仍要各跑各的。';
   return {
     stagePath: stage,
     verdict: blocking ? 'block' : 'pass',
@@ -823,5 +848,14 @@ function finishHandoff(
     summary,
     role,
     outputs,
+    sections: [...sections],
   };
+}
+
+/** 摘要里那半句：`延伸阅读 42 条（已核）· 缺口 3 条（未核）`。 */
+function describeSections(sections: readonly HandoffSection[]): string {
+  return sections
+    .map((section) => `${section.heading === '' ? '(无标题)' : section.heading} ${section.entries} 条`
+      + `（${section.verified ? '已核' : '未核'}）`)
+    .join(' · ');
 }

@@ -15,6 +15,8 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
 import { validateHandoff } from '../../lib/core/validate.ts';
+import { resourceSections } from '../../lib/core/resources.ts';
+import { fingerprintSections } from '../../lib/reach/sections.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const HANDOFF_SCHEMA = JSON.parse(fs.readFileSync(path.join(ROOT, 'schemas', 'agent-handoff.schema.json'), 'utf8'));
@@ -481,4 +483,102 @@ test('JSON 里的坏 \\u 与坏转义：阻断且指出位置', () => {
     files: VALID_FILES,
   });
   assertBlocked(gate(badEscape), '不认识的转义');
+});
+
+/* ── 九、「资源清单」的分节摘要（#129）──────────────────────────────────
+   按节冻结与「改一节只重核一节」都建立在**分节与指纹**这一层上：节怎么切、条目数怎么算、
+   指纹跟着什么变。这一组测纯函数那一层——门禁不去发网络请求，`verified` 由调用方问台账。 */
+
+const MANIFEST_TEXT = [
+  '# 资源清单',                                    // 1（h1，不算小节）
+  '> 定位说明：引言不是小节。',                      // 2
+  '',                                              // 3
+  '## Knowledge',                                  // 4
+  '',                                              // 5
+  '- [A 官方文档](https://a.example/one)',          // 6
+  '  一行用途',                                     // 7（缩进说明不是条目）
+  '- [B 教材](https://b.example/two)',              // 8
+  '- [A 再来一次](https://a.example/three)',        // 9（同域名，算第二条）
+  '',                                              // 10
+  '## 易变内容的官方核对来源',                        // 11
+  '',                                              // 12
+  '- [官方](https://docs.example/x)',               // 13
+  '',                                              // 14
+  '## Gaps',                                       // 15
+  '',                                              // 16
+  '### 抓不动的站点',                                // 17（`###` 不是小节）
+  '',                                              // 18
+  '- docs.example：超时',                           // 19
+  '',                                              // 20
+].join('\n');
+
+test('分节：`##` 才成节、条目数与域名分布按节算、指纹只跟内容走', () => {
+  const sections = resourceSections(MANIFEST_TEXT);
+  assert.deepEqual(sections.map((section) => section.heading),
+    ['Knowledge', '易变内容的官方核对来源', 'Gaps']);
+  assert.deepEqual(sections.map((section) => section.entries), [3, 1, 1], '缩进的说明不算条目');
+
+  const fingerprints = fingerprintSections(MANIFEST_TEXT);
+  assert.deepEqual(fingerprints[0].hosts,
+    [{ host: 'a.example', entries: 2 }, { host: 'b.example', entries: 1 }]);
+  assert.deepEqual(fingerprints[0].urls,
+    ['https://a.example/one', 'https://b.example/two', 'https://a.example/three']);
+  assert.deepEqual(fingerprints[2].urls, [], 'Gaps 里那条不是 http(s) 链接');
+  for (const section of fingerprints) assert.match(section.sha256, /^[0-9a-f]{64}$/);
+
+  // 只改第一节：它的指纹变，另外两节一个字都不动。
+  const edited = MANIFEST_TEXT.replace('- [B 教材](https://b.example/two)',
+    '- [B 教材](https://b.example/two)\n- [C 新增](https://c.example/four)');
+  const after = fingerprintSections(edited);
+  assert.notEqual(after[0].sha256, fingerprints[0].sha256);
+  assert.equal(after[1].sha256, fingerprints[1].sha256);
+  assert.equal(after[2].sha256, fingerprints[2].sha256);
+  assert.equal(after[0].entries, 4);
+
+  // 末尾多一个空行不算改动（digest 归一化掉末尾空行）。
+  assert.deepEqual(fingerprintSections(`${MANIFEST_TEXT}\n`).map((section) => section.sha256),
+    fingerprints.map((section) => section.sha256));
+
+  // 代码块里的 `-` 与 `##` 都不算：示例文本不是条目、也不是小节。
+  const fenced = ['## 一节', '', '```md', '- 示例条目', '## 假标题', '```', '', '- 真条目'].join('\n');
+  const fencedSections = resourceSections(fenced);
+  assert.equal(fencedSections.length, 1);
+  assert.equal(fencedSections[0].entries, 1);
+});
+
+test('门禁把逐节摘要原样交回，verified 两态都如实转达', () => {
+  const stage = makeStage('resources-sections', {
+    manifest: manifestOf({ role: 'resource-scout', outputs: [{ path: 'RESOURCES.md', kind: 'file' }] }),
+    files: { 'RESOURCES.md': MANIFEST_TEXT },
+  });
+  const fingerprints = fingerprintSections(MANIFEST_TEXT);
+  const verified = new Set([fingerprints[0].sha256]);
+  const verdict = validateHandoff({
+    stagePath: stage,
+    manifestText: fs.readFileSync(path.join(stage, 'handoff.json'), 'utf8'),
+    entries: snapshot(stage),
+    expectedRole: 'resource-scout',
+    schema: HANDOFF_SCHEMA,
+    sections: fingerprints.map((section) => ({
+      heading: section.heading,
+      entries: section.entries,
+      hosts: section.hosts,
+      sha256: section.sha256,
+      verified: verified.has(section.sha256),
+    })),
+  });
+  assert.equal(verdict.verdict, 'pass');
+  assert.deepEqual(verdict.sections.map((section) => [section.heading, section.entries, section.verified]),
+    [['Knowledge', 3, true], ['易变内容的官方核对来源', 1, false], ['Gaps', 1, false]]);
+  assert.deepEqual(verdict.sections[0].hosts,
+    [{ host: 'a.example', entries: 2 }, { host: 'b.example', entries: 1 }]);
+  assert.match(verdict.summary, /资源清单 3 节/);
+  assert.match(verdict.summary, /Knowledge 3 条（已核）/);
+  assert.match(verdict.summary, /易变内容的官方核对来源 1 条（未核）/);
+
+  // 不传 sections：不是资源清单的交接就是空列表，结论一个字不改。
+  const bare = gate(stage, { role: 'resource-scout' });
+  assert.deepEqual(bare.sections, []);
+  assert.equal(bare.verdict, 'pass');
+  assert.doesNotMatch(bare.summary, /资源清单/);
 });

@@ -51,7 +51,9 @@ const DECLARATIONS = {
     writes: {},
   },
   studymate_validate_handoff: {
-    reads: ['handoff'],
+    // #129：门禁本身只读盘上快照；`resources` 是那条**旁路**——若 `deliver/` 里有
+    // `RESOURCES.md`，就按节给条目数、域名分布与内容指纹（它不参与放行/阻断的判定）。
+    reads: ['handoff', 'resources'],
     writes: {},
   },
   studymate_renumber_lessons: {

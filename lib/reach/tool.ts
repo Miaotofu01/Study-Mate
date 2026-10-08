@@ -35,12 +35,14 @@ import path from 'node:path';
 import { cmpCodePoints } from '../core/format.ts';
 import type { DomainAccess } from '../host/access.ts';
 import type { Domain } from '../host/domains.ts';
-import { cacheFile, isFresh, loadCache, saveCache } from './cache.ts';
+import { cacheFile, isFresh, loadCache, markVerified, saveCache } from './cache.ts';
 import type { CacheEntry } from './cache.ts';
 import { extractLinks } from './manifest.ts';
 import type { ManifestEntry } from './manifest.ts';
 import { runProbes } from './schedule.ts';
 import type { ProbeFn, ProbeOutcome } from './schedule.ts';
+import { fingerprintSections, hostOf } from './sections.ts';
+import type { SectionFingerprint } from './sections.ts';
 import { proxyFromEnv, requestOnce } from './transport.ts';
 import type { RequestResult, RouteName } from './transport.ts';
 
@@ -150,6 +152,21 @@ const FAILURE_ROW_SCHEMA = {
 } as const;
 
 /**
+ * 一节资源的花名册：标题、条目数、内容指纹、这一节核过没有。
+ *
+ * `verified` 的判据是**这一节里的链接都有结论**（这一轮探到的或缓存里新鲜的），
+ * 而不是「整份清单都核完了」——这正是「按节冻结」要的那一格：主干核完就能被下游取用。
+ * 一份指纹的核过记录落在插件私有台账（`<DSH_HOME>/studymate/reach/verified.json`），
+ * 交接门禁拿同一份指纹去问它，于是「改了一节只有那一节要重核」。
+ */
+const SECTION_ROW_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['heading', 'entries', 'sha256', 'verified'],
+  properties: { heading: TEXT, entries: INTEGER, sha256: TEXT, verified: { type: 'boolean' } },
+} as const;
+
+/**
  * 输出契约。**刻意短**：一行一条的明细不进返回值（宿主对工具结果有 8192 字符的截断，
  * 118 条明细会被悄悄切掉一半，读起来像是「只核了前 60 条」）。要明细自己去读缓存。
  */
@@ -157,7 +174,7 @@ export const REACH_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: ['manifest', 'total', 'ok', 'failed', 'cached', 'probed', 'pending',
-    'route', 'hosts', 'failures', 'summary', 'next'],
+    'route', 'hosts', 'sections', 'failures', 'summary', 'next'],
   properties: {
     manifest: TEXT,
     total: INTEGER,
@@ -168,6 +185,7 @@ export const REACH_OUTPUT_SCHEMA = {
     pending: INTEGER,
     route: { type: 'string', enum: ['直连', '代理', '未探'] },
     hosts: { type: 'array', items: HOST_ROW_SCHEMA },
+    sections: { type: 'array', items: SECTION_ROW_SCHEMA },
     failures: { type: 'array', items: FAILURE_ROW_SCHEMA },
     summary: TEXT,
     next: TEXT,
@@ -192,6 +210,14 @@ export interface FailureRow {
   note: string;
 }
 
+/** 一节资源的对外一格：指纹 + 条目数 + 这一节核过没有。 */
+export interface SectionRow {
+  heading: string;
+  entries: number;
+  sha256: string;
+  verified: boolean;
+}
+
 export interface ReachReport {
   manifest: string;
   total: number;
@@ -202,6 +228,7 @@ export interface ReachReport {
   pending: number;
   route: RouteName;
   hosts: HostRow[];
+  sections: SectionRow[];
   failures: FailureRow[];
   summary: string;
   next: string;
@@ -262,16 +289,8 @@ const MISSING_MANIFEST_NEXT = '把参数 manifest 改成「资源清单」的路
 function emptyReport(manifest: string, summary: string, next: string, cache: string): ReachReport {
   return {
     manifest, total: 0, ok: 0, failed: 0, cached: 0, probed: 0, pending: 0,
-    route: '未探', hosts: [], failures: [], summary, next, cache,
+    route: '未探', hosts: [], sections: [], failures: [], summary, next, cache,
   };
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
 }
 
 /** 请求是被取消的（信号打上来）不是站点答的——这种不算结论，也不该进台账。 */
@@ -289,6 +308,8 @@ interface AssembleInput {
   cachedCount: number;
   offline: boolean;
   cache: string;
+  /** 这一份清单切出来的小节（带指纹）——`verified` 就是在这里按「链接都有结论」判的。 */
+  sections: readonly SectionFingerprint[];
 }
 
 function assemble(input: AssembleInput): ReachReport {
@@ -344,6 +365,15 @@ function assemble(input: AssembleInput): ReachReport {
     next = `${failed} 条打不开：把它们从清单里去掉，或换成等价来源后重核`;
   }
 
+  // 逐节：这一节里的链接**都有结论**才算核过（没有任何链接的小节是空真——没什么可核的）。
+  // 判据刻意不写成「整份清单都核完」：按节冻结要的就是「主干那一节核完，下游就能取用」。
+  const sections: SectionRow[] = input.sections.map((section) => ({
+    heading: section.heading,
+    entries: section.entries,
+    sha256: section.sha256,
+    verified: section.urls.every((url) => verdicts.has(url)),
+  }));
+
   return {
     manifest: input.manifest,
     total,
@@ -354,11 +384,27 @@ function assemble(input: AssembleInput): ReachReport {
     pending: input.pending.length,
     route: input.route,
     hosts: [...hostRows.values()].sort((a, b) => cmpCodePoints(a.host, b.host)),
+    sections,
     failures,
     summary,
     next,
     cache: input.cache,
   };
+}
+
+/**
+ * 把这一轮核过的小节记进指纹台账，再把报告原样交回去。
+ *
+ * 记账是**旁路**：写不进去不影响报告（`markVerified` 自己吞异常）；反过来报告也不因为
+ * 「记没记上」而改一个字——台账是给下一轮与交接门禁看的加速器，不是这一轮的结论。
+ */
+function recordVerified(report: ReachReport): ReachReport {
+  const at = Date.now();
+  const records = report.sections
+    .filter((section) => section.verified)
+    .map((section) => [section.sha256, { at, entries: section.entries }] as const);
+  if (records.length > 0) markVerified(records);
+  return report;
 }
 
 /* ── 渲染：一句能读的报告 ──────────────────────────────────────────────── */
@@ -367,11 +413,14 @@ export function renderReachReport(value: ReachReport): string {
   const head = `核验「${value.manifest}」：共 ${value.total} 条`
     + `（打得开 ${value.ok}、打不开 ${value.failed}；这一轮探 ${value.probed} 条、用缓存 ${value.cached} 条`
     + `${value.pending === 0 ? '' : `、没轮到 ${value.pending} 条`}）；路由：${value.route}`;
+  // 指纹只印前 8 位：人读够分辨，全量在结构化返回里。
+  const sections = value.sections.map((row) => `· ${row.heading === '' ? '(无标题)' : row.heading}：`
+    + `${row.entries} 条 · 指纹 ${row.sha256.slice(0, 8)} · ${row.verified ? '已核' : '未核'}`);
   const hosts = value.hosts.map((row) => `· ${row.host}：${row.entries} 条（打得开 ${row.ok}、打不开 ${row.failed}）`);
   const failures = value.failures.map((row) => `✗ 第 ${row.line} 行 ${row.url}`
     + `${row.status === 0 ? '' : `——HTTP ${row.status}`}（${row.note}）`);
   const tail = value.next === '' ? [] : [value.next];
-  return [head, ...hosts, ...failures, ...tail].join('\n');
+  return [head, ...sections, ...hosts, ...failures, ...tail].join('\n');
 }
 
 /* ── 工具本体 ──────────────────────────────────────────────────────────── */
@@ -443,8 +492,9 @@ export function verifySourcesTool(): ReachToolSpec {
         );
       }
 
-      // ── 3. 摘链接 + 4. 缓存分片 ────────────────────────────────────────
+      // ── 3. 摘链接 + 分节 + 4. 缓存分片 ────────────────────────────────
       const links = extractLinks(view.markdown);
+      const sections = fingerprintSections(view.markdown);
       const refresh = args.refresh === true;
       const offline = args.offline === true;
       const clock = Date.now();
@@ -464,10 +514,10 @@ export function verifySourcesTool(): ReachToolSpec {
         for (const [url, entry] of cachedVerdicts) {
           verdicts.set(url, { ok: entry.ok, status: entry.status, note: entry.note, route: entry.route, cached: true });
         }
-        return assemble({
+        return recordVerified(assemble({
           manifest: located, links, verdicts, probed: new Set(), pending: toProbe.map((link) => link.url),
-          route: '未探', cachedCount, offline: true, cache,
-        });
+          route: '未探', cachedCount, offline: true, cache, sections,
+        }));
       }
 
       // ── 6. 先定路由表：拿第一条待核的探一次，结果直接复用 ──────────────
@@ -558,10 +608,10 @@ export function verifySourcesTool(): ReachToolSpec {
       // 「一条都没探过」时路由如实报 `未探`（路由表没被用过）。
       if (settled.length === 0) route = '未探';
 
-      return assemble({
+      return recordVerified(assemble({
         manifest: located, links, verdicts, probed: settledUrls, pending,
-        route, cachedCount, offline: false, cache,
-      });
+        route, cachedCount, offline: false, cache, sections,
+      }));
     },
   };
 }

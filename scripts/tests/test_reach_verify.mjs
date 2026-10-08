@@ -556,3 +556,56 @@ test('直连连接层失败、代理通 → 路由是代理，直连只被碰一
   assert.equal(proxy.state.hits, 3, '每条真核验各走一条代理连接');
   await assertOutput(assert, ctx.definitions.get(TOOL), value);
 });
+
+/* ── 八、分节与指纹台账（#129）───────────────────────────────────────────
+   分节本身（节怎么切、条目数与域名分布）在 `test_validators_handoff.mjs` 那一组；这里测
+   工具这一侧的接上：报告里逐节给指纹与 `verified`，核完的小节记进指纹台账——交接门禁拿
+   同一个指纹回答 `verified`，于是「改一节只重核那一节」。 */
+
+test('报告按节给指纹与 verified：核完的那节记进台账，没轮到的节不记', async (t) => {
+  const home = useHome(t);
+  useProxyEnv(t);
+  const site = await startSite(okHandler(120));
+  t.after(() => site.close());
+  const dir = writeManifest(home, [
+    '# 资源清单',
+    '## 主干',
+    `- [一](${site.url('127.0.0.1', '/one')})`,
+    '## 第二节',
+    ...[1, 2, 3].map((index) => `- [x${index}](${site.url('127.0.0.2', `/p${index}`)})`),
+  ]);
+  const ctx = registered();
+
+  // 预算只够第一条：主干那一节核完、第二节一条都没轮到。
+  useBudget(t, 50);
+  const first = await verify(ctx, { manifest: relativeTo(home, dir) });
+  await assertOutput(assert, ctx.definitions.get(TOOL), first);
+  assert.deepEqual(first.sections.map((section) => section.heading), ['主干', '第二节']);
+  const byHeading = new Map(first.sections.map((section) => [section.heading, section]));
+  assert.equal(byHeading.get('主干').entries, 1);
+  assert.equal(byHeading.get('主干').verified, true, JSON.stringify(first.sections));
+  assert.equal(byHeading.get('第二节').verified, false, JSON.stringify(first.sections));
+  for (const section of first.sections) assert.match(section.sha256, /^[0-9a-f]{64}$/);
+
+  const ledger = reach.loadVerified(home.dshHome);
+  assert.ok(ledger.has(byHeading.get('主干').sha256), '核过的那节该记进指纹台账');
+  assert.equal(ledger.get(byHeading.get('主干').sha256).entries, 1);
+  assert.equal(ledger.has(byHeading.get('第二节').sha256), false, '没轮到的节不该被记成核过');
+
+  // 去掉预算：第二节也核完，两节都进台账；主干的指纹没变（内容没动）。
+  useBudget(t, undefined);
+  const second = await verify(ctx, { manifest: relativeTo(home, dir) });
+  assert.equal(second.pending, 0);
+  assert.deepEqual(second.sections.map((section) => section.verified), [true, true]);
+  const warm = reach.loadVerified(home.dshHome);
+  assert.ok(warm.has(byHeading.get('第二节').sha256));
+  assert.equal(second.sections[0].sha256, byHeading.get('主干').sha256, '只补探不该改主干的指纹');
+
+  // 改掉第一节里那一条：指纹变，台账里的旧记录不再算数（改一节只剩那一节要重核）。
+  const edited = reach.fingerprintSections(
+    fs.readFileSync(path.join(dir, 'RESOURCES.md'), 'utf8').replace('- [一](', '- [一改了]('));
+  assert.notEqual(edited[0].sha256, second.sections[0].sha256, '改过的节指纹必须变');
+  assert.equal(warm.has(edited[0].sha256), false, '改过的节不该拿旧记录冒充已核');
+  assert.equal(edited[1].sha256, second.sections[1].sha256, '没动的那一节指纹照旧');
+  assert.ok(warm.has(edited[1].sha256), '没动的那一节照旧算核过');
+});

@@ -8,9 +8,10 @@
    域内的分工：
 
      · `manifest.ts`  —— 清单里有哪些链接（纯函数：不碰盘、不发请求）
+     · `sections.ts`  —— 清单按 `##` 分节，逐节配链接、按域名的分布与**内容指纹**
      · `transport.ts` —— 一条 HTTP/1.1 GET 怎么发出去（`node:net`／`node:tls`，四个分支）
      · `schedule.ts`  —— 并发、同站礼貌、路由表、墙上预算（probe 是注入的，测试能驱动）
-     · `cache.ts`     —— 探过的结果留在哪（按 URL 一份台账）
+     · `cache.ts`     —— 两本台账：按 URL 的探测结论、按**小节指纹**的「这一份核过没有」
      · `tool.ts`      —— 定位清单、核只补增量、定路由表、如实报
 
    核验域**不 import 工具域**：`registerStudyTool` 由注册点当参数递进来，所以域图上只有
@@ -19,11 +20,11 @@
    （#69）按域查环、默认拒绝。域声明里唯一要 `host` 的是「工具 body 拿到的
    `DomainAccess`」那个类型（只用 type，运行期一行都不借）。
 
-   缓存为什么落在 `<DSH_HOME>/studymate/reach/cache.json` 而不是学习工作区里：这是插件私有
-   状态，不是学习数据。学习工作区的布局由 docs/adr/0004-学习数据格式冻结与例外.md 冻着
-   ——学生看得见的目录里多出一份「探过哪些链接」的台账，既没有对应的阅读端出口，
-   也会让「换台机器同步学习数据」带上一份与本地网络环境绑死的记录。与任务台账
-   （`lib/tasks/store.ts`）选同一个落点、同一个理由。
+   两本台账为什么落在 `<DSH_HOME>/studymate/reach/`（`cache.json` 按 URL、`verified.json` 按
+   小节指纹）而不是学习工作区里：这是插件私有状态，不是学习数据。学习工作区的布局由
+   docs/adr/0004-学习数据格式冻结与例外.md 冻着——学生看得见的目录里多出一份「探过哪些链接」
+   的台账，既没有对应的阅读端出口，也会让「换台机器同步学习数据」带上一份与本地网络环境
+   绑死的记录。与任务台账（`lib/tasks/store.ts`）选同一个落点、同一个理由。
    ───────────────────────────────────────────────────────────────────────── */
 
 import { verifySourcesTool } from './tool.ts';
@@ -51,9 +52,13 @@ export {
 export { extractLinks } from './manifest.ts';
 export { parseProxy, proxyFromEnv, requestOnce } from './transport.ts';
 export { runProbes } from './schedule.ts';
-export { cacheFile, isFresh, loadCache, reachDir, saveCache } from './cache.ts';
-export type { HostRow, FailureRow, ReachArgs, ReachReport, ReachRun, ReachToolContext, ReachToolRegistry, ReachToolSpec } from './tool.ts';
+export { fingerprintSections, hostOf, sha256Text } from './sections.ts';
+export {
+  cacheFile, isFresh, loadCache, loadVerified, markVerified, reachDir, saveCache, verifiedFile,
+} from './cache.ts';
+export type { HostRow, FailureRow, ReachArgs, ReachReport, ReachRun, ReachToolContext, ReachToolRegistry, ReachToolSpec, SectionRow } from './tool.ts';
 export type { ManifestEntry } from './manifest.ts';
 export type { ProbeFn, ProbeOutcome, ProbeTarget, ScheduleResult } from './schedule.ts';
 export type { ProxyTarget, RequestResult, RouteName } from './transport.ts';
-export type { CacheEntries, CacheEntry } from './cache.ts';
+export type { CacheEntries, CacheEntry, VerifiedEntries, VerifiedRecord } from './cache.ts';
+export type { ResourceHost, SectionFingerprint } from './sections.ts';

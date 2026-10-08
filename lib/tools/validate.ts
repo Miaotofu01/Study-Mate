@@ -12,7 +12,9 @@
        与图片目录逐行对账）。为什么是移植而不是复用：那一层在 Python 里，`lib/core/**` 里
        没有对应的纯函数实现，而 #68 之后技能不再调 Python。
      · `studymate_validate_handoff`    → `lib/core/validate.ts` 的 validateHandoff（盘上快照
-       由 `vault.ts` 走一遍 fs，与测试里那个 walker 同一形状）
+       由 `vault.ts` 走一遍 fs，与测试里那个 walker 同一形状）。它另走一条**旁路**：若
+       `deliver/` 里有 `RESOURCES.md`，就按节给出条目数、域名分布与内容指纹（核验台账
+       回答「这一份核过没有」）——总控看摘要就不必把清单读进上下文
 
    包内 `schemas/*.json` 是**插件自己的契约**（每个工作区都一样、随包发货），不走域 guard：
    guard 管的是学习数据。这一句是刻意的，别把 schema 也塞进数据域——它由
@@ -24,9 +26,11 @@ import path from 'node:path';
 import {
   validateCurriculum, validateHandoff, validateProgress, validateSubject,
 } from '../core/validate.ts';
-import type { StudyProblem, ValidationReport } from '../core/validate.ts';
+import type { HandoffSection, StudyProblem, ValidationReport } from '../core/validate.ts';
 import { decodeImageSrc, FormatProblems } from '../core/format.ts';
 import { parseLesson, poolJsonError, reportPoolShape } from '../core/lesson.ts';
+import { fingerprintSections } from '../reach/sections.ts';
+import { loadVerified } from '../reach/cache.ts';
 import { joinPath, lessonFilesUnder, pathFactsOf, resolveGiven } from './paths.ts';
 import type { StudyToolSpec } from './define.ts';
 import type { DomainAccess } from '../host/access.ts';
@@ -688,6 +692,60 @@ export function validatePoolTool(): StudyToolSpec {
    四、studymate_validate_handoff —— 交接门禁
    ══════════════════════════════════════════════════════════════════════════ */
 
+/** `resources` 域给的清单视图（`lib/host/vault.ts` 的 `resources` 分支）。 */
+interface ResourcesView {
+  file: string;
+  present: boolean;
+  markdown: string;
+  bytes: number;
+}
+
+const SECTION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['heading', 'entries', 'hosts', 'sha256', 'verified'],
+  properties: {
+    heading: TEXT,
+    entries: INTEGER,
+    hosts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['host', 'entries'],
+        properties: { host: TEXT, entries: INTEGER },
+      },
+    },
+    sha256: TEXT,
+    verified: { type: 'boolean' },
+  },
+};
+
+/**
+ * 把 `deliver/RESOURCES.md` 读成逐节摘要。**这是旁路**：读不到、没这份文件、路径不合法，
+ * 一律给空列表——门禁的结论只由交接边界决定，不能因为一份附属材料读不到而改判。
+ *
+ * `verified` 问的是核验工具的**指纹台账**（插件私有，不进学习工作区）：这一份内容
+ * 核过没有，看指纹在不在里面——而不是看角色有没有说「核过了」。
+ */
+function handoffSections(access: DomainAccess, stagePath: string): HandoffSection[] {
+  let view: ResourcesView;
+  try {
+    view = access.read<ResourcesView>('resources', path.join(stagePath, 'deliver', 'RESOURCES.md'));
+  } catch {
+    return [];
+  }
+  if (!view.present) return [];
+  const verified = loadVerified();
+  return fingerprintSections(view.markdown).map((section) => ({
+    heading: section.heading,
+    entries: section.entries,
+    hosts: section.hosts,
+    sha256: section.sha256,
+    verified: verified.has(section.sha256),
+  }));
+}
+
 export function validateHandoffTool(): StudyToolSpec {
   return {
     name: 'studymate_validate_handoff',
@@ -702,13 +760,13 @@ export function validateHandoffTool(): StudyToolSpec {
         node: { type: 'string', description: '节点级任务给节点 id；科目级任务省略。' },
       },
     },
-    reads: ['handoff'],
+    reads: ['handoff', 'resources'],
     output: {
       schema: {
         type: 'object',
         additionalProperties: false,
         required: ['stage', 'verdict', 'blocking', 'blockingCount', 'role', 'outputs',
-          'summary', 'problems'],
+          'sections', 'summary', 'problems'],
         properties: {
           stage: TEXT,
           verdict: { type: 'string', enum: ['pass', 'block'] },
@@ -716,6 +774,7 @@ export function validateHandoffTool(): StudyToolSpec {
           blockingCount: INTEGER,
           role: { oneOf: [TEXT, { type: 'null' }] },
           outputs: INTEGER,
+          sections: { type: 'array', items: SECTION_SCHEMA },
           summary: TEXT,
           problems: { type: 'array', items: PROBLEM_SCHEMA },
         },
@@ -725,6 +784,8 @@ export function validateHandoffTool(): StudyToolSpec {
         text: [
           `交接门禁：${value.verdict === 'pass' ? '放行' : '阻断'}（${value.stage}）`,
           value.summary,
+          ...value.sections.map((section: any) => `· ${section.heading === '' ? '(无标题)' : section.heading}：`
+            + `${section.entries} 条 · 指纹 ${section.sha256.slice(0, 8)} · ${section.verified ? '已核' : '未核'}`),
           ...value.problems.map((problem: any) => `${problem.file}:${problem.line} ${problem.message}`),
         ].join('\n'),
       }],
@@ -738,6 +799,7 @@ export function validateHandoffTool(): StudyToolSpec {
         expectedRole: args.role,
         expectedNode: args.node ?? null,
         schema: await packagedSchema('agent-handoff.schema.json'),
+        sections: handoffSections(run.access, view.stage),
       });
       return {
         stage: verdict.stagePath,
@@ -746,6 +808,7 @@ export function validateHandoffTool(): StudyToolSpec {
         blockingCount: verdict.problems.filter((problem) => problem.blocking).length,
         role: verdict.role,
         outputs: verdict.outputs,
+        sections: verdict.sections,
         summary: verdict.summary,
         problems: verdict.problems,
       };

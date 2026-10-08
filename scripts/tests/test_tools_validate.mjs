@@ -11,7 +11,7 @@ import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { assertOutput, execute, fakeContext, loadTools, useHome, writeSubject } from './fixtures/tools.mjs';
+import { assertOutput, execute, fakeContext, loadCore, loadTools, useHome, writeSubject } from './fixtures/tools.mjs';
 
 const tools = await loadTools();
 
@@ -349,4 +349,34 @@ test('交接门禁：角色错配 / 未声明产物 → 明确阻断，且说清
   assert.match(all, /未声明产物/);
   assert.match(value.summary, /阻断/);
   assert.match(value.summary, /不复制、不删 stage/);
+});
+
+test('交接门禁：deliver/ 里有资源清单就带逐节摘要，verified 跟着指纹台账走', async (t) => {
+  const home = useHome(t);
+  const stage = makeStage(path.join(home.workspace, '.stage', 'resource-scout-demo'), {
+    manifest: manifestOf({
+      role: 'resource-scout',
+      outputs: [{ path: 'RESOURCES.md', kind: 'file' }],
+    }),
+    files: {
+      'RESOURCES.md': ['# 资源清单', '## Knowledge', '- [A](https://a.example/one)', '',
+        '## Gaps', '- 缺一块'].join('\n'),
+    },
+  });
+  const ctx = fakeContext();
+  tools.registerValidatorTools(ctx.ctx);
+  const value = await call(ctx, 'studymate_validate_handoff', { stage, role: 'resource-scout' });
+  assert.equal(value.verdict, 'pass');
+  // 门禁自己不去核链接：`verified` 是空的（台账里没有这份指纹）。
+  assert.deepEqual(value.sections.map((section) => [section.heading, section.entries, section.verified]),
+    [['Knowledge', 1, false], ['Gaps', 1, false]]);
+  assert.deepEqual(value.sections[0].hosts, [{ host: 'a.example', entries: 1 }]);
+  assert.match(value.summary, /资源清单 2 节/);
+
+  // 核验工具记下这一节的指纹之后，同一个交接再交一次就是「已核」。
+  const reach = await loadCore('lib/reach/index.ts');
+  reach.markVerified([[value.sections[0].sha256, { at: Date.now(), entries: 1 }]], home.dshHome);
+  const again = await call(ctx, 'studymate_validate_handoff', { stage, role: 'resource-scout' });
+  assert.deepEqual(again.sections.map((section) => section.verified), [true, false]);
+  assert.match(again.summary, /Knowledge 1 条（已核）/);
 });
