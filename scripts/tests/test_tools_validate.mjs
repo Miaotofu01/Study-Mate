@@ -12,6 +12,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { assertOutput, execute, fakeContext, loadCore, loadTools, useHome, writeSubject } from './fixtures/tools.mjs';
+import {
+  gifBytes, htmlBytes, jpegBytes, pngBytes, truncatedBytes, webpBytes, webpExtendedBytes, webpLossyBytes,
+} from './fixtures/images.mjs';
+import { imageKindOfExtension, parseImageHeader, parseSizeCell } from '../../lib/core/image.ts';
 
 const tools = await loadTools();
 
@@ -212,8 +216,10 @@ function writePoolIndex(subject, text, files = {}) {
   const dir = path.join(subject.dir, 'assets', 'img', 'pool');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(subject.dir, 'assets', 'img', 'pool.md'), text);
-  for (const [name, bytes] of Object.entries(files)) {
-    fs.writeFileSync(path.join(dir, name), Buffer.alloc(bytes, 0x61));
+  for (const [name, content] of Object.entries(files)) {
+    // 数字 = 造那么多字节的占位文件；Buffer = 现造的真图片字节（`fixtures/images.mjs`）。
+    fs.writeFileSync(path.join(dir, name),
+      Buffer.isBuffer(content) ? content : Buffer.alloc(content, 0x61));
   }
   return dir;
 }
@@ -222,16 +228,94 @@ const POOL_HEADER = '| 文件 | 主题标签 | 一句话说明 | 来源 URL | �
 
 test('图片库干净放行；空图片库（只有表头）也算合格', async (t) => {
   const f = withTools(t);
-  writePoolIndex(f.subject, `${POOL_HEADER}\n| demo-变量-赋值-wiki-01.png | 变量 | 赋值 | https://example.com | CC0 | 100×100 | 2026-05-01 |\n`,
-    { 'demo-变量-赋值-wiki-01.png': 1024 });
+  // 反证：这一张是**真图片字节**（800×600 PNG），它必须一条问题都没有——否则这一套判据
+  // 自己在空转（原来的夹具是 1024 个 'a'，按新判据会报「文件头认不出」，所以换掉）。
+  writePoolIndex(f.subject, `${POOL_HEADER}\n| demo-变量-赋值-wiki-01.png | 变量 | 赋值 | https://example.com | CC0 | 800×600 | 2026-05-01 |\n`,
+    { 'demo-变量-赋值-wiki-01.png': pngBytes(800, 600) });
   let value = await call(f.ctx, 'studymate_validate_pool', { paths: ['demo'] });
   assert.equal(value.blocking, false, messages(value.reports[0]).join('\n'));
   assert.equal(value.reports[0].rows, 1);
+  assert.deepEqual(value.reports[0].problems, [], '正常的图必须全绿（判据不空转）');
 
   writePoolIndex(f.subject, `${POOL_HEADER}\n`, {});
   value = await call(f.ctx, 'studymate_validate_pool', { paths: ['demo'] });
   assert.equal(value.blocking, false, messages(value.reports[0]).join('\n'));
   assert.equal(value.reports[0].rows, 0);
+});
+
+test('图片完整性：文件头与扩展名、宽高与索引尺寸、认不出的头（新增判据全是提示）', async (t) => {
+  const f = withTools(t);
+  writePoolIndex(f.subject, [
+    POOL_HEADER,
+    '| demo-变量-赋值-wiki-01.png | 变量 | 正常 | https://example.com | CC0 | 800×600 | 2026-05-01 |',
+    '| demo-变量-赋值-wiki-02.png | 变量 | GIF 存成 png | https://example.com | CC0 | 4×3 | 2026-05-01 |',
+    '| demo-变量-赋值-wiki-03.jpg | 变量 | 尺寸对不上 | https://example.com | CC0 | 100×100 | 2026-05-01 |',
+    '| demo-变量-赋值-wiki-04.png | 变量 | 错误页 | https://example.com | CC0 | 1×1 | 2026-05-01 |',
+    '| demo-变量-赋值-wiki-05.webp | 变量 | 尺寸没写 | https://example.com | CC0 |  | 2026-05-01 |',
+    '| demo-变量-赋值-wiki-06.png | 变量 | 大 | https://example.com | CC0 | 800×600 | 2026-05-01 |',
+    '',
+  ].join('\n'), {
+    'demo-变量-赋值-wiki-01.png': pngBytes(800, 600),
+    'demo-变量-赋值-wiki-02.png': gifBytes(4, 3),
+    'demo-变量-赋值-wiki-03.jpg': jpegBytes(1024, 768),
+    'demo-变量-赋值-wiki-04.png': htmlBytes(),
+    'demo-变量-赋值-wiki-05.webp': webpBytes(640, 480),
+    'demo-变量-赋值-wiki-06.png': Buffer.concat([pngBytes(800, 600), Buffer.alloc(500 * 1024)]),
+  });
+  const report = (await call(f.ctx, 'studymate_validate_pool', { paths: ['demo'] })).reports[0];
+  const all = messages(report).join('\n');
+
+  // 第一行是真图：它一条都不该有。
+  assert.equal(report.problems.filter((problem) => problem.line === 3).length, 0, all);
+
+  const kindMismatch = find(report, '文件头与扩展名不符');
+  assert.ok(kindMismatch, all);
+  assert.equal(kindMismatch.line, 4);
+  assert.equal(kindMismatch.blocking, false);
+  assert.match(kindMismatch.message, /是 \.png，文件头是 gif/);
+
+  const sizeMismatch = find(report, '尺寸与文件头不符');
+  assert.ok(sizeMismatch, all);
+  assert.equal(sizeMismatch.line, 5);
+  assert.equal(sizeMismatch.blocking, false);
+  assert.match(sizeMismatch.message, /索引写 100×100，文件头是 1024×768/);
+
+  const unreadable = find(report, '文件头认不出');
+  assert.ok(unreadable, all);
+  assert.equal(unreadable.line, 6);
+  assert.equal(unreadable.blocking, false);
+
+  const noSize = find(report, '`尺寸` 认不出');
+  assert.ok(noSize, all);
+  assert.equal(noSize.line, 7);
+  assert.equal(noSize.blocking, false);
+  assert.match(noSize.message, /640×480/, '认不出尺寸时要把文件头算出来的那个数给它');
+
+  // 体积那条是**既有**判据，照旧阻断。
+  const tooBig = find(report, '超体积');
+  assert.ok(tooBig, all);
+  assert.equal(tooBig.line, 8);
+  assert.equal(tooBig.blocking, true);
+});
+
+test('文件头解析（纯函数）：四种格式的宽高、三种 WebP 布局、认不出就是 null', () => {
+  assert.deepEqual(parseImageHeader(pngBytes(800, 600)), { kind: 'png', width: 800, height: 600 });
+  assert.deepEqual(parseImageHeader(gifBytes(4, 3)), { kind: 'gif', width: 4, height: 3 });
+  assert.deepEqual(parseImageHeader(jpegBytes(1024, 768)), { kind: 'jpeg', width: 1024, height: 768 });
+  assert.deepEqual(parseImageHeader(webpBytes(640, 480)), { kind: 'webp', width: 640, height: 480 });
+  assert.deepEqual(parseImageHeader(webpLossyBytes(320, 200)), { kind: 'webp', width: 320, height: 200 });
+  assert.deepEqual(parseImageHeader(webpExtendedBytes(1920, 1080)), { kind: 'webp', width: 1920, height: 1080 });
+  for (const bytes of [htmlBytes(), truncatedBytes(), Buffer.alloc(0), Buffer.from('a'.repeat(64))]) {
+    assert.equal(parseImageHeader(bytes), null, `${bytes.length} 字节的这份不该被认成图片`);
+  }
+  assert.equal(imageKindOfExtension('a.PNG'), 'png');
+  assert.equal(imageKindOfExtension('a.jpeg'), 'jpeg');
+  assert.equal(imageKindOfExtension('a.txt'), null);
+  assert.equal(imageKindOfExtension('没有扩展名'), null);
+  assert.deepEqual(parseSizeCell('800×600'), { width: 800, height: 600 });
+  assert.deepEqual(parseSizeCell(' 800 x 600 '), { width: 800, height: 600 });
+  assert.equal(parseSizeCell('大图'), null);
+  assert.equal(parseSizeCell('0×600'), null);
 });
 
 test('索引缺失 / 索引写错地方 / 缺列 / 表头不一致 —— 逐条报且阻断', async (t) => {

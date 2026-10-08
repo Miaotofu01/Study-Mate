@@ -12,7 +12,10 @@
        锚点四态对账 + 图片存在性；DOM 结构检查随静态渲染一起退役）
      · `studymate_validate_pool`       →迁移前的 Python 图片库校验器的**行为移植**（图片库索引
        与图片目录逐行对账）。为什么是移植而不是复用：那一层在 Python 里，`lib/core/**` 里
-       没有对应的纯函数实现，而 #68 之后技能不再调 Python。
+       没有对应的纯函数实现，而 #68 之后技能不再调 Python。#132 另加了**按文件头复算**：
+       格式与扩展名是否一致、宽高与索引的「尺寸」列是否对得上——解析在 `lib/core/image.ts`
+       （纯函数，只读字节），这三条新判据全是**提示**（现存工作区里已经存在的问题不该
+       升级即整片变红）
      · `studymate_validate_handoff`    → `lib/core/validate.ts` 的 validateHandoff（盘上快照
        由 `vault.ts` 走一遍 fs，与测试里那个 walker 同一形状）。它另走一条**旁路**：若
        `deliver/` 里有 `RESOURCES.md`，就按节给出条目数、域名分布与内容指纹（核验台账
@@ -30,6 +33,7 @@ import {
 } from '../core/validate.ts';
 import type { HandoffSection, StudyProblem, ValidationReport } from '../core/validate.ts';
 import { decodeImageSrc, FormatProblems, cmpCodePoints } from '../core/format.ts';
+import { imageKindOfExtension, parseImageHeader, parseSizeCell } from '../core/image.ts';
 import { parseLesson, poolJsonError, reportPoolShape } from '../core/lesson.ts';
 import { isSourceSection } from '../core/resources.ts';
 import { fingerprintSections, sectionLine } from '../reach/sections.ts';
@@ -596,8 +600,14 @@ function isCalendarDate(text: string): boolean {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
+/** 图片库里的一张图：字节数 + 文件头（`lib/host/vault.ts` 的图片库视图给的）。 */
+interface PoolFile {
+  bytes: number;
+  head: Uint8Array;
+}
+
 function checkPoolRow(
-  cells: string[], index: Map<string, number>, files: Map<string, number>, line: number,
+  cells: string[], index: Map<string, number>, files: Map<string, PoolFile>, line: number,
 ): StudyProblem[] {
   const problems: StudyProblem[] = [];
   const cellOf = (name: string): string => {
@@ -608,8 +618,8 @@ function checkPoolRow(
   if (name === '') {
     return [blockingProblem('', line, '`文件` 是空的（每行要写图片库里的文件名）')];
   }
-  const bytes = files.get(name);
-  const exists = bytes !== undefined;
+  const file = files.get(name);
+  const exists = file !== undefined;
   if (!exists) problems.push(blockingProblem('', line, `文件缺失：图片库里没有 ${POOL_REL}/${name}`));
   if (name.length > POOL_NAME_MAX) {
     problems.push(blockingProblem('', line,
@@ -631,10 +641,34 @@ function checkPoolRow(
   if (captured !== '' && !isCalendarDate(captured)) {
     problems.push(blockingProblem('', line, '`抓取日期` 要写成有效的 YYYY-MM-DD 日期'));
   }
-  if (exists && bytes > MAX_BYTES) {
-    // 只报字节：四舍五入成 KB 时 512001 B 会印成「500 KB > 500 KB」，自相矛盾
-    problems.push(blockingProblem('', line, `超体积：${name} ${bytes} B > ${MAX_BYTES} B`
-      + `（${MAX_BYTES / 1024} KB 上限；不缩放、超了就放弃）`));
+  if (file !== undefined) {
+    if (file.bytes > MAX_BYTES) {
+      // 只报字节：四舍五入成 KB 时 512001 B 会印成「500 KB > 500 KB」，自相矛盾
+      problems.push(blockingProblem('', line, `超体积：${name} ${file.bytes} B > ${MAX_BYTES} B`
+        + `（${MAX_BYTES / 1024} KB 上限；不缩放、超了就放弃）`));
+    }
+    // ── #132：从文件本身复算（三条判据**全是提示**）────────────────────────
+    // 为什么是提示：这几条是这一批新加的，现存工作区里可能本来就躺着「扩展名与文件头不符」
+    // 或「尺寸对不上」的图；判成阻断等于升级即整片变红（与清单覆盖率那一条同一个口径）。
+    // 采图角色照旧「把校验器报的每一行改到没有为止」，提示一样要改。
+    const extension = imageKindOfExtension(name);
+    const header = parseImageHeader(file.head);
+    if (header === null) {
+      problems.push(noteProblem('', line, `文件头认不出：${name} 不是完整的 PNG／JPEG／GIF／WebP`
+        + '（下载了一半，或存成了 HTML 错误页？）'));
+    } else if (extension !== null && header.kind !== extension) {
+      problems.push(noteProblem('', line, `文件头与扩展名不符：${name} 是 .${extension}，文件头是 ${header.kind}`
+        + '（多半是下载失败时把错误页按扩展名存了下来）'));
+    } else if (index.get('尺寸') !== undefined) {
+      const size = parseSizeCell(cellOf('尺寸'));
+      if (size === null) {
+        problems.push(noteProblem('', line, `\`尺寸\` 认不出：写成 \`宽×高\`（按文件头复算就是 `
+          + `${header.width}×${header.height}）`));
+      } else if (size.width !== header.width || size.height !== header.height) {
+        problems.push(noteProblem('', line, `尺寸与文件头不符：索引写 ${size.width}×${size.height}，`
+          + `文件头是 ${header.width}×${header.height}（索引以文件头为准，页面标注可能被缩放过）`));
+      }
+    }
   }
   return problems;
 }
@@ -654,7 +688,7 @@ function checkSubjectPool(access: DomainAccess, subjectDir: string): Record<stri
     return { dir: subjectDir, indexFile, rows: 0, problems, ...conclusion(problems) };
   }
 
-  const files = new Map(view.files.map((entry) => [entry.name, entry.bytes]));
+  const files = new Map(view.files.map((entry) => [entry.name, { bytes: entry.bytes, head: entry.head }]));
 
   // Python 的 `str.splitlines()`：`\r\n` / `\r` / `\n` 都算断行
   const lines = view.index.text.split(/\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]/);
@@ -695,7 +729,7 @@ function checkSubjectPool(access: DomainAccess, subjectDir: string): Record<stri
 export function validatePoolTool(): StudyToolSpec {
   return {
     name: 'studymate_validate_pool',
-    description: '校验科目图片库：pool.md 索引与图片目录逐行对账，逐条回报行号与是否阻断。',
+    description: '校验科目图片库：pool.md 索引与图片目录逐行对账，并按文件头复算格式与尺寸，逐条回报行号与是否阻断。',
     parameters: {
       type: 'object',
       additionalProperties: false,
