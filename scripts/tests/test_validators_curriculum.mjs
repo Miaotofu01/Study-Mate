@@ -18,7 +18,8 @@ import { fileURLToPath } from 'node:url';
 
 import { indexYaml } from '../../lib/core/yamlpos.ts';
 import { parseYaml } from '../../lib/yaml.ts';
-import { validateCurriculum } from '../../lib/core/validate.ts';
+import { validateCurriculum, validateResources } from '../../lib/core/validate.ts';
+import { resourceEntries } from '../../lib/core/resources.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CURRICULUM_SCHEMA = JSON.parse(fs.readFileSync(path.join(ROOT, 'schemas', 'curriculum.schema.json'), 'utf8'));
@@ -396,4 +397,110 @@ test('schema 里用了没实现的关键字：问题照样逐条报，而且算�
   const problem = find(report, 'oneOf');
   assert.ok(problem, JSON.stringify(messages(report)));
   assert.equal(problem.blocking, true);
+});
+
+/* ── 六、「资源清单」的覆盖率（validateResources，#130）──────────────────
+   「够了」的判据：每个节点至少一处来源（不少）、条数不超过节点数 × 2（不膨胀）。
+   判据全在**提示**上——「服务 <节点 id>」是新加的写法，现存清单一条都没有，判阻断等于
+   升级即整片变红。这一组测的是纯函数那一层，不碰盘。 */
+
+const RESOURCES_TEXT = [
+  '# 资源清单',                                     // 1
+  '',                                              // 2
+  '## Knowledge',                                  // 3
+  '',                                              // 4
+  '- [A](https://a.example/1) · 服务 var',          // 5
+  '- [B](https://b.example/2) · 服务 fn、var',      // 6（一条服务两个节点）
+  '- [C](https://c.example/3)',                     // 7（没写服务标记）
+  '',                                              // 8
+  '## 易变内容的官方核对来源',                       // 9
+  '',                                              // 10
+  '- [D](https://d.example/4) · 服务 fn',           // 11
+  '',                                              // 12
+  '## Wisdom (Communities)',                       // 13
+  '',                                              // 14
+  '- [社区](https://forum.example) · 服务 var',      // 15（社区不是来源）
+  '',                                              // 16
+  '## Gaps',                                       // 17
+  '',                                              // 18
+  '- 缺一块',                                       // 19（缺口不是来源）
+  '',                                              // 20
+].join('\n');
+
+test('清单条目：服务标记按行摘出，社区与 Gaps 的条目不算来源', () => {
+  const entries = resourceEntries(RESOURCES_TEXT);
+  assert.deepEqual(entries.map((entry) => entry.line), [5, 6, 7, 11, 15, 19]);
+  assert.deepEqual(entries.map((entry) => entry.heading),
+    ['Knowledge', 'Knowledge', 'Knowledge', '易变内容的官方核对来源', 'Wisdom (Communities)', 'Gaps']);
+  assert.deepEqual(entries.map((entry) => entry.nodes),
+    [['var'], ['fn', 'var'], [], ['fn'], ['var'], []]);
+  // 没写标记、认不出形状的 token 都**如实留着**，不在这里悄悄丢掉（那是校验器的判断）。
+  const bogus = resourceEntries(['## Knowledge', '- [X](https://x.example) · 服务 大写.不是id'].join('\n'));
+  assert.deepEqual(bogus[0].nodes, ['大写.不是id']);
+});
+
+test('覆盖率：每个节点至少一处来源，指不出的逐条报出（全是提示）', () => {
+  const report = validateResources({
+    file: 'RESOURCES.md', markdown: RESOURCES_TEXT, nodeIds: ['var', 'fn', 'extra'],
+  });
+  assert.equal(report.blocking, false);
+  assert.equal(report.blockingCount, 0);
+  assert.ok(find(report, '还有 1 个节点指不出一处来源（共 3 个节点）：extra'), JSON.stringify(messages(report)));
+  const one = find(report, '节点 extra 指不出一处来源');
+  assert.ok(one, JSON.stringify(messages(report)));
+  assert.equal(one.line, 1);
+  assert.equal(one.blocking, false);
+  // 第 7 行那条没写服务标记：如实报出条数，且它不参与覆盖率。
+  assert.ok(find(report, '1 条来源条目没写「服务 <节点 id>」'), JSON.stringify(messages(report)));
+  // 没超限、没造词。
+  assert.equal(find(report, '清单在膨胀'), undefined);
+  assert.equal(find(report, '不存在的节点 id'), undefined);
+});
+
+test('覆盖率：一条服务多个节点时计数正确；来源够就不报「指不出」', () => {
+  const report = validateResources({
+    file: 'RESOURCES.md', markdown: RESOURCES_TEXT, nodeIds: ['var', 'fn'],
+  });
+  assert.equal(find(report, '指不出一处来源'), undefined, JSON.stringify(messages(report)));
+  // 社区与 Gaps 里的条目不参与条数：来源条目只有第 5、6、7、11 行四条。
+  assert.equal(find(report, '清单在膨胀'), undefined);
+});
+
+test('条数超限如实报出：来源条目 > 节点数 × 2', () => {
+  const report = validateResources({
+    file: 'RESOURCES.md', markdown: RESOURCES_TEXT, nodeIds: ['var'],
+  });
+  const over = find(report, '清单条目 4 条 > 节点数 1 × 2 = 2');
+  assert.ok(over, JSON.stringify(messages(report)));
+  assert.equal(over.blocking, false);
+  assert.match(over.message, /（4 倍）/, '倍数也要如实报出来');
+  assert.match(over.message, /清单在膨胀/);
+  // 没有节点时不该编一条除零的结论（那种大纲本身已经被别处报过了）。
+  const noNodes = validateResources({ file: 'RESOURCES.md', markdown: RESOURCES_TEXT, nodeIds: [] });
+  assert.equal(find(noNodes, '清单在膨胀'), undefined);
+});
+
+test('「服务」里写了不存在的节点 id：如实报出并指到那一行', () => {
+  const report = validateResources({
+    file: 'RESOURCES.md',
+    markdown: ['## Knowledge', '- [A](https://a.example/1) · 服务 自己造的词', '- [B](https://b.example/2) · 服务 var'].join('\n'),
+    nodeIds: ['var'],
+  });
+  const problem = find(report, '不存在的节点 id: 自己造的词');
+  assert.ok(problem, JSON.stringify(messages(report)));
+  assert.equal(problem.line, 2);
+  assert.equal(problem.blocking, false);
+});
+
+test('清单一条标记都没有：每个节点都报「指不出一处来源」，且说清有几条没写标记', () => {
+  const report = validateResources({
+    file: 'RESOURCES.md',
+    markdown: ['## Knowledge', '- [A](https://a.example/1)', '- [B](https://b.example/2)'].join('\n'),
+    nodeIds: ['var', 'fn'],
+  });
+  assert.ok(find(report, '还有 2 个节点指不出一处来源（共 2 个节点）：var、fn'), JSON.stringify(messages(report)));
+  assert.ok(find(report, '节点 var 指不出一处来源'));
+  assert.ok(find(report, '节点 fn 指不出一处来源'));
+  assert.ok(find(report, '2 条来源条目没写「服务 <节点 id>」'));
+  assert.equal(report.blocking, false);
 });

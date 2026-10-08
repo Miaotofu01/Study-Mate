@@ -380,3 +380,37 @@ test('交接门禁：deliver/ 里有资源清单就带逐节摘要，verified �
   assert.deepEqual(again.sections.map((section) => section.verified), [true, false]);
   assert.match(again.summary, /Knowledge 1 条（已核）/);
 });
+
+/* ── 五、数据层校验器也读「资源清单」的覆盖率（#130）────────────────────── */
+
+test('数据层校验器：清单在盘上就一并报覆盖率（提示），不在就不编空报告', async (t) => {
+  const f = withTools(t);
+  // 夹具默认没有 RESOURCES.md：既不报一条「缺文件」，也不多一份空报告。
+  const before = await call(f.ctx, 'studymate_validate_curriculum', { paths: ['demo'] });
+  assert.equal(before.reports.some((report) => report.kind === 'resources'), false);
+  assert.equal(before.blocking, false);
+
+  fs.writeFileSync(path.join(f.subject.dir, 'RESOURCES.md'), [
+    '## Knowledge',
+    '- [A](https://a.example/one) · 服务 var',
+  ].join('\n'));
+  const after = await call(f.ctx, 'studymate_validate_curriculum', { paths: ['demo'] });
+  const report = after.reports.find((item) => item.kind === 'resources');
+  assert.ok(report, JSON.stringify(after.reports.map((item) => item.kind)));
+  assert.ok(report.problems.some((problem) => problem.message.includes('节点 fn 指不出一处来源')),
+    JSON.stringify(messages(report)));
+  assert.equal(report.blocking, false, '覆盖率是提示');
+  assert.equal(report.blockingCount, 0);
+  assert.equal(after.blocking, false, '提示不改整体结论');
+  // 一条来源服务 var：var 不报，fn 报一条。
+  assert.equal(report.problems.filter((problem) => problem.message.includes('节点 var 指不出一处来源')).length, 0);
+  // 站点分布**只报不卡**：附在报告上，也写进那一句摘要。
+  assert.deepEqual(report.hosts, [{ host: 'a.example', entries: 1 }]);
+  assert.match(report.summary, /站点分布（只报不卡）：1 个站点——a\.example 1 条/);
+
+  // 直接给清单文件也认（它要读同目录的 curriculum.yaml 拿节点 id）。
+  const direct = await call(f.ctx, 'studymate_validate_curriculum', { paths: ['demo/RESOURCES.md'] });
+  assert.equal(direct.reports.length, 1);
+  assert.equal(direct.reports[0].kind, 'resources');
+  assert.ok(messages(direct.reports[0]).some((message) => message.includes('节点 fn 指不出一处来源')));
+});
