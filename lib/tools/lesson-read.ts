@@ -11,8 +11,8 @@
    而且 `node.lesson` 的 `<slug>/<文件名>` 也不是能直接喂给 `resolveTarget` 的路径）。
    vault 的 `readLibrary` 在一次调用里只读一遍盘（两个域共用同一份缓存）。
 
-   **它不进 `lib/tools/index.ts` 的 `registerStudyMate`**：那八个原生工具的面一字不动
-   （`STUDY_TOOL_NAMES` 仍是八条）。这个工具由答疑预设那条插件行
+   **它不进 `lib/tools/index.ts` 的 `registerStudyMate`**：那九个原生工具的面一字不动
+   （`STUDY_TOOL_NAMES` 仍是九条）。这个工具由答疑预设那条插件行
    （`lib/tools/qa-preset.ts`）注册进它自己的作用域——见那里的文件头。
    ───────────────────────────────────────────────────────────────────────── */
 

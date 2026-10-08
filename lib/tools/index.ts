@@ -39,6 +39,7 @@ import { applyEmptyReasonsTool, renumberLessonsTool } from './rewrite.ts';
 import { exportTool } from './export.ts';
 import { registerWatch } from '../watch/index.ts';
 import { registerLabTools } from '../lab/index.ts';
+import { registerReachTools } from '../reach/index.ts';
 import { LESSON_READ_TOOL_NAME } from './lesson-read.ts';
 
 /** `ctx.inject(['tools'], …)` 给的那层上下文：只用得到这几个成员。 */
@@ -77,7 +78,7 @@ export function registerExportTools(ctx: StudyPluginContext): void {
   registerStudyTool(ctx, exportTool());
 }
 
-/* ── 八个工具的名字（注册表与测试共用一份，别在两处各写一遍） ─────────────
+/* ── 九个工具的名字（注册表与测试共用一份，别在两处各写一遍） ─────────────
    名字的**形态**是刻意的：用下划线不用点号（`decisions.md` §3）。工具名会原样进模型 API 的
    `tools[].name`，而 OpenAI 兼容接口（含 DeepSeek）只接受 `^[a-zA-Z0-9_-]+$`；DSH 自己不校验，
    所以点号会在**真实会话**里炸、不在门禁里炸。目标态规格 §3.1 写的 `studymate.workspace.context`
@@ -92,16 +93,19 @@ export const STUDY_TOOL_NAMES = [
   'studymate_renumber_lessons',
   'studymate_apply_empty_reasons',
   'studymate_export',
+  // #125：核验「资源清单」里的链接。它排在最后，注册清单里也跟着排在 `registerExportTools`
+  // 之后（顺序是断言的一部分：`test_tools_guard.mjs` 按这张表逐位对注册结果）。
+  'studymate_verify_sources',
 ] as const;
 
 /* ── 答疑面那一个只读工具的名字表（#104）────────────────────────────────────
    与上面的学习面**并列、不混**：`studymate_lesson_read`（`./lesson-read.ts`）由答疑预设那条
    插件行（`./qa-preset.ts`）注册进它**自己的作用域**，不在 `registerStudyMate` 的注册面上，
-   所以学习会话的工具面里没有它（`STUDY_TOOL_NAMES` 仍是八条）。
+   所以学习会话的工具面里没有它（`STUDY_TOOL_NAMES` 仍是九条）。
 
    为什么要单独一张表：技能正文里反引号点名的 `studymate_*` 必须能在代码里找到出处
    （`scripts/tests/test_skill_contracts.mjs` 守这条），而那个判据认的是**两张表的并集**——
-   `local-qa` 那条链上的工具属于这一张。别为了省一张表把它塞进上面那八条。 */
+   `local-qa` 那条链上的工具属于这一张。别为了省一张表把它塞进上面那九条。 */
 export const QA_TOOL_NAMES = [LESSON_READ_TOOL_NAME] as const;
 
 /**
@@ -120,6 +124,9 @@ export function registerStudyMate(ctx: StudyPluginContext): void {
   registerValidatorTools(ctx);
   registerRewriteTools(ctx);
   registerExportTools(ctx);
+  // #125 核验域：studymate_verify_sources 把「资源清单」里的链接探一遍（并发取、先定路由表、
+  // 结果留缓存，再核只补增量）。同一个姿势：注册点把造工具能力递进去，核验域不 import 工具域。
+  registerReachTools(ctx, { registerStudyTool });
   // #73 任务模型：五个 studymate_task_* 工具 + 阅读端进度路由（GET /api/studymate/tasks）。
   // 任务域不 import 工具域，所以把「造工具」这件事当参数递进去——域图上只有 tools → tasks
   // 一条边。别的子系统照这个姿势加：自己的目录里导出 registerXxx(ctx)。

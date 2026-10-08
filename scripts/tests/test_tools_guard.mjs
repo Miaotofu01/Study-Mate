@@ -8,7 +8,8 @@
    反证之外还钉三件事：注册点上全部工具的**声明表**（谁读谁写，放宽一行就红）、
    `requires:['model']` 在无模型时返回 `{available:false, reason}` 且 **body 不跑**、
    以及「唯一注册点」`registerStudyMate` 真的把每个子系统都挂上了。
-   #73 之后注册点上有两个子系统（学习数据八个 + 任务域五个），断言按两份名字表拼起来算。
+   #73 之后注册点上有两个子系统（学习数据九个 + 任务域五个），#77 加了实验域一个、
+   #125 加了核验域一个，断言按各份名字表拼起来算。
 
    夹具（临时 HOME/工作区、假 ctx）在 `fixtures/tools.mjs`：那是夹具不是套件，
    所以放在 `fixtures/` 下——放 `scripts/tests/` 根下会被套件覆盖断言当成「没登记的套件」。 */
@@ -19,10 +20,14 @@ import { createAccess, DomainViolationError, matchesPattern } from '../../lib/ho
 import { assertOutput, execute, fakeContext, loadTools, useHome } from './fixtures/tools.mjs';
 
 const tools = await loadTools();
-// #73 之后注册点上有三个子系统：学习数据的八个工具 + 任务域的五个 + 实验域的一个（#77）。
-// 名字表各自是自己目录里导出的那一份（不在这里手写第二遍），所以「谁注册了什么」只有一处真相。
+// #125 之后注册点上有四个子系统：学习数据的九个工具 + 任务域的五个 + 实验域的一个（#77）
+// + 核验域的一个（#125）。名字表各自是自己目录里导出的那一份（不在这里手写第二遍），
+// 所以「谁注册了什么」只有一处真相。
 const tasks = await import('../../lib/tasks/index.ts');
 const lab = await import('../../lib/lab/index.ts');
+const reach = await import('../../lib/reach/index.ts');
+// 注册顺序 = 学习面一张表（核验那条在表尾，注册点里也跟着排在 `registerExportTools` 之后）
+// + 任务域 + 实验域，与 `registerStudyMate` 里那一串调用逐位对应。
 const ALL_TOOL_NAMES = [...tools.STUDY_TOOL_NAMES, ...tasks.TASK_TOOL_NAMES, ...lab.LAB_TOOL_NAMES];
 
 /* ── 一、注册点上全部工具的声明表（放宽一行就红） ─────────────────────── */
@@ -78,15 +83,23 @@ const DECLARATIONS = {
     reads: ['pool', 'lab', 'attempts', 'workspace'],
     writes: { attempts: ['**'] },
   },
+  // #125 核验域：读工作区（定位清单）与「资源清单」那一份文件；一个字段都不写——
+  // 探过的结果进的是 `<DSH_HOME>` 下的缓存，那不是学习数据的域（见 lib/reach/index.ts 文件头）。
+  studymate_verify_sources: {
+    reads: ['workspace', 'resources'],
+    writes: {},
+  },
 };
 
-test('注册点上的工具一个不多一个不少：八个学习数据工具 + 五个任务工具 + 一个实验工具', () => {
+test('注册点上的工具一个不多一个不少：九个学习数据工具 + 五个任务工具 + 一个实验工具', () => {
   const ctx = fakeContext();
   tools.registerStudyMate(ctx.ctx);
   assert.deepEqual([...ctx.definitions.keys()], ALL_TOOL_NAMES);
-  assert.equal(tools.STUDY_TOOL_NAMES.length, 8);
+  assert.equal(tools.STUDY_TOOL_NAMES.length, 9);
   assert.equal(tasks.TASK_TOOL_NAMES.length, 5);
   assert.equal(lab.LAB_TOOL_NAMES.length, 1);
+  assert.equal(reach.REACH_TOOL_NAMES.length, 1);
+  assert.deepEqual([...reach.REACH_TOOL_NAMES], [tools.STUDY_TOOL_NAMES[8]]);
   for (const name of ALL_TOOL_NAMES) {
     // 模型 API 的 tools[].name 只接受 ^[a-zA-Z0-9_-]+$（含 DeepSeek 的兼容接口）
     assert.match(name, /^[a-z0-9_]+$/, `${name} 的名字会进模型 API 的 tools[].name`);

@@ -55,7 +55,7 @@ const DOMAIN_RULES = {
   // tools → export）。方向**只有**这一条——子系统一律不许 import tools（任务域就是把
   // `registerStudyTool` 当参数接过去的，正是为了不出现反向边，见 lib/tasks/tools.ts 文件头）。
   // 往后每落地一个注册进注册点的子系统，这里加一个域名，别改成通配。
-  tools:  { allow: ['core', 'lib', 'host', 'tasks', 'watch', 'lab', 'export'], builtin: true, package: false },  // 原生工具（#68）+ 任务（#73）+ 监听（#74）+ 实验（#77）+ 导出（#82）
+  tools:  { allow: ['core', 'lib', 'host', 'tasks', 'watch', 'lab', 'export', 'reach'], builtin: true, package: false },  // 原生工具（#68）+ 任务（#73）+ 监听（#74）+ 实验（#77）+ 导出（#82）+ 核验（#125）
   tasks:  { allow: ['core', 'lib'], builtin: true, package: false },  // 任务模型（#73）
   // 实验域（#77）：判分三轨的第三轨。要 core（题型与必备字段）、lib（作答数据的落点）、
   // tasks（长命令走任务模型、可查可取消）。`node:child_process` 是它存在的理由，而它
@@ -71,6 +71,11 @@ const DOMAIN_RULES = {
   // **不许 import tools**（预登记的初值里有它）：工具域 import 导出域去注册 `studymate_export`，
   // 反向再来一条就是域图成环——这条环由下面的环检测拦下，所以这里直接不写。
   export: { allow: ['core', 'lib', 'tasks'], builtin: true, package: false },
+  // 核验域（#125）：核「资源清单」里的链接能不能打开。要 core（纯函数：`cmpCodePoints`）、
+  // lib（`workspace.ts` 的 DSH_HOME）与 host（工具 body 的 `DomainAccess` 类型）。它是唯一
+  // 会发网络请求的域（`node:net` / `node:tls`）——`builtin: true` 就是为它这条边的。
+  // **不 import tools**：`registerStudyTool` 由注册点注入，与实验域同一个姿势。
+  reach:  { allow: ['core', 'lib', 'host'], builtin: true, package: false },
   bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'lab', 'watch', 'export', 'ask'], builtin: true, package: false },
   client: { allow: [], builtin: false, package: false },  // 浏览器侧单文件：只与模块加载器打交道
   // katex 域（#91）：**随包发的第三方 dist**（`lib/katex/**`：KaTeX 的 min.js / min.css /

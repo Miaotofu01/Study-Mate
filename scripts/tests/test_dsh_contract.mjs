@@ -14,7 +14,7 @@
 
    三件事，缺一不可：
 
-     1. **扫**：`registerStudyMate` 的十四个学习工具 + 答疑预设那条插件行注册的只读工具，
+     1. **扫**：`registerStudyMate` 的十五个原生工具 + 答疑预设那条插件行注册的只读工具，
         逐个把 `parameters` 与 `output.schema` 交给宿主的 `assertSupportedJsonSchema`；
      2. **反证**：同一个校验器对一份已知不合规的 schema 必须**报错**——否则这条套件自己
         就是个空转（第 1 条绿了也说明不了任何事）；
@@ -63,7 +63,7 @@ test('宿主契约：没给 STUDYMATE_DSH_PACKAGE 就跳过（与 test:dsh 同�
   assert.ok(fs.existsSync(runtime), `STUDYMATE_DSH_PACKAGE 指向的目录不存在：${runtime}`);
 });
 
-/** 注册点上全部工具的定义：十四个学习工具 + 答疑预设那条行注册的只读工具。 */
+/** 注册点上全部工具的定义：十五个原生工具 + 答疑预设那条行注册的只读工具。 */
 async function allDefinitions() {
   const { registerStudyMate } = await loadTools();
   const learning = fakeContext();

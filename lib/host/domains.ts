@@ -2,7 +2,7 @@
    StudyMate · 域 host —— 学习数据的**数据域词表**
 
    这不是源码目录（`decisions.md` §2 的「目录即域」说的是 `lib/` 的布局），而是
-   「一个工具能碰哪些学习数据」的计量单位。八个原生工具各自声明读哪些域、写哪个域里的
+   「一个工具能碰哪些学习数据」的计量单位。九个原生工具各自声明读哪些域、写哪个域里的
    哪些字段；声明之外的访问在 `access.ts` 里**当场抛错**（issue #68 的验收第 2、3 条）。
 
    为什么自己造：宿主**没有**「工具声明读写域」的一等机制——`dsh-authorization` 是凭据流程、
@@ -30,6 +30,7 @@ export const DOMAINS = [
   'attempts',       // subjects/<slug>/attempts/<NNNN>-<节点id>.json —— 作答数据（#71 读写、#77 回填）
   'handoff',        // 角色交接暂存区（.studymate-stage/<角色>-<节点>/）—— 只读盘上快照
   'export',         // 导出产物落点 —— **只写**，读法不存在（#82 落地）
+  'resources',      // 资源清单（`RESOURCES.md`，科目目录里或暂存目录的 `deliver/` 下）
 ] as const;
 
 export type Domain = (typeof DOMAINS)[number];

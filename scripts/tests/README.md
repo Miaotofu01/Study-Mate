@@ -21,7 +21,7 @@ npm test
 | `npm run test:release` | 版本、changelog、重试和发布保护 |
 | `npm run test:static` | 技能调用面与提示词规则归属、词表与发布元数据、文档悬空引用、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
 | `npm run test:browser` | 十套真实浏览器渲染测试（阅读端本体、阅读位置、作答落盘、监听推送、跑一次、导出产物、公式排版、四路由 × 三档视口、课件页正文与页头、问答会话与引用），浏览器二进制自动探测 |
-| `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录；native 安装下还验八个原生工具的注册、body 可调用（走真 dispatch）与越权抛，以及 #70 的引擎路径：`root` 指向已安装的包、`~/.dsh/studymate/engine/` 不再出现 |
+| `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录；native 安装下还验九个原生工具的注册、body 可调用（走真 dispatch）与越权抛，以及 #70 的引擎路径：`root` 指向已安装的包、`~/.dsh/studymate/engine/` 不再出现 |
 | `npm run test:dsh-contract` | **宿主契约守门**：拿真宿主自己的 schema 校验器（`dsh-tools` 的 `assertSupportedJsonSchema`）扫注册点上全部工具的 `parameters` 与 `output.schema`，并核对参考调用 `createWebhookSession` 的字段清单没漂；附一条反证（已知不合规的 schema 必须报错）。同一个 `STUDYMATE_DSH_PACKAGE`，没设就跳过。指针与纪律在 [工程约束](../规范/工程约束.md) §三「宿主契约」 |
 | `npm run test:dsh-cli` | 真实 DSH CLI 安装、更新、卸载，还需要 `pnpm` |
 
@@ -61,7 +61,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_rules_pure.mjs` | 纯函数规则层（`lib/core/rules.ts`）：四层判定逐条通过标准、题型与深度的匹配、旧六档 → 三档六条映射逐条断言、证据资格与分母口径；并断言 `lib/core/**` 不 import `node:*` |
 | `test_core_coverage_floor.mjs` | 覆盖率下限：自己 spawn 一轮带 `--test-coverage-*` 阈值的 `node --test`，规则层与整个 `lib/core/**` 的覆盖率不达标就让门禁红。统计范围**自动发现**（`lib/core/**` 有哪几个模块、哪几条套件真的把它们拉进这一轮，全从盘上算），并断言每个模块都出现在覆盖率报告里——没被加载的模块不进分母，静默少算会红 |
 | `test_architecture_boundaries.mjs` | 架构边界与依赖无环（#69）：扫真实源码解析 `import` / `export … from` / 动态 `import()` 得到 import 图，按文件顶部那张**域规则表**判（`lib/` 一级目录 = 域，未知域默认拒绝，`lib/core/**` 不许碰 `node:*` 与域外东西），域图与模块图都断言无环；另有合成图的反证用例钉住判据本身 |
-| `test_tools_guard.mjs` | 原生工具域（`lib/tools/{domains,access,define,index,capability}.ts`）：八个工具的名字与**声明表**（谁读哪些域、写哪些字段，放宽一行就红）、`description` 只有一句话、注册走 `ctx.effect`；**反证**越权读与越权写必须抛 `DomainViolationError`（写越权时回调一次都不跑）；`requires:['model']` 在无模型时不跑 body 并返回 `{available:false, reason}` |
+| `test_tools_guard.mjs` | 原生工具域（`lib/tools/{domains,access,define,index,capability}.ts`）：九个工具的名字与**声明表**（谁读哪些域、写哪些字段，放宽一行就红）、`description` 只有一句话、注册走 `ctx.effect`；**反证**越权读与越权写必须抛 `DomainViolationError`（写越权时回调一次都不跑）；`requires:['model']` 在无模型时不跑 body 并返回 `{available:false, reason}` |
 | `test_tools_context.mjs` | `studymate_workspace_context` 的结构化摘要（工作区路径、今天、时区、科目现状含当前节点与三档、最近学习记录、可用能力），以及**逐域投影**：`subjects` 切片里没有题库、没有课件正文（顺着节点也读不到别的域） |
 | `test_tools_validate.mjs` | 四个校验工具：数据层（大纲／进度／科目，逐条带行号）、内容层（格式 + 锚点四态 + 图片存在性 + 题库坏 JSON）、图片库（原 Python 校验器的行为移植：表头、命名、三列非空、日期、体积）、交接门禁（明确放行／阻断） |
 | `test_tools_rewrite.mjs` | 两个改写工具（位次重排与无题理由回填，原 Python 脚本的行为照搬）：位次重排（dry-run、换位、目标名被占、重复、认不出的命名）与 `empty_reason` 写入（位置、缩进、CRLF、拦下的六类）；`studymate_export` 的占位形状 |
@@ -88,7 +88,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 
 `test_skill_contracts.mjs` 把技能正文里点名的东西与代码里的唯一出处对上，分三类：
 
-- **调用面**：正文里反引号包起来的 `studymate_*` 必须都在 `lib/tools/index.ts` 的名字表里（注册表是唯一出处）——**两张表的并集**：学习面 `STUDY_TOOL_NAMES`（八条）与答疑面 `QA_TOOL_NAMES`（只挂答疑预设的那条只读工具）；而且**真跑一遍两个宿主的导出**——Codex/OpenAI 与 Antigravity 的导出件里不许再留原生工具名、必须有等价的引擎命令落点（映射表在两个 `bin/*-skill-compat.mjs` 里）。
+- **调用面**：正文里反引号包起来的 `studymate_*` 必须都在 `lib/tools/index.ts` 的名字表里（注册表是唯一出处）——**两张表的并集**：学习面 `STUDY_TOOL_NAMES`（九条）与答疑面 `QA_TOOL_NAMES`（只挂答疑预设的那条只读工具）；而且**真跑一遍两个宿主的导出**——Codex/OpenAI 与 Antigravity 的导出件里不许再留原生工具名、必须有等价的引擎命令落点（映射表在两个 `bin/*-skill-compat.mjs` 里）。
 - **词表**：`layered-practice` 的四层（含义与通过标准）与四种题型（服务哪一层、必备字段）必须与 `lib/core/rules.ts` 的 `LAYERS` / `LAYER_RULES` / `QUESTION_KINDS` / `QUESTION_KIND_SHAPES` / `QUESTION_RULES` 逐字一致；`evidence-check` 的可信度排序与排除清单必须与 `EVIDENCE_BY_TRUST` / `NON_INDEPENDENT_EVIDENCE` 逐条一致。
 - **#81 的范围**：两个教学协议与五个角色的技能里不写引擎脚本命令，也不再出现旧六档与旧四层名。
 
@@ -107,7 +107,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 
 测试创建临时 HOME、DSH_HOME 和工作区，启动仅监听本机随机端口的 Web，不调用模型。CLI 测试通过临时本地 registry 安装、更新和卸载实际打包的 StudyMate，检查普通模式、学习模式、安装方式切换与学习数据保留。
 
-`test:dsh` 的探针在**插件真的被加载**时（native 安装）还验一遍原生工具：八个 `studymate_*` 在 `ctx.tools` 上按名字查得到、模型侧投影只有一句话说明，走真 dispatch 调 `studymate_workspace_context` / 两个校验器 / 导出占位，并反证越权读、越权写会抛 `[DOMAIN_VIOLATION]`。**它验的不是「模型在真实会话里调了工具」**——那要花额度，默认门禁不跑（结果里的 `modelRequestsIssued` 恒为 0）。standalone 安装写的是声明式预设、插件包不进 profile，那种安装下没有原生工具，探针按 `nativeTools: null` 照实断言。
+`test:dsh` 的探针在**插件真的被加载**时（native 安装）还验一遍原生工具：九个 `studymate_*` 在 `ctx.tools` 上按名字查得到、模型侧投影只有一句话说明，走真 dispatch 调 `studymate_workspace_context` / 两个校验器 / 导出占位，并反证越权读、越权写会抛 `[DOMAIN_VIOLATION]`。**它验的不是「模型在真实会话里调了工具」**——那要花额度，默认门禁不跑（结果里的 `modelRequestsIssued` 恒为 0）。standalone 安装写的是声明式预设、插件包不进 profile，那种安装下没有原生工具，探针按 `nativeTools: null` 照实断言。
 
 同一套探针也钉 #70 的引擎路径：**native 安装下 `root` 指向已安装的包自身**（技能、预设、schema、数据骨架都在包里），`~/.dsh/studymate/engine/` 不再出现源码树副本；standalone 安装照旧把那份**只读材料**落在那里、`root` 也照旧指向它。另有一条从 standalone 交接（`--mode native`）到原生启动的用例，验 `root` 从 `engine/` 换成包目录。
 

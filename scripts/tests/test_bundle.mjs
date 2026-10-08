@@ -312,7 +312,7 @@ test('packed npm package loads CLI and both plugins inside node_modules', t => {
     });
     assert.deepEqual(definitions.map(definition => definition.name), ['studymate_lesson_read']);
     assert.deepEqual(definitions[0].declaration.writes, {});
-    assert.equal(QA_DENIED_TOOL_NAMES.length, 14);
+    assert.equal(QA_DENIED_TOOL_NAMES.length, 15);
     assert.ok(QA_DENIED_TOOL_NAMES.includes('studymate_lab_run'));
     assert.ok(QA_DENIED_TOOL_NAMES.includes('studymate_task_cancel'));
     assert.deepEqual(restrictions, [{ deny: [...QA_DENIED_TOOL_NAMES] }]);
