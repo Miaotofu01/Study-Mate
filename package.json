@@ -7,8 +7,8 @@
     "studymate": "bin/studymate.mjs"
   },
   "exports": {
-    ".": "./bin/dsh-plugin.ts",
-    "./qa-preset": "./lib/tools/qa-preset.ts",
+    ".": "./bin/dsh-plugin.mjs",
+    "./qa-preset": "./bin/qa-preset.mjs",
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },

@@ -243,3 +243,78 @@ test('an old host skips unsupported native loading without blocking startup', as
     assert.match(warning, /npx -y @yunmiao\/studymate@latest install/);
   }
 });
+
+test('packed npm package loads CLI and both plugins inside node_modules', t => {
+  const f = fixture(t);
+  const consumer = path.join(f.dir, "npm 用户 O'Brien #1");
+  const packs = path.join(f.dir, 'packs');
+  fs.mkdirSync(consumer, { recursive: true });
+  fs.mkdirSync(packs);
+  fs.writeFileSync(path.join(consumer, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
+  const env = { ...f.env, NODE_OPTIONS: '', npm_config_cache: path.join(f.dir, 'npm-cache') };
+  const npmCli = process.env.npm_execpath || (process.platform === 'win32'
+    ? path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js') : null);
+  const npm = (args, cwd) => spawnSync(npmCli ? process.execPath : 'npm', npmCli ? [npmCli, ...args] : args,
+    { cwd, env, encoding: 'utf8', timeout: 60000, windowsHide: true });
+  const passed = result => {
+    assert.equal(result.status, 0, String(result.error || '') + result.stderr + result.stdout);
+    return result;
+  };
+  const packed = passed(npm(['pack', '--ignore-scripts', '--offline', '--json', '--pack-destination', packs], root));
+  const archive = path.join(packs, JSON.parse(packed.stdout)[0].filename);
+  passed(npm(['install', archive, '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false'], consumer));
+  const installed = path.join(consumer, 'node_modules', '@yunmiao', 'studymate');
+  // 必须是 npm 解出来的真实 node_modules 路径；源码检出与 npm link 都复现不了这次故障。
+  assert.equal(fs.lstatSync(installed).isSymbolicLink(), false);
+  const version = JSON.parse(fs.readFileSync(path.join(installed, 'package.json'), 'utf8')).version;
+  const run = (args) => passed(spawnSync(process.execPath, args,
+    { cwd: consumer, env, encoding: 'utf8', timeout: 30000, windowsHide: true }));
+
+  // 每条公开入口都在全新的 Node 进程里启动，不能借前一条入口已经注册的加载钩子过关。
+  assert.equal(run([path.join(installed, 'bin', 'studymate.mjs'), '--version']).stdout.trim(), version);
+  const foreign = path.join(consumer, 'node_modules', 'foreign');
+  fs.mkdirSync(foreign);
+  fs.writeFileSync(path.join(foreign, 'package.json'), JSON.stringify({ type: 'module', exports: './index.ts' }));
+  fs.writeFileSync(path.join(foreign, 'index.ts'), 'export const marker: number = 1;\n');
+  run(['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import { inject, apply } from '@yunmiao/studymate';
+    assert.deepEqual(inject, ['agentPresets']);
+    const configs = [], effects = [], warnings = [];
+    console.warn = message => warnings.push(String(message));
+    let disposed = 0;
+    await apply({
+      get: () => ({ name: 'web', home: process.env.DSH_HOME }),
+      agentPresets: { register: config => {
+        configs.push(config);
+        return () => { disposed++; };
+      } },
+      effect: async fn => { effects.push(await fn()); },
+    });
+    assert.deepEqual(configs.map(config => config.id), ['learning', 'qa']);
+    assert.deepEqual(warnings, []);
+    for (const dispose of effects) await dispose();
+    assert.equal(disposed, 2);
+    await assert.rejects(import('foreign'), { code: 'ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING' });
+  `]);
+  assert.equal(f.yaml(f.config).root, installed);
+  run(['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import { inject, apply, QA_DENIED_TOOL_NAMES } from '@yunmiao/studymate/qa-preset';
+    assert.deepEqual(inject, ['tools']);
+    const definitions = [], restrictions = [];
+    apply({
+      tools: {
+        register: definition => { definitions.push(definition); return () => {}; },
+        restrict: filter => { restrictions.push(filter); },
+      },
+      effect: fn => fn(),
+    });
+    assert.deepEqual(definitions.map(definition => definition.name), ['studymate_lesson_read']);
+    assert.deepEqual(definitions[0].declaration.writes, {});
+    assert.equal(QA_DENIED_TOOL_NAMES.length, 14);
+    assert.ok(QA_DENIED_TOOL_NAMES.includes('studymate_lab_run'));
+    assert.ok(QA_DENIED_TOOL_NAMES.includes('studymate_task_cancel'));
+    assert.deepEqual(restrictions, [{ deny: [...QA_DENIED_TOOL_NAMES] }]);
+  `]);
+});

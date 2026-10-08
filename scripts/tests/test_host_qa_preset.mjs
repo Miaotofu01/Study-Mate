@@ -145,9 +145,9 @@ test('答疑模式与学习模式并列：id/名/order 各自独立，插件行�
   assert.equal(qa.order, 20);
   assert.notEqual(qa.order, learning.order);
 
-  // 那条工具面行必须解析得到：包导出 ./qa-preset → 这个文件
+  // 那条工具面行必须解析得到：npm 先经 JS 入口初始化包内 TS 加载。
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-  assert.equal(manifest.exports['./qa-preset'], './lib/tools/qa-preset.ts');
+  assert.equal(manifest.exports['./qa-preset'], './bin/qa-preset.mjs');
   assert.ok(manifest.files.includes('preset/qa/**'), '发出去的包里必须带 preset/qa/**');
   assert.ok(rows.some(row => row.id === 'studymate-qa-tools'
     && row.name === '@yunmiao/studymate/qa-preset'));

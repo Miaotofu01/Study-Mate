@@ -8,8 +8,11 @@ import { adaptSkill } from './skill-compat.mjs';
 import { buildOpenAiPlugin } from './openai-plugin.mjs';
 import { buildAntigravityPlugin } from './antigravity-plugin.mjs';
 import { listDocMarkdown } from './docs-payload.mjs';
-import { readConfigObject } from '../lib/workspace.ts';
-import { installPreset } from '../lib/preset.ts';
+import './typescript-runtime.mjs';
+
+// 先注册包内加载钩子，再解析 TypeScript 模块图（npx 的包位于 node_modules）。
+const { readConfigObject } = await import('../lib/workspace.ts');
+const { installPreset } = await import('../lib/preset.ts');
 
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const metadata = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'));
