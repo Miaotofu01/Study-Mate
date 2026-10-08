@@ -632,13 +632,17 @@ export function validateResources(input: ResourcesInput): ValidationReport {
     }
   }
 
-  const limit = input.nodeIds.length * RESOURCE_ENTRY_LIMIT;
-  if (entries.length > limit) {
+  // 没有节点就没什么可比（那种大纲本身已经被别处报过了），不在这里编一条除零的结论。
+  const nodes = input.nodeIds.length;
+  const limit = nodes * RESOURCE_ENTRY_LIMIT;
+  if (nodes > 0 && entries.length > limit) {
+    // 倍数也要报出来（#128 的实现决定：「如实报出条数、节点数与倍数」）。
+    const times = Math.round((entries.length / nodes) * 10) / 10;
     problems.push({
       file: input.file,
       line: 1,
-      message: `清单条目 ${entries.length} 条 > 节点数 ${input.nodeIds.length} × ${RESOURCE_ENTRY_LIMIT} = ${limit}：`
-        + '清单在膨胀——每条来源都该服务到节点，别拿条目充长度',
+      message: `清单条目 ${entries.length} 条 > 节点数 ${nodes} × ${RESOURCE_ENTRY_LIMIT} = ${limit}`
+        + `（${times} 倍）：清单在膨胀——每条来源都该服务到节点，别拿条目充长度`,
       blocking: false,
     });
   }

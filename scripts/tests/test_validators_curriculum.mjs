@@ -473,7 +473,11 @@ test('条数超限如实报出：来源条目 > 节点数 × 2', () => {
   const over = find(report, '清单条目 4 条 > 节点数 1 × 2 = 2');
   assert.ok(over, JSON.stringify(messages(report)));
   assert.equal(over.blocking, false);
+  assert.match(over.message, /（4 倍）/, '倍数也要如实报出来');
   assert.match(over.message, /清单在膨胀/);
+  // 没有节点时不该编一条除零的结论（那种大纲本身已经被别处报过了）。
+  const noNodes = validateResources({ file: 'RESOURCES.md', markdown: RESOURCES_TEXT, nodeIds: [] });
+  assert.equal(find(noNodes, '清单在膨胀'), undefined);
 });
 
 test('「服务」里写了不存在的节点 id：如实报出并指到那一行', () => {
