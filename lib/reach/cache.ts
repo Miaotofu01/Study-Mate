@@ -106,3 +106,85 @@ export function saveCache(entries: CacheEntries, home: string = dshHome()): void
     // 见文件头：缓存写不进去不影响这一轮的结论
   }
 }
+
+/* ── 第二本台账：按**内容指纹**记「这一份核过没有」─────────────────────────
+   为什么要第二本而不是把指纹塞进上面那本：那本是 `url → 结论`，这本是
+   `小节指纹 → 核过`，键的语义不同、寿命也不同（URL 的结论会过期重探；指纹挂的是
+   「这一段文字被核过」这个事实，**没有过期一说**——内容没变就永远算数，内容变了
+   指纹自然就变了）。两本共用 `<DSH_HOME>/studymate/reach/` 这个落点与同一套
+   容错读、原子写。
+
+   为什么只存 `at`：判定只看「在不在」。核的时候打得开几条、打不开几条，是**上一轮**的证据，
+   写进正文报告的那一份才是给人看的；台账里多存一份副本只会多一个会悄悄过期的说法。 */
+
+/** 一条指纹的核验记录。**判定只看「在不在」**，`at` 只用来在超上限时丢最老的。 */
+export interface VerifiedRecord {
+  /** 什么时候核的（毫秒时间戳）。 */
+  at: number;
+}
+
+export type VerifiedEntries = Map<string, VerifiedRecord>;
+
+/** 指纹台账的落点。 */
+export function verifiedFile(home: string = dshHome()): string {
+  return path.join(reachDir(home), 'verified.json');
+}
+
+/** 上限：一本台账不该无限长。超了丢最老的（与 URL 那本同一个姿势）。 */
+const MAX_VERIFIED = 2000;
+
+function verifiedOf(value: unknown): VerifiedRecord | null {
+  if (value === null || typeof value !== 'object') return null;
+  const at = (value as Record<string, unknown>).at;
+  if (typeof at !== 'number' || !Number.isFinite(at)) return null;
+  return { at };
+}
+
+/** 读指纹台账。**文件不存在、坏掉、读不动都是「没有记录」**，一律返回空表。 */
+export function loadVerified(home: string = dshHome()): VerifiedEntries {
+  let text = '';
+  try {
+    text = fs.readFileSync(verifiedFile(home), 'utf8');
+  } catch {
+    return new Map();
+  }
+  try {
+    const parsed = JSON.parse(text) as { entries?: unknown } | null;
+    const raw = parsed?.entries;
+    if (raw === null || typeof raw !== 'object') return new Map();
+    const out: VerifiedEntries = new Map();
+    for (const [sha, value] of Object.entries(raw as Record<string, unknown>)) {
+      const record = verifiedOf(value);
+      if (record !== null) out.set(sha, record);
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
+/** 记下这一批指纹「核过了」。写不进去就算了——下一轮重核一遍，结论一样。 */
+export function markVerified(
+  records: Iterable<readonly [string, VerifiedRecord]>,
+  home: string = dshHome(),
+): void {
+  const merged = loadVerified(home);
+  let added = false;
+  for (const [sha, record] of records) {
+    merged.set(sha, record);
+    added = true;
+  }
+  if (!added) return;
+  try {
+    const dir = reachDir(home);
+    fs.mkdirSync(dir, { recursive: true });
+    const kept = [...merged.entries()].sort((a, b) => b[1].at - a[1].at).slice(0, MAX_VERIFIED);
+    const body = JSON.stringify({ version: 1, entries: Object.fromEntries(kept) }, null, 2);
+    const file = verifiedFile(home);
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, body, 'utf8');
+    fs.renameSync(tmp, file);
+  } catch {
+    // 见上：台账写不进去不影响这一轮的结论
+  }
+}

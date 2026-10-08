@@ -29,7 +29,7 @@
 | `studymate_renumber_lessons` | **`subject`**（科目目录或 slug）、`dryRun?` | 大纲插/删节点之后重排课件位次；不确定就先 `dryRun` 只算不改 |
 | `studymate_apply_empty_reasons` | **`subject`**、**`node`**（节点 id）、**`reasons`**（数组：每项一个 `anchor` 与它的 `reason`，锚点与正文逐字匹配）、`dryRun?` | 出题角色交回无题理由时：把 `empty_reason:` 打进内容文件（**别手工开文件改**） |
 | `studymate_export` | `subject?`（slug；省略＝全部科目） | 学生要一份能离线看的；**#82 落地前是占位**，见 §9 |
-| `studymate_verify_sources` | **`manifest`**（「资源清单」的路径：`RESOURCES.md` 本身、含它的科目目录，或暂存目录里的 `deliver/RESOURCES.md`）、`offline?`（只用缓存、不发请求）、`refresh?`（忽略缓存重核） | 角色交回清单、或搬进科目之后：把清单里的链接并发探一遍，报出打得开／打不开，结论按 URL 记在插件缓存里（再核只补增量）。`offline` 时一个请求都不发；`refresh` 时忽略缓存重核 |
+| `studymate_verify_sources` | **`manifest`**（「资源清单」的路径：`RESOURCES.md` 本身、含它的科目目录，或暂存目录里的 `deliver/RESOURCES.md`）、`offline?`（只用缓存、不发请求）、`refresh?`（忽略缓存重核） | 角色交回清单、或搬进科目之后：把清单里的链接并发探一遍，报出打得开／打不开，结论按 URL 记在插件缓存里、按**小节指纹**记在指纹台账里（再核只补增量、改一节只重核那一节，交接门禁拿指纹回答 `verified`）。`offline` 时一个请求都不发；`refresh` 时忽略缓存重核 |
 | `studymate_lab_run` | **`subject`**（slug）、**`node`**（节点 id）、**`question`**（题 id：`<锚点文本>#<题号>`）、`cwd?`（相对这一课的 lab 实验目录，默认 `.`）、`writable?`（数组：声明这次会写的相对路径）、`predicted?`（学生先写下的预测）、`selfAssessment?`（`答对了` / `答了一半` / `没答上`，**只有学生能选**） | 判分三轨的第三轨（规格 §7.3）：`交付物` 题要**可运行证据**时，Host 半在学生本机上代跑那道题里**声明过的**命令。读 §3 的那一节，先看清「命令从哪来」与边界 |
 
 > 任务域（`studymate_task_status` / `_wait` / `_cancel` / `_destroy` / `_resume`）不在本表：那是插件自己跑的后台工作（导出、格式转换、索引重建）的句柄，契约见 `lib/tasks/tools.ts`。它只有一条常驻纪律——**状态查询从不阻塞，等待有上限，超时会告诉你下一步**。
@@ -106,7 +106,9 @@
 - `problems` 每条带 `file` 与 `line`（1 起），`blocking: true` 是阻断、`false` 是提示——**打回按它，不按你自己的判断**。
 - `validate_lesson` 另给两份对账清单：`anchors: [{ text, resolution, line, keys }]`（`resolution` 四态：`resolved` / `stale` / `ambiguous` / `missing`，**多匹配绝不静默取第一个**）与 `orphans: [{ key, line, count }]`（题库里没有对应锚点的键）。
 - 空值口径：没问题时 `problems: []`、`blockingCount: 0`、`summary: "放行——没有问题"`；文件不存在是**一条阻断问题**（`line: 1`），不是异常。
-- `validate_handoff` 的形状不同：`{ stage, verdict: 'pass' | 'block', blocking, blockingCount, role: string | null, outputs: <产物条数>, summary, problems }`。`verdict: 'block'` 时**不搬、不删 stage**。
+- `validate_handoff` 的形状不同：`{ stage, verdict: 'pass' | 'block', blocking, blockingCount, role: string | null, outputs: <产物条数>, sections: [ { heading, entries, hosts: [ { host, entries } ], sha256, verified } ], summary, problems }`。`verdict: 'block'` 时**不搬、不删 stage**。
+  - `sections` 是 `deliver/RESOURCES.md` 的**逐节摘要**（`##` 小节，标题行原文）：这一节几条、来自哪些域名、内容指纹、以及**这一份内容核过没有**。不是资源清单的交接就是 `[]`。总控要的「几节、几条、都来自哪些站点」看这里，**不必把清单读进上下文**。
+  - `verified` 问的是核验工具的指纹台账（插件私有），不是角色说了什么；**按节冻结**：某一节已定稿、`verified: true`，采图与课设就能被派出去，不必等整份核完。
 
 ### 两个改写工具
 
@@ -128,11 +130,13 @@ apply_empty_reasons → { subject, node, file, dryRun, ok,
 { manifest, total, ok, failed, cached, probed, pending,
   route: '直连' | '代理' | '未探',
   hosts: [ { host, entries, ok, failed } ],
+  sections: [ { heading, entries, sha256, verified } ],
   failures: [ { line, url, status, note } ],
   summary, next, cache }
 ```
 
 - `failures` 只列**这一轮真探过且打不开**的那几条（`line` 是清单里 1 起的行号、`status` 是 HTTP 状态码或 0、`note` 是一句原因）；缓存里带回来的旧结论**不在这里**，要全量明细去读 `cache` 指的台账。
+- `sections` 是清单逐节的指纹：`verified: true` 表示**这一节里至少有一条 http 链接、且每条都有结论**（这一轮探到的或缓存里新鲜的），并且这份指纹已经记进台账——交接门禁拿同一个指纹回答 `verified`。一条 http 链接都没有的小节（只有 `[Local: …]` 指针、或整节都是缺口）报 `未核`：核验工具核的是链接，那种小节没有可核的东西。所以清单改了一节，只有那一节要重核。
 - `cached` 是这一轮直接用的缓存条数，`probed` 是真发出去的条数，`pending` 是没轮到的。`route` 是这一轮实际走的路：先直连，**连接层**失败（DNS／连接被拒／证书）且有代理才换代理，换通了就把表用到队尾；HTTP 4xx／5xx 不换路。
 - `pending > 0` 时 `next` 会让你**用同一个 manifest 再调一次**——缓存让第二遍只探剩下的；都探完还有打不开的，`next` 会叫你去掉或换成等价来源。
 - **返回值刻意短**：不列 118 条明细。宿主对工具结果有 8192 字符的截断，长清单的逐条明细会被悄悄切掉（读起来像"只核了前 60 条"），所以明细留在缓存里、报告只给计数与打不开的那几条。
@@ -148,11 +152,11 @@ apply_empty_reasons → { subject, node, file, dryRun, ok,
 | `studymate_validate_curriculum` | workspace / curriculum / progress / subjects | — |
 | `studymate_validate_lesson` | workspace / curriculum / lessons / pool / assets | — |
 | `studymate_validate_pool` | workspace / assets | — |
-| `studymate_validate_handoff` | handoff（只读盘上快照） | — |
+| `studymate_validate_handoff` | handoff（只读盘上快照）／ resources（`deliver/RESOURCES.md` 这一份，只为逐节摘要） | — |
 | `studymate_renumber_lessons` | workspace / curriculum / lessons | `lessons/*` |
 | `studymate_apply_empty_reasons` | workspace / curriculum / lessons | `lessons/*#empty_reason` |
 | `studymate_export` | —（一份学习数据都不读） | `export/**` |
-| `studymate_verify_sources` | workspace / resources（只读 `RESOURCES.md` 这一份清单） | —（结论缓存落在 `<DSH_HOME>/studymate/reach/cache.json`，那不是学习数据的域） |
+| `studymate_verify_sources` | workspace / resources（只读 `RESOURCES.md` 这一份清单） | —（结论缓存落在 `<DSH_HOME>/studymate/reach/cache.json`、指纹台账落在同目录的 `verified.json`，那不是学习数据的域） |
 | `studymate_lab_run` | workspace / pool / lab / attempts | `attempts/**`（只写「跑」那一格，走 `lib/attempts.ts` 的栅栏） |
 
 域词表（`DOMAINS`）：`workspace`（路径、配置、今天、时区、找科目）、`memory`、`subjects`、`curriculum`、`progress`、`lessons`、`pool`、`assets`、`records`、`reference`（学生自加的资料，ADR-0010）、`misconceptions`、`lab`（`subjects/<slug>/lab/<NNNN>-<短名>/`，读它要同时给 `node`）、`attempts`（`subjects/<slug>/attempts/<NNNN>-<节点id>.json`，读它也要给 `node`）、`handoff`、`export`（**只写**，读它会抛）、`resources`（`RESOURCES.md` 这一份，科目目录里或暂存目录的 `deliver/` 下；不认别的文件名）。新增一个域要同时改域词表与 vault 的读法——词表、guard 与读法的实现在 `lib/host/{domains,access,vault}.ts`（`lib/tools/` 下那三份只做转发，别再往转发处加逻辑）。
