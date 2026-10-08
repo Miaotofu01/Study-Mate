@@ -34,8 +34,12 @@ const AA_NORMAL = 4.5;
 const TEXT_TOKENS = [
   '--smb-text',            // 主文字
   '--smb-text-2',          // 次级
-  '--smb-text-3',          // 三级
-  '--smb-text-4',          // 四级（最小号）
+  '--smb-text-3',          // 三级（#115 起也是代码块顶栏那行语言标记）
+  '--smb-text-4',          // 四级（最小号；#115 起也是代码行号槽）
+  // 代码行三档里靠 mix 取的两档（#115）：现成的 2/3/4 档在亮色下塌成同一支灰，
+  // 这两支把「输出」与「注释」在 [4.5, 18] 之间匀开，所以必须逐张表面达 AA（下面那条主断言）。
+  '--smb-code-out',
+  '--smb-code-cmt',
   '--smb-text-done',       // 语义色的文字档（饱和档达不到 AA，见 token 块的注释）
   '--smb-text-learning',
   '--smb-text-info',
@@ -44,12 +48,35 @@ const TEXT_TOKENS = [
   '--dsw-alias-label-primary-inverted',   // 反色文字：只压在品牌填充上，单独一条断言
 ];
 
-/** 当表面用的 token（CSS 里做 background 的那些）。 */
-const SURFACE_TOKENS = ['--smb-bg', '--smb-panel', '--smb-raise', '--smb-fill'];
+/** 当表面用的 token（CSS 里做 background 的那些）。
+    代码块那一组（#115）：块体与顶栏换成宿主自己的 markdown 代码块 token，命令行还垫着一条
+    `-segment-selected` 的带——文字就压在这三层上，所以三层都要进这张表，AA 这半条才真的
+    压在新底上（只引 token 不登记，比对度那半条会漏过去，先例是 --dsw-alias-fill-tertiary）。 */
+const SURFACE_TOKENS = [
+  '--smb-bg', '--smb-panel', '--smb-raise', '--smb-fill',
+  '--dsw-alias-markdown-code-block',
+  '--dsw-alias-markdown-code-block-banner',
+  '--dsw-alias-markdown-code-segment-selected',
+];
+
+/** 解算用的调色板 = 宿主快照 + 我们自己的 `--smb-*` 包装。
+    为什么要把本地那半边并进来（#114 评审 3）：`--smb-code-out` / `--smb-code-cmt` 混的是
+    `--smb-text` / `--smb-bg` 这两支**带兜底的本地包装**，不是裸 alias——解 color-mix 时要能
+    顺着包装走到宿主取值。本地值原样放进去（`var(--dsw-…, 兜底)`），链式解析还是 resolve 那一支。 */
+function paletteFor(mode) {
+  const palette = new Map(PALETTES[mode]);
+  for (const [name, spec] of TOKENS) {
+    if (palette.has(name)) continue;
+    palette.set(name, spec.alias
+      ? `var(${spec.alias}${spec.fallback ? `, ${spec.fallback}` : ''})`
+      : String(spec.fallback));
+  }
+  return palette;
+}
 
 /** 把 token 名解成具体颜色；解不出来就抛，别让 null 混进对比度算式。 */
 function color(name, mode) {
-  const palette = PALETTES[mode];
+  const palette = paletteFor(mode);
   const spec = TOKENS.get(name);
   if (spec) {
     const value = spec.alias ? resolve(`var(${spec.alias})`, palette) : null;
