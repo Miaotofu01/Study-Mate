@@ -29,7 +29,7 @@ import {
 import type { HandoffSection, StudyProblem, ValidationReport } from '../core/validate.ts';
 import { decodeImageSrc, FormatProblems } from '../core/format.ts';
 import { parseLesson, poolJsonError, reportPoolShape } from '../core/lesson.ts';
-import { fingerprintSections } from '../reach/sections.ts';
+import { fingerprintSections, sectionLine } from '../reach/sections.ts';
 import { loadVerified } from '../reach/cache.ts';
 import { joinPath, lessonFilesUnder, pathFactsOf, resolveGiven } from './paths.ts';
 import type { StudyToolSpec } from './define.ts';
@@ -784,8 +784,7 @@ export function validateHandoffTool(): StudyToolSpec {
         text: [
           `交接门禁：${value.verdict === 'pass' ? '放行' : '阻断'}（${value.stage}）`,
           value.summary,
-          ...value.sections.map((section: any) => `· ${section.heading === '' ? '(无标题)' : section.heading}：`
-            + `${section.entries} 条 · 指纹 ${section.sha256.slice(0, 8)} · ${section.verified ? '已核' : '未核'}`),
+          ...value.sections.map((section: any) => sectionLine(section)),
           ...value.problems.map((problem: any) => `${problem.file}:${problem.line} ${problem.message}`),
         ].join('\n'),
       }],

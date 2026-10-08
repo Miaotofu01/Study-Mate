@@ -375,7 +375,7 @@ test('交接门禁：deliver/ 里有资源清单就带逐节摘要，verified �
 
   // 核验工具记下这一节的指纹之后，同一个交接再交一次就是「已核」。
   const reach = await loadCore('lib/reach/index.ts');
-  reach.markVerified([[value.sections[0].sha256, { at: Date.now(), entries: 1 }]], home.dshHome);
+  reach.markVerified([[value.sections[0].sha256, { at: Date.now() }]], home.dshHome);
   const again = await call(ctx, 'studymate_validate_handoff', { stage, role: 'resource-scout' });
   assert.deepEqual(again.sections.map((section) => section.verified), [true, false]);
   assert.match(again.summary, /Knowledge 1 条（已核）/);

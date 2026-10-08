@@ -55,13 +55,15 @@ export function hostOf(url: string): string {
 
 /** 逐节：`entries` 用纯函数域的判据，`hosts` 与 `urls` 用链接摘取那一层的判据。 */
 export function fingerprintSections(markdown: string): SectionFingerprint[] {
-  const links = extractLinks(markdown);
   return resourceSections(markdown).map((section) => {
-    const inside = links.filter((link) => link.line >= section.from && link.line <= section.to);
+    // 每一节**自己**摘一遍链接（拿这一节的正文原文，含标题行）：同一条链接出现在两节里，
+    // 两节都该算到。若在这里用整份文件全局去重的那一份（`extractLinks(markdown)`），
+    // 后出现的那一节会被摘成空表——于是「这一节核过没有」被空真绕过。
+    const inside = extractLinks(section.digest);
     const counts = new Map<string, number>();
     const urls: string[] = [];
     for (const link of inside) {
-      // `extractLinks` 已按 URL 全局去重，同一节里不会出现同一条两次。
+      if (urls.includes(link.url)) continue;
       urls.push(link.url);
       const host = hostOf(link.url);
       counts.set(host, (counts.get(host) ?? 0) + 1);
@@ -77,4 +79,18 @@ export function fingerprintSections(markdown: string): SectionFingerprint[] {
       urls,
     };
   });
+}
+
+/**
+ * 一行「这一节核过没有」——核验工具与交接门禁的文本输出**共用同一句**（同一份判据、同一份
+ * 展示，别在两处各写一份逐字相同的串）。
+ */
+export function sectionLine(row: {
+  heading: string;
+  entries: number;
+  sha256: string;
+  verified: boolean;
+}): string {
+  return `· ${row.heading === '' ? '(无标题)' : row.heading}：${row.entries} 条`
+    + ` · 指纹 ${row.sha256.slice(0, 8)} · ${row.verified ? '已核' : '未核'}`;
 }

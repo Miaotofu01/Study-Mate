@@ -114,16 +114,13 @@ export function saveCache(entries: CacheEntries, home: string = dshHome()): void
    指纹自然就变了）。两本共用 `<DSH_HOME>/studymate/reach/` 这个落点与同一套
    容错读、原子写。
 
-   为什么只存 `at` 与 `links`：判定只看「在不在」。核的时候打得开几条、打不开几条，
-   是**上一轮**的证据，写进正文报告的那一份才是给人看的；台账里多存一份副本只会
-   多一个会悄悄过期的说法。 */
+   为什么只存 `at`：判定只看「在不在」。核的时候打得开几条、打不开几条，是**上一轮**的证据，
+   写进正文报告的那一份才是给人看的；台账里多存一份副本只会多一个会悄悄过期的说法。 */
 
-/** 一条指纹的核验记录。 */
+/** 一条指纹的核验记录。**判定只看「在不在」**，`at` 只用来在超上限时丢最老的。 */
 export interface VerifiedRecord {
   /** 什么时候核的（毫秒时间戳）。 */
   at: number;
-  /** 核的时候这一节有几条条目（旁证，不参与判定）。 */
-  entries: number;
 }
 
 export type VerifiedEntries = Map<string, VerifiedRecord>;
@@ -138,10 +135,9 @@ const MAX_VERIFIED = 2000;
 
 function verifiedOf(value: unknown): VerifiedRecord | null {
   if (value === null || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const at = record.at;
+  const at = (value as Record<string, unknown>).at;
   if (typeof at !== 'number' || !Number.isFinite(at)) return null;
-  return { at, entries: typeof record.entries === 'number' && Number.isFinite(record.entries) ? record.entries : 0 };
+  return { at };
 }
 
 /** 读指纹台账。**文件不存在、坏掉、读不动都是「没有记录」**，一律返回空表。 */

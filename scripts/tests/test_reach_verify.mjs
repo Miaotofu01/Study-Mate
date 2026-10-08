@@ -589,7 +589,7 @@ test('报告按节给指纹与 verified：核完的那节记进台账，没轮�
 
   const ledger = reach.loadVerified(home.dshHome);
   assert.ok(ledger.has(byHeading.get('主干').sha256), '核过的那节该记进指纹台账');
-  assert.equal(ledger.get(byHeading.get('主干').sha256).entries, 1);
+  assert.equal(typeof ledger.get(byHeading.get('主干').sha256).at, 'number');
   assert.equal(ledger.has(byHeading.get('第二节').sha256), false, '没轮到的节不该被记成核过');
 
   // 去掉预算：第二节也核完，两节都进台账；主干的指纹没变（内容没动）。
@@ -608,4 +608,46 @@ test('报告按节给指纹与 verified：核完的那节记进台账，没轮�
   assert.equal(warm.has(edited[0].sha256), false, '改过的节不该拿旧记录冒充已核');
   assert.equal(edited[1].sha256, second.sections[1].sha256, '没动的那一节指纹照旧');
   assert.ok(warm.has(edited[1].sha256), '没动的那一节照旧算核过');
+});
+
+test('verified 不认空真：没有链接的节不算核过，同一条链接出现在两节里两节都算', async (t) => {
+  const home = useHome(t);
+  useProxyEnv(t);
+  const site = await startSite(routeHandler({ '/one': 200 }));
+  t.after(() => site.close());
+  const shared = site.url('127.0.0.1', '/one');
+  const dir = writeManifest(home, [
+    '# 资源清单',
+    '## 主干',
+    `- [一](${shared})`,
+    '## 重复引用',
+    `- [同一条链接再说一次](${shared})`,
+    '## 只有本地指针',
+    '- [Local: 教材](reference/book.md)',
+    '## 缺口',
+    '- 没找到',
+  ]);
+  const ctx = registered();
+  const value = await verify(ctx, { manifest: relativeTo(home, dir) });
+  const byHeading = new Map(value.sections.map((section) => [section.heading, section]));
+  assert.equal(value.total, 1, '全局去重后只有一条链接要核');
+
+  // 同一条链接出现在两节里：两节都算核过（不是只有先出现的那一节）。
+  assert.equal(byHeading.get('主干').verified, true);
+  assert.equal(byHeading.get('重复引用').verified, true, JSON.stringify(value.sections));
+  // 一条 http 链接都没有的节：没有可核的东西，就不该记一份「核过」——空真会让门禁对一份
+  // 没核过的内容说「已核」。
+  assert.equal(byHeading.get('只有本地指针').verified, false);
+  assert.equal(byHeading.get('缺口').verified, false);
+
+  const ledger = reach.loadVerified(home.dshHome);
+  assert.ok(ledger.has(byHeading.get('主干').sha256));
+  assert.ok(ledger.has(byHeading.get('重复引用').sha256), '同一条链接被核过，后出现的那一节也该记上');
+  assert.equal(ledger.has(byHeading.get('只有本地指针').sha256), false);
+  assert.equal(ledger.has(byHeading.get('缺口').sha256), false);
+
+  // 逐节的域名分布也按节自己摘：后出现的那一节同样看得到那个站点。
+  const fingerprints = reach.fingerprintSections(fs.readFileSync(path.join(dir, 'RESOURCES.md'), 'utf8'));
+  assert.deepEqual(fingerprints[1].hosts, [{ host: '127.0.0.1', entries: 1 }]);
+  assert.deepEqual(fingerprints[2].hosts, []);
 });

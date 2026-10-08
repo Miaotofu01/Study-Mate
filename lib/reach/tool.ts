@@ -41,7 +41,7 @@ import { extractLinks } from './manifest.ts';
 import type { ManifestEntry } from './manifest.ts';
 import { runProbes } from './schedule.ts';
 import type { ProbeFn, ProbeOutcome } from './schedule.ts';
-import { fingerprintSections, hostOf } from './sections.ts';
+import { fingerprintSections, hostOf, sectionLine } from './sections.ts';
 import type { SectionFingerprint } from './sections.ts';
 import { proxyFromEnv, requestOnce } from './transport.ts';
 import type { RequestResult, RouteName } from './transport.ts';
@@ -154,8 +154,11 @@ const FAILURE_ROW_SCHEMA = {
 /**
  * 一节资源的花名册：标题、条目数、内容指纹、这一节核过没有。
  *
- * `verified` 的判据是**这一节里的链接都有结论**（这一轮探到的或缓存里新鲜的），
+ * `verified` 的判据是**这一节里至少有一条链接、且每条都有结论**（这一轮探到的或缓存里新鲜的），
  * 而不是「整份清单都核完了」——这正是「按节冻结」要的那一格：主干核完就能被下游取用。
+ * 一条链接都没有的小节（例如只有 `[Local: …]` 指针或整节都是缺口）**不算核过**：核验工具核的是
+ * 链接，那种小节没有可核的东西，就不该记一份「核过」——`verified` 的语义是「台账里有这一份指纹
+ * 的记录」，空真会让门禁对一份没核过的内容说「已核」。
  * 一份指纹的核过记录落在插件私有台账（`<DSH_HOME>/studymate/reach/verified.json`），
  * 交接门禁拿同一份指纹去问它，于是「改了一节只有那一节要重核」。
  */
@@ -365,13 +368,15 @@ function assemble(input: AssembleInput): ReachReport {
     next = `${failed} 条打不开：把它们从清单里去掉，或换成等价来源后重核`;
   }
 
-  // 逐节：这一节里的链接**都有结论**才算核过（没有任何链接的小节是空真——没什么可核的）。
+  // 逐节：这一节里**至少有一条链接、且每条都有结论**才算核过。
   // 判据刻意不写成「整份清单都核完」：按节冻结要的就是「主干那一节核完，下游就能取用」。
+  // 也刻意不把「一条链接都没有的小节」算成核过——核验工具核的是链接，那种小节没有可核的
+  // 东西，就不该记一份「核过」的记录（`verified` 的语义是「台账里有这一份指纹的记录」）。
   const sections: SectionRow[] = input.sections.map((section) => ({
     heading: section.heading,
     entries: section.entries,
     sha256: section.sha256,
-    verified: section.urls.every((url) => verdicts.has(url)),
+    verified: section.urls.length > 0 && section.urls.every((url) => verdicts.has(url)),
   }));
 
   return {
@@ -402,7 +407,7 @@ function recordVerified(report: ReachReport): ReachReport {
   const at = Date.now();
   const records = report.sections
     .filter((section) => section.verified)
-    .map((section) => [section.sha256, { at, entries: section.entries }] as const);
+    .map((section) => [section.sha256, { at }] as const);
   if (records.length > 0) markVerified(records);
   return report;
 }
@@ -413,9 +418,8 @@ export function renderReachReport(value: ReachReport): string {
   const head = `核验「${value.manifest}」：共 ${value.total} 条`
     + `（打得开 ${value.ok}、打不开 ${value.failed}；这一轮探 ${value.probed} 条、用缓存 ${value.cached} 条`
     + `${value.pending === 0 ? '' : `、没轮到 ${value.pending} 条`}）；路由：${value.route}`;
-  // 指纹只印前 8 位：人读够分辨，全量在结构化返回里。
-  const sections = value.sections.map((row) => `· ${row.heading === '' ? '(无标题)' : row.heading}：`
-    + `${row.entries} 条 · 指纹 ${row.sha256.slice(0, 8)} · ${row.verified ? '已核' : '未核'}`);
+  // 逐节那一行与交接门禁的文本输出共用同一句（`sectionLine`）。
+  const sections = value.sections.map((row) => sectionLine(row));
   const hosts = value.hosts.map((row) => `· ${row.host}：${row.entries} 条（打得开 ${row.ok}、打不开 ${row.failed}）`);
   const failures = value.failures.map((row) => `✗ 第 ${row.line} 行 ${row.url}`
     + `${row.status === 0 ? '' : `——HTTP ${row.status}`}（${row.note}）`);
