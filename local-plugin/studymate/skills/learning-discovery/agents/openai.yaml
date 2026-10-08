@@ -1,0 +1,7 @@
+interface:
+  display_name: "StudyMate · 方向探索"
+  short_description: "供学习总控在学生没有明确方向时访谈、给候选并交接建课"
+  default_prompt: "请用 $learning-discovery 的内部协议帮我从几个候选学习方向里选一个。"
+
+policy:
+  allow_implicit_invocation: true

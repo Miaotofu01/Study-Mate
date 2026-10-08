@@ -1,0 +1,7 @@
+interface:
+  display_name: "StudyMate · 学习证据"
+  short_description: "供学习总控和评估角色使用，对照课程目标核验作答、运行结果与真实产物"
+  default_prompt: "请用 $evidence-check 的内部规范核验当前学习任务的真实作答和运行证据。"
+
+policy:
+  allow_implicit_invocation: true

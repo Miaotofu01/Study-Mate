@@ -1,0 +1,7 @@
+interface:
+  display_name: "StudyMate · 学习档案"
+  short_description: "供学习总控落盘交付并维护共享记忆、科目进度、评估记录与会话恢复状态"
+  default_prompt: "请用 $record-keeping 的内部规范核对并更新当前学习工作区的档案。"
+
+policy:
+  allow_implicit_invocation: true

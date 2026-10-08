@@ -1,0 +1,7 @@
+interface:
+  display_name: "StudyMate · 课件规范"
+  short_description: "供学习总控和讲解角色使用，统一课件结构、内容块与教材式行文"
+  default_prompt: "请用 $lesson-design 的内部规范检查当前 StudyMate 课件的内容设计。"
+
+policy:
+  allow_implicit_invocation: true

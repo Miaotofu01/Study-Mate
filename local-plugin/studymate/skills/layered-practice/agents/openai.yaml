@@ -1,0 +1,7 @@
+interface:
+  display_name: "StudyMate · 练习规范"
+  short_description: "供学习总控和出题角色使用，约定练习层级、题型、实验任务与判分要点"
+  default_prompt: "请用 $layered-practice 的内部规范核对当前课程练习的层级、题型和判分要求。"
+
+policy:
+  allow_implicit_invocation: true

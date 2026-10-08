@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "review-config",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "algorithm",
+    "library_version",
+    "config_version",
+    "effective_from",
+    "scheduler"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "algorithm": {
+      "const": "FSRS-6"
+    },
+    "library_version": {
+      "const": "6.3.2"
+    },
+    "scheduler": {
+      "type": "object"
+    }
+  }
+}

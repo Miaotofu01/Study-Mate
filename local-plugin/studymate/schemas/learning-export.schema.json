@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "learning-export",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "workspace_id",
+    "subject",
+    "export_id",
+    "records"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "record_id",
+          "round_id",
+          "node_id",
+          "question_id",
+          "question_version",
+          "attempts"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "array",
+            "minItems": 1
+          }
+        }
+      }
+    }
+  }
+}

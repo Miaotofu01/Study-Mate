@@ -1,0 +1,6 @@
+PyYAML>=6.0,<7
+jsonschema>=4.0,<5
+fsrs==6.3.2
+pypdf>=6,<7
+beautifulsoup4>=4.13,<5
+fonttools>=4,<5

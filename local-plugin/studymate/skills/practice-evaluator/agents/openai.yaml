@@ -1,0 +1,7 @@
+interface:
+  display_name: "StudyMate · 出题评估"
+  short_description: "接受学习总控派工，设计练习与实验任务并依据真实作答和运行证据评估"
+  default_prompt: "请用 $practice-evaluator 按学习总控指定的节点和任务阶段完成出题或证据评估。"
+
+policy:
+  allow_implicit_invocation: false

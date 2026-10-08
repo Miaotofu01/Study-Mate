@@ -1,0 +1,7 @@
+interface:
+  display_name: "StudyMate · 课件采图"
+  short_description: "接受学习总控派工，从指定资料站点收集课件图片并维护来源索引"
+  default_prompt: "请用 $image-scout 从学习总控指定的资料站点收集适用图片并更新索引。"
+
+policy:
+  allow_implicit_invocation: false

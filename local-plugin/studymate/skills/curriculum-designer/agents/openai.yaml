@@ -1,0 +1,7 @@
+interface:
+  display_name: "StudyMate · 课程设计"
+  short_description: "接受学习总控派工，依据学习目标与资料设计课程依赖和实验节点"
+  default_prompt: "请用 $curriculum-designer 按学习总控提供的目标、基础和资料清单设计课程大纲。"
+
+policy:
+  allow_implicit_invocation: false

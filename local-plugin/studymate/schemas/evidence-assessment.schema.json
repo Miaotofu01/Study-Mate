@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "evidence-assessment",
+  "type": "object",
+  "required": [
+    "assessment_id",
+    "results"
+  ],
+  "properties": {
+    "assessment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "node_id",
+          "status",
+          "criterion",
+          "covered_objectives",
+          "evidence",
+          "independent",
+          "verdict"
+        ],
+        "properties": {
+          "evidence": {
+            "type": "array",
+            "minItems": 1
+          },
+          "covered_objectives": {
+            "type": "array",
+            "minItems": 1
+          }
+        }
+      }
+    }
+  }
+}

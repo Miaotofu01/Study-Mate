@@ -1,0 +1,7 @@
+interface:
+  display_name: "StudyMate · 学习总控"
+  short_description: "开始新科目、继续或切换学习，恢复课程进度与练习并安排下一步"
+  default_prompt: "请用 $learning-system 根据我的目标和已有进度，安排这次的学习与练习。"
+
+policy:
+  allow_implicit_invocation: true

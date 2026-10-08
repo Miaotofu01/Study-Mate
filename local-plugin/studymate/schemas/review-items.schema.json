@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "review-items",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "items"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "review_item_id",
+          "item_version",
+          "node_id",
+          "origin_key",
+          "prompt",
+          "answer",
+          "criteria",
+          "status"
+        ],
+        "properties": {
+          "review_item_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "item_version": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "suspended",
+              "archived"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

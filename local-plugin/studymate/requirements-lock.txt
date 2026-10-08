@@ -1,0 +1,13 @@
+# Verified on Python 3.14; FSRS model/library identity is fixed.
+attrs==26.1.0
+beautifulsoup4==4.15.0
+fsrs==6.3.2
+fonttools==4.66.1
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+pypdf==6.19.0
+PyYAML==6.0.3
+referencing==0.37.0
+rpds-py==2026.9.1
+soupsieve==2.10
+typing_extensions==4.16.0

@@ -1,0 +1,7 @@
+interface:
+  display_name: "StudyMate · 资料收集"
+  short_description: "接受学习总控派工，为指定科目整理权威教材、官方文档与资料缺口"
+  default_prompt: "请用 $resource-scout 按学习总控给定的科目目标收集权威资料并记录缺口。"
+
+policy:
+  allow_implicit_invocation: false
