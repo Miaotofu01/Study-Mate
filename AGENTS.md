@@ -29,6 +29,10 @@ issue 与 spec 都活在 GitHub Issues（`Miaotofu01/Study-Mate`），全部操�
 
 **单上下文**布局：领域词表在仓库根 `GLOSSARY.md`，架构决策在 `docs/adr/`。两者都已建立——用到领域词就按词表里的叫法，动到已决策的区域先读对应 ADR。见 [docs/agents/domain.md](docs/agents/domain.md)。
 
+### 编排纪律
+
+派活、等下属、跑门禁时怎么省轮次与上下文：`一票` / `子集` / `检查点` 三个词的用法与例外。见 [docs/agents/编排纪律.md](docs/agents/编排纪律.md)。
+
 ## 文档在哪
 
 `docs/` 每个目录放什么、路径与维护者是谁，唯一出处是[工程约束](docs/规范/工程约束.md) §二 与[文件归属](docs/规范/文件归属.md)。这里只记怎么找：
