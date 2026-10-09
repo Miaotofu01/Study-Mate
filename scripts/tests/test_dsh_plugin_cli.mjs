@@ -1,5 +1,5 @@
 // Opt-in real CLI regression: STUDYMATE_DSH_PACKAGE=/path/to/@deepseek-ai/dsh
-// node --test scripts/tests/test_dsh_plugin_cli.mjs (requires pnpm and Python).
+// node --test scripts/tests/test_dsh_plugin_cli.mjs (requires pnpm).
 // The temporary registry serves only the two locally packed test versions.
 // Optional STUDYMATE_DSH_DOWNGRADE_PACKAGE tests the same home with an older DSH.
 import assert from 'node:assert/strict';
@@ -11,13 +11,13 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { findPython } from '../../bin/studymate.mjs';
+
+import { extractTarGz } from './fixtures/tarball.mjs';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const runtime = process.env.STUDYMATE_DSH_PACKAGE;
 const packageName = '@yunmiao/studymate';
 const redact = value => String(value).replace(/https?:\/\/[^\s<>"')]+/g, '[url]');
-const python = runtime ? findPython() : null;
 const runtimeVersion = directory => JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8')).version;
 const modern = directory => {
   const [major, minor, patch] = runtimeVersion(directory).split(/[.-]/).map(Number);
@@ -87,8 +87,7 @@ async function fixture(t) {
   let packed = passed(await run(process.execPath, [npmCli, 'pack', '--ignore-scripts', '--json', '--pack-destination', packs], env, project));
   const original = path.join(packs, JSON.parse(packed.stdout)[0].filename);
   const unpacked = path.join(directory, 'unpacked');
-  passed(await run(python.command, [...python.prefix, '-c',
-    'import sys,tarfile; tarfile.open(sys.argv[1]).extractall(sys.argv[2])', original, unpacked], env, home));
+  extractTarGz(original, unpacked);
   const packageDirectory = path.join(unpacked, 'package');
   const manifestPath = path.join(packageDirectory, 'package.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
@@ -178,12 +177,12 @@ export function apply(ctx){
 `);
   const overlay = path.join(directory, 'probe.patch.yml');
   fs.writeFileSync(overlay, JSON.stringify([{ insert: [{ id: 'studymate-cli-test-probe', name: probe }] }]));
-  async function web(expected, overrides = {}) {
+  async function web(expected) {
     const version = runtimeVersion(activeRuntime);
     const result = passed(await cli(['web', '--patch', overlay, '--host', '127.0.0.1', '--port', '0', '--no-open'],
       { STUDYMATE_CLI_EXPECT_LEARNING: String(expected), STUDYMATE_CLI_RUNTIME: activeRuntime,
         STUDYMATE_CLI_MODERN: String(modern(activeRuntime)),
-        STUDYMATE_CLI_WORKFLOW: /^0\.1\.[0-5](?:-|$)/.test(version) ? 'worker-thread' : 'ptc', ...overrides }));
+        STUDYMATE_CLI_WORKFLOW: /^0\.1\.[0-5](?:-|$)/.test(version) ? 'worker-thread' : 'ptc' }));
     const line = result.output.split(/\r?\n/).find(value => value.startsWith('STUDYMATE_CLI_PROBE '));
     assert.ok(line, redact(result.output));
     assert.equal(JSON.parse(line.slice('STUDYMATE_CLI_PROBE '.length)).ok, true, line);
@@ -213,9 +212,7 @@ export function apply(ctx){
     path.join(dshHome, 'profiles/web/cordis.patch.yml')];
   const snapshot = () => managedFiles.map(file => fs.existsSync(file) ? fs.readFileSync(file) : null);
   const unchanged = before => assert.deepEqual(snapshot(), before, 'Boot must preserve installer-owned config and patch bytes');
-  const emptyPath = path.join(directory, 'no-python');
-  fs.mkdirSync(emptyPath);
-  return { cli, web, passed, engineVersion, snapshot, unchanged, emptyPath, configFile: managedFiles[0],
+  return { cli, web, passed, engineVersion, snapshot, unchanged, configFile: managedFiles[0],
     engineDirectory: path.join(dshHome, 'studymate/engine'),
     installCli, switchRuntime: directory => { activeRuntime = directory; },
     updateRegistry: () => { latest = '0.1.3-cli-test.2'; } };
@@ -292,18 +289,10 @@ if (!runtime) {
     f.unchanged(before);
     assert.equal(f.engineVersion(), version);
   });
-  if (modern(runtime)) {
-    test('missing Python keeps ordinary Web running and explains why learning is unavailable', { timeout: 180000 }, async t => {
-      const f = await fixture(t);
-      f.passed(await f.cli(['plugin', '--profile', 'web', 'add', packageName]));
-      const before = f.snapshot();
-      const result = await f.web(0, { PATH: f.emptyPath, Path: f.emptyPath });
-      assert.match(redact(result.output), /没有找到可用的 Python 3\.9\+/);
-      assert.match(redact(result.output), /请安装 Python 3\.9\+/);
-      f.unchanged(before);
-      assert.equal(f.engineVersion(), undefined);
-    });
-  }
+  /* 「没有 Python 就让 Web 照跑、并说清为什么学不了」那一条随 #83/#70 一起退役：
+     安装器不再探测 Python（`dceeb31`「安装器不再探测 Python」），引擎改成随包发的 TypeScript，
+     `没有找到可用的 Python 3.9+` 这句提示与 `engineVersion() === undefined` 那个状态都不再存在。
+     留着它等于让这一套对着一个没有实现者的分支断言——删掉，不是搬到别处。 */
   if (process.env.STUDYMATE_DSH_DOWNGRADE_PACKAGE) {
     test('upgrading legacy npx users to modern DSH requires an explicit native handoff', { timeout: 180000 }, async t => {
       assert.equal(modern(runtime), true);
