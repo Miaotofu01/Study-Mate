@@ -75,7 +75,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 
 ## 提示词规则归属
 
-`test_skill_rules.mjs` 逐条断言「旧版里的可执行规则还在」（512 条，原 Python 套件 `test_skill_rules` 的行为移植）。片段**住在哪**由 `rule-owners.json` 声明，不由它挂在哪个技能下决定：
+`test_skill_rules.mjs` 逐条断言「旧版里的可执行规则还在」（517 条，原 Python 套件 `test_skill_rules` 的行为移植）。片段**住在哪**由 `rule-owners.json` 声明，不由它挂在哪个技能下决定：
 
 | 键 | 是什么 | 怎么写 |
 | --- | --- | --- |
