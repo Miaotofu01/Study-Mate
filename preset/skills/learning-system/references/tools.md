@@ -107,6 +107,7 @@
 - `validate_lesson` 另给两份对账清单：`anchors: [{ text, resolution, line, keys }]`（`resolution` 四态：`resolved` / `stale` / `ambiguous` / `missing`，**多匹配绝不静默取第一个**）与 `orphans: [{ key, line, count }]`（题库里没有对应锚点的键）。
 - 空值口径：没问题时 `problems: []`、`blockingCount: 0`、`summary: "放行——没有问题"`；文件不存在是**一条阻断问题**（`line: 1`），不是异常。
 - `validate_curriculum` 给科目目录（或 `RESOURCES.md` 本身）时，`reports` 里可能多一份 `kind: 'resources'`：判的是**「资源清单」对大纲节点的覆盖率**——每条来源在行末写 `· 服务 node.id`（多条用「、」分隔），于是「还有 N 个节点指不出一处来源」与「条数超过节点数 × 2」都报得出来。这几条**全是提示**（`blocking: false`）：这个标记是新加的写法，现存清单一条都没有，判成阻断等于升级即整片变红——但看到它们就该派「资料收集」补收集，别自己数。那一份报告另带 `hosts`（**站点分布，只报不卡**：`[ { host, entries } ]`，如「7 个站点——oi-wiki 12 条」）。
+- `validate_pool` 还会**按文件头复算**（#132）：文件头与扩展名是否一致（存成 `.png` 的 HTML 错误页）、宽高与索引的「尺寸」列是否对得上（`尺寸` **以文件头为准**，页面标注可能被缩放过）。这几条新判据**全是提示**——现存工作区里已经存在的这类问题不该升级即整片变红；但采图角色照旧「把校验器报的每一行改到没有为止」。
 - `validate_handoff` 的形状不同：`{ stage, verdict: 'pass' | 'block', blocking, blockingCount, role: string | null, outputs: <产物条数>, sections: [ { heading, entries, hosts: [ { host, entries } ], sha256, verified } ], summary, problems }`。`verdict: 'block'` 时**不搬、不删 stage**。
   - `sections` 是 `deliver/RESOURCES.md` 的**逐节摘要**（`##` 小节，标题行原文）：这一节几条、来自哪些域名、内容指纹、以及**这一份内容核过没有**。不是资源清单的交接就是 `[]`。总控要的「几节、几条、都来自哪些站点」看这里，**不必把清单读进上下文**。
   - `verified` 问的是核验工具的指纹台账（插件私有），不是角色说了什么；**按节冻结**：某一节已定稿、`verified: true`，采图与课设就能被派出去，不必等整份核完。

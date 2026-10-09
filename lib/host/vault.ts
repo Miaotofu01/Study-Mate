@@ -618,8 +618,27 @@ export function createWorkspaceVault(): Vault {
   return { facts, load };
 }
 
-/** 图片库目录里的图片清单（名字 + 字节数）；目录不在就是空清单，不抛。 */
-function listPoolFiles(dir: string): { name: string; bytes: number }[] {
+/** 文件头取几个字节：四种位图的宽高都在前 30 字节里（`lib/core/image.ts`）。 */
+const POOL_HEAD_BYTES = 64;
+
+/** 只读文件头那几个字节——**不把整张图读进内存**（图片库单张上限 500 KB，一份库几十张）。 */
+function poolHead(file: string): Uint8Array {
+  try {
+    const handle = fs.openSync(file, 'r');
+    try {
+      const buffer = Buffer.alloc(POOL_HEAD_BYTES);
+      const read = fs.readSync(handle, buffer, 0, POOL_HEAD_BYTES, 0);
+      return buffer.subarray(0, read);
+    } finally {
+      fs.closeSync(handle);
+    }
+  } catch {
+    return new Uint8Array(0);
+  }
+}
+
+/** 图片库目录里的图片清单（名字 + 字节数 + 文件头）；目录不在就是空清单，不抛。 */
+function listPoolFiles(dir: string): { name: string; bytes: number; head: Uint8Array }[] {
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -628,17 +647,20 @@ function listPoolFiles(dir: string): { name: string; bytes: number }[] {
   }
   return entries
     .filter((entry) => entry.isFile())
-    .map((entry) => ({ name: entry.name, bytes: fs.statSync(path.join(dir, entry.name)).size }))
+    .map((entry) => {
+      const file = path.join(dir, entry.name);
+      return { name: entry.name, bytes: fs.statSync(file).size, head: poolHead(file) };
+    })
     .sort((a, b) => cmpCodePoints(a.name, b.name));
 }
 
-/** 一个科目的图片库整幅视图：索引原文、图片清单、以及「索引写错地方」的旁证。 */
+/** 一个科目的图片库整幅视图：索引原文、图片清单（含文件头）、以及「索引写错地方」的旁证。 */
 export interface AssetsView {
   dir: string;
   poolDir: string;
   index: FileView;
   misplacedIndex: boolean;
-  files: { name: string; bytes: number }[];
+  files: { name: string; bytes: number; head: Uint8Array }[];
 }
 
 function assetsView(subjectDir: string): AssetsView {
