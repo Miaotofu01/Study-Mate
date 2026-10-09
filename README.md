@@ -13,6 +13,8 @@
 
 <p align="center"><sub> StudyMate 是面向数学与计算机科目学习的助手，原则是「learn with doing」</sub></p>
 
+<p align="center">简体中文 · <a href="README.en.md">English</a></p>
+
 <p align="center"><a href="#快速开始">快速开始</a> · <a href="#它是什么">它是什么</a> · <a href="#核心功能">核心功能</a> · <a href="#常见问题">常见问题</a> · <a href="docs/使用/使用说明.md">使用说明</a> · <a href="docs/使用/Antigravity.md">Antigravity 说明</a></p>
 
 <p align="center"><img src="docs/images/taitou.png" width="860" alt="StudyMate：看板娘 + 手写体品牌字 + 覆盖科目（线代／微积分／概率论／C++／Python／机器学习／深度学习）+「任何科目，一站式搞定 / Learn With Doing」"></p>
