@@ -1,6 +1,7 @@
 // Keep CI's functional suites explicit so optional audits do not grow the gate.
 // 「显式」的代价是新增套件会静默地永远不跑——所以下面有一条覆盖断言兜着。
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -59,6 +60,189 @@ function checkSuiteCoverage() {
     + `（当前组 ${mode}：${(groups[mode].node || []).length} 个 Node + `
     + `${(groups[mode].tests || []).length} 个 --test）`);
   return true;
+}
+
+/** `npm test` 这一串能摸到的脚本名（传递闭包）。用来回答一个问题：「CI 到底跑不跑它？」 */
+function scriptsReachableFromTest() {
+  const scripts = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts || {};
+  const reachable = new Set(['test']);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const name of [...reachable]) {
+      for (const match of (scripts[name] || '').matchAll(/npm run ([\w:-]+)/g)) {
+        if (!reachable.has(match[1])) { reachable.add(match[1]); grew = true; }
+      }
+    }
+  }
+  return { scripts, reachable };
+}
+
+/** 只在按需入口上、而 `npm test` 摸不到的那些套件——**CI 一个都不会跑它们**。
+    这条判据是算出来的而不是列出来的：新加一个按需入口，它自动进这张网。 */
+function unreachableSuites() {
+  const { scripts, reachable } = scriptsReachableFromTest();
+  const inGroups = new Set(Object.values(groups).flatMap(group =>
+    [...(group.node || []), ...(group.tests || [])].map(name => name.replace(/^scripts\/tests\//, ''))));
+  const reached = new Set();
+  for (const name of reachable) {
+    for (const match of (scripts[name] || '').matchAll(/scripts\/tests\/([\w./-]+)/g)) reached.add(match[1]);
+  }
+  return suiteFiles().filter(name =>
+    !inGroups.has(name) && !reached.has(name) && !SUPPORT_FILES.has(name) && !MANUAL_ONLY.has(name));
+}
+
+/** 这个文件解析得过吗？`node --check` 只解析、不执行，所以拿它问任何文件都没有副作用。
+    解析不过就回一小段错误（够指到行列），过得去回 null。**批量那条路的退路**，见 `parseFailures`。 */
+function parseError(absolutePath) {
+  const result = spawnSync(process.execPath, ['--check', absolutePath], { windowsHide: true, encoding: 'utf8' });
+  if (result.status === 0) return null;
+  return (result.stderr || '').trim().split('\n').slice(0, 5).join('\n');
+}
+
+/* 一个进程问完所有文件：`vm.SourceTextModule` 只解析、不求值，102 个文件约 100ms。
+   逐个 `node --check` 是同一件事但每个文件一次进程启动（102 个约 5s）——而 `npm test`
+   会走两遍这里（core 与 --static），那个差价不能不当回事。 */
+const BATCH_PARSE = `
+const fs = require('node:fs');
+const vm = require('node:vm');
+const files = JSON.parse(fs.readFileSync(0, 'utf8'));
+const bad = [];
+for (const file of files) {
+  try { new vm.SourceTextModule(fs.readFileSync(file, 'utf8'), { identifier: file }); }
+  catch (error) { bad.push([file, String(error.message).split('\\n')[0]]); }
+}
+process.stdout.write(JSON.stringify(bad));
+`;
+
+/** 哪些文件解析不过：`Map<绝对路径, 一句话原因>`（全过就是空 Map）。
+
+    批量那条路走不通时（比如哪天 `--experimental-vm-modules` 这个开关变了）退回逐个
+    `node --check`——**两条路必须得出同一个结论**，否则判据自己就成了待观察的变量。
+    反证在 `selfCheckGate`：同一对输入喂给这里，必须仍然分得清好坏。 */
+function parseFailures(files) {
+  if (files.length > 0) {
+    const batch = spawnSync(process.execPath, ['--experimental-vm-modules', '--no-warnings', '-e', BATCH_PARSE],
+      { input: JSON.stringify(files), encoding: 'utf8', windowsHide: true });
+    if (batch.status === 0 && batch.stdout) {
+      try { return new Map(JSON.parse(batch.stdout)); } catch { /* 落到逐个检查 */ }
+    }
+  }
+  const failures = new Map();
+  for (const file of files) {
+    const error = parseError(file);
+    if (error) failures.set(file, error.split('\n').slice(0, 2).join(' '));
+  }
+  return failures;
+}
+
+/** 读 `node:test` 的汇总行。没有汇总行（不是 node:test 套件）时 `tests` 回 null——
+    报 0 会让调用方把「没跑」当成「跑了 0 条」，而这两件事要分开。 */
+function summarizeTestRun(output) {
+  const read = key => {
+    const match = new RegExp(`^ℹ ${key} (\\d+)$`, 'm').exec(output);
+    return match ? Number(match[1]) : null;
+  };
+  const tests = read('tests');
+  return { tests, fail: tests === null ? null : (read('fail') ?? 0) };
+}
+
+/**
+ * 套件的**存活**：光有归属不够，还得证明它跑得起来。
+ *
+ * 这条堵的是两次真实事故，两条都发生在「按需入口」上、都几周无人发现：
+ *   · `test_dsh_runtime.mjs` 是一个语法错误（多余的 `}));`）→ 解析阶段就死，贡献 0 行覆盖；
+ *   · `test_dsh_plugin_cli.mjs` import 了一个已删除的 `findPython` → 模块载入阶段就死，
+ *     而它的入口参数早就不在任何文档里，连「按 README 走一遍」都跑不到。
+ *
+ * 两条断言：
+ *   · 解析：只解析、不执行，没有副作用；
+ *   · 未设宿主环境变量空跑一次：退出码必须是 0 或 3（`EXIT_SKIP`），且真跑过就 `fail` 为 0、
+ *     注册过至少一条测试——**空跑到「没跑过也不知道」正是要堵的形态**。
+ *
+ * 为什么只查「当前组之外」：当前组的文件马上会被真的跑一遍，语法错误当场就炸；
+ * 这里要照亮的是今晚没人跑的那半边。代价约 0.3s，且随模式自适应
+ * （CI 跑 core，于是 31 个非 core 文件被解析一遍；`--static` 时是 79 个；`--browser` 时反过来）。
+ */
+function checkSuiteLiveness() {
+  /* 组里两种写法的前缀不一样：`node` 那半边本来就是相对 `scripts/tests/` 的
+     （`browser/reading_test.mjs`），`tests` 那半边带完整前缀——两边都要归一化，
+     否则「当前组之外」会变成「全部」，把当前组自己解析一遍（且失去自适应的意义）。 */
+  const inGroup = new Set([...(groups[mode].node || []), ...(groups[mode].tests || [])]
+    .map(name => name.replace(/^scripts\/tests\//, '')));
+  const outside = suiteFiles().filter(name => !inGroup.has(name));
+  const problems = [];
+
+  const broken = parseFailures(outside.map(name => path.join(root, 'scripts', 'tests', name)));
+  for (const [absolute, reason] of broken) {
+    problems.push(`scripts/tests/${path.relative(path.join(root, 'scripts', 'tests'), absolute)} 解析不过`
+      + `（当前组 ${mode} 不会跑它，所以只有这里能看见）：${reason}`);
+  }
+
+  const onDemand = unreachableSuites();
+  for (const file of onDemand) {
+    const result = spawnSync(process.execPath, ['--test', path.join(root, 'scripts', 'tests', file)], {
+      windowsHide: true, encoding: 'utf8',
+      // 把宿主环境变量清掉：有真宿主时这套跑的是另一条更重的路，这里只问「载不载得进来」。
+      env: { ...process.env, STUDYMATE_DSH_PACKAGE: '', STUDYMATE_DSH_DOWNGRADE_PACKAGE: '' },
+    });
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+    if (result.status !== 0 && result.status !== 3) {
+      problems.push(`scripts/tests/${file} 空跑起不来（退出码 ${result.status}，期望 0 或 3）：\n`
+        + `${output.trim().split('\n').slice(0, 6).join('\n')}`);
+      continue;
+    }
+    const { tests, fail } = summarizeTestRun(output);
+    if (tests === null) continue;                       // 不是 node:test 汇总（例如纯脚本），不猜
+    if (fail !== 0) problems.push(`scripts/tests/${file} 空跑里有 ${fail} 条失败`);
+    else if (tests < 1) problems.push(`scripts/tests/${file} 空跑一条测试都没注册`);
+  }
+
+  if (problems.length) {
+    console.error('\n套件存活检查没过：');
+    for (const problem of problems) console.error(`\n${problem}`);
+    console.error('\n这些套件不在当前门禁组里，所以只有这一条断言能看见它们。');
+    return false;
+  }
+  console.log(`套件存活：当前组之外 ${outside.length} 个文件都解析得过`
+    + `；按需入口上 ${onDemand.length} 个套件空跑都起得来（${onDemand.join('、')}）`);
+  return true;
+}
+
+/**
+ * 反证：**上面两条判据本身还张着**。
+ *
+ * 只断言「真实套件都过」的话，判据哪天退化成恒真也照样绿——`test_architecture_boundaries.mjs`
+ * 拿合成图钉住自己那张网，是同一条纪律。这里更便宜：两条判据都收成了纯函数，直接喂坏输入。
+ * 每次门禁都跑，约 40ms。
+ */
+function selfCheckGate() {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-gate-self-'));
+  try {
+    /* 一次同时喂好、坏两个文件：判据必须**两个方向都对**——坏的报出来，好的放过。
+       只验「坏的报出来」的话，一个恒报错的判据也能过，门禁会永远红。 */
+    const bad = path.join(scratch, 'syntax-error.mjs');
+    fs.writeFileSync(bad, 'export const oops = }));\n');
+    const good = path.join(scratch, 'fine.mjs');
+    fs.writeFileSync(good, 'export const ok = 1;\n');
+
+    const verdict = parseFailures([good, bad]);
+    if (!verdict.has(bad)) throw new Error('反证失败：故意的语法错误没被判据抓出来');
+    if (verdict.has(good)) throw new Error(`反证失败：一个合法文件被判成解析不过（${verdict.get(good)}）`);
+    if (parseFailures([]).size !== 0) throw new Error('反证失败：空输入却报出了失败');
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+
+  const sample = 'ℹ tests 4\nℹ pass 0\nℹ fail 0\nℹ skipped 4\n';
+  if (summarizeTestRun(sample).tests !== 4 || summarizeTestRun(sample).fail !== 0) {
+    throw new Error('反证失败：node:test 汇总行读不出来');
+  }
+  if (summarizeTestRun('ℹ tests 4\nℹ fail 2\n').fail !== 2) {
+    throw new Error('反证失败：失败条数读不出来');
+  }
+  if (summarizeTestRun('not a test run').tests !== null) {
+    throw new Error('反证失败：没有汇总行却报出了一个测试数');
+  }
 }
 
 const groups = {
@@ -300,6 +484,13 @@ function run(command, args) {
   failed ||= result.status !== 0;
 }
 if (!checkSuiteCoverage()) process.exit(2);
+try {
+  selfCheckGate();                                    // 先证明判据自己还张着，再拿它判真实套件
+} catch (error) {
+  console.error(`\n门禁自检没过：${error.message}`);
+  process.exit(2);
+}
+if (!checkSuiteLiveness()) process.exit(2);
 
 const group = groups[mode];
 for (const file of group.node || []) run(process.execPath, [`scripts/tests/${file}`]);

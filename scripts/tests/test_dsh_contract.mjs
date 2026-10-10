@@ -55,11 +55,22 @@ function hostModule(pkg, relative) {
   return null;
 }
 
-test('宿主契约：没给 STUDYMATE_DSH_PACKAGE 就跳过（与 test:dsh 同一口径）', t => {
+/** 没给真宿主就**明确跳过**——不许空跑成 pass。
+
+    `t.skip` 之前这里写的是裸 `return;`：`node:test` 把「回调正常跑完」记成通过，于是没设
+    `STUDYMATE_DSH_PACKAGE` 时四条里有一条显示跳过、另外三条显示通过，而那三条一条断言都没做。
+    「这一条到底验过没有」因此不可知——`test_dsh_plugin_cli.mjs` 就是同一类问题在载入阶段
+    静默死了几周的。判据与措辞一处定义，别处只给指针。 */
+function requireRuntime(t) {
   if (runtime === undefined || runtime === '') {
     t.skip('未设置 STUDYMATE_DSH_PACKAGE：跳过真宿主契约检查（见 scripts/tests/README.md）');
-    return;
+    return false;
   }
+  return true;
+}
+
+test('宿主契约：没给 STUDYMATE_DSH_PACKAGE 就跳过（与 test:dsh 同一口径）', t => {
+  if (!requireRuntime(t)) return;
   assert.ok(fs.existsSync(runtime), `STUDYMATE_DSH_PACKAGE 指向的目录不存在：${runtime}`);
 });
 
@@ -83,7 +94,7 @@ async function allDefinitions() {
 }
 
 test('宿主契约：注册点上每个工具的 schema 都过宿主自己的校验器', async t => {
-  if (runtime === undefined || runtime === '') return;
+  if (!requireRuntime(t)) return;
 
   const modulePath = hostModule(runtime, path.join('dsh-tools', 'lib', 'types', 'json-schema.js'));
   if (modulePath === null) {
@@ -114,7 +125,7 @@ test('宿主契约：注册点上每个工具的 schema 都过宿主自己的校
 });
 
 test('宿主契约：反证——宿主校验器对已知不合规的 schema 必须报错', async t => {
-  if (runtime === undefined || runtime === '') return;
+  if (!requireRuntime(t)) return;
 
   const modulePath = hostModule(runtime, path.join('dsh-tools', 'lib', 'types', 'json-schema.js'));
   if (modulePath === null) {
@@ -143,7 +154,7 @@ test('宿主契约：反证——宿主校验器对已知不合规的 schema 必
 });
 
 test('宿主契约：参考实现的 createWebhookSession 仍然带着那四个字段', async t => {
-  if (runtime === undefined || runtime === '') return;
+  if (!requireRuntime(t)) return;
 
   const modulePath = hostModule(runtime, path.join('dsh-webhook', 'lib', 'types', 'session.js'));
   if (modulePath === null) {
