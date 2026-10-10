@@ -101,10 +101,10 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 
 ## DSH 实际安装与启动
 
-兼容性改动时，在独立目录安装要检查的 DSH，然后指定其包目录：
+兼容性改动时，在独立目录安装要检查的 DSH，然后指定其包目录。**示例里的版本就是本机在跑的那个宿主**，换成你要核的版本即可：
 
 ```sh
-npm install --prefix /tmp/studymate-dsh @deepseek-ai/dsh@0.1.7-alpha.2
+npm install --prefix /tmp/studymate-dsh @deepseek-ai/dsh@0.2.0-rc.2
 export STUDYMATE_DSH_PACKAGE=/tmp/studymate-dsh/node_modules/@deepseek-ai/dsh
 npm run test:dsh
 npm run test:dsh-cli

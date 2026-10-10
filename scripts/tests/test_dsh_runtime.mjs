@@ -1,6 +1,6 @@
 // Real-runtime regression tests. The supplied DSH installation is read-only.
 // STUDYMATE_DSH_PACKAGE=/absolute/path/to/@deepseek-ai/dsh \
-// STUDYMATE_DSH_EXPECTED_VERSION=0.1.7-alpha.2 node --test scripts/tests/test_dsh_runtime.mjs
+// STUDYMATE_DSH_EXPECTED_VERSION=0.2.0-rc.2 node --test scripts/tests/test_dsh_runtime.mjs
 // Without STUDYMATE_DSH_PACKAGE these tests skip; normal unit tests need no DSH.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
