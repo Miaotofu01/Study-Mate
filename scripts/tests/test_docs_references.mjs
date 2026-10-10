@@ -50,7 +50,7 @@ const HISTORICAL = new Set([
 
 /** 检查范围：面向使用者的入口文档与全部 `docs/**`（历史文档除外，见上）。 */
 function documents() {
-  const found = ['README.md', 'CONTRIBUTING.md', 'AGENTS.md'];
+  const found = ['README.md', 'README.en.md', 'CONTRIBUTING.md', 'AGENTS.md'];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);

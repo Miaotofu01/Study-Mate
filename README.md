@@ -13,6 +13,8 @@
 
 <p align="center"><sub> StudyMate 是面向数学与计算机科目学习的助手，原则是「learn with doing」</sub></p>
 
+<p align="center">简体中文 · <a href="README.en.md">English</a></p>
+
 <p align="center"><a href="#快速开始">快速开始</a> · <a href="#它是什么">它是什么</a> · <a href="#核心功能">核心功能</a> · <a href="#常见问题">常见问题</a> · <a href="docs/使用/使用说明.md">使用说明</a> · <a href="docs/使用/Antigravity.md">Antigravity 说明</a></p>
 
 <p align="center"><img src="docs/images/taitou.png" width="860" alt="StudyMate：看板娘 + 手写体品牌字 + 覆盖科目（线代／微积分／概率论／C++／Python／机器学习／深度学习）+「任何科目，一站式搞定 / Learn With Doing」"></p>
@@ -121,6 +123,15 @@ npm test
 与[文件归属](docs/规范/文件归属.md)——两处各有唯一出处，这里不再抄一份。
 
 DSH 侧就是**一个插件包**（`@yunmiao/studymate`）：Host 半注册原生工具与阅读端数据路由，Client 半是阅读端本体；预设与工作区配置由安装器写。学习数据默认位于独立的 `~/StudyMate`，无需保留源码仓库；详见 [安装说明](docs/使用/安装.md)。
+
+<a href="docs/images/architecture.dark.png">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/architecture.light.png" />
+    <img src="docs/images/architecture.dark.png" width="860" alt="StudyMate 系统架构：宿主、插件包（提示词层 / Host 半 / Client 半）、学习工作区与安装分发" />
+  </picture>
+</a>
+
+<sub>架构图源文件：[architecture.drawio](docs/images/architecture.drawio)（用 draw.io 打开编辑，改完重新导出 `architecture.light.png` 与 `architecture.dark.png`）</sub>
 
 学习工作区里面长什么样（科目文件夹、课件、lab、档案、课型与题型），见 [使用说明 §六](docs/使用/使用说明.md#六学习数据存在哪)。
 
