@@ -124,6 +124,15 @@ npm test
 
 DSH 侧就是**一个插件包**（`@yunmiao/studymate`）：Host 半注册原生工具与阅读端数据路由，Client 半是阅读端本体；预设与工作区配置由安装器写。学习数据默认位于独立的 `~/StudyMate`，无需保留源码仓库；详见 [安装说明](docs/使用/安装.md)。
 
+<a href="docs/images/architecture.dark.png">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/architecture.light.png" />
+    <img src="docs/images/architecture.dark.png" width="860" alt="StudyMate 系统架构：宿主、插件包（提示词层 / Host 半 / Client 半）、学习工作区与安装分发" />
+  </picture>
+</a>
+
+<sub>架构图源文件：[architecture.drawio](docs/images/architecture.drawio)（用 draw.io 打开编辑，改完重新导出 `architecture.light.png` 与 `architecture.dark.png`）</sub>
+
 学习工作区里面长什么样（科目文件夹、课件、lab、档案、课型与题型），见 [使用说明 §六](docs/使用/使用说明.md#六学习数据存在哪)。
 
 ## 常见问题

@@ -123,6 +123,15 @@ For the directory tree, what each directory does, and who maintains which file, 
 
 On the DSH side, it is **one plugin package** (`@yunmiao/studymate`): the Host half registers the native tools and the reader's data routes, and the Client half is the reader itself. The installer writes the presets and workspace configuration. Study data lives in a separate `~/StudyMate` by default, so you don't need to keep the source repository; see the [installation guide](docs/使用/安装.md).
 
+<a href="docs/images/architecture.en.dark.png">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/architecture.en.light.png" />
+    <img src="docs/images/architecture.en.dark.png" width="860" alt="StudyMate system architecture: hosts, the plugin package (agent plane / Host half / Client half), the study workspace, and install & distribution" />
+  </picture>
+</a>
+
+<sub>Diagram source: [architecture.en.drawio](docs/images/architecture.en.drawio) (open it in draw.io to edit, then re-export `architecture.en.light.png` and `architecture.en.dark.png`)</sub>
+
 For what the study workspace looks like inside (subject folders, lessons, labs, records, lesson types, and question types), see [User Guide §6](docs/使用/使用说明.md#六学习数据存在哪).
 
 ## FAQ
