@@ -240,7 +240,8 @@ const session = await openSession({ suite: 'attempts' });
    重建之后观察者再回调，读到的是**已脱离文档**的旧节点 → 宽 0 → 两条栏永远收起，
    题目（在右栏里）就点不到。这里把 ResizeObserver 换成不回调的空实现：effect 里那次
    `measure()` 仍然打头跑一次、量到的是真布局（实测 1440），被测的作答路径一条不少。
-   同一处边界在 #75 的 reading_test.mjs 里有记（路线图 draw() 量到旧节点、坐标归零）。 */
+   同一处边界（mini-react 整树重建 → 闭在 effect 里的 DOM 量到旧节点）在 reading_routes_test.mjs
+   里有记：LessonPage 的 ResizeObserver 量画布宽，被闭住的旧节点一脱离文档就报 0。 */
 await session.inject('window.ResizeObserver = function () { this.observe = function () {}; this.unobserve = function () {}; this.disconnect = function () {}; };');
 
 /** 三层导航：主页 → 科目页 → 课件页 → 右栏题目（每次都是全新一次页面加载）。 */

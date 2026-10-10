@@ -157,7 +157,7 @@ export function libraryPayload() {
       nodes: [node('0001', 'filler-node', '撑高度的一课',
         ['---', 'title: 撑高度', '---', '', '## 只有一节', '', filler('撑高度', 14), ''].join('\n'),
         [], {}, '未开始')],
-      edges: [], levels: 1, stats: { 未开始: 1, 学习中: 0, 已学完: 0 },
+      levels: 1, stats: { 未开始: 1, 学习中: 0, 已学完: 0 },
       continue_node: 'filler-node', order: ['filler-node'],
     });
   }
@@ -179,7 +179,7 @@ export function libraryPayload() {
           '::: quiz 理解 锚点：本地偏好与学习工作区', ':::', ''].join('\n'),
         second, poolData, '未开始'),
     ],
-    edges: [], levels: 1,
+    levels: 1,
     stats: { 未开始: 1, 学习中: 1, 已学完: 0 },
     continue_node: 'reading-position', order: ['reading-position', 'anchor-states'],
   };

@@ -195,15 +195,19 @@ const PROBE = `(() => {
     courses: qa('.smb-course__name').map((el) => el.textContent.trim()),
     mapLabel: map && map.getAttribute('aria-label'),
     mapRole: map && map.getAttribute('role'),
-    edgeSvgs: qa('.smb-map svg[aria-hidden="true"]').length,
-    edgePaths: qa('.smb-map__edges path').length,
-    // 连线的几何也记下来：路径在不在、坐标是不是落在图里（截图里看不清时靠这个判）
-    edgeD: qa('.smb-map__edges path').map((one) => one.getAttribute('d')),
-    edgeStyle: (() => { const svg = q('.smb-map__edges'); if (!svg) return null; const cs = getComputedStyle(svg);
-      return [svg.getAttribute('class'), svg.namespaceURI, cs.position, cs.width, cs.height, cs.top].join(' | '); })(),
-    nodeRects: qa('[data-node]').map((el) => { const r = el.getBoundingClientRect(); return el.dataset.node + ':' + Math.round(r.width) + 'x' + Math.round(r.height) + '@' + Math.round(r.left) + ',' + Math.round(r.top); }),
-    edgeBox: (() => { const svg = q('.smb-map__edges'); if (!svg) return null; const r = svg.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; })(),
-    mapBox: (() => { const box = q('.smb-map'); if (!box) return null; const r = box.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; })(),
+    // 路线图里不该再有连线：连线的几何、坐标换算、只为此存在的重画都随 #152 删掉了，
+    // 「安静」的机器形态是「连线元素不存在」，所以这里数的是**没有**。
+    mapSvgs: qa('.smb-map svg').length,
+    arrowedPaths: qa('path[marker-end], marker#smb-arrow').length,
+    // 三处「箭头是前置关系」的说法一并翻面：科目主页整页可见文字里不该再出现「箭头」
+    // （下面的整页 innerText 断言守着）。这一条收窄到路线图自己那块 .smb-block，
+    // 不靠 DOM 顺序偶然等于「目录」那条 hint。
+    mapHint: (() => {
+      const block = map && map.closest('.smb-block');
+      const el = block && block.querySelector('.smb-block__hint');
+      return el ? el.textContent : null;
+    })(),
+    mapLegendMeta: (() => { const el = q('.smb-map__legend .smb-meta'); return el ? el.textContent : null; })(),
     levels: qa('.smb-map__level').length,
     tableCaption: table && table.querySelector('caption') && table.querySelector('caption').textContent,
     tableRows: table ? table.querySelectorAll('tbody tr').length : 0,
@@ -230,6 +234,7 @@ const PROBE = `(() => {
     motionOptions: qa('.smb-select option').map((one) => one.value),
     motionLabel: q('.smb-motionpick') ? q('.smb-motionpick').getAttribute('title') : null,
     bodyText: document.body.innerText.slice(0, 400),
+    pageText: document.body.innerText,
   };
 })()`;
 
@@ -286,18 +291,20 @@ try {
   await session.scene('reading-subject', async (ctx) => {
     await ctx.navigate(fixture, { settle: 1200 });
     await ctx.evaluate(`document.querySelectorAll('.smb-course')[0].click()`);
-    const log = await ctx.evaluate(`JSON.stringify((window.__rectLog__ || []).slice(0, 8))`);
-    console.log('      data-node 的 rect 记录：' + log);
     await ctx.sleep(400);
     const seen = await ctx.evaluate(PROBE);
     check('进了科目主页（科目名在标题里）', String(seen.bodyText).includes('演示科目'), JSON.stringify(seen.bodyText).slice(0, 200));
-    check('路线图容器有 aria-label（说清是什么图）', /^路线图：演示科目，3 层、3 个节点/.test(String(seen.mapLabel)), String(seen.mapLabel));
+    check('路线图容器有 aria-label（说清是什么图，且不再提箭头）',
+      /^路线图：演示科目，3 层、3 个节点；按前置依赖分层，从上往下读。$/.test(String(seen.mapLabel)),
+      String(seen.mapLabel));
     check('路线图容器是 role=group（里面有可点卡片，不能当 role=img 吞掉）', seen.mapRole === 'group', String(seen.mapRole));
-    check('两条装饰 svg 都 aria-hidden（读屏不再念一堆 path）', seen.edgeSvgs === 2, `实际 ${seen.edgeSvgs}`);
-    // 只断言「连线元素在」：连线几何（edgeD）**不在断言范围**——迷你 React 每次状态变化整树重建，
-    // 而路线图的 draw() 把 DOM 节点闭在 effect 里（真 React 里节点不换，所以这是对的），
-    // 于是重建后它量到的是旧节点、坐标归零。这是夹具的已知边界，不是阅读端的缺陷。
-    check('连线元素按前置关系建出来了（2 条）', seen.edgePaths === 2, `实际 ${seen.edgePaths}`);
+    check('路线图里没有连线层、也没有只为箭头存在的 svg（0 个）', seen.mapSvgs === 0, `实际 ${seen.mapSvgs}`);
+    check('页面里没有连线元素与箭头 marker（0 条）', seen.arrowedPaths === 0, `实际 ${seen.arrowedPaths}`);
+    check('目录说明翻面成「按前置依赖分层；点卡片进课件。」', seen.mapHint === '按前置依赖分层；点卡片进课件。', String(seen.mapHint));
+    check('图例里那句只留「点卡片进课件。」（不再提箭头）', seen.mapLegendMeta === '点卡片进课件。', String(seen.mapLegendMeta));
+    check('科目主页整页可见文字里不再出现「箭头」（#153 的三处说法都翻面了）',
+      !String(seen.pageText).includes('箭头'),
+      JSON.stringify(String(seen.pageText).match(/.{0,30}箭头.{0,30}/)));
     check('视觉隐藏的 <table> 在，且「看不见」的配方真的生效',
       seen.tableRows === 3 && seen.tableHidden && seen.tableHidden.position === 'absolute'
       && seen.tableHidden.clipPath === 'inset(50%)' && seen.tableHidden.overflow === 'hidden',

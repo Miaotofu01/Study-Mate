@@ -439,7 +439,6 @@ export function createWorkspaceVault(): Vault {
               id: node.id, title: node.title, kind: node.kind, number: node.number,
               level: node.level, prerequisites: node.prerequisites,
             })),
-            edges: subject.edges,
             order: subject.order,
           }));
         }

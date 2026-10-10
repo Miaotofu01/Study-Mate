@@ -476,9 +476,8 @@ function buildFixture(dir, payload, name = 'reading-routes-fixture.html') {
   /* mini-react 每次重渲染都**整树重建 DOM**（不 diff），所以「把节点闭进 effect 里、之后还去量它」
      的代码在夹具里量到的是已经被换掉的旧节点：LessonPage 的 ResizeObserver 量画布宽
      （lib/client.js 的 measure），旧节点一脱离文档就报 0，画布宽被写成 0，两条栏于是永远打不开。
-     真 React 里节点不换，那段代码本身是对的（同一条夹具边界 reading_test.mjs 在路线图连线上
-     也记过一次）。这里把 ResizeObserver 换成「observe 时同步报一次真实尺寸、之后不再报」：
-     一次场景里窗口尺寸不会变，这与真 React 下「只有真的变了才回调」等价，
+     真 React 里节点不换，那段代码本身是对的。这里把 ResizeObserver 换成「observe 时同步报一次
+     真实尺寸、之后不再报」：一次场景里窗口尺寸不会变，这与真 React 下「只有真的变了才回调」等价，
      而不会把夹具的重建当成一次缩放。 */
   window.ResizeObserver = function (callback) {
     this.observe = function (target) {
@@ -1786,7 +1785,7 @@ try {
     // 大纲清空的那一份：零节点科目今天到不了页面（Host 半会跳过），这里直接喂给渲染器
     const payload = JSON.parse(JSON.stringify(half.payload));
     payload.subjects[0] = Object.assign({}, payload.subjects[0], {
-      nodes: [], edges: [], stats: {}, order: {}, continue_node: '', levels: 0,
+      nodes: [], stats: {}, order: {}, continue_node: '', levels: 0,
     });
     await ctx.navigate(buildFixture(half.root, payload, 'no-nodes-fixture.html'), { settle: 1000 });
     const home = await ctx.evaluate(HOME_PROBE);

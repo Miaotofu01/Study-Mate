@@ -161,8 +161,9 @@ test('科目与节点的键名是页面依赖的契约，逐个钉住', () => {
   const { workspace } = oneSubjectWorkspace();
   const [subject] = readLibrary({ workspace }).subjects;
 
+  // 没有 `edges`：路线图不画连线了（#153），大纲里那份 edges 不再投影进载荷。
   assert.deepEqual(Object.keys(subject).sort(), [
-    'continue_node', 'created_at', 'edges', 'glossary', 'goal', 'levels',
+    'continue_node', 'created_at', 'glossary', 'goal', 'levels',
     'misconception_issues', 'misconception_library', 'misconceptions', 'mission', 'name', 'nodes',
     'order', 'project', 'records', 'reference', 'reference_version', 'resources_md', 'slug',
     'stats', 'status', 'updated_at',
@@ -221,7 +222,6 @@ test('科目档案类附件按各自口径解析', () => {
   assert.deepEqual(subject.misconceptions, []);
   assert.deepEqual(subject.misconception_library, []);
   assert.deepEqual(subject.misconception_issues, []);
-  assert.deepEqual(subject.edges, [{ from: '变量', to: '函数', reason: '先有绑定再谈调用' }]);
   assert.deepEqual(subject.order, { 变量: 0, 函数: 1 });
   // 依赖分层：变量是根（0 层），函数在它后面（1 层），levels 是总层数
   assert.deepEqual(subject.nodes.map((node) => node.level), [0, 1]);
