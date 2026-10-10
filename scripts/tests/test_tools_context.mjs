@@ -139,6 +139,20 @@ test('subjects 切片里没有题库、没有课件正文（顺着节点也读�
   assert.match(JSON.stringify(withPool.read('pool')), /题库里的题面/);
 });
 
+test('curriculum 切片不再投影 edges，slug / nodes / order 照旧（#153）', async (t) => {
+  withTools(t);
+  const vault = createWorkspaceVault();
+  const access = createAccess({ tool: 'unit', declaration: { reads: ['curriculum'] } }, vault.load);
+  const entries = access.read('curriculum');
+  assert.equal(entries.length, 1);
+  const entry = entries[0];
+  assert.equal(entry.slug, 'demo');
+  assert.equal(entry.nodes.length, 2);
+  assert.deepEqual(entry.order, { var: 0, fn: 1 });
+  assert.ok(!Object.prototype.hasOwnProperty.call(entry, 'edges'),
+    'curriculum 视图不再投影 edges；前置关系读 nodes[].prerequisites');
+});
+
 test('handoff 域要指定 stage；export 域没有读法', async (t) => {
   useHome(t);
   const vault = createWorkspaceVault();

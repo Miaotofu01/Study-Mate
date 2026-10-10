@@ -128,13 +128,6 @@ interface AttemptsView {
   questions: Record<string, unknown>;
 }
 
-/** 大纲里的一条边。 */
-interface SubjectEdge {
-  from: unknown;
-  to: unknown;
-  reason: unknown;
-}
-
 /** 一份科目的 payload。 */
 interface SubjectPayload {
   slug: string;
@@ -160,7 +153,6 @@ interface SubjectPayload {
   misconception_issues: string[];
   records: LearningRecord[];
   nodes: SubjectNode[];
-  edges: SubjectEdge[];
   levels: number;
   stats: Record<string, number>;
   continue_node: string;
@@ -462,6 +454,14 @@ function buildSubject(subjectDir: string, dirName: string, workspace: string): S
     throw new Error(`curriculum.yaml 的 nodes 不是列表：${path.join(subjectDir, 'curriculum.yaml')}`);
   }
   const edgesIn: any[] = curriculum.edges || [];
+  /* 大纲里的 edges 不再进载荷（#153：阅读端不画连线了，`subject.edges` 没有消费方）。
+     但「坏数据当场抛错、不静默降级」这条读盘纪律留着：形状不对的 edges 仍然在这里炸，
+     与 `nodes` / 题库同一口径。环检测仍在 `lib/core/validate.ts`（prerequisites + edges）。 */
+  for (const edge of edgesIn) {
+    if (!edge || typeof edge !== 'object' || !Object.hasOwn(edge, 'from') || !Object.hasOwn(edge, 'to')) {
+      throw new Error(`curriculum.yaml 的 edges 里有缺少 from/to 的项：${JSON.stringify(edge)}`);
+    }
+  }
   const progressNodes = pick(progress, 'nodes', null) || {};
   const levels = levelsOf(nodesIn);
   const lessonsDir = path.join(subjectDir, 'lessons');
@@ -591,12 +591,6 @@ function buildSubject(subjectDir: string, dirName: string, workspace: string): S
     misconception_issues: misconceptionIssues,
     records: readRecords(path.join(subjectDir, 'learning-records')),
     nodes,
-    edges: edgesIn.map((edge) => {
-      if (!edge || typeof edge !== 'object' || !Object.hasOwn(edge, 'from') || !Object.hasOwn(edge, 'to')) {
-        throw new Error(`curriculum.yaml 的 edges 里有缺少 from/to 的项：${JSON.stringify(edge)}`);
-      }
-      return { from: edge.from, to: edge.to, reason: pick(edge, 'reason', '') };
-    }),
     levels: nodes.length === 0 ? 0 : Math.max(...Object.values(levels), 0) + 1,
     stats,
     continue_node: current === null ? '' : current.id,
