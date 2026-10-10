@@ -126,7 +126,7 @@ On the DSH side, it is **one plugin package** (`@yunmiao/studymate`): the Host h
 <a href="docs/images/architecture.en.dark.png">
   <picture>
     <source media="(prefers-color-scheme: light)" srcset="docs/images/architecture.en.light.png" />
-    <img src="docs/images/architecture.en.dark.png" width="860" alt="StudyMate system architecture: hosts, the plugin package (agent plane / Host half / Client half), the study workspace, and install & distribution" />
+    <img src="docs/images/architecture.en.dark.png" width="860" alt="StudyMate system architecture: hosts, the plugin package (prompt layer / Host half / Client half), the study workspace, and install & distribution" />
   </picture>
 </a>
 
