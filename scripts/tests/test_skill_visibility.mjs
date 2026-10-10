@@ -15,14 +15,11 @@
    三部分：
      一、出方向——工作目录在本仓库里时，宿主默认的那两条项目根扫描路径上什么都没有；
      二、入方向——学习预设显式声明技能目录，且那份声明落在包内（宿主默认不扫的位置）；
-     三、工具与面板——**现状**是它们的**注册面**不在预设作用域内，标准预设的会话里也看得见。
-         这是与 #84 用户故事 36 的**已知偏离**，宿主没有「按预设注册工具」的接口
-         （`ctx.tools.restrict()` 要求 agent 作用域，插件拿到的是 profile 根 ctx），
-         所以这条套件钉住的是事实而不是理想；结论与去向写在
-         `docs/规范/工程约束.md` §二「技能与工具的可见边界」。
-         **可见边界本身能按预设收**：#104 的「答疑模式」预设住在 agent 作用域里，用
-         `ctx.tools.restrict({ deny })` 把继承来的那批原生工具从自己那条会话的工具面上
-         收掉了（`lib/tools/qa-preset.ts`）——本条钉的是注册面，与那条收窄不矛盾。 */
+   三、工具与面板——**工具**的注册面自 #138 起在「学习模式」预设作用域里（预设载荷自己那条
+          `@yunmiao/studymate/learning-preset` 行），profile 根上一个都不留，所以别的预设的
+          会话看不见它们；**面板与 slot** 仍由 `package.json` 的 `dsh.client` 在**包级**声明
+          （宿主没有「按预设注册面板」的接口）——那一半偏离留着，结论与去向写在
+          `docs/规范/工程约束.md` §二「技能与工具的可见边界」。 */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -147,14 +144,12 @@ test('预设里少了技能目录占位符就装不上（搬家没把这条守�
   }), /__STUDYMATE_SKILLS__/);
 });
 
-test('工具与面板的注册面在预设之外（现状：标准预设的会话里也看得见）', async () => {
-  // 这一段是**特征化**测试：它钉住的是宿主当前给得起的形状，不是理想形状。
-  // 口径（#104 之后）：这里钉的是**注册面**——`registerStudyMate` 那九个学习工具落在插件所在的
-  // profile 根 ctx 上，插件没有「按预设注册工具/面板」的接口可用。可见边界是另一件事：
-  // 「答疑模式」预设住在 agent 作用域里，可以用 `ctx.tools.restrict({ deny })` 把**继承来的**
-  // 那批原生工具从自己这条会话的工具面上收掉（`lib/tools/qa-preset.ts`）。两者不矛盾，
-  // 所以 #104 的收窄不改变本条的判据，也不该把这条删掉。
-  // 哪天宿主给了「按预设注册工具/面板」的接口，这条会红——那时改它，并同步规范里的偏离记录。
+test('工具的注册面在「学习模式」预设里，profile 根上一个都不留（#138）', async () => {
+  // 这条以前钉的是相反的现状：`registerStudyMate` 那九个学习工具落在**插件所在的 profile 根**
+  // ctx 上，同一个 profile 里任何会话（含宿主内置的 standard）都看得见它们（#87 的已知偏离）。
+  // #138 把工具的注册面收进了预设载荷自己那条插件行（`@yunmiao/studymate/learning-preset`），
+  // 所以判据翻面：**profile 根上不再碰 tools 服务**，而那批名字由预设作用域里那条行注册。
+  // 面板/slot 仍在包级声明（宿主没有「按预设注册面板」的接口）——那一半偏离留着。
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-visibility-'));
   const previous = { HOME: process.env.HOME, DSH_HOME: process.env.DSH_HOME, LEARN_WORKSPACE: process.env.LEARN_WORKSPACE };
   Object.assign(process.env, {
@@ -165,6 +160,10 @@ test('工具与面板的注册面在预设之外（现状：标准预设的会�
   const injected = [];
   const toolNames = [];
   const presets = [];
+  const scopedNames = [];
+  const { STUDY_TOOL_NAMES } = await import(pathToFileURL(path.join(ROOT, 'lib', 'tools', 'index.ts')).href);
+  const tasks = await import(pathToFileURL(path.join(ROOT, 'lib', 'tasks', 'index.ts')).href);
+  const lab = await import(pathToFileURL(path.join(ROOT, 'lib', 'lab', 'index.ts')).href);
   try {
     const { apply } = await import(pathToFileURL(path.join(ROOT, 'bin', 'dsh-plugin.ts')).href);
     await apply({
@@ -174,13 +173,18 @@ test('工具与面板的注册面在预设之外（现状：标准预设的会�
       effect: async fn => { await fn(); },
       inject: (names, handler) => {
         injected.push(names.join(','));
-        // `ctx.inject(['tools'], …)` 的回调参数 = 同一个 profile 根作用域上的 tools 服务。
-        // 它不是 agent 作用域：宿主的 `ctx.tools.restrict()` 在这种 ctx 上直接抛
-        // （`@deepseek-ai/dsh-tools` 的 `restrict()`：requires a scoped context (agent.ctx)）。
         if (names.includes('tools')) {
           handler({ tools: { register: definition => { toolNames.push(definition.name); return () => {}; } } });
         }
       },
+    });
+
+    // 那条插件行在**自己的作用域**里注册——这里直接拿它的 apply 跑一遍假 ctx。
+    const { apply: applyPresetTools } = await import(
+      pathToFileURL(path.join(ROOT, 'lib', 'tools', 'learning-preset.ts')).href);
+    applyPresetTools({
+      tools: { register: definition => { scopedNames.push(definition.name); return () => {}; } },
+      effect: fn => fn(),
     });
   } finally {
     for (const [name, value] of Object.entries(previous)) {
@@ -189,18 +193,26 @@ test('工具与面板的注册面在预设之外（现状：标准预设的会�
     }
     fs.rmSync(temporary, { recursive: true, force: true });
   }
-  assert.ok(injected.includes('tools'), '工具注册走的是插件自己的注入面，不经过预设');
-  // 注册面 = profile 根 ctx，判据是「九个学习工具按名字都查得到」——名字表以
-  // lib/tools/index.ts 为唯一出处，这里不抄第二份。
-  const { STUDY_TOOL_NAMES } = await import(pathToFileURL(path.join(ROOT, 'lib', 'tools', 'index.ts')).href);
-  for (const name of STUDY_TOOL_NAMES) {
-    assert.ok(toolNames.includes(name), `${name} 必须注册在 profile 根 ctx 上`);
-  }
-  // 预设载荷里只有插件行：没有任何一行把工具或面板绑到学习模式上。
-  const payload = JSON.stringify(presets);
-  assert.ok(!payload.includes('studymate_'), '预设载荷里不该出现原生工具名');
-  // 面板/slot 在打包元数据里全局声明（package.json 的 dsh.client），与预设无关。
+
+  // ① profile 根上不再注册任何 StudyMate 工具——污染就出在这一步
+  assert.ok(!injected.includes('tools'), '插件在 profile 根上不该再碰 tools 服务');
+  assert.deepEqual(toolNames, [], 'profile 根 ctx 上不该注册任何 StudyMate 工具');
+
+  // ② 预设载荷里有那条插件行：它才是注册面
+  const learning = presets.find(config => config.id === 'learning');
+  assert.ok(learning, '学习模式预设要注册得上');
+  const toolRows = (learning.plugins ?? [])
+    .filter(row => row.name === '@yunmiao/studymate/learning-preset')
+    .map(row => row.id);
+  assert.deepEqual(toolRows, ['studymate-tools'], '学习模式预设要挂上那条工具面行');
+
+  // ③ 那条行在**它自己的作用域**里注册全部 15 个：九个学习工具 → 五个任务工具 → 一个实验工具
+  assert.deepEqual(scopedNames, [
+    ...STUDY_TOOL_NAMES, ...tasks.TASK_TOOL_NAMES, ...lab.LAB_TOOL_NAMES,
+  ]);
+
+  // ④ 面板/slot 仍是包级声明（与预设无关）：每个加载了这个包的 profile 都会挂上它
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(manifest.dsh?.client?.platform, 'web',
-    '客户端面板是包级声明：每个加载了这个包的 profile 都会挂上它');
+    '客户端面板是包级声明：宿主没有按预设注册面板的接口，这一半偏离留着');
 });

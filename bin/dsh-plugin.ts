@@ -1,13 +1,18 @@
 // StudyMate 的 DSH 插件入口（Host 半）。
 //
-// 三件事：
+// 四件事：
 //   1. 注册两条预设：「学习模式」（原有行为，一字不变）与「答疑模式」（#104，阅读端的就地
 //      答疑，只带一个只读的取课件工具）；
-//   2. 注册九个**原生工具**（#68）：总控拿到的是结构化返回，不是 exit code；
+//   2. 挂**宿主层**（#138）：导出的任务类型、任务域那条阅读端路由、实验域的任务类型与台账、
+//      文件监听（`registerStudyMateHost`，见 lib/tools/index.ts）；
 //   3. 给阅读端（Client 半 lib/client.js）供学习工作区数据：
 //      GET  /api/studymate/library   —— 整份快照，走宿主的 /api 认证通道，与其他插件取业务数据同一条路；
 //      GET  /api/studymate/asset     —— 课件配图（二进制）；
 //      GET/POST /api/studymate/reference —— 学生自加的参考资料：读取与写入（ADR-0010）。
+//
+// **原生工具不在这里**（#138）：九个学习工具 + 五个 `studymate_task_*` + 一个 `studymate_lab_run`
+// 由「学习模式」预设那条插件行（`@yunmiao/studymate/learning-preset`）注册进**预设作用域**，
+// 别的预设（含宿主内置的 standard）看不见它们。
 //
 // 三处刻意的写法，别顺手改回去：
 //   · `lib/` 下的模块用**动态 import**，且在注入回调里才加载。这个文件会被
@@ -16,8 +21,9 @@
 //   · 路由与工具都不写成顶层 `inject: ['connection'|'tools']`。那样在没装那个服务的组合
 //     （headless / tui，或更老的宿主）里整个插件都不会 apply，连预设都注册不上；
 //     用 ctx.inject 只在服务就绪时挂上，缺了就不挂。ctx.inject 不存在时也不该炸。
-//   · 工具注册**只**走 `registerStudyMate(ctx)` 一个入口（见 lib/tools/index.ts）。
-//     #69/#70/#73/#74 往那个函数的清单里各加一行，不在这个文件里写具体工具。
+//   · 注册**只**走 lib/tools/index.ts 那两个入口（宿主层 `registerStudyMateHost`、
+//     agent 层 `registerStudyMateTools`）。#69/#70/#73/#74 往那个清单里各加一行，
+//     不在这个文件里写具体工具。
 import { installPayload } from './studymate.mjs';
 
 /* ── 宿主的插件上下文 ────────────────────────────────────────────────────
@@ -87,25 +93,24 @@ export async function apply(ctx: PluginContext): Promise<void> {
     }
   }
 
-  // ── 原生工具（#68）─────────────────────────────────────────────────────
-  // 与路由同一种姿势：tools 服务就绪才注册，缺了就不注册（不让整个插件不 apply）。
-  // 具体注册什么在 lib/tools/index.ts 的 registerStudyMate 里——这个文件不认识任何工具。
-  // 模块在这里 await 加载（不是丢一个浮动 Promise）：apply 返回时工具已经注册好，
-  // 「插件加载完就能按名字查到工具」才是可断言的；这个文件也可能被单独拷出去跑（那时 ctx
-  // 没有 inject），所以加载放在 inject 判断之后。
+  // ── 宿主层（#138）──────────────────────────────────────────────────────
+  // 导出的任务类型、任务域那条阅读端路由与销毁回执、实验域的任务类型与台账收尾、文件监听
+  // ——这些是进程级的东西，注册在**插件所在的 profile 根**上。具体注册什么在
+  // `lib/tools/index.ts` 的 `registerStudyMateHost` 里，这个文件不认识任何工具。
+  //
+  // **原生工具不在这里**：九个学习工具 + 五个 `studymate_task_*` + 一个 `studymate_lab_run`
+  // 由「学习模式」预设那条插件行（`@yunmiao/studymate/learning-preset`）注册进**预设作用域**
+  // ——落在 profile 根会让同一个 profile 里每个预设的会话都看见它们（#87 那条已知偏离）。
+  //
+  // 模块在这里 await 加载（不是丢一个浮动 Promise）：apply 返回时这些已经挂好；这个文件也可能
+  // 被单独拷出去跑（那时 ctx 没有 inject），所以加载放在 inject 判断之后。
   if (typeof ctx.inject !== 'function') return;
   try {
-    const { registerStudyMate } = await import('../lib/tools/index.ts');
-    ctx.inject(['tools'], (toolsCtx) => {
-      try {
-        registerStudyMate(toolsCtx as unknown as Parameters<typeof registerStudyMate>[0]);
-      } catch (error) {
-        // 工具注册不上不该拖垮插件：预设与阅读端数据通路照常
-        console.warn(`StudyMate：原生工具注册失败，总控只能退回旧路径。${error instanceof Error ? error.message : String(error)}`);
-      }
-    });
+    const { registerStudyMateHost } = await import('../lib/tools/index.ts');
+    registerStudyMateHost(ctx as unknown as Parameters<typeof registerStudyMateHost>[0]);
   } catch (error) {
-    console.warn(`StudyMate：原生工具模块加载不了，总控只能退回旧路径。${error instanceof Error ? error.message : String(error)}`);
+    // 宿主层挂不上不该拖垮插件：预设与阅读端数据通路照常
+    console.warn(`StudyMate：宿主层注册失败（任务类型/路由/监听）。${error instanceof Error ? error.message : String(error)}`);
   }
 
   /* 错误信封的唯一构造点（`lib/route-envelope.ts`）。**动态取**：这个文件会被

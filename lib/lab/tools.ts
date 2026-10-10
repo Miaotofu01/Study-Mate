@@ -711,20 +711,34 @@ export function settledRunOutcome(service: TaskService, actor: string, taskId: s
 export const LAB_TOOL_NAMES = ['studymate_lab_run'] as const;
 
 /**
- * 把一个实验域挂到插件上。注册点（`lib/tools/index.ts`）只加一行：
- *
- *     registerLabTools(ctx, { registerStudyTool });
+ * `studymate_lab_run` 注册进**当前作用域**（agent 层）。注册面收进预设时用这一支。
  *
  * 与任务域同一个姿势：`registerStudyTool` 是注册点注入进来的，实验域**不 import 工具域**
  * ——域图上只有「工具域 → 实验域」一条边，不会成环（架构边界测试按域查环、默认拒绝）。
  */
-export function registerLabTools(ctx: TaskToolContext, registry: TaskToolRegistry): void {
-  ensureLabTaskKind();
+export function registerLabToolSpecs(ctx: TaskToolContext, registry: TaskToolRegistry): void {
   registry.registerStudyTool(ctx, labRunTool(taskService()) as unknown as Parameters<TaskToolRegistry['registerStudyTool']>[1]);
+}
+
+/**
+ * 实验域的**宿主层**：任务类型「实验代跑」与台账收尾。
+ *
+ * 两件都必须住在 profile 根：任务类型要在**插件加载时**就登记（重开 DSH 之后 resume 靠它按
+ * 名字找回跑法），台账是进程里唯一的一份。阅读端那条 `POST /api/studymate/lab-run` 路由另有
+ * 落点（`bin/dsh-plugin.ts` 直接挂 `lib/lab/route.ts` 的 `registerLabRoute`），不在这里。
+ */
+export function registerLabHost(ctx: TaskToolContext): void {
+  ensureLabTaskKind();
   // 卸载时把台账收尾（事实已经落盘，这一步是给「卸载也要有收尾」一个明确的落点）
   if (typeof ctx.effect === 'function') {
     ctx.effect(() => () => {
       runLedger().flush();
     }, 'studymate: 实验代跑台账（收尾落盘）');
   }
+}
+
+/** 兼容入口：工具 + 宿主层一次挂完（既有测试与旧调用点用）。 */
+export function registerLabTools(ctx: TaskToolContext, registry: TaskToolRegistry): void {
+  registerLabToolSpecs(ctx, registry);
+  registerLabHost(ctx);
 }

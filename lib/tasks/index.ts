@@ -60,15 +60,26 @@ export function resetTaskService(): void {
 }
 
 /**
- * 把任务域的对外面挂到插件上：五个工具 + 一条阅读端路由 + 一条卸载时的销毁回执。
+ * 五个工具注册进**当前作用域**（agent 层）。注册面收进预设时用这一支：工具落在预设作用域，
+ * profile 根上不留它们（见 `lib/tools/index.ts` 的两层分工）。
  *
  * 为什么要 registry 这个参数：`registerStudyTool` 在工具域里，任务域不能 import 它
  * （域图成环，见 tools.ts 文件头）。注册点把它当参数递进来，任务域就只依赖 `node:*` 与
  * `lib/core` 这一侧的规矩不被破。
  */
-export function registerTaskTools(ctx: TaskToolContext, registry: TaskToolRegistry): void {
+export function registerTaskToolSpecs(ctx: TaskToolContext, registry: TaskToolRegistry): void {
   const service = taskService();
   for (const spec of taskToolSpecs(service)) registry.registerStudyTool(ctx, spec);
+}
+
+/**
+ * 任务域的**宿主层**：一条阅读端路由（`GET /api/studymate/tasks`）与一条卸载时的销毁回执。
+ *
+ * 它必须住在 profile 根：路由是给阅读端画的进度条，注册进预设作用域会在每条预设挂载时
+ * 重复注册（同一个 path 第二次注册直接抛），而且预设卸载时路由会跟着没。
+ */
+export function registerTaskHost(ctx: TaskToolContext): void {
+  const service = taskService();
   registerTaskRoute(ctx, service);
   // 卸载时给一次「销毁回执」：请求取消活任务、把 durable 记录刷到盘上；落盘记录与已完成产物
   // 一律**不删**（重开 DSH 要接得上）。回执走不了任何人的手里，所以它同时记进 problems()。
@@ -77,4 +88,10 @@ export function registerTaskTools(ctx: TaskToolContext, registry: TaskToolRegist
       service.dispose();
     }, 'studymate: 任务服务（销毁回执）');
   }
+}
+
+/** 兼容入口：工具 + 宿主层一次挂完（既有测试与旧调用点用）。 */
+export function registerTaskTools(ctx: TaskToolContext, registry: TaskToolRegistry): void {
+  registerTaskToolSpecs(ctx, registry);
+  registerTaskHost(ctx);
 }

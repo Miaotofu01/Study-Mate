@@ -8,6 +8,7 @@
   },
   "exports": {
     ".": "./bin/dsh-plugin.mjs",
+    "./learning-preset": "./bin/learning-preset.mjs",
     "./qa-preset": "./bin/qa-preset.mjs",
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
