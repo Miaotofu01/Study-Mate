@@ -17,6 +17,8 @@ import os from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { EXIT_SKIP } from './harness.mjs';
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT = path.join(HERE, '..', '..', '..', 'lib', 'client.js');   // scripts/tests/browser → 仓库根
 const FIXTURE = path.join(HERE, '..', 'fixtures', 'reading_position_fixture.mjs');
@@ -42,7 +44,11 @@ const chrome = findChrome();
 if (!chrome) {
   console.log('跳过：没探测到 Chrome / Chromium。'
     + '设 STUDYMATE_CHROME=<可执行文件>，或装上 google-chrome / chromium 再跑这一套。');
-  process.exit(0);
+  /* 退出码 3 = `harness.mjs` 的 `EXIT_SKIP`（「跳过，不算通过」），与同组另外九套一个口径。
+     这里曾经是 `process.exit(0)`：单独跑这一套时它报「成功」而一条断言都没做——而本文件
+     第 13 行的文件头写着「找不到就明确跳过并说明，不静默绿」。0 与 3 在门禁那里是两件事：
+     `checks.mjs` 判成功的方式是 `status === 0`。 */
+  process.exit(EXIT_SKIP);
 }
 
 /* ── 夹具：`lib/client.js` + 最小装载器 → 一份能上屏的资源表 ─────────── */
