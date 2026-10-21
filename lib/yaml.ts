@@ -28,7 +28,11 @@
    插件在启动时要读它做冲突检查；读不了就整条跳过，于是「学习模式」会从模式选择器里消失。
    所以多行 plain 标量也做成**显式开启**的能力（`plainScalarContinuation`）。
 
-   所以这里把这三类构造做成**显式开启**的能力，而不是放宽默认：不开就跟以前一字不差地报错，
+   这几类构造还会**交叉**：DSH 设置页的 graph-memory 三项写成 `!!js >-`（标签 + 块标量），
+   所以「带标签的块标量」也按同一条路读——先剥标签认出块头，正文读完再按 `tags` 的口径取值，
+   与 `!!js` 的单行值一致。组合与单开都只走显式开启，默认仍报错。
+
+   所以这里把这几类构造做成**显式开启**的能力，而不是放宽默认：不开就跟以前一字不差地报错，
    开了才解析（调用方是 lib/preset.ts，见那里对两种标签语义的说明）。学习文件仍走默认关闭，
    宁可炸，也不要静默把两行折成一个值。
 
@@ -404,6 +408,19 @@ function isBlockScalarHeader(text: string): boolean {
 }
 
 /**
+ * 值是块标量时返回它的头与「要不要过标签」。裸头如 `>-` 直接读；带标签的头如 `!!js >-`
+ * 先剥掉标签再判——DSH 的 profile 补丁就这么写（graph-memory 的 embedding 三项），
+ * 只认裸头的调用点会把它当 plain 标量，接着撞进续行规则报错，整份补丁读不出来，
+ * 学习模式于是静默不注册。返回 null＝不是块标量。
+ */
+function blockScalarHeader(text: string): { header: string; tagged: boolean } | null {
+  if (isBlockScalarHeader(text)) return { header: text, tagged: false };
+  const tag = splitTag(text);
+  if (tag && isBlockScalarHeader(tag.rest)) return { header: tag.rest, tagged: true };
+  return null;
+}
+
+/**
  * 读一个块标量。行号取自 header 那一行，往后按**原始行**走——空行属于块内容，
  * 而上面那份行索引刻意不留空行。
  *
@@ -674,9 +691,10 @@ function parseMapping(lines: SourceLine[], start: number, indent: number, file: 
     }
     const key = parseKey(pyStrip(line.content.slice(0, colon)), line, line.indent + 1, file);
     const rest = pyStrip(stripComment(line.content.slice(colon + 1)));
-    if (isBlockScalarHeader(rest)) {
-      const block = readBlockScalar(line, rest, indent);
-      setKey(obj, key, block.value);
+    const blockHeader = blockScalarHeader(rest);
+    if (blockHeader) {
+      const block = readBlockScalar(line, blockHeader.header, indent);
+      setKey(obj, key, blockHeader.tagged ? applyTag(block.value) : block.value);
       i = firstLineAtOrAfter(lines, i + 1, block.next);
     } else if (rest === '') {
       const child = parseChild(lines, i + 1, indent, file);
@@ -713,9 +731,10 @@ function parseSequence(lines: SourceLine[], start: number, indent: number, file:
       column++;
     }
     const value = pyStrip(stripComment(rest));
-    if (isBlockScalarHeader(value)) {
-      const block = readBlockScalar(line, value, indent);
-      arr.push(block.value);
+    const blockHeader = blockScalarHeader(value);
+    if (blockHeader) {
+      const block = readBlockScalar(line, blockHeader.header, indent);
+      arr.push(blockHeader.tagged ? applyTag(block.value) : block.value);
       i = firstLineAtOrAfter(lines, i + 1, block.next);
       continue;
     }
@@ -758,10 +777,23 @@ function parseChild(lines: SourceLine[], i: number, parentIndent: number, file: 
       const [value, next] = parseSequence(lines, i, line.indent, file);
       return { value, next };
     }
+    const text = pyStrip(stripComment(line.content));
+    // 孩子本身就是块标量头（`key:\n  |`，也含 `!!js >-` 这种带标签的）时先按块读。
+    // 这一步**不能挂在 `plainScalarContinuation` 下面**：`blockScalars` 这个选项承诺的就是
+    // `|` / `> `（`YamlParseOptions` 里写着），只开它不续行也必须认。
+    const blockHeader = findKeyColon(line.content) < 0 ? blockScalarHeader(text) : null;
+    if (blockHeader) {
+      // 缩进指示（`|2`）是相对**父节点**算的，不是相对块头那一行：`key:\n  |2\n    x`
+      // 在 PyYAML 里是 "  x"，传 `line.indent` 会读成 "x"——静默少两个空格。
+      const block = readBlockScalar(line, blockHeader.header, parentIndent);
+      return {
+        value: blockHeader.tagged ? applyTag(block.value) : block.value,
+        next: firstLineAtOrAfter(lines, i + 1, block.next),
+      };
+    }
     // 关闭续行时保持老路（交给 parseMapping 报「既不是 key: value」）；
-    // 打开后续行才可能是「孩子就是一个标量块」，例如 `key:\n  第一行\n  第二行`。
+    // 打开后续行才可能是「孩子就是一个标量续行」，例如 `key:\n  第一行\n  第二行`。
     if (findKeyColon(line.content) < 0 && plainScalarContinuationEnabled()) {
-      const text = pyStrip(stripComment(line.content));
       if (isPlainScalarStart(text)) return readPlainValue(lines, line, i, parentIndent, text, file);
       return { value: parseInlineValue(text, line, line.indent + 1, file), next: i + 1 };
     }
