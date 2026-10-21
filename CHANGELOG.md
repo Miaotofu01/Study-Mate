@@ -1,5 +1,652 @@
 # 更新日志
 
+<!-- studymate-release:v2.0.3 -->
+## [2.0.3](https://github.com/Miaotofu01/Study-Mate/releases/tag/v2.0.3) - 2026-10-21
+
+### 已合并的 Pull Request
+
+- fix(发布): npm 异步入库的等待窗口从 5 分钟放到 30 分钟，超时报错给出可查的现场 ([#188](https://github.com/Miaotofu01/Study-Mate/pull/188))
+- feat(课件生成成本): 记忆机制、闸门分层、契约落点与讲解工序（\#183–\#187） ([#200](https://github.com/Miaotofu01/Study-Mate/pull/200))
+- fix(安装): npx install 不再声明躲不掉的「答疑模式」（\#204） ([#205](https://github.com/Miaotofu01/Study-Mate/pull/205))
+- fix(预设): persona 不再引用未注册的 {{cwd}}（\#206） ([#207](https://github.com/Miaotofu01/Study-Mate/pull/207))
+- fix(解析器): 支持 profile 补丁里的多行 plain 标量，学习模式不再静默跳过（\#208） ([#209](https://github.com/Miaotofu01/Study-Mate/pull/209))
+- feat(阅读端): 「相关课件」站内跳转；删掉架构图（\#201/\#202） ([#211](https://github.com/Miaotofu01/Study-Mate/pull/211))
+- fix(套件): 不再往共享的 preset/skills 写哨兵，改成前后指纹（\#216） ([#217](https://github.com/Miaotofu01/Study-Mate/pull/217))
+- fix(阅读端): 一门科目的文件读不了只坏那一门，不再整页「读不到学习工作区」（\#222） ([#223](https://github.com/Miaotofu01/Study-Mate/pull/223))
+
+### 所有提交
+
+- fix(发布): npm 异步入库的等待窗口从 5 分钟放到 30 分钟，超时报错给出可查的现场 ([2a9b5a1](https://github.com/Miaotofu01/Study-Mate/commit/2a9b5a1536c40c169b5e54c448ed20e429ce5dab))
+
+  > 2026-10-15 的 v2.0.2 发布里 npm publish 成功了，但 60 次 × 5 秒的轮询全部落空，
+  > 流程在创建 GitHub Release \*\*之前\*\*失败：npm 有 2.0.2、tag 已推、Release 与
+  > studymate-openai.zip 缺失。npm 对大包是异步入库（本次 8.1 MB 的包在 registry
+  > 上迟到约 55 分钟），5 分钟这个窗口与它的实际行为不匹配。
+  > 
+  > - 等待窗口改成 30 分钟，节奏从密到疏（5s → 10s → 15s → 30s），请求数反而更省
+  > - 窗口可调：RELEASE\_NPM\_WAIT\_SECONDS（workflow 里显式给出 1800）
+  > - 超时不再只说 could not be verified (exit 0)：给出查过的 registry URL、已等
+  >   时长和次数，并说明包可能仍在 npm 队列里、重跑会补齐缺的那一半
+  > - registry 非 404 失败带上 URL，方便区分「没发出去」与「registry 抽风」
+  > - publish job 超时 20 → 40 分钟，否则等待窗口自己就会被掐掉
+  > 
+  > 重跑不会重复发包：registry 已经有同版本时 verifyPublished 核对完整性后直接
+  > 补 Release 与 ZIP。
+  > 
+  > Closes \#182
+
+- Merge pull request \#188 from Miaotofu01/fix/release-npm-async ([2852e50](https://github.com/Miaotofu01/Study-Mate/commit/2852e50426c6a75d9400f8e307b657f70b57e4dc))
+
+  > fix(发布): npm 异步入库的等待窗口从 5 分钟放到 30 分钟，超时报错给出可查的现场
+
+- docs(技能): 课件口径重写——problem 变选填、行文要求精简 ([ff11827](https://github.com/Miaotofu01/Study-Mate/commit/ff1182727288f1140200bc436eaf99ae389e5ac5))
+
+  > 课设大纲里 problem 从「每节必填」改成选填：想不出真实的问题就留空，
+  > 编出来的场景比空着更糟；lesson-design 的着眼点二/三/四与 §四.7 按同一
+  > 口径重写，「一节的组织」随版式口径一起删掉。两个无头宿主的整行锚点与
+  > 技能规则表里退役的那条随之跟上，导出件与文档口径保持同步。
+
+- docs(技能): 三个暂存角色补归属表指针，字段契约明文指向 schema（\#194） ([8cd0f01](https://github.com/Miaotofu01/Study-Mate/commit/8cd0f0105d4ca68288aa4826fc4297bc7f6aba21))
+
+  > 出题评估、课设、资料收集三份规格此前一处都没提归属表，lab 该放哪、
+  > 产物叫什么只能去翻渲染端源码反推。三份各补一句归属表指针，措辞与既有
+  > 三份逐字同文、放在开头（文末会撞上无头宿主导出套件那条「正文最后一条
+  > 非改写行」哨兵）。
+  > 
+  > 讲解与出题规格把「该去哪儿查」写死：题库字段的契约唯一出处是
+  > \`schemas/question.schema.json\`（词表与层级匹配在 \`lib/core/rules.ts\`
+  > 的 \`QUESTION\_KIND\_SHAPES\`），\`:::\` 指令与块的写法看内容格式规范。
+  > 
+  > 顺手清掉死指针：\`templates/assets/quiz.js\` 早随 \#83 退役，却仍在
+  > practice-evaluator 与 layered-practice 两处被当成「字段的唯一出处」，
+  > 替代指向改为真实存在的 schema 与内容格式规范（历史设计文档里的叙述
+  > 按「不再随实现更新」保留）。
+  > 
+  > 长期判据落进工程约束 §二：角色规格里出现「读渲染端源码反推约定」的
+  > 步骤即规格 bug；读 schema 与 \`lib/core/\*\*\` 的核心纯函数是规范指定的
+  > 工序。规则可达性套件按同形先例补四条断言（三条指针 + 一条工序）。
+
+- docs(技能): lab 判分契约写进题目规范，判分入口钉成 check.sh（\#196） ([e91af44](https://github.com/Miaotofu01/Study-Mate/commit/e91af44157cd32a67748357a48475b9e0c7454cf))
+
+  > 既有实现（\#77 的跑手）一直没有落纸的规格，这条把它按实现逐字写进 \`layered-practice\` §六：
+  > 
+  > - 命令只能来自题库里 \`kind: 交付物\` 那道题的「证据」字段，模型与学生都不能自编；
+  > - 跑手是唯一入口，只回事实（结局／退出码／信号／stdout／stderr／字节／截断），不做通过判定；
+  > - 判分入口固定 \`check.sh\`，禁止自造判定字样与自定义退出码语义；
+  > - 三处布局（任务目录／答案目录／lab 说明），任务目录内部允许课程自定义子目录；
+  > - 干净态与作答态各跑一次 \`check.sh\`。
+  > 
+  > 不新增加载面：\`rule-owners.json\` 一个字不动（\`reaches\` 与总控的加载清单都不变）。
+  > 断言分两处：\`test\_skill\_rules.mjs\` 的 \`RULES\['layered-practice'\]\` 新增 8 条逐字片段、
+  > \`RULES\['practice-evaluator'\]\` 新增 1 条钉「按第六节做事」；\`test\_skill\_contracts.mjs\` 新拿
+  > 跑手的 \`RUN\_FACTS\_SCHEMA\` 对账事实字段名与 \`结局\` 取值（任一边改名都红），并反证契约里
+  > 没有 \`通过\`／\`passed\` 这类结论字段。
+
+- merge(课件生成成本): 三个暂存角色补归属表指针、字段契约指向 schema（\#194） ([a2172f4](https://github.com/Miaotofu01/Study-Mate/commit/a2172f42cc2d8f802d8d641bb12ba16caa4b71b7))
+- merge(课件生成成本): lab 判分契约写进题目规范、判分入口钉成 check.sh（\#196） ([82c2be1](https://github.com/Miaotofu01/Study-Mate/commit/82c2be1e2c878b19cd8c438795cc15bba0160b01))
+- feat(校验): 闸门只按题库文件在不在分层，未产出时降级为「待对账」提示 ([e8f6a87](https://github.com/Miaotofu01/Study-Mate/commit/e8f6a87f63d9ced5b2c15c2ad346d565987dff52))
+
+  > 讲解交稿时题还没出，「题库未产出」这类报错它修不了；于是首次自检永远没有可信的
+  > 放行结论。改成：题库文件\*\*确证不在盘上\*\*（\`poolPresent === false\`）时，题目位置相关的
+  > 判定整体降级成一条带处数的「待对账」提示（待办不是缺陷，对账搬入后由总控跑），
+  > 格式类与正文自身的错照旧阻断。
+  > 
+  > 分层只认 \`poolPresent\` 这一个判据：原来 \`poolOnDisk = poolPresent !== false &amp;&amp; pool != null\`
+  > 把「文件在不在」与「内容读进来没有」AND 在一起，坏 JSON 会被当成「未产出」——
+  > 那等于悄悄放松闸门。现在文件在盘上（哪怕 JSON 坏了、顶层不是对象）与「没被告知在不在」
+  > 都照旧逐条阻断，输出与改动前逐字一致（已用旧实现的差分核对）。
+  > 
+  > 顺带删掉不再发出的 \`pool-missing\` 错误码与那条 checkPoolPresence；工具参数一个没动。
+
+- docs(提示词): 三处口径对齐「对账发生在搬入后」 ([d04a643](https://github.com/Miaotofu01/Study-Mate/commit/d04a6434458d0726a3be4a679dd662ee1bd14041))
+
+  > - 讲解规格删掉「题库/锚点类报错此时是预期的……别消它」——题库未产出已经不再阻断，
+  >   没有要「消」的错；自检口径改成「格式层每一行改到没有」，题还没出时那条「待对账」提示
+  >   照旧不许靠补 \`empty\_reason\` 或删 \`::: quiz\` 块来消。
+  > - 出题规格的「交稿前对账」改成「搬入后对账」：题库在 \`deliver/\` 里、它交回的 \`empty\_reason\`
+  >   也由总控搬入时打进内容文件，搬入前对不上。
+  > - 总控的内容校验那一步与工具参考写明对账就发生在那里；课件内容格式补一段「分层只按题库
+  >   文件在不在」，并把「内容层与锚点对账」改成「格式层与对账层」——「内容层」本来就包含
+  >   锚点对账，别拿它指「只查格式」。
+  > 
+  > 规则套件补上否定支持（RULES 只断「必须出现」）：退役说法进 FORBIDDEN 表，改回去就红，
+  > 既有 517 条条目形状不变。
+
+- Merge branch 'feat/183-187-课件生成成本' into ticket/193 ([b8825ce](https://github.com/Miaotofu01/Study-Mate/commit/b8825ce9354f07019b4d076a159ac6d85f595ef4))
+
+  > \# Conflicts:
+  > \#	scripts/tests/test\_skill\_rules.mjs
+
+- test(检查): 规则表去掉一条重复条目（讲解自检的工具名已有守卫） ([8bad225](https://github.com/Miaotofu01/Study-Mate/commit/8bad2255b0c69b0a737a74dfbd4bf48a61b2665d))
+- refactor(记忆)!: 共享记忆与模板改名 MEMORY.yaml——读侧、适配器、夹具与文档跟到新名 ([aa06b61](https://github.com/Miaotofu01/Study-Mate/commit/aa06b61bd1e99cb9e8089106bcf138a452261037))
+
+  > 工作区根的共享记忆从 \`.learning/MEMORY.md\` 改成 \`.learning/MEMORY.yaml\`，内容改成
+  > YAML 分节，节与今天一致（我是谁 / 教学偏好 / 学习习惯 / 跨科目观察）。为什么改：
+  > 下一步要把这份记忆拆开用——画像进上下文、干活笔记不进——而 \`\#\#\` 标题加自由
+  > bullet 没有机器可读的节边界，按节取用只能靠猜。
+  > 
+  > 改名破的是 ADR-0004 那句「布局、文件名与目录结构不动」的字面承诺，范围写死成
+  > \*\*只破文件名\*\*：目录结构与五份 schema 一律不动。决策与边界见下一提交的 ADR-0014。
+  > 
+  > 跟到新名的每一处：
+  > - 模板：\`templates/MEMORY.yaml\`（带注释的空骨架，节与改名前一致），\`templates/README.md\`
+  > - 读侧四个消费点：答疑注入（\`lib/ask/memory.ts\`）、工作区摘要（\`lib/host/vault.ts\`
+  >   的 \`memory\` 域）、图片库载荷（\`lib/library.ts\` 的 \`memory\_md\`）、监听域
+  >   （\`lib/watch/domains.ts\`），以及各自的域注释
+  > - 两个无头宿主适配器按模板复制的整行文本（Codex/ChatGPT Work 与 Antigravity），
+  >   导出件里的 \`首次初始化\` 与恢复链路都指向新名
+  > - 三套按名断言模板存在的套件、十余处直接建这份文件的夹具、发布清单与技能规则断言
+  > - 文档：目标态规格 §5.1 布局树与 §5.5 开场恢复、使用说明的目录树与「跨科目只共享」、
+  >   文件归属表、模板说明表、学习方向探索指南、两张架构图源文件
+  > 
+  > \*\*读侧不兜旧名、不留兼容分支\*\*：旧名从此就是一份普通文件。旧工作区改个名即可
+  > （一条 \`mv\`），节一个都没动。
+
+- merge(课件生成成本): 闸门只按题库文件在不在分层，未产出时降级为待对账提示（\#193） ([eefd539](https://github.com/Miaotofu01/Study-Mate/commit/eefd539854782ba5c8b6ee793dd0dd6e395a150f))
+- test(记忆): 钉住「认新名、不认旧名」——旧名落回普通文件，全仓不许留旧名 ([0a070c2](https://github.com/Miaotofu01/Study-Mate/commit/0a070c22ddcd5e53ebe90d65751042f0fa0db9fd))
+
+  > 改名这类横扫最容易留下半处旧名（某份夹具、某条注释、模板说明表里的旧路径），
+  > 而规则可达性套件只断「必须出现」，钉不住「不许再出现」——它全绿，改名却只完成一半。
+  > 
+  > 新增 \`test\_memory\_rename.mjs\` 两条判据：
+  > - \*\*模板骨架\*\*：\`templates/MEMORY.yaml\` 在盘上、旧模板名不在，且解析回来的四节与
+  >   四节条目逐字等于改名前那份（期望值写死，不从模板自己算）。
+  > - \*\*否定式扫全仓\*\*：\`MEMORY.md\` 不许再出现在活文件里。豁免只给性质上不受约束的
+  >   几张——生成产物（CHANGELOG）、决策记录（ADR 要同时写出旧名与新名）、自述历史
+  >   文档，以及把旧名当\*\*反证输入\*\*的两条断言（监听域要它落回 workspace、答疑注入
+  >   不该读到它）。豁免写在这里而不是让扫描放宽：放宽会把真正该修的旧名一起放过去。
+  > 
+  > 顺带把「旧名是普通文件」的行为判据钉在各消费点自己的套件里：监听域映射、
+  > 答疑建会话（只有旧名那份文件时不注入）、摘要工具回报的路径以新名结尾。
+
+- docs(ADR): 0014 记下改名与破 ADR-0004 的文件名冻结——边界写死，含被否备选 ([cbd4404](https://github.com/Miaotofu01/Study-Mate/commit/cbd4404f7ef2849769385850b371c7dfde1245fb))
+
+  > ADR-0004 的承诺是「布局、文件名与目录结构不动」，这次破的只有文件名一处。
+  > 新 ADR 把边界写死（只破文件名，目录结构与五份 schema 一律不动），并记下两条被否
+  > 备选：\*\*兼容旧名一段时间\*\*（读侧兜底分支没有自然的删除时机，改名永远只完成一半）、
+  > \*\*不破冻\*\*（YAML 塞进 \`.md\` 是让文件名说谎；继续用 \`\#\#\` 分节则这次改名的理由原样留着）。
+  > 另记下代价：旧工作区要自己 \`mv\` 一次（读侧把这份文件当文本读，改完名原样能读），
+  > 模板名要在 DSH 与两个无头宿主三处一起动，宿主载荷的字段名不动。
+  > 
+  > 目标态规格 §5.2 那句「ADR-0004 里那条唯一例外」随之收窄成「状态词表例外」——
+  > 不然这处新破例会让那句现成的规格变成假话。
+
+- Merge branch 'feat/183-187-课件生成成本' into ticket/189 ([e1aaf7d](https://github.com/Miaotofu01/Study-Mate/commit/e1aaf7d73ad28bd4bd6eab9c92b2c806cfa32e4f))
+- docs(ADR): 0014 措辞收紧——旧名还能出现在哪几类地方写全 ([ae91726](https://github.com/Miaotofu01/Study-Mate/commit/ae91726af30e1e7e12149b894b933b72ce773532))
+
+  > 上一版说「CHANGELOG 与 ADR 是唯一还能提旧名的地方」，漏了两类：自述为历史或当轮
+  > 快照的文档（设计方案、学习方向探索验收记录），以及两处\*\*故意\*\*把旧名喂进去的反证
+  > 输入（监听域要它落回 \`workspace\`、答疑注入不该读到它）。断言标题同步收紧。
+
+- merge(课件生成成本): 共享记忆与模板改名 MEMORY.yaml，破 ADR-0004 文件名冻结并落 ADR-0014（\#189） ([b3f2984](https://github.com/Miaotofu01/Study-Mate/commit/b3f2984f91ecad1e75e50188e054d6c08692f2a5))
+- docs(技能): 讲解写内容改成整份一次写盘、自检提到写盘之前（\#198） ([8c55de6](https://github.com/Miaotofu01/Study-Mate/commit/8c55de6b4e70ab2ca47678f5d03f727d146b1186))
+
+  > 「写内容」那 8 步重排：写前先对着清单过一遍（首现自检 ＋ 块语法 ＋ 题目位置），
+  > 再整份一次写出去；之后只按行编辑做定点修正，不许整篇重写。落盘后那一步仍点名
+  > studymate\_validate\_lesson，但只看它点出的具体行、按行修、不动别处。大改（例如
+  > 学生要求换写法）允许再整份写一次，作为一次明确的新交付，不是边写边重写。
+  > 
+  > 可达性套件加正向片段与顺序断言（写前自检排在产出课件内容文件之前），并把
+  > 「整篇重写一遍」「交稿前自检」两条退役说法搬进 FORBIDDEN 否定表。
+  > 
+  > 量测回归（分析目录的量测器对比工具入参字符量与重发成本、写整份与编辑的步数）
+  > 留待下一次真实建课，本地没有会话归档、跑不了。
+
+- merge(课件生成成本): 并入 \#189 共享记忆改名，讲解写盘工序与规则表对齐 ([ae664bb](https://github.com/Miaotofu01/Study-Mate/commit/ae664bb0886401a71fd0f273dea448367419128c))
+- test(检查): 顺序断言取段前先钉两个节标题（改标题时报得清楚，不是 TypeError） ([101312d](https://github.com/Miaotofu01/Study-Mate/commit/101312d787e9669b9581b8796792f7971e20e797))
+- docs(规范): 速查页与 lab 的阅读端消费约定进内容格式规范（\#195） ([5bd4048](https://github.com/Miaotofu01/Study-Mate/commit/5bd404899bcb1a5f5e3602dd1c6ad99fd9af5e84))
+
+  > 「阅读端怎么消费速查页与 lab」以前只写在渲染端源码里：角色为了搞清
+  > 「东西该放哪、阅读端到底接受什么」得去翻源码反推约定。
+  > 
+  > - \`docs/规范/课件内容格式.md\` §5 新增一节（角色只读结论）：速查页是手写页面、
+  >   阅读端不渲染它（只列进「参考资料」、挂科目主页），课件正文里别给它写相对链接；
+  >   lab 的任务目录与说明只以摘要出现、答案目录不列出来、学生按交付物题的
+  >   「跑一次」跑起来。判分入口的契约只留一句指针指向 \`layered-practice\` 第六节。
+  > - 角色侧只补指针（不抄规范正文）：\`learning-coach\` 的「速查页」段、
+  >   \`layered-practice\` §六的「三处布局」；\`lesson-design\` 的硬约束表补上
+  >   「上/下节课指针不用回填」与出处指针——这一条已有出处，不新写第二版。
+  > - 可达性套件：RULES 表加三条（讲解/题目规范/课设各一条），另加一条规范正文
+  >   断言（片段逐字取自 §5 那一节），并反证判分契约没被抄进规范。
+
+- merge(课件生成成本): 并入集成分支最新尖端——共享记忆改名与否定式规则（\#189/\#193） ([9064fee](https://github.com/Miaotofu01/Study-Mate/commit/9064fee6d8a117434711936cbf1978db4bc4b89d))
+- merge(课件生成成本): 讲解写内容改成整份一次写盘、自检提到写盘之前（\#198） ([9dc2005](https://github.com/Miaotofu01/Study-Mate/commit/9dc2005413b7152b25bf659e75295f65425ebd4b))
+- test(记忆): 全仓扫旧名改成扫已跟踪文件——本机 scratch 与学习工作区不再让门禁变红 ([8215059](https://github.com/Miaotofu01/Study-Mate/commit/8215059fdc0704be0b1cb0e79351e07654fb59ca))
+
+  > 主检出目录里跑 \`npm run test:static\` 会红：这条判据扫的是工作区文件系统，只跳过
+  > \`.git\` 与 \`node\_modules\`，于是三个未跟踪的本地目录（\`.superpowers/sdd\`、维护者真实的
+  > 学习工作区 \`workspace/\`、一次性产物 \`分析/\`）里那 58 处旧名全被算成违规。内容本身
+  > 没问题——已跟踪文件里 offender 为 0——是判据的作用域错了。
+  > 
+  > 为什么必须修：这个仓库唯一的门禁就是「本地 \`npm test\` 跑通」（CONTRIBUTING 硬规矩 3），
+  > 而 CI 在干净检出里跑、看不见本机残留。判据对本机 scratch 敏感，意味着它在本地永远红，
+  > 等于把门禁废掉；它还正好撞上「测试不读写学生的 \`workspace/\`」那条规矩。
+  > 
+  > 改法：判据的输入换成 \`git ls-files -z\`（已跟踪文件）。不用手写目录黑名单——那会随
+  > 仓库长大而腐烂，还容易把真 offender 一起放过；\`git ls-files\` 是仓库自己算出来的，
+  > 本地与 CI 看到的是同一个集合。\`-z\` 不是可选项：默认设置下 git 会把非 ASCII 路径
+  > 转义成 \`"\\346…"\`，那不是盘上的路径。
+  > 
+  > 判据没有被削弱，两条\*\*合成数据自证\*\*钉住它（与 \`scripts/release/checks.mjs\` 的自检、
+  > \`test\_architecture\_boundaries.mjs\` 的合成图反证同一条纪律）：临时 git 仓库里三份文件
+  > 都写着旧名、只有一份进了索引——已跟踪的那份\*\*必须\*\*被列成 offender（含行号与原行），
+  > 未跟踪与被 ignore 的两份\*\*必须\*\*不列；另加一条防空转：已跟踪清单不足 100 份就报错，
+  > 不给「清单是空的所以全绿」留门。真仓库上也反证过：加一份已跟踪的旧名立刻红，未跟踪
+  > 与被 ignore 的旧名照旧全绿。
+
+- merge(课件生成成本): 全仓扫旧名的判据收窄到已跟踪文件，本机 scratch 不再让门禁变红（\#189） ([91d0aa9](https://github.com/Miaotofu01/Study-Mate/commit/91d0aa93abec786f32ea2d7422a91cd77d1c6fa8))
+- merge(课件生成成本): 并入集成分支最新尖端——讲解写盘工序与旧名判据收窄（\#198/\#189） ([b4ba36c](https://github.com/Miaotofu01/Study-Mate/commit/b4ba36c309fb00fcf02a81169d0fafd87ce774f8))
+- fix(提示词): 上/下课指针的两句旧说法改成与规范一致（\#195） ([7b4c639](https://github.com/Miaotofu01/Study-Mate/commit/7b4c6393b3c99ee9233c1c1388a92b9f228fc225))
+
+  > 预生成页面时代的说法与刚落进规范的那句结论（指针按 \`curriculum.yaml\` 的 \`nodes:\`
+  > 现算、抄了会漂移）对着干，读规格的角色会以为指针要预写：
+  > 
+  > - \`learning-coach\` 写内容第 3 步：删「文件名必须与上一课的「下节课」指针逐字一致」，
+  >   改成「上/下节课指针由阅读端按「课程大纲」现算，\*\*不用你回填\*\*」；命名与位次那半句照旧。
+  > - \`lesson-design\` 硬约束表「文件名」行：「上一课的「下节课」指针按这条规则预写」
+  >   改成「序号写对了，阅读端现算的上/下节课指针才接得上」。
+  > - 规则表：退役条目「与上一课指针逐字一致」换成正面条目（现算、不回填）；
+  >   两句旧说法进 \`FORBIDDEN\`，判据走 reachable（讲解与它加载的 \`lesson-design\` 都要干净）。
+  > 
+  > 只动这两句，周围段落一字未改。
+
+- feat(模板): lab 实验骨架随包发出，出题角色从骨架起、只填题目与断言（\#197） ([d8b718d](https://github.com/Miaotofu01/Study-Mate/commit/d8b718d391bc03129b808e1221058ba9178da74d))
+
+  > \`templates/lab/\` 是给\*\*出题角色\*\*照抄的实验骨架：判分入口的框架（\`check.sh\`——读参数、
+  > 跑断言、只回事实）、任务目录／答案目录／探针的布局、lab 说明、干净态与作答态两个跑法，
+  > 外加一条「在干净目录里整套重跑」的自检（\`自检.sh\`）。角色只填题目与断言——判分机制
+  > 不再每课从零设计。
+  > 
+  > 为什么：量测里这块占出题角色 45% 的开销，同一个判分脚本被重写 8 次与 1 次的差别，
+  > 根因就是「该长什么样」没有落点。骨架只回事实——不印判决词、不自定义退出码语义
+  > （\`check.sh\` 的退出码就是断言那一次的，原样转交），与跑手「非零不是失败判决」同一口径；
+  > 同一个判分脚本被重写三遍以上就是规格 bug，改骨架、报总控。
+  > 
+  > 随包发出这条链上，安装器、两个无头宿主插件、发布 tarball 各补一处断言，
+  > 清单从 \`templates/\` 源现取（\`fixtures/templates.mjs\`），不再手抄文件名——手抄的那串
+  > 正是「骨架加了新文件、某一条路没跟上」会漏的地方。
+
+- merge(课件生成成本): 速查页与 lab 的阅读端消费约定进规范，指针旧说法对齐（\#195） ([4e68a15](https://github.com/Miaotofu01/Study-Mate/commit/4e68a1574edaa1277f5b0d408c40697f7be70cb2))
+- merge(课件生成成本): lab 实验骨架随包发出、出题角色从骨架起，并入集成分支最新尖端（\#197） ([fb5da49](https://github.com/Miaotofu01/Study-Mate/commit/fb5da492a1781afa1e965b6e8f1c05b306d1896a))
+
+  > 冲突解在四处，两边都是「改名/新说法 + \#197 这一条」的合并，没有取舍：
+  > · bin/studymate.mjs 的载荷注释取共享记忆新名 \`MEMORY.yaml\`，并补上 lab 骨架那几份
+  >   \`\*.sh\` 是「给科目照抄的数据」；
+  > · practice-evaluator 取搬入后对账的新说法，并保留「从 \`&lt;root&gt;/templates/lab/\` 的骨架起」；
+  > · 发布 tarball 清单与 DSH 装机断言都跟到 \`MEMORY.yaml\`，并各留 \#197 那一条。
+
+- merge(课件生成成本): lab 实验骨架并入 \#195/\#198 后的集成分支（\#197） ([4473e77](https://github.com/Miaotofu01/Study-Mate/commit/4473e77373e6c926849a27b9e37578481313b3cc))
+
+  > 冲突只有一处：\`test\_skill\_rules.mjs\` 的 \`layered-practice\` 规则表两边各加了一条
+  > （\#197 的骨架落点与量测口径、\#195 的阅读端消费指针）——两条都留，顺序按各自
+  > 正文的自然顺序。规范正文那边自动合并：我的骨架段落在第六节末尾，\#195 的那句
+  > 补在「三处布局」段里，互不遮挡。
+
+- feat(模板): lab 骨架补干净态／作答态两个运行入口，自检改成复用它们（\#197） ([32a1ec1](https://github.com/Miaotofu01/Study-Mate/commit/32a1ec1ab2279bbaabb339347ac0ace409be9c51))
+
+  > 骨架原来只有「同一个入口的两种盘上状态」：作答态那次要角色自己记住
+  > \`cp -R ../solutions/&lt;NNNN&gt;-&lt;主题&gt;/作答/. 作答/ &amp;&amp; sh check.sh\`——记命令就等于把
+  > 「同一份派工词两次跑出两种东西」的风险留在原地。现在两个状态各有一个入口：
+  > 
+  > · \`干净态.sh\`：整棵 lab 拷进临时目录 → \`sh check.sh\` → 退出码原样转述；
+  > · \`作答态.sh\`：同上，另把 \`solutions/&lt;任务&gt;/作答\` 摆进那份副本，跑完连痕迹一起删；
+  > · \`自检.sh\`：只按顺序调这两个入口（自己不摆盘、不跑 check.sh），退出码 = 最后一次那次。
+  > 
+  > 判分入口仍然只有 \`check.sh\` 一个：两个入口只摆盘、调它、原样转述事实——不判定、
+  > 不碰断言、没有字面退出码。发布 tarball 的必带清单跟着把三个脚本都钉上（随包发出这条
+  > 链上另外几处是逐文件对整棵树，源现取，不用改）。lab 说明骨架的目录地图与第六节
+  > 改成写「跑哪个入口」，并把非 shell 类课程的约定（断言默认 POSIX sh，要别的语言在
+  > \`断言.sh\` 里 \`exec\` 它）从断言的文件头提到说明书第二节——那是骨架的内部约定，
+  > 不进 \`layered-practice\` 正文。
+
+- merge(课件生成成本): lab 实验骨架随包发出，干净态／作答态两个运行入口（\#197） ([5523417](https://github.com/Miaotofu01/Study-Mate/commit/5523417afbe88aa739fd47cffddf5cf166466a02))
+- feat(记忆): 模板把「跨科目观察」换成「积累」（\#190） ([49b14c2](https://github.com/Miaotofu01/Study-Mate/commit/49b14c2dca9187a861cdedfde98caa2a6af39d64))
+
+  > 共享记忆的第四节原来只装两条本机事实，撤掉，换成角色攒干活笔记的「积累」：
+  > 一条 = 中文键 + 一句话，写「换一门课还成立」的做法与事实。带注释的空骨架从
+  > 空列表变成空映射，注释里写明这一节不进任何注入。
+  > 
+  > - record-keeping 的节名同步，并在「共享记忆」节点名注入边界；
+  > - 可达性套件把「跨科目观察」搬进 FORBIDDEN（撤掉的节名不许回来）；
+  > - 改名套件的骨架期望值跟着换（前三节与改名前逐字一致）。
+
+- feat(记忆): 新增记忆模块——画像三节投影、积累条目与缺节/空骨架判定（\#190） ([e7a263d](https://github.com/Miaotofu01/Study-Mate/commit/e7a263d54dbc132252343a70e21395fb6f2ccc1d))
+
+  > 纯函数域里的一个模块（不碰盘、不碰宿主、不 import 域外东西），吃两份记忆文件的
+  > 文本（或「文件不存在」），给出三件事：
+  > 
+  > - 可注入的\*\*画像三节\*\*投影（节名白名单，按白名单顺序、原文照搬；只收有内容的节）；
+  > - \`积累\` 条目的键与内容（键是角色 grep 的索引，一句话是多行/列表时按行接起来）；
+  > - 节名完整性（缺节 + 规范之外的节）与空骨架判定（模板预置的骨架一条内容都没有）。
+  > 
+  > 「\`积累\` 与整份科目记忆永不进上下文」因此是代码判据，不是提示词约定；科目记忆那
+  > 一半接文本、不写死路径，\#191 直接可用。新套件覆盖白名单、分节、缺节、空骨架、
+  > 科目记忆与手写 YAML 的几种边界写法。
+
+- feat(记忆): 四条消费路径改按节投影，「积累」永不进上下文（\#190） ([04e6c87](https://github.com/Miaotofu01/Study-Mate/commit/04e6c870f41ea3605c556ed25003a77c24df0127))
+
+  > - 答疑开张注入：\`lib/ask/memory.ts\` 是唯一读点，交出去的已经是画像三节（空骨架也
+  >   不注入）——路由那条 \`if (memory !== '')\` 不必也不该再判一次；
+  > - 工作区摘要工具：\`memory.markdown\` 换投影，三个键的形状一个字没动（宿主契约不动），
+  >   工具描述与技能参考里对 \`memory\` 字段的说明跟着改；
+  > - 图片库载荷：\`memory\_md\` 换投影，字段名与形状照旧；
+  > - 监听域：认的文件名取自同一份词表（\`MEMORY\_FILE\`）；它只管「哪一片变了」、不带内容，
+  >   所以它没有投影可做——它认的名字漂了，页面就收不到「记忆变了」。
+  > 
+  > 四个消费点的既有套件各自扩了断言：fixture 里塞一段 \`积累\`，注入/摘要/载荷里它一个字
+  > 都不出现；只有 \`积累\` 的文件投影成空串（\`present\` 照实为 true）。
+
+- docs(记忆): 术语表、目标态规格与归属表同步「积累」与注入边界（\#190） ([6d0ed1a](https://github.com/Miaotofu01/Study-Mate/commit/6d0ed1a93c54ee8087bc94a982153fa9a9b364d8))
+
+  > - 术语表「共享记忆」改到「分节存放、画像注入、\`积累\` 不注入」，「跨科目观察」进 \_Avoid\_；
+  > - 目标态规格 §7.4 与 §11 差异表、§13 提案清单两处注入边界同步（只三节，边界在代码里）；
+  > - 文件归属那一行的功能列写清画像三节注入用、\`积累\` 不进任何注入；
+  > - 使用说明的目录树注释与 templates/README 的骨架说明跟着改；
+  > - ADR-0014 补一条后续说明：\#190 撤掉「跨科目观察」、收窄注入边界（破冻范围不变）。
+
+- Merge branch 'feat/183-187-课件生成成本' into ticket/190 ([d55721c](https://github.com/Miaotofu01/Study-Mate/commit/d55721c55b7e6c50ba3634d3570c2eb5b5ef5ba1))
+- docs(记忆): 修前两处注释的措辞与括号（\#190 自校） ([a95fb9c](https://github.com/Miaotofu01/Study-Mate/commit/a95fb9cafa2cdfb6b846703d056bfa042d0f1eab))
+
+  > - library.ts 的文件头那一条括号没闭合，收成一句；
+  > - 答疑套件的夹具注释说「三节各有内容」，实际是两节。
+
+- merge(课件生成成本): 记忆模块与按节投影，「积累」永不进上下文（\#190） ([66b59c7](https://github.com/Miaotofu01/Study-Mate/commit/66b59c791c5ffff351b8abc8bfb7af3d0d0f522b))
+- feat(模板): 科目记忆骨架 subject-MEMORY.yaml，建科目时预置（\#191） ([5e6cbea](https://github.com/Miaotofu01/Study-Mate/commit/5e6cbeabd2a2e34351a153f93c889f4f9b8080df))
+
+  > 工作区里两份记忆同名（都叫 MEMORY.yaml），模板源名必须分得开：共享那份占着
+  > templates/MEMORY.yaml，科目这份带范围前缀，落到 &lt;subject\_path&gt;/MEMORY.yaml。
+  > 骨架只有「积累」一节、带注释、一条内容都没有——它是给角色往里追加条目的落点。
+
+- feat(记忆): 监听域认得科目记忆，自成一域而不并进注入源（\#191） ([5f1b51a](https://github.com/Miaotofu01/Study-Mate/commit/5f1b51a6186dc2adca8f1a82d6de447e23d8232d))
+
+  > 科目目录下那份 MEMORY.yaml 认得出（不再落回「认不出来」的兜底），但\*\*不\*\*并进
+  > memory——那一域的名分是「注入源（共享记忆画像三节）变了」。文件名取自记忆模块
+  > 那一份词表，与共享记忆同名不同位置。
+
+- feat(提示词): 建科目预置科目记忆骨架，两份记忆的落点判据写进档案规范（\#191） ([d296876](https://github.com/Miaotofu01/Study-Mate/commit/d296876d8b79cb5b9cad121fd5f6737d43cb8f0a))
+
+  > 「科目文件夹」第 1 步补上预置那一步（源与目标都写死，源名漂了规则套件会红）；
+  > 「共享记忆」一节补落点判据——换一门课还成立写共享记忆，不成立写科目记忆；
+  > 读写规则第 1 条的新建除外名单加上科目记忆。
+
+- docs(记忆): 科目记忆进归属表、术语表与两处布局树（\#191） ([9ae28c7](https://github.com/Miaotofu01/Study-Mate/commit/9ae28c70d04327ab46987eb6c3a2d941de58d1c2))
+
+  > 归属表加一行（代称／文件名／功能／路径／维护者），角色按代称查得到它；术语表加
+  > 「科目记忆」词条。ADR-0014 补一条后续：这是 ADR-0004 布局冻结的第二处破例，但是
+  > \*\*新增\*\*——不改已有文件名、旧工作区零迁移，目录结构与五份 schema 仍不动。
+
+- test(记忆): 科目骨架判定与四条注入面「一个字都不出现」（\#191） ([6d19976](https://github.com/Miaotofu01/Study-Mate/commit/6d199768b9b60f839a260fcb86f855bc61048d55))
+
+  > - 主接缝 test\_core\_memory 加三例：骨架单节／空判定／缺节交代，以及填一条后
+  >   键与内容按 readMemory({subject}) 读得出来（角色 grep 键），仍不进注入；
+  > - 四条注入面各自真造一份\*\*带内容\*\*的科目记忆再断言它一个字都不出现：答疑开张
+  >   注入、工作区摘要工具、图片库载荷、监听域（域名不认识成注入源那一片）；
+  > - 建科目那一侧的规则条目进 test\_skill\_rules 的 RULES 表。
+
+- merge(课件生成成本): 科目记忆落地——建科目预置骨架、四条注入面都不含它（\#191） ([f59de6b](https://github.com/Miaotofu01/Study-Mate/commit/f59de6b433d9f69f8fda6a44039d1fc2e0b03300))
+- feat(提示词): 两份记忆全角色直写，memory\_updates 确认门退役（\#192） ([99914fa](https://github.com/Miaotofu01/Study-Mate/commit/99914fac5baff3e7c9affb2bce6822f73d1668fd))
+
+  > - record-keeping：那一句「不派角色」补上记忆例外；共享记忆节写全正向规则
+  >   （什么时候写／写哪一份／在节末尾追加一行／不碰别人的条目），并留下冲突可见的理由
+  > - learning-system：收尾直接追加进「积累」；两份记忆不占「同一科目一个写入者」的串行位
+  > - learning-discovery：探索收尾直接写共享记忆，不再「仍先确认」
+  > - 四处禁令摘掉「共享记忆」：讲解／出题评估／采图补正向写入规则，
+  >   采图只写共享记忆、不写科目记忆
+  > - 三个暂存角色的「不写科目目录」开一个口子：两份记忆是唯一豁免，
+  >   仍不进 deliver/ 与 handoff.json
+
+- feat(宿主): 无头适配器的记忆例外锚点跟着正文改（\#192） ([b5467d9](https://github.com/Miaotofu01/Study-Mate/commit/b5467d983aa6553ce24751687c3b5090621f9968))
+
+  > 整行锚点原来是「…不派角色。\*\*工作区根」，正文加了记忆例外之后这条正则不再命中——
+  > 两处正则与两条替换串同步改成「…不派角色；\*\*唯一的例外是两份记忆」，
+  > 替换串也带上那句例外，否则导出稿里会留下 DSH 措辞。
+
+- docs(记忆): 归属表维护者放开「所有角色（直写）」，会话摘要遗留字段留话（\#192） ([0a04316](https://github.com/Miaotofu01/Study-Mate/commit/0a0431639e671f5cb7b005e899e5925e2ce9cb15))
+
+  > - 文件归属：共享记忆与科目记忆两行的维护者写「所有角色（直写）」，
+  >   「维护者一列写的是技能名」两处措辞改成允许这个值
+  > - session-summary.schema.json：已退役的 memory\_updates 字段\*\*留着不删\*\*
+  >   （盘上旧会话摘要仍要被解释），并在字段 description 里写清已无写入者与消费者
+
+- test(记忆): 直写规则的可达性断言与 memory\_updates 退役否定表（\#192） ([dc73d64](https://github.com/Miaotofu01/Study-Mate/commit/dc73d64294104ed1c299a728ff5396d5fc879e1d))
+
+  > - 探索协议那条「记忆更新仍确认」换成正向的「收尾直接写、不再先确认」
+  > - 六个角色各加「两份记忆是例外／唯一豁免／第三个例外」与
+  >   「在对应节的末尾追加一行，不整份读改写」的可达性断言
+  > - record-keeping 补四条写法断言（时机、判据、追加一行、只追加）
+  > - FORBIDDEN 新增五条：memory\_updates、学生确认后写进、
+  >   「不派角色。\*\*工作区根」的无例外原文，以及三处角色「不碰」清单里的旧措辞
+
+- merge(课件生成成本): 两份记忆全角色直写，memory\_updates 确认门退役（\#192） ([c972304](https://github.com/Miaotofu01/Study-Mate/commit/c9723045daba4c318441166b5488a4b70c298e40))
+- docs(记忆): 退役的确认门从用词里收干净——收尾直写（\#192） ([7ed175c](https://github.com/Miaotofu01/Study-Mate/commit/7ed175cc53c0295ddfc9219fedb75f8bd80d420e))
+
+  > - 使用说明「结束」一步不再写「给一条共享记忆的更新建议（你确认后才写入）」，
+  >   改成把这一轮值得留的做法与事实\*\*直接追加\*\*进「积累」；探索那一段末尾的
+  >   「共享记忆更新仍按原规则另行确认」也删掉，换成 \#192 的口径
+  > - 学习方向探索指南 §6 同一处措辞跟上（口径的唯一出处仍是 \`record-keeping\`）
+  > - Codex 宿主提示词（\`bin/openai-interaction.mjs\` 的 DIALOGUE）不再许诺
+  >   「待确认的长期观察才写记忆」：该留的事实收尾直接追加，推断与没经确认的
+  >   自述不算事实、只留在断点里
+
+- docs(规范): 归属表补上 lab 三个运行入口，科目记忆的存在性写清两层（\#197/\#191） ([b9eb135](https://github.com/Miaotofu01/Study-Mate/commit/b9eb135163addadaeab0ae10ae7b5f65c1f2b2e3))
+
+  > - §二 新增「lab 运行入口」一行，登记 \`干净态.sh\`／\`作答态.sh\`／\`自检.sh\`：
+  >   角色照「布局以归属表为准」查表时，这三个名字此前只活在骨架目录与 lab 说明里
+  > - 科目记忆那一行不再让「按需存在」与「建科目时预置」互相抵消：新科目在建科目
+  >   时就从 \`templates/subject-MEMORY.yaml\` 预置带注释的空骨架；旧科目（骨架落地
+  >   前建的）可能还没有，读侧按「不存在」处理
+  > - test\_lab\_runner 补一条文档断言：三个名字在盘上、在 §二 里查得到，那一行还
+  >   写清了它们落到 \`&lt;subject\_path&gt;/lab/\`
+
+- fix(lab): 两个运行入口的失败路径印一行事实并以非零退出（\#197） ([9f8e890](https://github.com/Miaotofu01/Study-Mate/commit/9f8e890acead8a93c52b4209fcdc2a1ca1ce7f19))
+
+  > - \`干净态.sh\` / \`作答态.sh\`：找不到任务目录那一支以前印完「任务目录不在」就裸
+  >   \`exit\`——那取的是上一条命令（\`printf\`）的状态，于是「这一趟没跑起来」被报成 0。
+  >   现在两支都走 \`stuck()\`：印「这次没跑起来：卡在哪一步」，交回\*\*卡住那一步自己\*\*
+  >   的退出码（不编数字，与 \`check.sh\` 里那句「谁卡住就交回谁的退出码」同一姿势，
+  >   没有第二套码表）
+  > - 同一个出口接住 \`cd\`／\`mktemp\`／两次 \`cp\` 的失败：五处都不再静默报成功，
+  >   每一处都说清卡在哪一步（定位骨架、找任务目录、建临时目录、摆盘）
+  > - test\_lab\_runner 补反证（造一个没有任务目录的 lab：两个入口都非零退出、输出里
+  >   说清原因、不印「退出码：0」）与对照（任务目录在的时候两态的退出码与事实行照旧）
+
+- fix(记忆): 投影不带注释、指示符开头的值要加引号、监听域措辞改准（\#190/\#199） ([1327b5a](https://github.com/Miaotofu01/Study-Mate/commit/1327b5aa9a40efef2d392df4e0635c46ce3aecd6))
+
+  > - \`lib/core/memory.ts\`：节体止于\*\*最后一个非空非注释行\*\*（模板里「积累」上方
+  >   那三行注释落在「学习习惯」的 \`to\` 范围里，此前会跟着它进答疑注入），投影再从
+  >   内容行里取一次——节体里任何位置的注释都不进注入，学生的每一行照旧原文照搬；
+  >   \`to\` 仍是「下一节标题之前那一行」这个行号事实
+  > - 两份记忆骨架的注释与 \`record-keeping\`「怎么写」补上：值以 \`\*\`／\`&amp;\`／\`!\` 这类
+  >   指示符开头\*\*必须加引号\*\*（\`\*\*先动手\*\*再补理论\` 要写成 \`"\*\*先动手\*\*再补理论"\`）
+  >   ——裸写会被 \`lib/yaml.ts\` 当别名／标签拒掉，那份记忆当场打不开；工程约束 §五
+  >   收一条实测过的坑
+  > - 监听域的措辞改准：它只按\*\*文件名\*\*认这份文件、一个字节的内容都不带（它回答
+  >   「哪一片变了」，不是「取哪几节」）——\`memory.ts\` 文件头与 ADR-0014 两处跟上，
+  >   科目骨架里「监听域也取不到它」一并收掉
+  > - 断言：合成数据与真模板两种投影都不带注释；\`\*\*…\*\*\` 开头的值加引号解析得开、
+  >   裸写报「不支持别名」（反证）；\`record-keeping\` 加一条可达性断言
+
+- docs(规范): 速查页那一节只留角色需要的结论（\#195） ([b74e75f](https://github.com/Miaotofu01/Study-Mate/commit/b74e75f5632895e0037661bc402109affae7084e))
+
+  > - 「速查页与 lab 在阅读端的样子」不再抄渲染端实现：删掉「\`reference/\` 那份清单里
+  >   只有名字、类型与体积」与 \`.md\`／\`.markdown\`／\`.txt\` 内联白名单——那正是这一节
+  >   要堵的漂移
+  > - 只留结论：速查页在「参考资料」里列得出来、不在页面里内联打开、正文里不给它
+  >   写链接（三句仍逐字保留，\`test\_skill\_rules\` 按它们断言）
+
+- docs(设计): 目标态规格补「两份记忆的写机制」一节（\#183 决策 11） ([f38de27](https://github.com/Miaotofu01/Study-Mate/commit/f38de27af728e81bf8de539239e82cff61bc496b))
+
+  > - 新增 §5.6：条目形状（一条 = 中文键 + 一句话）、谁能写（所有角色收尾直写，
+  >   在对应节的末尾追加一行、不整份读改写——\`memory\_updates\` 确认门已退役）、
+  >   写哪一份（换一门课还成立 → 共享记忆，不成立 → 科目记忆）、存在性（共享记忆
+  >   首次初始化工作区预置、科目记忆建科目时预置，旧工作区缺哪一份都不是错误）、
+  >   以及「积累」永不进注入这条边界（判据在 \`lib/core/memory.ts\`）
+  > - 附一段为什么是直写而不是「建议 + 确认」，含两条已接受的代价（落点会分错、
+  >   两人同写靠按行追加与锚点失配报错来暴露）
+
+- merge(课件生成成本): 两轴评审的 13 条修复——退役的门收干净、骨架失败路径、投影去注释、规范口径 ([b774165](https://github.com/Miaotofu01/Study-Mate/commit/b77416511e1a163c62da283eecb2da745ad15268))
+- Merge pull request \#200 from Miaotofu01/feat/183-187-课件生成成本 ([327aae0](https://github.com/Miaotofu01/Study-Mate/commit/327aae089f50d8189f218fca3474b657cbf5ee14))
+
+  > feat(课件生成成本): 记忆机制、闸门分层、契约落点与讲解工序（\#183–\#187）
+
+- fix(安装): npx install 不再声明躲不掉的「答疑模式」（\#204） ([4ce1af4](https://github.com/Miaotofu01/Study-Mate/commit/4ce1af4d1dd09e6cd41179c1892975456a888c38))
+
+  > - \`preset/qa/agent.cordis.yml\` 里写死的取课件工具行（\`@yunmiao/studymate/qa-preset\`）
+  >   会被声明式安装原样抄进档位托管块；那条路不把包放进档位，这一行解析不到，而宿主
+  >   把「有一行起不来」判成\*\*整条预设 broken\*\*（\`mountPreset\` 任一行 failed 就 throw）
+  >   ——答疑模式在预设列表里是坏的。学习模式那条行早就有同样的判断（只在原生安装时加，
+  >   \`lib/preset.ts\` 有注释说明原因），答疑这条漏了
+  > - \`bin/studymate.mjs\`：答疑预设的暂存与 \`extraPresets\` 只在原生安装（\`native\` 或
+  >   \`--mode native\`）时做；声明式接管只声明学习模式。原生安装一字未改，两条照旧注册
+  > - 口径跟上：\`--help\` 与 \`docs/使用/安装.md\` 的「两条模式声明」改成学习模式那一条；
+  >   \`docs/规范/工程约束.md\` 的「预设源有两份」记下这个分岔
+  > - test\_installer 补一条：档位里没有包、以及「旧一代插件被接管」两种声明式安装都只
+  >   声明 learning，且托管块里不出现 \`@yunmiao/studymate/qa-preset\`
+
+- Merge pull request \#205 from Miaotofu01/fix/204-standalone-只声明学习模式 ([e0f0eb3](https://github.com/Miaotofu01/Study-Mate/commit/e0f0eb30e282cf2c907e41522efbe7dca993fd58))
+
+  > fix(安装): npx install 不再声明躲不掉的「答疑模式」（\#204）
+
+- fix(预设): persona 不再引用未注册的 {{cwd}}（\#206） ([e8a8404](https://github.com/Miaotofu01/Study-Mate/commit/e8a84042722564e4bec4ef8ba9fca3e75e9b3e3f))
+
+  > DSH 0.2.1 起 prompt loop 只注册 provider / model 两个提示变量，工作目录由
+  > working-directory 服务作为 required runtime context 投递。学习模式与答疑模式
+  > 的 persona 仍写着 \`suffix: Your working directory is {{cwd}}.\`，渲染
+  > \`deployment:persona-suffix\` 时整轮抛 unknown prompt variable，两条预设都进不去。
+  > 
+  > - 两条预设的 suffix 改成空串（省略即空，仍会遮蔽部署级 suffix）
+  > - 注释写明变量边界并指向 \#206，避免以后又把 cwd 写回模板
+  > - test\_host\_qa\_preset 不再断言旧文案
+  > - test\_preset\_install 新增回归：两条预设的 persona 模板只允许 provider / model；
+  >   反向验证过，把 suffix 改回 {{cwd}} 时该断言立刻红
+  > 
+  > Refs \#206
+
+- fix(解析器): 支持 DSH 配置里的多行 plain 标量，学习模式不再被整条跳过 ([04f2a1d](https://github.com/Miaotofu01/Study-Mate/commit/04f2a1da42a35cb646f4a09068835bbbd2f24e1e))
+
+  > DSH 0.2.1-rc.2 的设置页会把长文本写成合法的 YAML 多行 plain 标量
+  > （\`description: …; suited\` 下一行缩进续写 \`to complex …\`）。插件的
+  > \`lib/yaml.ts\` 只支持到行尾的 plain 标量，读 profile 的 \`cordis.patch.yml\`
+  > 时直接抛错；\`bin/dsh-plugin.ts\` 捕获后跳过原生加载，于是「学习模式」
+  > 「答疑模式」都不会被注册，模式选择器里只剩宿主自带的那几条。
+  > 
+  > - \`lib/yaml.ts\` 新增显式选项 \`plainScalarContinuation\`：在块上下文里按
+  >   YAML 折行规则读续行（单换行折空格、空行折换行），续行里出现 \`": "\`
+  >   与 PyYAML 一样报错。默认关闭，学习文件的严格解析不变。
+  > - \`lib/preset.ts\` 的 profile 补丁解析与预设插件列表解析打开该选项；
+  >   bundle（原生加载）与声明式安装都走同一条解析路径。
+  > - 回归测试：\`test\_host\_yaml\_workspace\` 覆盖折行/空行/标量块/列表项与
+  >   默认关闭时的报错；\`test\_preset\_install\` 用 DSH 设置页的真实形态验证
+  >   bundle 与声明式两条注册路径都不再被补丁解析挡住。
+  > 
+  > Refs \#208
+
+- Merge pull request \#207 from buguoshixc/fix/206-persona-cwd ([c3f75f3](https://github.com/Miaotofu01/Study-Mate/commit/c3f75f3f607b1e504121a6a4ed79ad9561761889))
+
+  > fix(预设): persona 不再引用未注册的 {{cwd}}（\#206）
+
+- Merge pull request \#209 from buguoshixc/fix/yaml-multiline-plain ([b9240f5](https://github.com/Miaotofu01/Study-Mate/commit/b9240f56679d5d0fb5bf2e569ff5066870f0aa5e))
+
+  > fix(解析器): 支持 profile 补丁里的多行 plain 标量，学习模式不再静默跳过（\#208）
+
+- chore(文档): 删掉架构图与 README 里的嵌入块（\#201） ([1095fae](https://github.com/Miaotofu01/Study-Mate/commit/1095fae1bce3c413cfbbc805f795bd56d3297404))
+
+  > 六大件源文件加两张 PNG 一起删：画出来的架构和今天的实现已经对不上（提示词层 /
+  > Host 半 / Client 半这套说法留着，但图里的模块与连线停在旧版本），维护者定了不重导。
+  > 留着就得有人不断解释「图是旧的」，删掉更省事。
+  > 
+  > - docs/images/ 下六个文件：architecture.drawio、architecture.en.drawio，
+  >   以及中英各两档配色 PNG
+  > - README.md 删 7 行、README.en.md 删 9 行：嵌图那一块连同英文那份的
+  >   "Diagram source" 重导说明一起拿掉，上下文仍是连贯的段落，没留空行堆叠
+  > - docs/images/ 其余文件（logo、preview-\*、taitou 与两个子目录）不动
+  > 
+  > CHANGELOG.md 里提过这两份 drawio 的旧条目属于发布历史，不动。
+  > 
+  > (cherry picked from commit a9339a8799e9580ea0a1a5f6d5093d84c88dd6ac)
+
+- feat(阅读端): 「相关课件」指向本科目另一课时在站内打开（\#202） ([3abf271](https://github.com/Miaotofu01/Study-Mate/commit/3abf27172886d5fa415dc7cc946a1de0b566b6dc))
+
+  > \`::: related\` 的条目本来就写成 \`- \[标题\](链接)\`，格式规范 §4 的例子还是相对路径
+  > （\`0004-cpp.float\`），而阅读端把正文里的 \`\[文字\](目标)\` 一律按外链渲染——学生点下去
+  > 是一个不存在的新窗口。维护者拍板的方向：只让 \`related\` 这一种跳转生效，正文里的普通
+  > 链接照旧不管（那里本来也不该出现仓库内路径）。
+  > 
+  > 判据只吃 href 与当前科目的节点清单，去向三分：
+  > 
+  > - 外链与页内锚点（\`http(s):\` / \`mailto:\` / 协议相对 / \`\#…\`）保持现在的行为，一个字不改；
+  > - \`&lt;序号&gt;-&lt;节点id&gt;\`（省不省 \`lessons/\` 前缀、省不省 \`.md\` 都认，序号按数值比）比得中
+  >   本科目大纲里\*\*带着课件正文\*\*的那一课，就渲染成站内跳转；
+  > - 其余（序号或 id 对不上、那一课还没有课件正文、跨科目）\*\*不渲染成链接\*\*，只留文字——
+  >   死链比不能点更坏。
+  > 
+  > 站内那一支复用既有的打开路径：\`LessonPage\` 把 props 上的 \`onLesson\` 交给 \`Blocks\` 的
+  > ctx，点的就是左栏节点树与「上一课 / 下一课」那条 \`goLesson\`（换 slug / nodeId / 视图）。
+  > 没新增路由、没另写渲染；渲染成 \`&lt;button data-node&gt;\`（没有可打开的地址，也就没有 \`href\`
+  > 与 \`target="\_blank"\`），观感那一条 CSS 自己补。
+  > 
+  > - \`scripts/tests/test\_client\_related.mjs\`：判据表 + 渲染出来的元素形状（Node，React 桩）
+  > - \`scripts/tests/browser/related\_links\_test.mjs\`：真 Chrome 点一下——写错的那条点不动，
+  >   站内那条把这一页换成那一课、\`location.href\` 一字不变；顺带反证正文普通链接一个字没改
+  > - \`docs/规范/课件内容格式.md\` §4 写清认哪些写法与三种去向，§5 那条结论跟着改
+  > 
+  > (cherry picked from commit 2de3dd006f5ca9a70e46e75261708c9ff3734c01)
+
+- docs(规范): related/resources 那一段去掉退役渲染器的类名，只留「写什么」 ([566faf9](https://github.com/Miaotofu01/Study-Mate/commit/566faf9b04858d7667faf2e5ecb069bb9db18c84))
+
+  > (cherry picked from commit 2a2fdf5bdff88877049584d05e90d95761f0670f)
+
+- Merge pull request \#211 from Miaotofu01/fix/201-202-架构图与相关课件 ([a3d6a70](https://github.com/Miaotofu01/Study-Mate/commit/a3d6a700dc660954bb2bd8ffeec46ea500ad09dd))
+
+  > feat(阅读端): 「相关课件」站内跳转；删掉架构图（\#201/\#202）
+
+- fix(套件): 不再往共享的 preset/skills 写哨兵，改成前后指纹（\#216） ([f16011e](https://github.com/Miaotofu01/Study-Mate/commit/f16011ecc25da74db34026f018e83659de891f45))
+
+  > \`test\_bundle\` 为了验「启动不许往包目录里写」，把哨兵
+  > \`preset/skills/obsolete.txt\` 写进\*\*仓库自己的检出目录\*\*，断言完再删。
+  > \`npm run test:installer\` 把本文件与 \`test\_installer.mjs\` 并发跑，那条用例的
+  > \`copyPayload\` 正在 cpSync 同一棵树（先 readdir 再逐个 lstat），哨兵被删掉的
+  > 瞬间就会撞 ENOENT——\`a3d6a70\` 那一跑（\#211 合并）就是这么红的，与 \#211 的
+  > 内容无关（它只动 docs/client/套件）。
+  > 
+  > - 判据换成 \`snapshot()\` 的前后指纹：启动前后各给 \`preset/skills\` 取一次
+  >   「名字 → 内容 hash」，覆盖新增 / 改写 / 删除三种写，比单个哨兵更强
+  > - 不再写共享目录：installer 的拷贝与 \`checks.mjs\` 那一组都在读它
+  > - 反证：模拟「启动往包里写一个文件」时该断言立刻红
+  > 
+  > Refs \#216
+
+- Merge pull request \#217 from Miaotofu01/fix/216-并发哨兵 ([0277071](https://github.com/Miaotofu01/Study-Mate/commit/02770715096de7b616359b2981c906d59334621b))
+
+  > fix(套件): 不再往共享的 preset/skills 写哨兵，改成前后指纹（\#216）
+
+- fix(阅读端): 一门科目的文件读不了只坏那一门，不再整页「读不到学习工作区」（\#222） ([c723465](https://github.com/Miaotofu01/Study-Mate/commit/c723465734521fc3de9037323e5fbec02b0ce1cf))
+
+  > 真机（2026-10-21）：某科目 \`curriculum.yaml\` 第 99 行写了个裸 \`&amp;\`（YAML 锚点），
+  > 阅读端整页变成「读不到学习工作区」。三个问题叠在一起：一门坏把其余科目一起
+  > 带走；卡片把「一门坏」说成「工作区没了」；唯一动作「重试」永远失败，也不说
+  > 该改哪一行。
+  > 
+  > - \`lib/library.ts\`：\`buildLibrary\` 加显式开关 \`isolateBrokenSubjects\`。开着时
+  >   一门读不出来只记进 \`unreadable: \[{ dir, error }\]\`，其余科目照常读；\*\*默认仍
+  >   是当场抛错\*\*——导出与原生工具要完整快照，口径不变（「坏数据不静默降级」那
+  >   条纪律留在默认路径上）。
+  > - 阅读端那条路由（\`bin/dsh-plugin.ts\` 的 GET /api/studymate/library）开开关。
+  > - \`lib/client.js\`：新增 \`Unreadable\`／\`EmptyLibrary\`。主页点名哪门科目、哪份文件
+  >   第几行、原文是什么；全读不了时也不再借「还没有科目」那句话；正常路径一字没改。
+  > - 解析器\*\*不放宽\*\*：这行按 YAML 就是锚点（PyYAML 也拒、js-yaml 静默读成 null），
+  >   收下它等于让四个概念悄悄消失——要修的是那份文件。
+  > 
+  > Refs \#222
+
+- Merge pull request \#223 from Miaotofu01/fix/222-单科坏数据 ([f56f04f](https://github.com/Miaotofu01/Study-Mate/commit/f56f04fddbd648d3de2d2cc652ba7f5e4d5b16ec))
+
+  > fix(阅读端): 一门科目的文件读不了只坏那一门，不再整页「读不到学习工作区」（\#222）
+
+
+[完整比较](https://github.com/Miaotofu01/Study-Mate/compare/v2.0.2...v2.0.3)
+<!-- /studymate-release:v2.0.3 -->
+
 <!-- studymate-release:v2.0.2 -->
 ## [2.0.2](https://github.com/Miaotofu01/Study-Mate/releases/tag/v2.0.2) - 2026-10-15
 
