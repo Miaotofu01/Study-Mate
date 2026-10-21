@@ -141,7 +141,9 @@ export async function apply(ctx: PluginContext): Promise<void> {
           if (!workspace) {
             return envelope(500, 'no-workspace', '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。');
           }
-          return Response.json(readLibrary({ workspace }));
+          // #222：阅读端按科目隔离坏数据——一门读不了，其余科目照常打开，坏的那门带错误
+          // 进 `unreadable` 由页面点名。导出与原生工具不传这个开关，照旧整份失败。
+          return Response.json(readLibrary({ workspace, isolateBrokenSubjects: true }));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           return envelope(500, 'internal', message);

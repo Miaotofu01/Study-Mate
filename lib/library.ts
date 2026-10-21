@@ -161,6 +161,14 @@ interface SubjectPayload {
   order: Record<string, number>;
 }
 
+/** 一门读不出来的科目。payload 里**照旧带着它**，不是悄悄少一门（#222）。 */
+interface UnreadableSubject {
+  /** 科目目录名。只敢信目录名：`subject.yaml` 可能正是坏的那一份。 */
+  dir: string;
+  /** 原样带出读盘错误——里面有 `<文件>:<行>:<列>` 与那行原文，学生照着能去修。 */
+  error: string;
+}
+
 /** 阅读端拿到的整份快照。 */
 interface LibraryPayload {
   workspace: string;
@@ -168,6 +176,14 @@ interface LibraryPayload {
   today: string;
   memory_md: string;
   subjects: SubjectPayload[];
+  /**
+   * 读不出来的科目。**只坏这一门**：它不进 `subjects`（读不出来就是读不出来），
+   * 但错误原样递到阅读端，让学生看得见是哪门、哪份文件第几行——整页一张
+   * 「读不到学习工作区」会把「一门坏」说成「工作区没了」，还把其余科目一起带走。
+   * 只有 `isolateBrokenSubjects` 开着（阅读端那条路由）才会非空：导出与原生工具走默认，
+   * 读不全就当场抛。
+   */
+  unreadable: UnreadableSubject[];
 }
 
 /* ── 三档词表（目标态规格 §5.2）─────────────────────────────────────────────
@@ -605,12 +621,16 @@ function buildSubject(subjectDir: string, dirName: string, workspace: string): S
 /**
  * 读一个学习工作区，产出阅读端要的整份 JSON。
  *
- * @param {{workspace: string, root?: string}} options
+ * @param {{workspace: string, root?: string, isolateBrokenSubjects?: boolean}} options
  *   workspace：工作区目录（其中含 .learning/），相对路径按 root（默认进程 cwd）解析；
- *   root：项目根，只用来解析相对路径。
+ *   root：项目根，只用来解析相对路径；
+ *   isolateBrokenSubjects：一门科目读不出来时把错误记进 `unreadable` 继续读其余科目
+ *   （阅读端用）；省略则照旧当场抛错，要完整快照的调用方（导出、原生工具）用这个默认。
  * @returns {object} 可直接 JSON.stringify 的 payload
  */
-export function buildLibrary(options: { workspace?: string; root?: string } = {}): LibraryPayload {
+export function buildLibrary(
+  options: { workspace?: string; root?: string; isolateBrokenSubjects?: boolean } = {},
+): LibraryPayload {
   const { workspace: workspaceOption } = options;
   if (typeof workspaceOption !== 'string' || workspaceOption === '') {
     throw new Error('buildLibrary 需要 workspace：学习工作区目录的路径（其中应含 .learning/subjects/）');
@@ -630,10 +650,21 @@ export function buildLibrary(options: { workspace?: string; root?: string } = {}
     .sort(cmpCodePoints);
 
   // 建课时会先建目录再填内容，所以零节点的科目直接跳过，不出现在阅读端。
+  /* 一门读不出来只坏这一门（#222）——**只有阅读端这条路开这个开关**。
+     默认仍是「坏数据当场抛错、不静默降级」：导出与原生工具要的是完整快照，少一门就该停。
+     阅读端相反：它要让其余科目照常打开，并点名是哪门、哪份文件第几行（`unreadable`）。
+     以前这里一律抛，一门坏就把整份 payload 作废，页面只剩「读不到学习工作区」那张卡——
+     把「一门坏」说成了「工作区没了」。开关开着也**不是静默**：坏的那门带着错误进 payload。 */
   const subjects: SubjectPayload[] = [];
+  const unreadable: UnreadableSubject[] = [];
   for (const name of subjectDirs) {
-    const subject = buildSubject(path.join(subjectsDir, name), name, workspace);
-    if (subject.nodes.length > 0) subjects.push(subject);
+    try {
+      const subject = buildSubject(path.join(subjectsDir, name), name, workspace);
+      if (subject.nodes.length > 0) subjects.push(subject);
+    } catch (error) {
+      if (!options.isolateBrokenSubjects) throw error;
+      unreadable.push({ dir: name, error: error instanceof Error ? error.message : String(error) });
+    }
   }
   /* 一个可用科目都没有时给一份**空清单**，不抛错：这是「工作区在、课还没建」，
      不是读盘失败。原来这里抛错，页面于是只能显示「读不到学习工作区」那张错误卡——
@@ -656,11 +687,14 @@ export function buildLibrary(options: { workspace?: string; root?: string } = {}
        展开的东西同样只该是学生画像；只有 `积累` 的文件投影成空串。 */
     memory_md: readMemory({ shared: readTextIfPresent(path.join(learningDir, MEMORY_FILE)) }).injectable,
     subjects,
+    unreadable,
   };
 }
 
 /** 读盘并构建。与 buildLibrary 同一实现，只是名字更贴合调用点的读法。 */
-export function readLibrary(options: { workspace?: string; root?: string } = {}): LibraryPayload {
+export function readLibrary(
+  options: { workspace?: string; root?: string; isolateBrokenSubjects?: boolean } = {},
+): LibraryPayload {
   return buildLibrary(options);
 }
 

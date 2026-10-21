@@ -350,6 +350,9 @@ const groups = {
       // 跑掉，再断言工厂闭包里的纯逻辑与渲染函数（夹具见 scripts/tests/fixtures/client_harness.mjs）。
       'scripts/tests/test_client_search_index.mjs',
       'scripts/tests/test_client_fold_empty_state.mjs',
+      // #222：一门科目的文件读不了时，主页点名是哪门、哪份文件第几行，好科目照常列——
+      // 不是整页一张「读不到学习工作区」。数据侧按科目隔离在 test_host_library_payload.mjs。
+      'scripts/tests/test_client_unreadable.mjs',
       // #72 的 Client 半：作答落盘的写队列 + 合并轮询 + 陈旧响应围栏（旧读数/在飞写入
       // 不许覆盖新作答）、版本冲突的重读与重来一次、自评走同一条路、界面文案不再说
       // 「只在内存里作答」。夹具同上（client_harness.mjs）。
