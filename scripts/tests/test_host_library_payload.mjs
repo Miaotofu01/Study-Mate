@@ -139,12 +139,12 @@ function oneSubjectWorkspace() {
 
 /* ── 顶层形状 ─────────────────────────────────────────────────────────── */
 
-test('readLibrary 的顶层就那五个键，含义各自钉住', () => {
+test('readLibrary 的顶层就那六个键，含义各自钉住', () => {
   const { workspace } = oneSubjectWorkspace();
   const payload = readLibrary({ workspace });
 
   assert.deepEqual(Object.keys(payload).sort(),
-    ['generated_at', 'memory_md', 'subjects', 'today', 'workspace']);
+    ['generated_at', 'memory_md', 'subjects', 'today', 'unreadable', 'workspace']);
   // workspace 是解析后的绝对路径：调用方靠它知道自己在读哪个库
   assert.equal(payload.workspace, workspace);
   // generated_at 是 ISO 时间戳（只钉形状，不钉具体时刻）
@@ -251,6 +251,40 @@ test('零节点的科目直接跳过：建课先建目录，不该出现在阅�
   const { workspace } = makeWorkspace(tree);
   const payload = readLibrary({ workspace });
   assert.deepEqual(payload.subjects.map((subject) => subject.slug), ['demo']);
+  assert.deepEqual(payload.unreadable, []);
+});
+
+test('#222 一门科目读不了只坏那一门：其余照常，读不了的那门带原样错误（含文件:行:列）', () => {
+  const tree = {
+    ...subjectTree('demo', minimalSubject()),
+    // 真机那份：缩进 7 个空格的裸 `&`，解析器按 YAML 语义拒（它是锚点）
+    ...subjectTree('c-language', {
+      'subject.yaml': 'slug: c-language\nname: C 语言\nstatus: 学习中\n',
+      'curriculum.yaml': [
+        'nodes:',
+        '  - id: pointer',
+        '    concepts:',
+        '       &取地址、*引用、空指针、指针运算',
+        '',
+      ].join('\n'),
+    }),
+    // 形状不对也算「读不了」：一门坏不该把整份 payload 作废
+    ...subjectTree('shape', {
+      'subject.yaml': 'slug: shape\nname: 形状不对\n',
+      'curriculum.yaml': 'nodes: {}\n',
+    }),
+  };
+  const { workspace } = makeWorkspace(tree);
+  // 默认仍是「坏数据当场抛错」（导出与原生工具要完整快照）：同一个工作区，不开开关就抛
+  assert.throws(() => readLibrary({ workspace }), /不支持锚点/);
+  // 阅读端开开关：以前这里也抛，整页只剩「读不到学习工作区」
+  const payload = readLibrary({ workspace, isolateBrokenSubjects: true });
+
+  assert.deepEqual(payload.subjects.map((subject) => subject.slug), ['demo'], '好的那门照常读出来');
+  assert.deepEqual(payload.unreadable.map((item) => item.dir), ['c-language', 'shape'], '坏的那几门要点名');
+  assert.match(payload.unreadable[0].error, /curriculum\.yaml:4:8: 不支持锚点 &/);
+  assert.match(payload.unreadable[0].error, /&取地址/, '错误里要带那行原文，学生照着能去修');
+  assert.match(payload.unreadable[1].error, /curriculum\.yaml 的 nodes 不是列表/);
 });
 
 test('科目档案类附件按各自口径解析', () => {
