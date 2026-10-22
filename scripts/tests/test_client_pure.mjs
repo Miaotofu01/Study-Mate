@@ -55,7 +55,7 @@ function loadPure() {
 }
 
 const PURE = loadPure();
-const { coachPlacement, motionFor, MOTION_LEVELS, MOTION_MS } = PURE;
+const { coachPlacement, motionFor, MOTION_LEVELS, MOTION_MS, FONT_LEVELS, FONT_BODY_PX } = PURE;
 
 /* ── 动效四档 ──────────────────────────────────────────────────────────── */
 
@@ -96,6 +96,43 @@ test('prefers-reduced-motion 真的生效：auto 档在媒体查询里被改写�
   // 显式档位不受系统偏好影响：媒体查询里只许出现 auto
   const inside = CSS.slice(CSS.indexOf('@media (prefers-reduced-motion'), CSS.indexOf('@media (prefers-reduced-motion') + 300);
   assert.ok(!/data-motion="(full|reduced|off)"/.test(inside), '显式档位不该被系统偏好改写');
+});
+
+/* ── 阅读字号四档 ──────────────────────────────────────────────────────── */
+
+const px = (text) => Number(text);
+
+test('字号四档：small / medium / large / xlarge 一个不少', () => {
+  assert.deepEqual([...FONT_LEVELS].sort(), ['large', 'medium', 'small', 'xlarge']);
+});
+
+test('CSS 里的字号档与 FONT_BODY_PX 逐档一致（不是两份真相）', () => {
+  for (const level of ['small', 'large', 'xlarge']) {
+    const rule = new RegExp('\\.smb-root\\[data-fs="' + level + '"\\]\\s*\\{[^}]*--smb-fs-body:\\s*(\\d+)px');
+    const found = rule.exec(CSS);
+    assert.ok(found, `CSS 里没有 .smb-root[data-fs="${level}"] 的 --smb-fs-body`);
+    assert.equal(px(found[1]), FONT_BODY_PX[level], `${level} 档的正文字号与 FONT_BODY_PX 对不上`);
+  }
+  // medium 是「不写规则」的那一档：走 .smb-root 的基础阶梯
+  assert.equal(TOKENS.get('--smb-fs-body').fallback, FONT_BODY_PX.medium + 'px', '.smb-root 的基础正文不是 medium 档');
+});
+
+test('字号档覆盖整条阶梯：字号与行高成对（只放大正文会让层级塌掉）', () => {
+  for (const level of ['small', 'large', 'xlarge']) {
+    const rule = new RegExp('\\.smb-root\\[data-fs="' + level + '"\\]\\s*\\{([^}]*)\\}').exec(CSS);
+    assert.ok(rule, `CSS 里没有 .smb-root[data-fs="${level}"]`);
+    const body = rule[1];
+    const fsTokens = body.match(/--smb-fs-[\w-]+:/g) || [];
+    const lhTokens = body.match(/--smb-lh-[\w-]+:/g) || [];
+    assert.equal(fsTokens.length, lhTokens.length, `${level} 档的字号与行高不成对`);
+    assert.ok(fsTokens.length >= 6, `${level} 档没把整条阶梯都覆盖（只放大正文会让层级塌掉）`);
+    assert.ok(!/--smb-lh-[\w-]+:\s*[\d.]+px/.test(body), `${level} 档的行高写成了 px（子元素换字号就断）`);
+  }
+});
+
+test('正文列宽跟着字号走（em 而不是 px）', () => {
+  assert.ok(/\.smb-doc\s*\{[^}]*max-width:[^;}]*clamp\([\d.]+em,\s*70%,\s*[\d.]+em\)/.test(CSS),
+    '正文列宽没按 em 写：调大字号后每行会变得更短');
 });
 
 /* ── 首次引导定位几何 ──────────────────────────────────────────────────── */
