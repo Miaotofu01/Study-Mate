@@ -8,7 +8,8 @@
 //   3. 给阅读端（Client 半 lib/client.js）供学习工作区数据：
 //      GET  /api/studymate/library   —— 整份快照，走宿主的 /api 认证通道，与其他插件取业务数据同一条路；
 //      GET  /api/studymate/asset     —— 课件配图（二进制）；
-//      GET/POST /api/studymate/reference —— 学生自加的参考资料：读取与写入（ADR-0010）。
+//      GET/POST /api/studymate/reference —— 学生自加的参考资料：读取与写入（ADR-0010）；
+//      GET  /api/studymate/health    —— 安装/配置/工作区/模型/lab 的诊断报告（PR 1）。
 //
 // **原生工具不在这里**（#138）：九个学习工具 + 五个 `studymate_task_*` + 一个 `studymate_lab_run`
 // 由「学习模式」预设那条插件行（`@yunmiao/studymate/learning-preset`）注册进**预设作用域**，
@@ -71,6 +72,17 @@ const REFERENCE_PATH = '/api/studymate/reference';
 
 export async function apply(ctx: PluginContext): Promise<void> {
   const profile = ctx.get?.('profileContext');
+  // 启动失败不能只留一条 console.warn：/api/studymate/health 与 `studymate doctor`
+  // 都要能读到最后一次失败发生在哪一段。动态导入是刻意的——test_bundle 会把本文件
+  // 单独拷到一个没有 lib/ 的目录里跑。
+  const noteFailure = async (stage: string, error: unknown): Promise<void> => {
+    try {
+      const { recordStartupFailure } = await import('../lib/doctor.ts');
+      recordStartupFailure(stage, error);
+    } catch {
+      // lib/ 不在（安装器边界失败）时，原错误仍然由下面的 console.warn 报出去。
+    }
+  };
   if (!profile || !ctx.agentPresets?.register) {
     console.warn('StudyMate：当前 DSH 不支持原生插件接口（需要 0.1.7-alpha.1+）；已跳过原生加载。旧版请使用 npx -y @yunmiao/studymate@latest install。');
   } else {
@@ -89,6 +101,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
       }
     } catch (error) {
       // Startup may report a problem, but must not migrate profile ownership.
+      await noteFailure('preset-registration', error);
       console.warn(`StudyMate：已跳过原生加载。${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -110,6 +123,7 @@ export async function apply(ctx: PluginContext): Promise<void> {
     registerStudyMateHost(ctx as unknown as Parameters<typeof registerStudyMateHost>[0]);
   } catch (error) {
     // 宿主层挂不上不该拖垮插件：预设与阅读端数据通路照常
+    await noteFailure('host-registration', error);
     console.warn(`StudyMate：宿主层注册失败（任务类型/路由/监听）。${error instanceof Error ? error.message : String(error)}`);
   }
 
@@ -123,6 +137,14 @@ export async function apply(ctx: PluginContext): Promise<void> {
   // 每次请求现读工作区：学习文件是纯文本、体量小（目标态 §12「按需扫描足够」），
   // 不落盘索引、不加缓存，也就没有「文件变了页面还是旧的」这类要同步的状态。
   if (typeof ctx.inject !== 'function') return;
+
+  // 健康检查：阅读端横幅与支持排障共用同一份报告。路由自己 inject(['connection'])，
+  // 与其余子系统保持同一种注册姿势；这里只留一行动态加载。
+  void import('../lib/doctor.ts').then(
+    ({ registerHealthRoute }) => registerHealthRoute(ctx as unknown as Parameters<typeof registerHealthRoute>[0]),
+    (error) => console.warn(`StudyMate：健康检查路由没挂上。${error instanceof Error ? error.message : String(error)}`),
+  );
+
   ctx.inject(['connection'], (connectionCtx) => {
     // 反射取出来的 connection 服务：形状由宿主决定，本文件只用下面判过的那两个成员
     const connection: any = Reflect.get(connectionCtx, 'connection');

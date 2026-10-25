@@ -264,6 +264,8 @@ const groups = {
       // 阅读端 /api/studymate/* 路由的**错误信封**：形状（`{ok:false, error:{code,message}}`）、
       // 机读码词表（源码里用了表外的码就红）、以及两端一致（lib/client.js 是手写 JS，不进 tsc）。
       'scripts/tests/test_host_route_envelope.mjs',
+      // PR 1：诊断报告与 /api/studymate/health 的注册/返回形状。
+      'scripts/tests/test_doctor.mjs',
       // 性能预算（目标态规格 §10.3）：**相对规模的比例**，不写绝对秒数。数 readLibrary()
       // 真的碰了几次文件系统，断言 4 倍规模 ≈ 4 倍工作量（线性 ≈ 4、平方 ≈ 16）。
       'scripts/tests/test_host_perf_budget.mjs',
@@ -301,6 +303,8 @@ const groups = {
       'scripts/tests/test_client_tokens.mjs',
       'scripts/tests/test_client_typography.mjs',
       'scripts/tests/test_client_pure.mjs',
+      // PR 2：/health 报告 → 阅读端横幅的四态映射与三段文案（不启动真宿主）。
+      'scripts/tests/test_client_health.mjs',
       // #88 三栏几何：ADR-0011 的让位顺序（右栏先拿 / 左栏先让 / 中栏保底 420）与
       // 「并排装不下就把那一栏盖在正文上」的降级。同样是纯函数——「任何画布宽度下都
       // 有一栏打得开」是代数，浏览器里一条条试既慢又试不全。

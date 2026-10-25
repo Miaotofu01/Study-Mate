@@ -47,6 +47,8 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | 套件 | 覆盖行为 |
 | --- | --- |
 | `test_installer.mjs`、`test_bundle.mjs` | npm 安装、更新与安装模式切换，Bundle 激活和清理，临时工作区数据保留 |
+| `test_doctor.mjs` | 诊断报告、启动失败记录与 `GET /api/studymate/health` 的注册/返回形状；只读临时 DSH_HOME，不启动真 DSH |
+| `test_client_health.mjs` | 阅读端把 `/health` 报告压成 ok / warn / fail / unavailable 四态，以及 FAIL/WARN/不可用横幅的文案与按钮 |
 | `test_openai_plugin.mjs` | ZIP 用**独立读取器**解开后不依赖源码或 DSH 即可跑交互断点（read → update → answer）、没有 0 字节文件也没有 Python 文件；构建可重复，失败时保留已有产物 |
 | `test_preset_install.mjs` | 预设注册（`lib/preset.ts`，原 Python 安装助手的**行为移植**）：版本边界各自独立、补丁形态保留与幂等（注释、`!!js`、CRLF、流式列表）、暂存与 `--patch-output`、手动声明/越界 profile/坏清单/符号链接一律在写盘之前失败、`--bundle` 给 DSH 的 config 形状 |
 | `test_interaction_state.mjs` | Codex 交互断点（`openai/studymate/scripts/interaction_state.mjs`）：工作区必须显式且初始化过、revision 栅栏、锁不等待、迟到/重复/已消费的 question id 不能推进、空回答不算、坏了的状态不许覆盖、提交成功但锁清不掉时如实报成功 |

@@ -147,6 +147,13 @@ DSH 侧就是**一个插件包**（`@yunmiao/studymate`）：Host 半注册原�
 ## 常见问题
 
 <details>
+<summary><b>装完看不到学习模式 / 阅读端，或工作区读不到</b></summary>
+
+先跑 `npx -y @yunmiao/studymate@latest doctor`（只读检查，不改文件）；需要贴给维护者时加 `--json`。它会把 Node、dsh、profile、配置、工作区与预设声明逐项列出来。详见[诊断说明](docs/使用/诊断.md)。
+
+</details>
+
+<details>
 <summary><b>装完看不到课件页</b></summary>
 
 课件由**阅读端实时渲染**，不再预生成 HTML（页面模板已随 #83 退役）。在 DSH 里新建会话选「学习模式」，从侧边栏切到阅读端即可。要一份能离线打开的，跑 `npx -y @yunmiao/studymate export`，产物在 `<工作区>/export/`。
@@ -165,7 +172,7 @@ DSH 侧就是**一个插件包**（`@yunmiao/studymate`）：Host 半注册原�
 - **项目交流群**(QQ)：161914370
 - **参与开发**：[CONTRIBUTING.md](CONTRIBUTING.md)（改哪块先读哪份、本地怎么验、提交信息规范）
 - **变更日志**：[CHANGELOG.md](CHANGELOG.md)
-- **文档**：[使用说明](docs/使用/使用说明.md)（日常怎么用、课型与题型、检查与档案规则）· [Codex 与 ChatGPT](docs/使用/Codex与ChatGPT.md)（OpenAI 插件构建、安装与工作区）· [Antigravity 说明](docs/使用/Antigravity.md)（Antigravity 插件构建、多智能体协同与安装）· [课件内容格式](docs/规范/课件内容格式.md)（内容文件与题目位置的语法）· [阅读端呈现](docs/规范/阅读端呈现.md)（四个面「看起来对不对」的意图判据）· [文件归属](docs/规范/文件归属.md)（代称 ↔ 路径 ↔ 维护者）· [Agent 交接协议](docs/规范/Agent交接协议.md)（staged 子代理交付的机器边界）· [目标态规格](docs/设计/目标态规格.md)（重构后系统的形状与门禁）· [工程约束](docs/规范/工程约束.md)（目录约定、规则归属、原生工具指针）· [工作区数据骨架](templates/README.md)
+- **文档**：[使用说明](docs/使用/使用说明.md)（日常怎么用、课型与题型、检查与档案规则）· [诊断说明](docs/使用/诊断.md)（doctor 与 health 路由）· [Codex 与 ChatGPT](docs/使用/Codex与ChatGPT.md)（OpenAI 插件构建、安装与工作区）· [Antigravity 说明](docs/使用/Antigravity.md)（Antigravity 插件构建、多智能体协同与安装）· [课件内容格式](docs/规范/课件内容格式.md)（内容文件与题目位置的语法）· [阅读端呈现](docs/规范/阅读端呈现.md)（四个面「看起来对不对」的意图判据）· [文件归属](docs/规范/文件归属.md)（代称 ↔ 路径 ↔ 维护者）· [Agent 交接协议](docs/规范/Agent交接协议.md)（staged 子代理交付的机器边界）· [目标态规格](docs/设计/目标态规格.md)（重构后系统的形状与门禁）· [工程约束](docs/规范/工程约束.md)（目录约定、规则归属、原生工具指针）· [工作区数据骨架](templates/README.md)
 
 ### 提改动前先跑这几条
 

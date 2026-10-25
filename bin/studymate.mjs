@@ -25,6 +25,7 @@ Codex / ChatGPT Work：下载并导入最新插件 ZIP：
 https://github.com/Miaotofu01/Study-Mate/releases/latest/download/studymate-openai.zip
 
 用法：studymate [install] [--workspace <目录>] [--profile <名称>] [--mode standalone|native] [--dsh <dsh 路径>]
+      studymate doctor [--workspace <目录>] [--profile <名称>] [--json]
       studymate export [--workspace <目录>] [--out <目录>] [--subject <slug>] [--json] [--quiet]
       studymate build-plugin [--output <目录>]（开发者构建）
       studymate build-antigravity [--output <目录>] [--install]（Antigravity 插件构建）
@@ -41,6 +42,7 @@ https://github.com/Miaotofu01/Study-Mate/releases/latest/download/studymate-open
 安装器不会安装或升级 dsh，也不会重启正在运行的会话。
 
 更新使用相同的 install 命令，沿用已有学习工作区。
+doctor 检查 Node / dsh / profile / 配置 / 工作区 / 预设声明 / lab 运行时；不改任何文件。
 export 把学习工作区导成能离线打开的自包含页面：Antigravity / Codex 侧课完默认导一份，
 DSH 侧按需（学生说“导出一份能离线看的”才跑）。落点默认 <工作区>/export/，不需要 DSH；
 它要一份 React（npm i -g react react-dom，或设 STUDYMATE_REACT_DIR 指过去）。
@@ -519,6 +521,11 @@ export async function main(args = process.argv.slice(2)) {
   try {
     if (args.length === 1 && ['--help', '-h'].includes(args[0])) console.log(help);
     else if (args.length === 1 && ['--version', '-v'].includes(args[0])) console.log(metadata.version);
+    else if (args[0] === 'doctor') {
+      // 动态 import：doctor 的诊断代码不该被 install/export 的启动路径拖进来。
+      const { doctorCommand } = await import('../lib/doctor.ts');
+      process.exitCode = doctorCommand(args.slice(1));
+    }
     else if (args[0] === 'export') {
       const options = parseExportArgs(args.slice(1));
       // 动态 import：其余子命令（安装 / 构建）不该被导出域那套东西拖进来，
