@@ -33,6 +33,8 @@ const internals = clientInternals();
 const {
   AskPanel, QA_SESSION_ENDPOINT, ASK_RETAIN_SOURCE, ASK_SESSION_PREFIX, ASK_SESSION_SEP,
   titleForAskSession, isAskSessionTitle, askSessionRows, latestAskSessionId,
+  ASK_SESSION_CACHE_KEY, askSessionCacheKey, cachedAskSessionId,
+  rememberAskSessionId, forgetAskSessionId,
 } = internals;
 
 /* ── 假服务与假 fetch ──────────────────────────────────────────────────── */
@@ -77,6 +79,17 @@ let calls = [];
 let reply = null;
 let sessions = null;
 let references = {};
+const clientWindow = loadClient().window;
+
+/** 最小 localStorage：套件进程里模拟“关掉再打开还是同一个浏览器”。 */
+function memoryStorage() {
+  const data = new Map();
+  return {
+    getItem: (key) => (data.has(String(key)) ? data.get(String(key)) : null),
+    setItem: (key, value) => { data.set(String(key), String(value)); },
+    removeItem: (key) => { data.delete(String(key)); },
+  };
+}
 
 globalThis.fetch = async (url, options) => {
   calls.push({ url, options });
@@ -86,6 +99,7 @@ globalThis.fetch = async (url, options) => {
 beforeEach(() => {
   calls = [];
   reply = null;
+  clientWindow.localStorage = memoryStorage();
   const made = fakeSessions([]);
   sessions = made.sessions;
   references = made.references;
@@ -364,4 +378,48 @@ test('#105 入口：顶部有「新对话」与「上一段会话」', () => {
   assert.equal(findByProp(tree, 'data-proto', 'qa-history').length, 1);
   const text = renderText(frame());
   assert.ok(text.includes('这条会话住在宿主里'), '没说明这段会话住在哪儿：' + text);
+});
+
+/* ══ 九、#171：空会话在宿主列表里还看不到时，靠本机缓存复用 ═══════════════ */
+
+test('#171 空会话缓存：按 subject/node 记 id，能读、能清', () => {
+  const key = askSessionCacheKey(SUBJECT, NODE);
+  assert.equal(key, 'computer-networks/net.mask');
+  assert.equal(cachedAskSessionId(key), null);
+  rememberAskSessionId(key, 'qa-empty-1');
+  assert.equal(cachedAskSessionId(key), 'qa-empty-1');
+  const raw = JSON.parse(clientWindow.localStorage.getItem(ASK_SESSION_CACHE_KEY));
+  assert.equal(raw[key].id, 'qa-empty-1');
+  forgetAskSessionId(key);
+  assert.equal(cachedAskSessionId(key), null);
+});
+
+test('#171 关掉再打开：新建过的空会话不再 POST 第二条', async () => {
+  reply = { available: true, ok: true, sessionId: 'qa-cache-1', title: TITLE, renamed: true, memoryInjected: true };
+
+  // 第一次打开：没有列表、没有缓存 → 建一条，并把 id 写进缓存
+  resetHookState();
+  setHookState(frame());
+  try {
+    AskPanel({ subject: SUBJECT, node: NODE, quote: null, hostKit: fakeKit().kit });
+    for (const cleanup of drainEffects()) cleanup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    resetHookState();
+  }
+  assert.equal(calls.length, 1, '第一次打开没有建会话');
+  assert.equal(cachedAskSessionId(askSessionCacheKey(SUBJECT, NODE)), 'qa-cache-1');
+
+  // 关掉再打开：宿主列表里仍然没有这条空会话；缓存命中就不该再 POST
+  calls = [];
+  resetHookState();
+  setHookState(frame());
+  try {
+    AskPanel({ subject: SUBJECT, node: NODE, quote: null, hostKit: fakeKit().kit });
+    drainEffects();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    resetHookState();
+  }
+  assert.equal(calls.length, 0, '缓存命中却又建了一条空会话（#171 回归）');
 });

@@ -204,12 +204,13 @@ test('存下来的位置按 id 认小节，不按下标：插入一节不会让�
 
 /* ── 什么时候可以下结论「恢复完了」 ───────────────────────────────────── */
 
-test('恢复是否到位：落在目标附近就算到；还差得远且滚得动就再试', () => {
-  assert.equal(readingPositionSettled(1000, 1000, 1600), true);
-  assert.equal(readingPositionSettled(1000, 980, 1600), true);      // 容差之内
-  assert.equal(readingPositionSettled(1000, 300, 1600), false);     // 没到位，应重试
-  // 布局还在长：像素目标当下滚不到（clamp 在底部）——先接受，等长起来再重算
-  assert.equal(readingPositionSettled(1000, 200, 200), true);
+test('恢复是否到位：落在目标附近才算到；正文还没长够时必须继续重试（#214）', () => {
+  assert.equal(readingPositionSettled(1000, 1000), true);
+  assert.equal(readingPositionSettled(1000, 980), true);            // 容差之内
+  assert.equal(readingPositionSettled(1000, 300), false);           // 没到位，应重试
+  // 首帧正文还很矮：目标 1000 当下 maxScroll 只有 200，位置被 clamp 在 200。
+  // 这不能算“已到位”，否则第一次 rAF 就结束，后面的重试全部作废。
+  assert.equal(readingPositionSettled(1000, 200), false);
   // 这一篇远比存下来的目标长（正文加长了），而位置还卡在半路：继续重试
-  assert.equal(readingPositionSettled(1000, 300, 3000), false);
+  assert.equal(readingPositionSettled(1000, 300), false);
 });

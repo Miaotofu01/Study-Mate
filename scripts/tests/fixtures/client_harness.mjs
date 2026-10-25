@@ -125,7 +125,9 @@ export function loadClient() {
   };
 
   const plugin = entry.factory(requireStub);
-  cached = { id: entry.id, plugin, requested, source };
+  // `window` 也交出来：健康检查/问答缓存这类浏览器本地状态的套件需要一个可控的
+  // localStorage 替身；生产代码仍然只从工厂闭包拿到的那个 window 读。
+  cached = { id: entry.id, plugin, requested, source, window: sandbox };
   return cached;
 }
 

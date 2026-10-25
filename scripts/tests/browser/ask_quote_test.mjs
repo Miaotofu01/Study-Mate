@@ -540,6 +540,10 @@ try {
   console.log(`夹具：${fixture}`);
   console.log(`数据：${workspace}（跑完删）`);
 
+  // 每个场景都是一次新的「打开页面」：#171 的本机会话缓存不能从上一场景带过来，
+  // 否则“新对话”会从 qa-fixture-2 变成 qa-fixture-1，测的就不是场景自己的行为了。
+  await session.inject(`try { window.localStorage.removeItem('studymate.ask.sessions.v1'); } catch (error) {}`);
+
   /* ── 一、打开问答：建一条会话、retain 它、面板里嵌的是宿主正文 ─────────── */
   await session.scene('ask-session-open', async (ctx) => {
     await openLesson(ctx);

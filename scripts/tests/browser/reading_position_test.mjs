@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { EXIT_SKIP } from './harness.mjs';
 
@@ -53,7 +53,7 @@ if (!chrome) {
 
 /* ── 夹具：`lib/client.js` + 最小装载器 → 一份能上屏的资源表 ─────────── */
 
-const { buildAssets, kernelSource } = await import(FIXTURE);
+const { buildAssets, kernelSource } = await import(pathToFileURL(FIXTURE).href);
 const assets = buildAssets(fs.readFileSync(CLIENT, 'utf8'), kernelSource());
 const route = (name) => assets.find((asset) => asset.path === name) || null;
 
