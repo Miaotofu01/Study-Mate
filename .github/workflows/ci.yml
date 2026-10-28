@@ -11,9 +11,20 @@ permissions:
 
 jobs:
   check:
-    name: Core regression tests
+    # 版本进 job 名：挂在哪条 Node 上一眼能看出来，不用点进矩阵才知道
+    name: Core regression tests (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      # 一条挂了另一条照跑：两个版本同时红/同时绿才算结论，别让先挂的那个把证据掐掉
+      fail-fast: false
+      # package.json 的 engines 承诺的是 `^22.19.0 || >=24.0.0`，两个大版本都在支持范围内，
+      # 所以门禁也得在两个版本上各跑一遍——只跑 24 等于让 22 那半承诺没人验。2026-10 那条
+      # 覆盖率下限门禁就是踩在这上面：子进程 `node --test` 的 reporter 随 stdout 是否 TTY 变，
+      # Node 22 在 CI 的管道里出 TAP（前缀 `# `），门禁只认 spec（前缀 `ℹ `），于是覆盖率
+      # 明明算对了却被判成「模块没进统计」。它在 24 上不显形，CI 一直绿着把 bug 藏了下来。
+      matrix:
+        node: ['22.x', '24.x']
     steps:
       - uses: actions/checkout@v7
         with:
@@ -23,7 +34,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node }}
           package-manager-cache: false
       # 类型门禁（npm run test:types）要 tsc，tsc 在 devDependencies 里。npm ci 按
       # package-lock.json 装：lockfile 与 package.json 对不上时直接失败，门禁不会因为

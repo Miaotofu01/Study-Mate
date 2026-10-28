@@ -96,8 +96,16 @@ const coveredBy = (include) => CORE_MODULES.filter(file => matchesInclude(file, 
 
 /**
  * 覆盖率报告的表里到底列了哪些文件。表是按目录缩进的（`lib` → ` core` → `  anchors.ts`），
- * 所以按缩进还原路径；带数字的行才是文件。解析不出来就返回 null——调用方会当成失败，不会
- * 悄悄放过。
+ * 所以按缩进还原路径；带数字的行才是文件。
+ *
+ * 每行的前缀随 reporter 变，**不是固定的**：stdout 是 TTY（本地直接跑）时 Node 用 spec
+ * reporter，前缀是 `ℹ `；stdout 被重定向或接管道（CI、`npm test`、`node --test` 自己 spawn
+ * 的子进程）时用 TAP reporter，前缀是 `# `。只认一种前缀就是把门禁绑在「调用环境有没有终端」
+ * 上：漏掉 TAP 那一半时，表格行会被解析成一堆带 `#` 的假路径，于是「模块没进覆盖率」满屏
+ * 误报，而覆盖率其实是好的。所以两种前缀都认（子进程另外还显式指定了 spec，见下面的 args）。
+ *
+ * 解析不出东西时返回 null，**空集合绝不冒充成功**——空 Set 是 truthy，上游 `assert.ok`
+ * 拦不住，于是「报告格式变了」会伪装成「模块没进统计」。
  */
 function reportedFiles(output) {
   const start = output.indexOf('start of coverage report');
@@ -106,8 +114,8 @@ function reportedFiles(output) {
   const files = new Set();
   const stack = [];
   for (const line of output.slice(start, end).split('\n')) {
-    // `ℹ ` 前缀之后才是目录缩进——缩进层级就是路径深度，别把前缀的空格算进去
-    const match = /^(?:ℹ )?( *)([^\s|][^|]*?)\s*\|\s*([\d.]*)\s*\|/.exec(line);
+    // 前缀之后才是目录缩进——缩进层级就是路径深度，别把前缀的空格算进去
+    const match = /^(?:ℹ |# )?( *)([^\s|][^|]*?)\s*\|\s*([\d.]*)\s*\|/.exec(line);
     if (!match) continue;
     const [, indent, rawName, percent] = match;
     const name = rawName.trim();
@@ -118,13 +126,55 @@ function reportedFiles(output) {
     if (percent === '') continue;  // 目录行没有数字，只有合计在下面
     files.add([...stack.slice(0, level + 1)].join('/'));
   }
+  // 一条文件都没解析出来 = 报告格式对不上（不是「覆盖率为 0」），直接当失败
+  if (files.size === 0) return null;
+  // 前缀没剥干净会拼出带 `#`、空格的假路径：这种也算没解析出来，别让它混进「已统计」里
+  if ([...files].some(file => !/^[\w./-]+$/.test(file))) return null;
   return files;
 }
+
+/* 解析器自己的测试放在真正跑子进程之前：它是门禁的耳朵，耳朵失灵时得先听得见。 */
+test('覆盖率表格的解析不跟 reporter 走（spec 的「ℹ 」与 TAP 的「# 」都要认）', () => {
+  // 同一张表、两种前缀：解析结果必须一样。只认一种，门禁结果就变成「stdout 有没有终端」的函数。
+  // 前缀正好占两个字符（`ℹ ` / `# `），后面紧跟目录缩进——别在模板里再补空格，否则缩进多一级
+  const table = prefix => [
+    `${prefix}start of coverage report`,
+    `${prefix}-----------------------------------------------------------`,
+    `${prefix}file       | line % | branch % | funcs % | uncovered lines`,
+    `${prefix}-----------------------------------------------------------`,
+    `${prefix}lib        |        |          |         | `,
+    `${prefix} core      |        |          |         | `,
+    `${prefix}  rules.ts | 100.00 |    95.35 |  100.00 | `,
+    `${prefix}ipc        |        |          |         | `,
+    `${prefix} bridge.ts |  92.31 |    80.00 |   88.89 | 1-3`,
+    `${prefix}-----------------------------------------------------------`,
+    `${prefix}all files  |  99.10 |    93.75 |   99.00 | `,
+    `${prefix}-----------------------------------------------------------`,
+    `${prefix}end of coverage report`,
+  ].join('\n');
+  // 表格里两个顶层目录（lib、ipc）各带一个文件：缩进决定层级，顶层目录不该被并到别人底下
+  const expected = ['ipc/bridge.ts', 'lib/core/rules.ts'];
+  assert.deepEqual([...reportedFiles(table('ℹ '))].sort(), expected);
+  assert.deepEqual([...reportedFiles(table('# '))].sort(), expected);
+  // 认不出来的前缀会拼出带 `#`、空格或 `%` 的假路径：必须当成「没解析出来」返回 null。
+  assert.equal(reportedFiles(table('% ')), null);
+  // 表在、但一行文件都没有（被截断或格式变了）：空集合同样算「没解析出来」，别冒充「没有模块」
+  assert.equal(
+    reportedFiles('ℹ start of coverage report\nℹ lib        |        |          |         | \nℹ end of coverage report'),
+    null,
+  );
+  // 连报告标记都没有，也算没解析出来
+  assert.equal(reportedFiles('nothing here'), null);
+});
 
 for (const floor of FLOORS) {
   test(`覆盖率下限：${floor.label}`, () => {
     const args = [
       '--test',
+      // 显式指定 reporter：不写这一条，Node 按「stdout 是不是 TTY」自己挑，本地终端里是
+      // spec（前缀 `ℹ `）、CI 与 `npm test` 的管道里是 TAP（前缀 `# `）。下面要解析覆盖率
+      // 表格，就不能让报告格式跟着调用环境漂移——把它钉死，解析才只有一种输入。
+      '--test-reporter=spec',
       '--experimental-test-coverage',
       `--test-coverage-include=${floor.include}`,
       `--test-coverage-lines=${floor.lines}`,
@@ -160,7 +210,8 @@ for (const floor of FLOORS) {
        没被任何套件加载的模块压根不进分母——那正是上一版「标签写着 lib/core/**、实际只统计 5 个」
        的成因。少了谁就红，并且指出该补哪条套件，而不是让它悄悄少算。 */
     const reported = reportedFiles(output);
-    assert.ok(reported, '解析不出覆盖率报告的文件表：报告格式变了，别让这条断言变成摆设');
+    assert.ok(reported, '解析不出覆盖率报告的文件表：报告格式变了（reporter 前缀？），'
+      + '别让这条断言变成摆设——它现在会把「解析失败」直接判红，而不是当成「模块没进统计」');
     const expected = coveredBy(floor.include).filter(file => !UNMEASURABLE.includes(file));
     const missing = expected.filter(file => !reported.has(file));
     assert.deepEqual(missing, [], `这些模块没进覆盖率统计（没有套件加载它们）：${missing.join('、')}`
