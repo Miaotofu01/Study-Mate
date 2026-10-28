@@ -424,55 +424,78 @@ function blockScalarHeader(text: string): { header: string; tagged: boolean } | 
  * 读一个块标量。行号取自 header 那一行，往后按**原始行**走——空行属于块内容，
  * 而上面那份行索引刻意不留空行。
  *
- * 折行规则按 YAML 的常见情形实现：`|` 原样保留换行；`>` 把非空行之间的单个换行折成空格，
- * 空行折成一个换行（更深的缩进行原样保留）。chomping：`-` 去掉结尾换行、默认留一个、`+` 全留。
+ * 规则照 PyYAML 的 scan_block_scalar 实现（测试里的期望值都是 PyYAML 6.0.1 跑出来的）：
+ *   · `|` 原样保留换行；
+ *   · `>` 只在「两个普通行之间没有空行」时把换行折成一个空格，隔了几个空行就输出几个换行；
+ *   · 缩进比块缩进更深的行（more-indented）旁边的换行一律**不折**，多出来的前导空格
+ *     属于正文——`a: >` + `  x` + `   y` 在 PyYAML 里是 "x\n y\n"，折成空格会静默少一层缩进（#224）。
+ *   · chomping 放到**收完所有行之后**统一做：`+`(keep) 的语义是保留尾部空行，以前在收集
+ *     阶段就把尾随空行 pop 掉，`|+` / `>+` 于是永远少换行（#224）。
  */
 function readBlockScalar(header: SourceLine, headerText: string, parentIndent: number): { value: string; next: number } {
   const indicator = headerText[0] ?? '';
   const chomp = headerText.includes('-') ? 'strip' : headerText.includes('+') ? 'keep' : 'clip';
+  // split('\n') 的最后一个元素是「文末换行之后的位置」，不是一行：最后一行到底有没有行尾换行，
+  // 决定 clip/keep 要不要补那个换行，所以得单独记。
+  const lastRaw = sourceLines.length - 1;
   const explicit = /\d/.exec(headerText);
-  const start = header.line; // 1 起：下一行的下标就是它
-  const pieces: Array<{ indent: number; content: string }> = [];
-  let index = start;
   let blockIndent: number | undefined = explicit ? parentIndent + Number(explicit[0]) : undefined;
+  // 自动探测缩进时块至少要比父节点深一格；块头后面那些只有空格的行也参与探测
+  // （PyYAML 的 max_indent），不跟着算会让自动缩进跟 PyYAML 分叉。
+  let probe = parentIndent + 1;
+  const texts: string[] = [];
+  const moreIndented: boolean[] = [];
+  const blanksBefore: number[] = [];
+  let pendingBlanks = 0;
+  let terminated = false;
+  let index = header.line; // 1 起：下一行的下标就是它
   for (; index < sourceLines.length; index++) {
     const raw = sourceLines[index];
-    if (raw.trim() === '') {
-      pieces.push({ indent: -1, content: '' });
-      continue;
-    }
+    const spaced = raw.trim() === '';
+    // 文末没换行的空白尾巴算不上一行空行，PyYAML 也一样当它不存在
+    if (spaced && index === lastRaw) break;
     let indent = 0;
     while (indent < raw.length && raw[indent] === ' ') indent++;
     if (blockIndent === undefined) {
-      if (indent <= parentIndent) break; // 块是空的：下一行不属于它
+      if (spaced) {
+        if (indent > probe) probe = indent;
+        pendingBlanks++;
+        continue;
+      }
+      if (indent < probe) break; // 缩进没比父节点深：这个块是空的
       blockIndent = indent;
     }
-    if (indent < blockIndent) break;
-    pieces.push({ indent, content: raw.slice(blockIndent) });
+    // 只有空格、且没比块缩进更深的行是空行；更深的就是「一行空格」正文
+    if (spaced && indent <= blockIndent) { pendingBlanks++; continue; }
+    if (!spaced && indent < blockIndent) break;
+    texts.push(raw.slice(blockIndent));
+    moreIndented.push(indent > blockIndent);
+    blanksBefore.push(pendingBlanks);
+    pendingBlanks = 0;
+    terminated = index < lastRaw;
   }
-  // 结尾的空行不算内容（YAML 的 chomping 只按最后一个非空行判断）
-  while (pieces.length && pieces[pieces.length - 1].indent === -1) pieces.pop();
-  let text: string;
-  if (indicator === '|') {
-    text = pieces.map(piece => piece.content).join('\n');
-  } else {
-    let folded = '';
-    let previousBlank = false;
-    for (const piece of pieces) {
-      if (piece.indent === -1) { folded += '\n'; previousBlank = true; continue; }
-      if (folded !== '' && !previousBlank) folded += ' ';
-      folded += piece.content;
-      previousBlank = false;
+  let value = texts.length === 0 ? '' : '\n'.repeat(blanksBefore[0]) + texts[0];
+  for (let k = 1; k < texts.length; k++) {
+    const gap = blanksBefore[k];
+    if (indicator === '|' || moreIndented[k - 1] || moreIndented[k]) {
+      value += '\n'.repeat(gap + 1) + texts[k];
+    } else if (gap > 0) {
+      value += '\n'.repeat(gap) + texts[k];
+    } else {
+      value += ` ${texts[k]}`;
     }
-    text = folded;
   }
-  if (text !== '') {
-    if (chomp === 'clip') text = `${text.replace(/\n+$/, '')}\n`;
-    else if (chomp === 'strip') text = text.replace(/\n+$/, '');
+  // chomping：strip 全去掉、clip 留一个（文末没换行就一个也不补）、keep 原样留。
+  if (texts.length === 0) {
+    if (chomp === 'keep') value = '\n'.repeat(pendingBlanks);
+  } else if (chomp === 'keep') {
+    value += (terminated ? '\n' : '') + '\n'.repeat(pendingBlanks);
+  } else if (chomp === 'clip' && terminated) {
+    value += '\n';
   }
   // `next` 交回去的是**下一行的行号**（1 起）。`index` 是 `sourceLines` 的 0 起下标，
   // 差一位就会把块的末行当成块外的结构再解析一遍。
-  return { value: text, next: index + 1 };
+  return { value, next: index + 1 };
 }
 
 function skipFlowSpace(text: string, i: number): number {
