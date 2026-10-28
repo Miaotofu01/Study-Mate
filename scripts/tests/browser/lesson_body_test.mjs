@@ -138,6 +138,15 @@ const TERM_LINES = [
   '# 上面这段是回放，输出原样保留',
 ];
 
+/** 行号位数夹具（#230）：120 行，末号 `120`——一位数、两位数、三位数三段行号都在同一块里。
+    这份是「行号槽按最长行号的位数撑开」那条的取景对象。夹具以前最长的代码块只有 5 行（终端块），
+    两位数行号一条也没被量过；于是行号槽写死 2.5ch（border-box 再扣掉 14px 左内边距，内容宽只剩
+    几像素）、又继承了 .smb-doc 的 overflow-wrap: anywhere，多位数被一个字一行地折下去、整列高度
+    翻两三倍、与代码行完全对不上，而套件一直是绿的。
+    120 行是刻意的：末号跨进三位数，「槽宽按位数撑开」才在最长的那一档上被验到。 */
+const LONG_GUTTER_LINES = Array.from({ length: 120 },
+  (_, i) => (i === 0 ? 'def meet_in_the_middle(graph, start, goal):' : `    step_${i + 1} = visit(${i + 1})`));
+
 /** 一个不含空格的长标识符 + 一条长 URL：两者都能把正文列顶宽，除非正文允许在词内断行。 */
 const LONG_TOKEN = 'studymate_pane_widths_v1_override_for_narrow_canvas_scenarios_' + 'x'.repeat(24);
 const LONG_URL = 'https://example.com/docs/very/long/path/that/never/breaks/' + 'segment-'.repeat(6) + 'end';
@@ -199,6 +208,10 @@ function subjectFiles(dirName, { slug, name, touched }) {
     '::: quiz 理解 锚点：变量的比喻', ':::', '',
     '::: quiz 应用 锚点：作用域的嵌套', ':::', '',
     '::: quiz 分析 锚点：绑定的时机', ':::', '',
+    // 三位数行号（#230）：120 行的块，末号 120。放**正文最末**是刻意的——它只给行号槽那条
+    // 断言取景，摆在末尾就不会挪动上面任何一条既有读数的取样位置（按语言取第一个块、按槽反查块、
+    // 图的编号、题目标记的分组）。
+    '```py', ...LONG_GUTTER_LINES, '```', '',
   ].join('\n');
 
   return {
@@ -453,6 +466,7 @@ const PROBE = `(() => {
         const codePre = block.querySelector('pre');
         const gutter = block.querySelector('.smb-code__gutter');
         const nums = gutter ? Array.from(gutter.children) : [];
+        const gutterStyle = gutter ? getComputedStyle(gutter) : null;
         const lines = codePre ? Array.from(codePre.querySelectorAll('.smb-code__line')) : [];
         const bodyBg = getComputedStyle(block).backgroundColor;
         const rows = lines.map((el, i) => {
@@ -487,8 +501,23 @@ const PROBE = `(() => {
           })(),
           gutter: gutter ? {
             count: nums.length, ariaHidden: gutter.getAttribute('aria-hidden'),
-            userSelect: getComputedStyle(gutter).userSelect,
+            userSelect: gutterStyle.userSelect,
             nums: nums.map((n) => n.textContent.trim()),
+            lineH: px(parseFloat(gutterStyle.lineHeight)),
+            // 行号槽内容盒的宽（clientWidth 扣掉左右内边距）：一位数、两位数……都要装在这条里。
+            // 槽写成定宽（曾经是 flex: 0 0 2.5ch + 14px 左内边距）时，这里只剩几像素。
+            contentW: px(gutter.clientWidth
+              - parseFloat(gutterStyle.paddingLeft) - parseFloat(gutterStyle.paddingRight)),
+            // 每个行号盒的高、与它那行文字实际占的宽：折行的数字盒高会翻倍，宽度会溢出内容盒。
+            boxes: nums.map((n) => {
+              const range = document.createRange();
+              range.selectNodeContents(n);
+              return {
+                text: n.textContent.trim(),
+                h: px(n.getBoundingClientRect().height),
+                w: px(range.getBoundingClientRect().width),
+              };
+            }),
           } : null,
           rows,
           // #116：框内的解释槽。判据是「贴着它解释的那一块」——几何上四边都在 .smb-code
@@ -531,6 +560,8 @@ const PROBE = `(() => {
       return {
         js: describe(pick('js')),
         term: describe(pick('term')),
+        // 三位数行号的取景对象：120 行的块（LONG_GUTTER_LINES），末号 120
+        long: describe(pick('py')),
         // ::: code 那一块由**槽元素反查**它所属的块（不按语言取——语言可能与围栏撞车）
         slot: (() => {
           const el = document.querySelector('.smb-code__caption');
@@ -774,6 +805,30 @@ try {
         && term.rows.every((r) => r.num !== null && Math.abs(r.top - r.numTop) <= 1),
         JSON.stringify(term && term.gutter && { nums: term.gutter.nums, userSelect: term.gutter.userSelect,
           ariaHidden: term.gutter.ariaHidden, offsets: term.rows.map((r) => [r.top, r.numTop]) }));
+      /* 行号槽按最长行号的位数撑开（#230）：一位数、两位数、三位数都在自己那一列里，
+         不许一个字一行地折下去。取景是正文最末那个 120 行的块（LONG_GUTTER_LINES，末号 120）。
+         三条关系式，不钉具体像素：
+           · 每个行号盒就是一行高——数字折行时盒高会翻成两行、三行（旧 CSS 实测 19.19 / 38.38 / 57.56）；
+           · 每个行号实际占的宽 ≤ 行号槽内容盒的宽——槽写死成 `2.5ch` 时扣掉 14px 左内边距只剩几像素，
+             多位数装不进去，正是「只显示 1 位、其余挤到下一行」的病因；
+           · 行号仍逐行对齐、末号是 120——槽一旦跟着折行变高，号与它那行代码就错位了。 */
+      const lg = c115 && c115.long;
+      const lgGutter = lg && lg.gutter;
+      const widestNum = lgGutter
+        ? lgGutter.boxes.reduce((a, b) => (b.w > a.w ? b : a), { text: '', w: 0 })
+        : null;
+      const lastNum = lgGutter && lgGutter.nums[lgGutter.nums.length - 1];
+      check(`${tag} 三位数行号也在自己那一列里、仍逐行对齐（${lgGutter && lgGutter.count} 行；末号 ${lastNum}；槽内容宽 ${lgGutter && lgGutter.contentW}；最宽的行号“${widestNum && widestNum.text}”占 ${widestNum && widestNum.w}）`,
+        !!lg && !!lgGutter && lgGutter.count === LONG_GUTTER_LINES.length
+        && lgGutter.boxes.length === LONG_GUTTER_LINES.length
+        && lgGutter.boxes.every((box) => box.h <= lgGutter.lineH + 1)
+        && lgGutter.boxes.every((box) => box.w <= lgGutter.contentW + 1)
+        && lastNum === String(LONG_GUTTER_LINES.length)
+        && lg.rows.length === LONG_GUTTER_LINES.length
+        && lg.rows.every((r) => r.num !== null && Math.abs(r.top - r.numTop) <= 1),
+        JSON.stringify(lgGutter && { lineH: lgGutter.lineH, contentW: lgGutter.contentW,
+          clientW: lgGutter.clientW, lastNum, boxes: lgGutter.boxes,
+          offsets: lg.rows.map((r) => [r.top, r.numTop]) }));
       check(`${tag} 代码横向滚动时行号不跟着跑（滚到 ${c115 && c115.js && c115.js.scrollFrozen && c115.js.scrollFrozen.scrolled}，行号槽横坐标动 ${(() => {
         const f = c115 && c115.js && c115.js.scrollFrozen;
         return f ? Math.round(Math.abs(f.after - f.before) * 100) / 100 : 'n/a';
