@@ -27,6 +27,9 @@
    折到下一行（`description: …; suited` + 缩进一行的 `to complex …`），这不是非法 YAML。
    插件在启动时要读它做冲突检查；读不了就整条跳过，于是「学习模式」会从模式选择器里消失。
    所以多行 plain 标量也做成**显式开启**的能力（`plainScalarContinuation`）。
+   同一批文件里还有双引号标量用行尾反斜杠续行的写法（`"…\\` 换行 + 缩进一行的 `…"`，
+   见 issue #220）：PyYAML 读出来是首尾相接的一串，而本解析器只拿到当前行、
+   见到行尾的 `\` 就报「双引号标量以反斜杠结尾」。这条也做成显式开启（`quotedScalarContinuation`）。
 
    这几类构造还会**交叉**：DSH 设置页的 graph-memory 三项写成 `!!js >-`（标签 + 块标量），
    所以「带标签的块标量」也按同一条路读——先剥标签认出块头，正文读完再按 `tags` 的口径取值，
@@ -55,6 +58,13 @@ export interface YamlParseOptions {
    * 学习文件仍按默认关闭：那边宁可炸，也不要静默把两行折成一个值。
    */
   plainScalarContinuation?: boolean;
+  /**
+   * 允许双引号标量的「行尾反斜杠 + 缩进续行」（`"x\` 换行 `  y"` 读成 `xy`）。
+   * 省略＝见到行尾反斜杠照旧报「双引号标量以反斜杠结尾」。
+   * 为什么单独一个开关：续行是**行**级别的信息，只开 plain 续行并不代表调用方
+   * 允许引号跨行；学习文件仍按默认关闭，那边宁可炸，也不要静默把两行拼成一个值。
+   */
+  quotedScalarContinuation?: boolean;
   /** 允许**一对**文档标记（开头的 `---`、结尾的 `...`）；省略＝见到就报错（一个文件只解析一个文档）。 */
   documentMarkers?: boolean;
 }
@@ -64,6 +74,7 @@ let active: YamlParseOptions = {};
 function tagsMode(): YamlTags | undefined { return active.tags; }
 function blockScalarsEnabled(): boolean { return active.blockScalars === true; }
 function plainScalarContinuationEnabled(): boolean { return active.plainScalarContinuation === true; }
+function quotedScalarContinuationEnabled(): boolean { return active.quotedScalarContinuation === true; }
 
 /** 这一次解析的**原始行**（含空行与整行注释，行尾的 \r 已归一）。块标量要按原文取，
     而下面的行索引刻意丢掉了空行与注释行，所以这里单独留一份。 */
@@ -336,6 +347,11 @@ function readQuoted(text: string, start: number, line: SourceLine, file: string)
       i++;
       continue;
     }
+    if (ch === '\n') {
+      // 拼进来的跨行文本里只有「`\` + 换行」是支持的续行；别的换行按 YAML 要折成空格，
+      // 本解析器没实现——宁可报错，也不要把它当正文原样塞进值里（形如 `"a` 换行 `b"`）。
+      fail(file, line, i + 1, line.raw, '双引号标量里的换行只支持行尾反斜杠续行');
+    }
     if (ch === '"') return { value: out, next: i + 1 };
     if (ch === '\\') {
       // 显式写成 string | undefined：越界时 text[i + 1] 就是 undefined，下面的分支靠它兜住
@@ -357,8 +373,10 @@ function readQuoted(text: string, start: number, line: SourceLine, file: string)
         continue;
       }
       if (esc === '\n') {
-        // YAML 的续行转义：\ 加换行等于把这个标量接下去。本解析器按行处理，走不到这里。
+        // YAML 的续行转义：`\` 加换行等于把这个标量接下去。单行的 readQuoted 走不到这里；
+        // 只有 foldQuotedLines 把下一行拼进来时才会。按 YAML 的口径，续行行首的缩进空白随之去掉。
         i += 2;
+        while (i < text.length && (text[i] === ' ' || text[i] === '\t')) i++;
         continue;
       }
       fail(file, line, i + 1, line.raw, `不认识的转义 \\${esc}`);
@@ -366,6 +384,45 @@ function readQuoted(text: string, start: number, line: SourceLine, file: string)
     out += ch;
     i++;
   }
+}
+
+/** 双引号标量在这一行里是不是已经闭合了：`\` 后面那个字符一律跳过（`\"`、`\\` 都不收尾，
+ *  `\xNN` 里跳过的 x 之后剩下的十六进制字符本来也不会是引号）。 */
+function doubleQuoteClosed(text: string): boolean {
+  for (let i = 1; i < text.length; i++) {
+    if (text[i] === '\\') { i++; continue; }
+    if (text[i] === '"') return true;
+  }
+  return false;
+}
+
+/**
+ * 把双引号标量的「行尾反斜杠 + 缩进续行」拼成一段文本（#220）。
+ * 为什么必须在**行**这一层做：readQuoted 只拿到当前行的文本，见到行尾的 `\` 只能报错，
+ * 而下一行长什么样只有这里（有 `line.line` 与 `sourceLines`）才知道。拼进来的换行交给
+ * readQuoted 的续行转义分支吃掉，续行行首的缩进空白也由它去掉。
+ * 中间几行必须各自以 `\` 结尾才算合法续行；否则原样返回，让 readQuoted 照老规矩报
+ * 「引号没有闭合」——这条路径只在 `quotedScalarContinuation` 打开时才有，默认仍报错。
+ */
+function foldQuotedLines(text: string, line: SourceLine, file: string): { text: string; nextLine: number } {
+  if (!quotedScalarContinuationEnabled() || text[0] !== '"') return { text, nextLine: line.line + 1 };
+  let joined = text;
+  let extra = 0;
+  while (!doubleQuoteClosed(joined)) {
+    if (!joined.endsWith('\\')) {
+      // extra > 0 说明上一轮已经拼进了续行：那一行不是以反斜杠结尾，也就不能继续拼下去。
+      // PyYAML 在这里会把换行折成空格，那是另一种语义；本解析器宁可炸，也不悄悄改值。
+      if (extra > 0) fail(file, line, 1, line.raw, '双引号标量的续行必须以行尾反斜杠结尾');
+      return { text, nextLine: line.line + 1 };
+    }
+    const raw = sourceLines[line.line + extra];
+    if (raw === undefined) {
+      fail(file, line, 1, line.raw, '引号没有闭合（续行只支持行尾反斜杠，且后面还要有收尾的引号）');
+    }
+    joined += `\n${raw}`;
+    extra++;
+  }
+  return { text: joined, nextLine: line.line + extra + 1 };
 }
 
 /** 拒绝所有「看起来像别的东西」的节点开头，附上人话解释。 */
@@ -670,6 +727,21 @@ function firstLineAtOrAfter(lines: SourceLine[], from: number, lineNo: number): 
   return i;
 }
 
+/**
+ * 读「一行里剩下的那部分」构成的值，顺带交回下一行的下标。
+ * 多一层的唯一原因是双引号标量的行尾反斜杠续行要先把后面几行拼进来（#220）；
+ * 没有续行时它就是把 parseInlineValue 包一下、`next` 落在 i + 1，与以前逐字一致。
+ */
+function readInlineValue(
+  lines: SourceLine[], line: SourceLine, index: number, text: string, column: number, file: string,
+): { value: unknown; next: number } {
+  const folded = foldQuotedLines(text, line, file);
+  return {
+    value: parseInlineValue(folded.text, line, column, file),
+    next: firstLineAtOrAfter(lines, index + 1, folded.nextLine),
+  };
+}
+
 function parseMapping(lines: SourceLine[], start: number, indent: number, file: string): [Record<string, unknown>, number] {
   const obj: Record<string, unknown> = {};
   let i = start;
@@ -706,8 +778,9 @@ function parseMapping(lines: SourceLine[], start: number, indent: number, file: 
         setKey(obj, key, folded.value);
         i = folded.next;
       } else {
-        setKey(obj, key, parseInlineValue(rest, line, line.indent + colon + 2, file));
-        i++;
+        const inline = readInlineValue(lines, line, i, rest, line.indent + colon + 2, file);
+        setKey(obj, key, inline.value);
+        i = inline.next;
       }
     }
   }
@@ -761,8 +834,9 @@ function parseSequence(lines: SourceLine[], start: number, indent: number, file:
       arr.push(folded.value);
       i = folded.next;
     } else {
-      arr.push(parseInlineValue(value, line, column + 1, file));
-      i++;
+      const inline = readInlineValue(lines, line, i, value, column + 1, file);
+      arr.push(inline.value);
+      i = inline.next;
     }
   }
   return [arr, i];
@@ -795,7 +869,11 @@ function parseChild(lines: SourceLine[], i: number, parentIndent: number, file: 
     // 打开后续行才可能是「孩子就是一个标量续行」，例如 `key:\n  第一行\n  第二行`。
     if (findKeyColon(line.content) < 0 && plainScalarContinuationEnabled()) {
       if (isPlainScalarStart(text)) return readPlainValue(lines, line, i, parentIndent, text, file);
-      return { value: parseInlineValue(text, line, line.indent + 1, file), next: i + 1 };
+      return readInlineValue(lines, line, i, text, line.indent + 1, file);
+    }
+    // 只开了引号续行时，孩子也可能是一段跨行的双引号标量（`key:\n  "x\` 换行 `  y"`）
+    if (findKeyColon(line.content) < 0 && quotedScalarContinuationEnabled() && text[0] === '"') {
+      return readInlineValue(lines, line, i, text, line.indent + 1, file);
     }
     const [value, next] = parseMapping(lines, i, line.indent, file);
     return { value, next };
@@ -814,7 +892,8 @@ function parseChild(lines: SourceLine[], i: number, parentIndent: number, file: 
  *
  * @param {string} text 文件全文
  * @param {YamlParseOptions} [options] 出错信息里要写的文件名；以及两份 cordis 配置才需要的
- *        `tags` / `blockScalars` / `plainScalarContinuation`（默认关闭，见文件头那段说明）
+ *        `tags` / `blockScalars` / `plainScalarContinuation` / `quotedScalarContinuation`
+ *        （默认关闭，见文件头那段说明）
  * @returns {unknown} 映射、序列或标量；空文档返回 null
  */
 export function parseYaml(text: string, options: YamlParseOptions = {}): unknown {
@@ -851,7 +930,7 @@ export function parseYaml(text: string, options: YamlParseOptions = {}): unknown
         fail(file, second, second.indent + 1, second.raw,
           '第一行既不是 key: value 也不是 "- " 列表项，本解析器不支持多行 plain 标量（YAML 会把续行折进同一个标量）');
       }
-      return parseInlineValue(head, first, first.indent + 1, file);
+      return readInlineValue(lines, first, 0, head, first.indent + 1, file).value;
     }
 
     let value;

@@ -127,6 +127,34 @@ test('块标量：| 保换行、> 折行，块后面还能接同级键', () => {
   ].join('\n'), opts), ['第一项', '第二项']);
 });
 
+test('双引号标量的行尾反斜杠续行：显式开启才认，默认仍报错（#220）', () => {
+  const opts = { quotedScalarContinuation: true };
+  // 最小复现：行尾的 `\` 表示「吃掉这个换行和下一行的缩进」，两截拼成一个词
+  assert.deepEqual(parseYaml('- a: "x\\\n    y"\n', opts), [{ a: 'xy' }]);
+  assert.deepEqual(parseYaml('a: "x\\\n  y\\\n  z"\n', opts), { a: 'xyz' });
+  // 下一行缩进多少都吃掉，不留空格
+  assert.deepEqual(parseYaml('a: "x\\\n      y"\n', opts), { a: 'xy' });
+  // 同一个值出现在别处也得走同一套路：列表项、嵌套键、键下一行才给值
+  assert.deepEqual(parseYaml('- "x\\\n  y"\n', opts), ['xy']);
+  assert.deepEqual(parseYaml('k:\n  a: "x\\\n    y"\n', opts), { k: { a: 'xy' } });
+  assert.deepEqual(parseYaml('k:\n  "x\\\n    y"\n', opts), { k: 'xy' });
+  assert.deepEqual(parseYaml('a: "x\\\r\n  y"\r\n', opts), { a: 'xy' });
+  // 收尾引号后面还能跟行尾注释
+  assert.deepEqual(parseYaml('a: "x\\\n  y" # 注释\n', opts), { a: 'xy' });
+  // 打开后也只放开「行尾反斜杠」这一种：不支持的跨行照旧当场报错，
+  // 没有静默折成空格（PyYAML 会折成空格，但那是另一种语义，不放宽）。
+  assert.throws(() => parseYaml('a: "x\n  y"\n', opts), /引号没有闭合/);
+  // 续行链断在空行上（那一行没有反斜杠）：PyYAML 会折成 'x\ny'，本解析器明确报错
+  assert.throws(() => parseYaml('a: "x\\\n\n  y"\n', opts), /续行必须以行尾反斜杠结尾/);
+  assert.throws(() => parseYaml('a: "x\\\n  y\n', opts), /续行必须以行尾反斜杠结尾/);
+  // 默认关闭：与以前一字不差的报错，学习文件的口径没被放宽
+  assert.throws(() => parseYaml('- a: "x\\\n    y"\n'), /双引号标量以反斜杠结尾/);
+  assert.throws(() => parseYaml('- a: "x\\\n    y"\n', { blockScalars: true }), /双引号标量以反斜杠结尾/);
+  // 单行双引号与各种转义不受影响
+  assert.deepEqual(parseYaml('a: "x\\n\\t\\x41"\n'), { a: 'x\n\tA' });
+  assert.deepEqual(parseYaml('a: "值是 # 不是注释"\n'), { a: '值是 # 不是注释' });
+});
+
 test('多行 plain 标量：显式开启后按 YAML 折行规则读，默认仍报错', () => {
   const opts = { plainScalarContinuation: true };
   assert.deepEqual(parseYaml('a: first line\n  second line\n', opts), { a: 'first line second line' });

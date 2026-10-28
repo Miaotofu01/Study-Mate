@@ -350,9 +350,14 @@ function scanDocument(text: string): PatchDocument & { contentLines: Array<{ sta
  * 学习文件那边 `---` / `...` 一律报错（一个文件只解析一个文档），但补丁文件是 DSH 的配置，
  * 带标记是合法的。只抹**开头这一个**与**末尾这一个**：中间再来一个就是真的多文档，那时
  * 解析器会照旧报错——多文档必须失败，不能只读第一份。
+ *
+ * 这里开 `quotedScalarContinuation`：#220 那种「双引号标量 + 行尾反斜杠续行」是**合法 YAML**
+ * （PyYAML 读作把换行与续行缩进吃掉），而补丁文件是**用户的**配置，写法不受我们约束。默认关着
+ * 是为了学习文件（我们自己的格式，越界即报错），但用户配置里遇到合法写法还报错就是我们的 bug。
  */
 const PATCH_PARSE_OPTIONS = {
   tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
+  quotedScalarContinuation: true,
 } as const;
 
 /** 解析并校验一份补丁文件；返回解析出的内容与插入位置。 */
@@ -648,6 +653,8 @@ export function installPreset(options: InstallPresetOptions): PresetRegistration
         .filter(key => key in source).map(key => [key, source[key]]));
       const plugins = parseYaml(preset.agent, {
         file: preset.file, tags: 'expression', blockScalars: true, plainScalarContinuation: true,
+        // 同 `PATCH_PARSE_OPTIONS`：预设文件是用户可改的 YAML，#220 那种合法写法不该报错。
+        quotedScalarContinuation: true,
       });
       if (!Array.isArray(plugins)) throw new Error(`${preset.id} 预设必须是插件列表；未修改配置`);
       // #138：StudyMate 的原生工具住在**主预设（学习模式）的作用域**里，不在 profile 根上——
