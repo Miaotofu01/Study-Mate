@@ -138,6 +138,10 @@ const TERM_LINES = [
   '# 上面这段是回放，输出原样保留',
 ];
 
+/** 一行号会变成三位数的长代码块：行号槽的宽度若被写死，第 100 行起的一个号会被折成两行，
+    整列于是比代码还高、逐行对不上代码行。这块是那条回归的靶子（不是取景主角，语言用 `text`）。 */
+const LONG_BLOCK_LINES = Array.from({ length: 120 }, (_, i) => `const v${i + 1} = ${i + 1};`);
+
 /** 一个不含空格的长标识符 + 一条长 URL：两者都能把正文列顶宽，除非正文允许在词内断行。 */
 const LONG_TOKEN = 'studymate_pane_widths_v1_override_for_narrow_canvas_scenarios_' + 'x'.repeat(24);
 const LONG_URL = 'https://example.com/docs/very/long/path/that/never/breaks/' + 'segment-'.repeat(6) + 'end';
@@ -199,6 +203,9 @@ function subjectFiles(dirName, { slug, name, touched }) {
     '::: quiz 理解 锚点：变量的比喻', ':::', '',
     '::: quiz 应用 锚点：作用域的嵌套', ':::', '',
     '::: quiz 分析 锚点：绑定的时机', ':::', '',
+    // 行号槽宽度的靶子块：120 行，号到三位数。排在最末——前面那几条读数（按语言取块、
+    // 题目标记滚进视口）量的位置都不受它影响，回归也不会因为夹具变长而误伤。
+    '```text', ...LONG_BLOCK_LINES, '```', '',
   ].join('\n');
 
   return {
@@ -453,6 +460,7 @@ const PROBE = `(() => {
         const codePre = block.querySelector('pre');
         const gutter = block.querySelector('.smb-code__gutter');
         const nums = gutter ? Array.from(gutter.children) : [];
+        const gutterStyle = gutter ? getComputedStyle(gutter) : null;
         const lines = codePre ? Array.from(codePre.querySelectorAll('.smb-code__line')) : [];
         const bodyBg = getComputedStyle(block).backgroundColor;
         const rows = lines.map((el, i) => {
@@ -489,6 +497,36 @@ const PROBE = `(() => {
             count: nums.length, ariaHidden: gutter.getAttribute('aria-hidden'),
             userSelect: getComputedStyle(gutter).userSelect,
             nums: nums.map((n) => n.textContent.trim()),
+            // 一个号只占一行：宽度写死时，三位数的号会被折成两行，高度翻倍、整列比代码还高
+            numHeights: nums.map((n) => px(n.getBoundingClientRect().height)),
+            lineH: (() => {
+              const lh = parseFloat(getComputedStyle(gutter).lineHeight);
+              return Number.isFinite(lh) ? px(lh) : null;
+            })(),
+            // 号装不装得进槽：槽的内容宽（扣掉左右内边距）与每个号**实际占的宽**。
+            // 前两条（高度、逐行对齐）断的是折行之后的后果；「一个号比槽的内容宽还宽」
+            // 才是病根——装不进槽，浏览器只能把它按字符折下去。
+            contentW: px(gutter.clientWidth - parseFloat(gutterStyle.paddingLeft)
+              - parseFloat(gutterStyle.paddingRight)),
+            // w 是号现在**真的**占多宽（折行时只覆盖最宽的那一列字——两位数的号折成
+            // 上下两行时这里只有 6.6px，比槽还窄）；singleW 是它**不折行时要占多宽**：
+            // 复制一份设成 nowrap、绝对定位脱离文档流量一次，量完就摘掉。装不装得进槽看
+            // 的是后者，前者留着当读数——只看前者会假绿。
+            boxes: nums.map((n) => {
+              const range = document.createRange();
+              range.selectNodeContents(n);
+              const probe = n.cloneNode(true);
+              probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;';
+              gutter.appendChild(probe);
+              const singleW = px(probe.getBoundingClientRect().width);
+              probe.remove();
+              return {
+                text: n.textContent.trim(),
+                h: px(n.getBoundingClientRect().height),
+                w: px(range.getBoundingClientRect().width),
+                singleW,
+              };
+            }),
           } : null,
           rows,
           // #116：框内的解释槽。判据是「贴着它解释的那一块」——几何上四边都在 .smb-code
@@ -531,6 +569,8 @@ const PROBE = `(() => {
       return {
         js: describe(pick('js')),
         term: describe(pick('term')),
+        // 行号槽宽度的靶子：120 行、号到三位数的那一块
+        long: describe(pick('text')),
         // ::: code 那一块由**槽元素反查**它所属的块（不按语言取——语言可能与围栏撞车）
         slot: (() => {
           const el = document.querySelector('.smb-code__caption');
@@ -784,6 +824,38 @@ try {
       check(`${tag} 行的文本逐字保留（\`> \` 前缀不删、行首空白不动）`,
         !!term && JSON.stringify(term.rows.map((r) => r.text)) === JSON.stringify(TERM_LINES),
         JSON.stringify(term && term.rows.map((r) => r.text)));
+      /* 行号槽的宽度：号到三位数时也不许折行（写死 2.5ch 就是在这里坏的——一个号变两行，
+         整列比代码还高、逐行对不上）。判据是「每个号的高度 = 一行行高」＋逐行仍对齐。 */
+      const long = c115 && c115.long;
+      const numSingleLine = !!long && !!long.gutter && long.gutter.numHeights.length === LONG_BLOCK_LINES.length
+        && long.gutter.numHeights.every((h) => long.gutter.lineH && h > 0 && h <= long.gutter.lineH * 1.2);
+      check(`${tag} 行号到三位数（${LONG_BLOCK_LINES.length} 行）时一个号仍只占一行`,
+        numSingleLine,
+        JSON.stringify(long && long.gutter && {
+          last: long.gutter.nums[long.gutter.nums.length - 1], lineH: long.gutter.lineH,
+          heights: Array.from(new Set(long.gutter.numHeights)),
+        }));
+      check(`${tag} 行号到三位数时仍逐行对齐、末号是 ${LONG_BLOCK_LINES.length}`,
+        !!long && !!long.gutter && long.gutter.count === LONG_BLOCK_LINES.length
+        && long.gutter.nums[LONG_BLOCK_LINES.length - 1] === String(LONG_BLOCK_LINES.length)
+        && long.rows.length === LONG_BLOCK_LINES.length
+        && long.rows.every((r) => r.num !== null && Math.abs(r.top - r.numTop) <= 1),
+        JSON.stringify(long && long.gutter && { count: long.gutter.count,
+          last: long.gutter.nums[long.gutter.nums.length - 1],
+          offsets: long.rows.slice(0, 3).map((r) => [r.top, r.numTop]) }));
+      /* 第三条直接对准病根：不是「折完还对不对齐」，而是「号到底装不装得进槽」。
+         判据看的是 boxes 里的 singleW（不折行时要占多宽）——折行的号在 DOM 里只占最宽
+         那一列字（旧 CSS 实测两位数折成上下两行、range 只剩 6.6px），拿「现在占的宽」
+         去比槽宽会假绿；量「装不折行时得多宽」才真的对准「槽够不够」。 */
+      check(`${tag} 行号实际占宽不超过行号槽内容宽（装得进槽）`,
+        !!long && !!long.gutter && long.gutter.boxes.length > 0
+        && long.gutter.boxes.every((b) => b.singleW <= long.gutter.contentW + 1
+          && b.w <= long.gutter.contentW + 1),
+        JSON.stringify(long && long.gutter && {
+          contentW: long.gutter.contentW,
+          widest: long.gutter.boxes.reduce((a, b) => (b.singleW > a.singleW ? b : a),
+            { text: null, w: 0, singleW: 0 }),
+        }));
       check(`${tag} 块整宽对齐正文列、也不是贴左边一条（块外框 ${term && term.boxW} ≈ 列 ${column}）`,
         !!term && term.boxW <= column + 1 && term.boxW >= column - 1,
         `${term && term.boxW} vs ${column}`);
