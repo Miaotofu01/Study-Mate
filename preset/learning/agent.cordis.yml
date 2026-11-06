@@ -201,8 +201,9 @@
       name: '@deepseek-ai/dsh-tool-subagent-control'
 
     # 0.2.2 把 `list_agents` 并进了主包（上面那行自己注册），`./list-agents` 子路径不再导出；
-    # 更老的宿主（0.2.1 及以前）只认这条子路径行。**留着行、按能否解析决定停用**：宿主把
-    # 「有一行起不来」判成整条预设 broken——0.2.2 上硬挂这条，学习模式整张卡片都显示加载失败。
+    # 0.2.1 及以前反过来只认这条子路径行（#248 直接删掉了它，旧宿主会因此少一个工具）。
+    # 所以**留着行、按能否解析决定停用**：宿主把「有一行起不来」判成整条预设 broken——
+    # 0.2.2 上硬挂这条，学习模式整张卡片都显示加载失败。
     # 判据与加载器同一套（`createRequire(baseUrl)`），解析不到才停用；0.2.1 上照常启用。
     - id: tool-subagent-list-agents
       name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
