@@ -84,14 +84,31 @@ const PROBE_TOOLS = [
     body: 'write-mastery' },
 ];
 
+// 0.2.2 起工具执行器换成了「一批调用」：`execute({calls:[{id,name,arguments}]})` 回
+// `{results:[{callId,result}]}`；之前是单次 `{callId,name,arguments}` 直接回结果本身。
+// 判据取宿主有没有 `@deepseek-ai/dsh-tool-executor-native`（0.2.2 新加的包），不看版本号。
+let batchToolDispatch = false;
+
 function dispatch(tools, name, args = {}, agent) {
+  const signal = new AbortController().signal;
+  const callId = `studymate-probe-${name}`;
+  if (!batchToolDispatch) {
+    return tools.execute({
+      callId,
+      name,
+      arguments: args,
+      signal,
+      // 这里的 `agent` 必须是一条**真 agent**，不是 scope key（见 openLearningAgent）。
+      ...agent === undefined ? {} : { agent },
+    });
+  }
   return tools.execute({
-    callId: `studymate-probe-${name}`,
-    name,
-    arguments: args,
-    signal: new AbortController().signal,
-    // 这里的 `agent` 必须是一条**真 agent**，不是 scope key（见 openLearningAgent）。
+    calls: [{ id: callId, name, arguments: JSON.stringify(args) }],
+    signal,
     ...agent === undefined ? {} : { agent },
+  }).then((settled) => {
+    assert.equal(settled.results.length, 1, '探针一次只发一个调用');
+    return settled.results[0].result;
   });
 }
 
@@ -149,21 +166,6 @@ async function probeNativeTools(app, home, presetTools, presetScope) {
   const leaked = STUDY_TOOL_NAMES.filter((name) => app.ctx.tools.get(name) !== undefined);
   assert.deepEqual(leaked, [], `这些原生工具不该注册在 profile 根上：${leaked.join('、')}`);
 
-  // ② 学习模式预设作用域里九个工具按名字都查得到
-  assert.ok(presetTools, '学习模式预设里要拿得到那条工具面行的 ctx');
-  assert.ok(presetScope, '学习模式预设那条插件行要拿得到自己的 scope（不带 scope 读的是全局视图）');
-  const missing = STUDY_TOOL_NAMES.filter((name) => !presetTools.get(name, presetScope));
-  assert.deepEqual(missing, [], `这些原生工具没注册：${missing.join('、')}`);
-
-  // 模型真正看到的那一份：只白名单 name / description / parameters，且说明只有一句
-  const exposed = presetTools.schemas(presetScope).filter((schema) => STUDY_TOOL_NAMES.includes(schema.name));
-  assert.equal(exposed.length, STUDY_TOOL_NAMES.length, '九个工具都要出现在模型侧投影里');
-  for (const schema of exposed) {
-    assert.deepEqual(Object.keys(schema).sort(), ['description', 'name', 'parameters'],
-      `${schema.name} 的模型侧投影多了字段`);
-    assert.ok(!schema.description.includes('\n'), `${schema.name} 的说明里有换行`);
-  }
-
   // ── 隔离的探针工作区 ──────────────────────────────────────────────────
   const root = fs.mkdtempSync(path.join(home, 'studymate-probe-'));
   const probeDsh = path.join(root, '.dsh');
@@ -183,10 +185,26 @@ async function probeNativeTools(app, home, presetTools, presetScope) {
   // 真 dispatch 要一条真「学习模式」会话（见 openLearningAgent 那段）：工作区先造好再建会话，
   // 会话的 `meta.cwd` 就是它。
   const agent = await openLearningAgent(app, probeWorkspace);
+  // ② 学习模式预设作用域里九个工具按名字都查得到。老宿主给的是预设那一层的 tools + scope；
+  //    0.2.1 起没有那个公开句柄，改看这条会话：`view(agent)` 把链上各层合成一份，
+  //    模型拿到的就是它（`schemas(agent)`）。
+  const tools = presetTools ?? app.ctx.tools;
+  const scope = presetScope ?? agent;
+  const missing = STUDY_TOOL_NAMES.filter((name) => !tools.get(name, scope));
+  assert.deepEqual(missing, [], `这些原生工具没注册：${missing.join('、')}`);
+
+  // 模型真正看到的那一份：只白名单 name / description / parameters，且说明只有一句
+  const exposed = tools.schemas(scope).filter((schema) => STUDY_TOOL_NAMES.includes(schema.name));
+  assert.equal(exposed.length, STUDY_TOOL_NAMES.length, '九个工具都要出现在模型侧投影里');
+  for (const schema of exposed) {
+    assert.deepEqual(Object.keys(schema).sort(), ['description', 'name', 'parameters'],
+      `${schema.name} 的模型侧投影多了字段`);
+    assert.ok(!schema.description.includes('\n'), `${schema.name} 的说明里有换行`);
+  }
   const outcome = {};
   try {
     // ① 工作区摘要（结构化，不是 exit code）
-    const context = await dispatch(presetTools, 'studymate_workspace_context', {}, agent);
+    const context = await dispatch(tools, 'studymate_workspace_context', {}, agent);
     assert.equal(context.isError, false, textOf(context));
     const summary = context.value;
     assert.equal(summary.workspace.path, probeWorkspace);
@@ -209,12 +227,12 @@ async function probeNativeTools(app, home, presetTools, presetScope) {
     //     DSH_HOME。探针不碰真实 DSH HOME，所以由 harness（外层测试）读那份配置逐条断言。
 
     // ② 两个校验器也走真 dispatch：参数校验 + 输出契约（含嵌套 oneOf）都由宿主盖章
-    const curriculum = await dispatch(presetTools, 'studymate_validate_curriculum', { paths: ['demo'] }, agent);
+    const curriculum = await dispatch(tools, 'studymate_validate_curriculum', { paths: ['demo'] }, agent);
     assert.equal(curriculum.isError, false, textOf(curriculum));
     assert.equal(curriculum.value.blocking, false, textOf(curriculum));
     assert.deepEqual(curriculum.value.reports.map((report) => report.kind),
       ['curriculum', 'progress', 'subject']);
-    const lesson = await dispatch(presetTools, 'studymate_validate_lesson', { paths: ['demo/lessons/0001-var.md'] }, agent);
+    const lesson = await dispatch(tools, 'studymate_validate_lesson', { paths: ['demo/lessons/0001-var.md'] }, agent);
     assert.equal(lesson.isError, false, textOf(lesson));
     assert.equal(lesson.value.reports[0].node.id, 'var');
     assert.deepEqual(lesson.value.reports[0].anchors.map((anchor) => anchor.resolution), ['resolved']);
@@ -228,7 +246,7 @@ async function probeNativeTools(app, home, presetTools, presetScope) {
     //     用真 React + 真 Chrome 在 file:// 下验）。探针的 DSH_HOME 是隔离的，所以解析顺序里
     //     的 profile 那一跳指不到东西，这里显式给一个候选根。
     process.env.STUDYMATE_REACT_DIR = fakeReactRoot(root);
-    const exported = await dispatch(presetTools, 'studymate_export', {}, agent);
+    const exported = await dispatch(tools, 'studymate_export', {}, agent);
     assert.equal(exported.isError, false, textOf(exported));
     assert.equal(exported.value.settled, true, textOf(exported));
     assert.equal(exported.value.status, '完成', textOf(exported));
@@ -504,6 +522,10 @@ async function probe() {
     const isModern = modern(manifest.version);
     const requireRuntime = createRequire(path.join(runtime, 'package.json'));
     const fromRuntime = name => import(pathToFileURL(requireRuntime.resolve(`@deepseek-ai/${name}`)).href);
+    try {
+      requireRuntime.resolve('@deepseek-ai/dsh-tool-executor-native');
+      batchToolDispatch = true;
+    } catch { batchToolDispatch = false; }
     const publicBoot = path.join(runtime, 'lib/profile-boot.js');
     const bootFile = fs.existsSync(publicBoot) ? publicBoot : path.join(runtime, 'lib',
       fs.readdirSync(path.join(runtime, 'lib')).find(file => /^profile-boot-.+\.js$/.test(file)));
@@ -558,25 +580,44 @@ async function probe() {
         scope = createScope(app.ctx, {});
         await app.ctx.agentPresets.mount(scope.ctx, 'learning');
       }
-      const mounts = registry.livePresetMounts(app.ctx.fiber).filter(mount => mount.presetId === 'learning');
-      assert.equal(mounts.length, 1, 'There must be exactly one learning composition');
-      if (isModern) assert.deepEqual(await registry.auditRows(mounts[0].tree), { failed: [], pending: [] });
-      else assert.deepEqual(await registry.inactiveRows(mounts[0].tree), []);
       const workflowName = `@deepseek-ai/dsh-workflow-${atLeastRelease(manifest.version, 1, 6) ? 'ptc' : 'worker-thread'}`;
-      const workflow = [...mounts[0].tree.entries()].find(entry => entry.options.name === workflowName);
-      assert.equal(workflow?.fiber?.state, 2, 'The correct workflow must be Active');
-      // #138：那条工具面行**只在原生安装时加**——声明式安装下本包不在 profile 里，模块解析不到，
-      // 而一行起不来会让整条预设 broken（真 DSH 里验过）。所以按插件是否真的加载来判。
-      if (nativeEntries.length === 1 && !nativeEntries[0].disabled) {
-        const toolsEntry = [...mounts[0].tree.entries()]
-          .find(entry => entry.options.name === '@yunmiao/studymate/learning-preset');
-        assert.ok(toolsEntry, '「学习模式」预设里要有那条工具面行（@yunmiao/studymate/learning-preset）');
-        assert.equal(toolsEntry.fiber?.state, 2, '那条工具面行要 Active');
-        presetTools = toolsEntry.fiber?.ctx?.get?.('tools');
-        // 那条行自己的 scope：`view(scope)` 把「全局层 + 链上每个祖先层 + own」合起来看，
-        // 所以从这一层读才读得到它注册的九个工具（从全局视图读永远是空的）。
-        const { scopeOf } = await fromRuntime('dsh-scope');
-        presetScope = scopeOf(toolsEntry.fiber?.ctx) ?? scopeOf(mounts[0].fiber?.ctx);
+      // 0.2.1 起注册表不再导出 `livePresetMounts`（0.2.0-rc.2 还有）。新宿主改读服务自己的
+      // `compositionInventory()`：每行带 `moduleName` 与 `fiberState`（2 = Active），就是宿主
+      // 给界面看的那份，断言的是同一件事。`resolve()` 已经给出 `broken`，行列状态只是复核。
+      if (typeof registry.livePresetMounts === 'function') {
+        const mounts = registry.livePresetMounts(app.ctx.fiber).filter(mount => mount.presetId === 'learning');
+        assert.equal(mounts.length, 1, 'There must be exactly one learning composition');
+        if (isModern) assert.deepEqual(await registry.auditRows(mounts[0].tree), { failed: [], pending: [] });
+        else assert.deepEqual(await registry.inactiveRows(mounts[0].tree), []);
+        const workflow = [...mounts[0].tree.entries()].find(entry => entry.options.name === workflowName);
+        assert.equal(workflow?.fiber?.state, 2, 'The correct workflow must be Active');
+        // #138：那条工具面行**只在原生安装时加**——声明式安装下本包不在 profile 里，模块解析不到，
+        // 而一行起不来会让整条预设 broken（真 DSH 里验过）。所以按插件是否真的加载来判。
+        if (nativeEntries.length === 1 && !nativeEntries[0].disabled) {
+          const toolsEntry = [...mounts[0].tree.entries()]
+            .find(entry => entry.options.name === '@yunmiao/studymate/learning-preset');
+          assert.ok(toolsEntry, '「学习模式」预设里要有那条工具面行（@yunmiao/studymate/learning-preset）');
+          assert.equal(toolsEntry.fiber?.state, 2, '那条工具面行要 Active');
+          presetTools = toolsEntry.fiber?.ctx?.get?.('tools');
+          // 那条行自己的 scope：`view(scope)` 把「全局层 + 链上每个祖先层 + own」合起来看，
+          // 所以从这一层读才读得到它注册的九个工具（从全局视图读永远是空的）。
+          const { scopeOf } = await fromRuntime('dsh-scope');
+          presetScope = scopeOf(toolsEntry.fiber?.ctx) ?? scopeOf(mounts[0].fiber?.ctx);
+        }
+      } else {
+        const compositions = (await app.ctx.agentPresets.compositionInventory())
+          .filter(item => item.id === 'learning');
+        assert.equal(compositions.length, 1, 'There must be exactly one learning composition');
+        const workflow = compositions[0].rows.find(row => row.moduleName === workflowName);
+        assert.equal(workflow?.fiberState, 2, 'The correct workflow must be Active');
+        // 新宿主不再公开「预设那一层」的句柄；原生工具换到**会话作用域**里读——
+        // 模型看到的那份正是 `schemas(agent)`，由下面 probeNativeTools 建起来的那条会话给。
+        if (nativeEntries.length === 1 && !nativeEntries[0].disabled) {
+          const toolsRow = compositions[0].rows
+            .find(row => row.moduleName === '@yunmiao/studymate/learning-preset');
+          assert.ok(toolsRow, '「学习模式」预设里要有那条工具面行（@yunmiao/studymate/learning-preset）');
+          assert.equal(toolsRow.fiberState, 2, '那条工具面行要 Active');
+        }
       }
     }
     // #68：原生工具在真 DSH 里的注册与调用。
@@ -602,16 +643,20 @@ async function probe() {
     result = { ok: false, error: redact(error.stack || error),
       studyMateWarnings: warnings.filter((text) => text.includes('StudyMate')).slice(0, 5) };
   } finally {
+    // 结果**先**同步写到 fd 1，再去收尾。0.2.2 起 desktop 档位只由 Electron 应用独占
+    // （CLI 直接 boot 会报 "profile "desktop" is managed exclusively by the Electron application"），
+    // 探针用 `resolvedProfile` 绕过了那道检查，但宿主自己的 shutdown 收不了尾、5s 后
+    // `forceExit`——marker 若排在它后面就永远发不出去，桌面档位那条会一直「Probe produced no result」。
+    // 结果本身已经算完，收尾失败只影响退出码，不影响 marker 里的判据。
+    fs.writeSync(1, `${marker}${JSON.stringify(result)}\n`);
     try {
       if (scope) await scope.dispose();
       if (app) await app.shutdown.shutdown(process.exitCode || 0);
     } catch (error) {
       process.exitCode = 1;
-      result = { ok: false, error: redact(error.stack || error), previous: result };
     }
     clearTimeout(timer);
   }
-  stdout(`${marker}${JSON.stringify(result)}\n`);
 }
 
 function fixture(t, scenario, profileName = 'web') {

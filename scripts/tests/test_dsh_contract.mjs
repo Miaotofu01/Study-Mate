@@ -12,7 +12,7 @@
    它要一份真宿主安装（`STUDYMATE_DSH_PACKAGE`，与 `test:dsh` 同一个环境变量），所以
    不进默认门禁、也不进 CI（CI 没有宿主包）。没设这个变量时整份跳过。
 
-   三件事，缺一不可：
+   四件事，缺一不可：
 
      1. **扫**：`registerStudyMate` 的十五个原生工具 + 答疑预设那条插件行注册的只读工具，
         逐个把 `parameters` 与 `output.schema` 交给宿主的 `assertSupportedJsonSchema`；
@@ -22,15 +22,23 @@
         agentOptions / setup`）住在宿主的 `createWebhookSession` 里。这里读那份源码，断言
         它**仍然**这么写——宿主改了契约，这里先红，然后再去改我们的调用。同一份字段清单在
         `test_host_ask_session.mjs`（默认门禁）里按「我们递出去的键」钉了一遍。
+     4. **预设行的模块解析**：宿主删掉一个子路径导出（0.2.2 的
+        `dsh-tool-subagent-control/list-agents`，见 #244），硬挂着的行会让**整条预设**
+        被判 broken。这里用宿主安装根上的 `createRequire().resolve` 逐行解析；解析不到的
+        必须带停用条件、并且按宿主的方式求值为 true。
    ───────────────────────────────────────────────────────────────────────── */
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 
+import { parseYaml } from '../../lib/yaml.ts';
 import { fakeContext, loadTools } from './fixtures/tools.mjs';
+
+const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 /** 与 `test:dsh`（`test_dsh_runtime.mjs`）同一个环境变量：已安装的 DSH 包目录（只读）。 */
 const runtime = process.env.STUDYMATE_DSH_PACKAGE;
@@ -171,4 +179,79 @@ test('宿主契约：参考实现的 createWebhookSession 仍然带着那四个�
     + '先读那份源码确认新契约，再改 lib/ask/session.ts 与 test_host_ask_session.mjs');
   assert.ok(source.includes('meta') && source.includes('agentPreset'),
     '参考调用里 meta.agentPreset 不见了：按预设建会话的契约可能已经换了写法');
+});
+
+/* ── 四条：预设里每一行的模块都得解析得到 ────────────────────────────────────
+
+   2026-11-06（#244）：DSH 0.2.2-rc.1 把 `list_agents` 并进主包，删掉了
+   `@deepseek-ai/dsh-tool-subagent-control/list-agents` 这个子路径导出；预设里那一行
+   还硬挂着，加载器解析不到，宿主就把「有一行起不来」判成**整条预设 broken**——
+   「学习模式」在预设列表里显示加载失败，老会话也跟着恢复不了。
+
+   判据就是加载器那一套：宿主安装根上 `createRequire(...).resolve(名字)`。
+   解析不到的行走两步：必须带 `disabled` 表达式（没有＝整条预设会被判 broken），
+   并且用宿主自己的求值方式（`with (ctx) { return eval(expr) }`，`baseUrl` 指宿主安装根）
+   求一遍必须是 true。这样既抓「宿主删了东西」，也抓「条件写反了、永远不停用」。
+
+   自己的两条子路径（`@yunmiao/studymate/*`）跳过：它们由安装器写进 profile，宿主安装根上
+   本来就没有，不是宿主契约的一部分。 */
+const PRESET_SOURCES = [
+  ['学习模式', path.join('preset', 'learning', 'agent.cordis.yml')],
+  ['答疑模式', path.join('preset', 'qa', 'agent.cordis.yml')],
+];
+
+/** 预设是「行 + 分组」的两层结构；分组行（`cordis:group`）只展开孩子，自己不挂模块。 */
+function presetRows(rows, found = []) {
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row === null || typeof row !== 'object') continue;
+    if (row.group === true) presetRows(row.config, found);
+    else if (typeof row.name === 'string') found.push(row);
+  }
+  return found;
+}
+
+test('宿主契约：预设里每一行的模块都解析得到，解析不到的必须自带停用条件', async t => {
+  if (!requireRuntime(t)) return;
+
+  const anchor = path.join(runtime, 'package.json');
+  const hostRequire = createRequire(anchor);
+  const resolvable = (name) => {
+    try { hostRequire.resolve(name); return true; } catch { return false; }
+  };
+  // 与 cordis 的 `!!js` 求值同一条路：`with (ctx) { return eval(expr) }`。
+  const evaluate = (expression) => {
+    const run = new Function('ctx', `with (ctx) { return eval(${JSON.stringify(expression)}); }`);
+    return run({ baseUrl: anchor });
+  };
+
+  const problems = [];
+  for (const [label, relative] of PRESET_SOURCES) {
+    const file = path.join(ROOT, relative);
+    const rows = presetRows(parseYaml(fs.readFileSync(file, 'utf8'), {
+      file, tags: 'expression', blockScalars: true, plainScalarContinuation: true,
+    }));
+    assert.ok(rows.length > 0, `${label}的预设一行都没读出来：${relative}`);
+    for (const row of rows) {
+      if (row.name.startsWith('cordis:') || row.name.startsWith('@yunmiao/studymate')) continue;
+      if (resolvable(row.name)) continue;
+      const expression = row.disabled !== null && typeof row.disabled === 'object' && '__jsExpr' in row.disabled
+        ? row.disabled.__jsExpr
+        : undefined;
+      if (expression === undefined) {
+        problems.push(`${label} ${row.id}: ${row.name} 在这个宿主上解析不到，又没带停用条件——`
+          + '整条预设会被判 broken（见 #244）');
+        continue;
+      }
+      let disabled;
+      try { disabled = evaluate(expression); } catch (error) {
+        problems.push(`${label} ${row.id}: 停用条件求值失败——${error.message}`);
+        continue;
+      }
+      if (disabled !== true) {
+        problems.push(`${label} ${row.id}: ${row.name} 解析不到，停用条件却给了 ${String(disabled)}——`
+          + '条件写反了或者判据不对');
+      }
+    }
+  }
+  assert.deepEqual(problems, []);
 });
