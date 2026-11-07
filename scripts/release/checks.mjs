@@ -408,6 +408,10 @@ const groups = {
       // 只读工具进本作用域）、只读工具的外部行为（给得出正文与题 / 给得出「没有」/ 不写盘）
       // 与占位符守卫。真宿主认不认这条配置只在真 DSH 里证得了——那一条不进默认门禁。
       'scripts/tests/test_host_qa_preset.mjs',
+      // 插件页：Host 状态路由的四种状态（没配置 / 没科目 / 正常 / 一门坏）与 workspace 优先级；
+      // 客户端两个官方槽位、subject 自过滤、zh/en 字典与状态投影。
+      'scripts/tests/test_host_status.mjs',
+      'scripts/tests/test_client_plugin_page.mjs',
     ],
   },
   '--static': {
@@ -424,6 +428,9 @@ const groups = {
       // #83：文档悬空引用（README 与 docs/** 的相对链接、行内代码里的仓库路径）。
       // 拆除之后最容易留下的就是"文档还指着已删文件"，人眼扫不可靠。
       'scripts/tests/test_docs_references.mjs',
+      // 插件页元信息：图标（包内相对路径 / 类型 / 256 KiB）、locale 标题简介（en 起字典）、
+      // 详情文档与图片、files/exports 是否真的把这几样发出去。失败形态全都不出声，所以钉成断言。
+      'scripts/tests/test_plugin_metadata.mjs',
       // #189：共享记忆改名 `MEMORY.yaml`。**否定式**扫全仓「旧名一处都不许留」——
       // 规则可达性套件只断「必须出现」，钉不住「不许再出现」，改名这类横扫的残留
       //（某份夹具、某条注释、模板说明表里的旧路径）靠人眼扫不出来。

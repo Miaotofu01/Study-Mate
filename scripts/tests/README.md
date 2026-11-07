@@ -51,6 +51,9 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_preset_install.mjs` | 预设注册（`lib/preset.ts`，原 Python 安装助手的**行为移植**）：版本边界各自独立、补丁形态保留与幂等（注释、`!!js`、CRLF、流式列表）、暂存与 `--patch-output`、手动声明/越界 profile/坏清单/符号链接一律在写盘之前失败、`--bundle` 给 DSH 的 config 形状 |
 | `test_interaction_state.mjs` | Codex 交互断点（`openai/studymate/scripts/interaction_state.mjs`）：工作区必须显式且初始化过、revision 栅栏、锁不等待、迟到/重复/已消费的 question id 不能推进、空回答不算、坏了的状态不许覆盖、提交成功但锁清不掉时如实报成功 |
 | `test_docs_references.mjs` | 文档悬空引用：README 与 `docs/**` 里的相对链接、行内代码里的仓库路径都必须在盘上真实存在（历史设计文档显式列为例外） |
+| `test_plugin_metadata.mjs` | 插件页元信息：`package.json.icon`（包内相对路径 / SVG-PNG-JPEG-WebP / ≤ 256 KiB / 在 `files` 里）、`locale/en.json` + `zh.json` 的 `meta.title`/`meta.description`（宿主从 en 起字典，只加 zh 时中文标题不生效）、`meta.detail`（**可选**：两份都不写，正文回退 README——DSH Desktop 按语言选 README.zh/README.en；有就校验路径/文档/图片与打包），以及反证（宿主会拒的形状这里也必须拒） |
+| `test_host_status.mjs` | 插件页状态路由（`GET /api/studymate/status`）：没配置 / 没科目 / 正常 / 一门坏四种状态都 **200**，只回事实与计数（不带课件/题库/作答）；原生 config 的 workspace 优先于安装器 YAML，来源标 `plugin-config` / `installer-config` |
+| `test_client_plugin_page.mjs` | 插件页的客户端契约：`plugins.row.config` / `plugins.detail.section` 两个官方槽位（name/key/id/order/locale）、`subject` 自过滤（别人的 bundle、row、无 `pkg` 的 item 都不画）、配置卡与状态卡的**卡片契约**（border / radius / 下沉 body / 标题 / facts、保存/重置在卡后）、状态投影与空态/错误态，以及 zh/en 字典键集、en 零 CJK、占位符一致、每个 `t(key)` 都有定义 |
 | `test_skill_frontmatter.mjs` | 12 份技能的调用面：5 个角色两个面都关、总控与 6 个协议两个面都开、布尔值形状 |
 | `test_skill_visibility.mjs` | 技能与工具的**可见边界**（#87）：照宿主的项目根规则走一遍当前 cwd，断言 `<项目根>/.dsh/skills` 与 `<项目根>/.agents/skills` 上什么都没有（工作目录在本仓库里也成立）；入方向——预设只在一个地方声明技能目录、那份声明指向包内真实存在的 12 份技能、占位符丢了安装时就抛；外加一条**特征化**断言把「工具/面板仍注册在 profile 根、不在预设作用域」这个与 spec 的已知偏离钉住（偏离记录在[工程约束](../规范/工程约束.md) §二「技能与工具的可见边界」） |
 | `test_statuses.mjs` | 三档词表与 schema 逐字对齐、旧六档只活在读侧映射里、题型/课型词表与 schema 一致，以及 `lib/library.ts` 那份字面量与 `lib/core/rules.ts` 不分叉 |

@@ -22,7 +22,7 @@ import path from 'node:path';
 import { resolveWorkspace } from '../workspace.ts';
 import { mergeDomains } from './domains.ts';
 import type { WatchDomain } from './domains.ts';
-import { publishChange, setWatchBackend } from './notice.ts';
+import { publishChange, setWatchBackend, watchBackend } from './notice.ts';
 import {
   capabilityObserver, isFsWatchService, nodeObserver, startTreeWatch,
 } from './tree.ts';
@@ -228,6 +228,29 @@ export function registerWatch(ctx: WatchContext): void {
     }
   } catch (error) {
     warn(`注册文件监听失败：${messageOf(error)}`);
+  }
+}
+
+/**
+ * 插件页状态：监听是否真的在跑、用的哪个后端。只回事实，不暴露目录内容。
+ */
+export function watchState(): { watching: boolean; backend: string } {
+  return { watching: watching !== null, backend: watchBackend() };
+}
+
+/**
+ * 原生 config 换了 workspace 之后重挂监听。
+ *
+ * `ensureWatching` 是进程级单例、启动时按当时的 workspace 起（见上），所以换目录后
+ * 旧树上的观察者不会报新目录的变化——必须停掉再起。拆与起都不抛：坏掉的监听不该把
+ * 插件页或原生工具带走。
+ */
+export function restartWatching(ctx: WatchContext): void {
+  try {
+    stopWatching();
+    ensureWatching(ctx);
+  } catch (error) {
+    warn(`重挂文件监听失败：${messageOf(error)}`);
   }
 }
 

@@ -2,6 +2,7 @@
   "name": "@yunmiao/studymate",
   "version": "2.0.4",
   "description": "StudyMate learning skills and lesson engine for DeepSeek Harness, Google Antigravity, Codex and ChatGPT Work.",
+  "icon": "docs/images/icon.png",
   "type": "module",
   "bin": {
     "studymate": "bin/studymate.mjs"
@@ -11,6 +12,7 @@
     "./learning-preset": "./bin/learning-preset.mjs",
     "./qa-preset": "./bin/qa-preset.mjs",
     "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "dsh": {
@@ -35,6 +37,7 @@
     "lib/**",
     "bin/*.mjs",
     "bin/*.ts",
+    "locale/*.json",
     "openai/studymate/.codex-plugin/plugin.json",
     "openai/studymate/scripts/*.mjs",
     "openai/studymate/skills/learning-system/references/*.md",
@@ -95,7 +98,16 @@
     "access": "public"
   },
   "devDependencies": {
+    "@deepseek-ai/schemastery": "~3.19.0",
     "@types/node": "^24.19.1",
     "typescript": "^7.0.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "~3.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
   }
 }
