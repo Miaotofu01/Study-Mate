@@ -164,6 +164,7 @@ test('npm publication waiting tolerates delayed registry visibility and reports 
 
 const tarballFiles = ['package.json', 'README.md', 'cordis.patch.yml', 'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs',
   'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'bin/openai-interaction.mjs', 'bin/openai-skill-ui.mjs',
+  'locale/en.json', 'locale/zh.json', 'docs/images/icon.png',
   'openai/studymate/scripts/interaction_state.mjs', 'openai/studymate/skills/learning-system/references/codex-interaction.md',
   'openai/studymate/.codex-plugin/plugin.json', 'docs/使用/Codex与ChatGPT.md',
   'preset/learning/agent.cordis.yml', 'preset/qa/agent.cordis.yml', 'lib/preset.ts', 'preset/skills/learning-system/SKILL.md',
@@ -195,6 +196,12 @@ test('tarball inspection rejects personal workspace, credentials and incomplete 
     assert.throws(() => validatePack({ ...pack, files: [...pack.files, { path }] }), /Unexpected or private/);
   }
   assert.throws(() => validatePack({ ...pack, files: pack.files.filter(file => !file.path.startsWith('schemas/')) }), /missing schemas/);
+  // 插件页的标题/简介/详情来自 locale/：整层丢了是**静默**退回包名与 README，所以前缀与基线 en 都要认。
+  assert.throws(() => validatePack({ ...pack, files: pack.files.filter(file => !file.path.startsWith('locale/')) }), /missing locale/);
+  for (const required of ['locale/en.json', 'locale/zh.json', 'docs/images/icon.png']) {
+    assert.throws(() => validatePack({ ...pack, files: pack.files.filter(file => file.path !== required) }),
+      error => error.message === `npm tarball is missing ${required}.`);
+  }
   // #197：lab 骨架的代表文件丢了要被认出来（前缀检查抓不住「templates/ 里还有别的文件」）
   assert.throws(() => validatePack({ ...pack, files: pack.files.filter(file => file.path !== 'templates/lab/0000-示例/check.sh') }),
     error => error.message === 'npm tarball is missing templates/lab/0000-示例/check.sh.');

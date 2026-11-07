@@ -24,12 +24,29 @@
 //   · 注册**只**走 lib/tools/index.ts 那两个入口（宿主层 `registerStudyMateHost`、
 //     agent 层 `registerStudyMateTools`）。#69/#70/#73/#74 往那个清单里各加一行，
 //     不在这个文件里写具体工具。
+import z from '@deepseek-ai/schemastery';
+
 import { installPayload } from './studymate.mjs';
 
+/* ── 原生配置（插件页「配置」那一页）────────────────────────────────────
+   `workspace` 走**原生 config**：安装器写进 `studymate-config.yaml` 的那份仍是默认值，
+   这里只在用户从插件页选了目录之后覆盖它（优先级判断只有 `lib/workspace.ts` 那一处）。
+   `.volatile()` 让改完立即生效、不重载插件；文件监听的重挂由 `loader/volatile-update` 负责。
+
+   schemastery 由宿主提供（与 `dsh-win-pwsh7` 同一条），包内只把它列为可选 peer +
+   devDependency（本地类型检查与测试用）；`bin/dsh-plugin.mjs` 把这个 `Config` 原样转出去
+   ——宿主读的是那个入口，不是本文件。 */
+export const Config = z.object({
+  workspace: z.string()
+    .description('学习工作区目录（绝对路径）；留空则沿用安装器写入的 studymate-config.yaml')
+    .volatile(),
+});
+
 /* ── 宿主的插件上下文 ────────────────────────────────────────────────────
-   本仓库不依赖宿主的类型包（Host 半是零依赖的插件），所以按**用到的成员**描述形状：
-   全部可选——缺 connection 的组合（headless / tui）与更老的宿主都会传进来一个残缺的 ctx，
-   下面每一步都在运行期自己判一次。 */
+   本仓库不依赖宿主的**类型包**；运行期只有一件宿主同款的 schema 库
+   （`@deepseek-ai/schemastery`，给原生 `Config` 用，动态 import、拿不到就退回无表单）。
+   其余按**用到的成员**描述形状：全部可选——缺 connection 的组合（headless / tui）与更老的
+   宿主都会传进来一个残缺的 ctx，下面每一步都在运行期自己判一次。 */
 
 /** `ctx.get('profileContext')` 给的 profile 归属。 */
 interface ProfileContext {
@@ -61,6 +78,8 @@ interface PluginContext {
   agentPresets?: { register: (config: unknown) => unknown };
   effect?: (fn: () => unknown, description?: string) => unknown;
   inject?: (names: string[], handler: (ctx: InjectedContext) => void) => unknown;
+  /** cordis 事件（这里只订阅 `loader/volatile-update`：原生 config 变更后的收尾）。 */
+  on?: (event: string, handler: (...args: unknown[]) => void) => unknown;
 }
 
 export const inject = ['agentPresets'];
@@ -69,7 +88,26 @@ const LIBRARY_PATH = '/api/studymate/library';
 const ASSET_PATH = '/api/studymate/asset';
 const REFERENCE_PATH = '/api/studymate/reference';
 
-export async function apply(ctx: PluginContext): Promise<void> {
+export async function apply(
+  ctx: PluginContext,
+  config?: { workspace?: { get?: () => unknown } },
+): Promise<void> {
+  // 原生 config 的 workspace 优先于安装器 YAML：接上 volatile 引用（优先级只在 lib/workspace.ts）。
+  try {
+    const { setWorkspaceOverride } = await import('../lib/workspace.ts');
+    const workspaceRef = config?.workspace;
+    setWorkspaceOverride(() => {
+      try {
+        const value = workspaceRef && typeof workspaceRef.get === 'function' ? workspaceRef.get() : undefined;
+        return typeof value === 'string' ? value : '';
+      } catch {
+        return '';
+      }
+    });
+  } catch {
+    // 拷出去跑的边界夹具没有 lib/：没有 override 就等于沿用安装器配置
+  }
+
   const profile = ctx.get?.('profileContext');
   if (!profile || !ctx.agentPresets?.register) {
     console.warn('StudyMate：当前 DSH 不支持原生插件接口（需要 0.1.7-alpha.1+）；已跳过原生加载。旧版请使用 npx -y @yunmiao/studymate@latest install。');
@@ -111,6 +149,34 @@ export async function apply(ctx: PluginContext): Promise<void> {
   } catch (error) {
     // 宿主层挂不上不该拖垮插件：预设与阅读端数据通路照常
     console.warn(`StudyMate：宿主层注册失败（任务类型/路由/监听）。${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  // ── 插件页：只读状态（`GET /api/studymate/status`）──────────────────────
+  // 与阅读端那几条同一种姿势：各自 `inject(['connection'])`，缺了不挂、挂不上只警告。
+  // watch 状态由这里（bin 域）读，lib 域不 import watch——否则 lib → watch → lib 成环。
+  void import('../lib/status-route.ts')
+    .then(async (module) => {
+      const { watchState } = await import('../lib/watch/index.ts');
+      module.registerStatusRoute(ctx, { profile: profile?.name, watch: () => watchState() });
+    })
+    .catch((error) => { console.warn(`StudyMate：插件页状态路由挂不上。${error instanceof Error ? error.message : String(error)}`); });
+
+  // 原生 config 的 workspace 是 volatile：值本身立即生效（resolveWorkspace 每次现读），
+  // 但文件监听是启动时按旧目录起的——变了就停掉再起，否则页面收不到新目录的变更推送。
+  // 事件只带「哪些路径变了」，我们只关心顶层 `workspace`。
+  if (typeof ctx.on === 'function') {
+    try {
+      ctx.on('loader/volatile-update', (paths: unknown) => {
+        const changed = Array.isArray(paths)
+          && paths.some((entry) => Array.isArray(entry) && entry[0] === 'workspace');
+        if (!changed) return;
+        void import('../lib/watch/index.ts')
+          .then(({ restartWatching }) => restartWatching(ctx as unknown as Parameters<typeof restartWatching>[0]))
+          .catch(() => { /* 监听重挂失败只影响推送，状态与阅读照常 */ });
+      });
+    } catch {
+      // 没有 on 的宿主：改完工作区后变更推送要等重启（状态本身实时）
+    }
   }
 
   /* 错误信封的唯一构造点（`lib/route-envelope.ts`）。**动态取**：这个文件会被

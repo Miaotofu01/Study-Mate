@@ -178,16 +178,16 @@ export function validatePack(pack) {
   // 根级的 README* / LICEN[CS]E* / COPYING* **不归 files 管**：npm 一定会把它们打进 tarball
   // （`files: ["lib"]` 的包照样进 README.en.md，npm 11 实测）。白名单认下这批——npm 塞进来、
   // 我们自己拦下，发布就卡在打包校验这步：#155（README.en.md，2026-10-10 的 Release）。
-  const allowed = /^(?:package\.json|cordis\.patch\.yml|CHANGELOG\.md|README(?:\.[^/]*)?|LICEN[CS]E(?:\.[^/]*)?|COPYING(?:\.[^/]*)?|bin\/[^/]+\.(?:mjs|ts)|lib\/.+|openai\/studymate\/(?:\.codex-plugin\/plugin\.json|scripts\/[^/]+\.mjs|skills\/learning-system\/references\/[^/]+\.md)|antigravity\/studymate\/.+|preset\/(?:learning|qa|skills)\/.+|schemas\/[^/]+\.json|templates\/.+|docs\/(?:[^/]+\/)*[^/]+\.md|docs\/images\/.+)$/;
+  const allowed = /^(?:package\.json|cordis\.patch\.yml|CHANGELOG\.md|README(?:\.[^/]*)?|LICEN[CS]E(?:\.[^/]*)?|COPYING(?:\.[^/]*)?|bin\/[^/]+\.(?:mjs|ts)|lib\/.+|locale\/[^/]+\.json|openai\/studymate\/(?:\.codex-plugin\/plugin\.json|scripts\/[^/]+\.mjs|skills\/learning-system\/references\/[^/]+\.md)|antigravity\/studymate\/.+|preset\/(?:learning|qa|skills)\/.+|schemas\/[^/]+\.json|templates\/.+|docs\/(?:[^/]+\/)*[^/]+\.md|docs\/images\/.+)$/u;
   for (const file of files) {
     if (!allowed.test(file) || /(^|\/)(?:\.env(?:\..*)?|\.npmrc|\.git|node_modules|__pycache__|\.DS_Store|[^/]+\.pyc)(\/|$)/.test(file)) {
       throw new Error(`Unexpected or private file in npm tarball: ${file}`);
     }
   }
-  for (const required of ['cordis.patch.yml', 'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs', 'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'lib/preset.ts', 'openai/studymate/.codex-plugin/plugin.json', 'docs/使用/Codex与ChatGPT.md', 'preset/learning/agent.cordis.yml', 'preset/qa/agent.cordis.yml', 'preset/skills/learning-system/SKILL.md', 'antigravity/studymate/plugin.json']) {
+  for (const required of ['cordis.patch.yml', 'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs', 'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'lib/preset.ts', 'locale/en.json', 'locale/zh.json', 'docs/images/icon.png', 'openai/studymate/.codex-plugin/plugin.json', 'docs/使用/Codex与ChatGPT.md', 'preset/learning/agent.cordis.yml', 'preset/qa/agent.cordis.yml', 'preset/skills/learning-system/SKILL.md', 'antigravity/studymate/plugin.json']) {
     if (!files.includes(required)) throw new Error(`npm tarball is missing ${required}.`);
   }
-  for (const prefix of ['schemas/', 'templates/', 'docs/']) if (!files.some(file => file.startsWith(prefix))) throw new Error(`npm tarball is missing ${prefix}.`);
+  for (const prefix of ['schemas/', 'templates/', 'docs/', 'locale/']) if (!files.some(file => file.startsWith(prefix))) throw new Error(`npm tarball is missing ${prefix}.`);
   // #197：工作区数据骨架里的 lab 骨架——出题角色照抄的那一份（判分入口固定叫 check.sh，
   // 两个运行入口各一个）。前缀检查只证明 `templates/` 里有东西，认不出骨架整份丢了；
   // 这几个文件是它的代表。

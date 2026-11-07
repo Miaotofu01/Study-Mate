@@ -76,7 +76,10 @@ const DOMAIN_RULES = {
   // 会发网络请求的域（`node:net` / `node:tls`）——`builtin: true` 就是为它这条边的。
   // **不 import tools**：`registerStudyTool` 由注册点注入，与实验域同一个姿势。
   reach:  { allow: ['core', 'lib', 'host'], builtin: true, package: false },
-  bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'lab', 'watch', 'export', 'ask'], builtin: true, package: false },
+  // 唯一的宿主 peer 例外：`@deepseek-ai/schemastery` 是宿主提供的可选 peer（`Config` schema），
+  // 不随包发（package.json 的 peerDependenciesMeta 标 optional，tarball 里没有 node_modules）。
+  // 白名单只给 bin 这一条边，别处仍然零外部包。
+  bin:    { allow: ['core', 'lib', 'tools', 'tasks', 'lab', 'watch', 'export', 'ask'], builtin: true, package: false, packages: ['@deepseek-ai/schemastery'] },
   client: { allow: [], builtin: false, package: false },  // 浏览器侧单文件：只与模块加载器打交道
   // katex 域（#91）：**随包发的第三方 dist**（`lib/katex/**`：KaTeX 的 min.js / min.css /
   // woff2 字体 / LICENSE、README），不是我们的源码——它没有 import、没有导出，唯一的读者是
@@ -348,9 +351,11 @@ function checkArchitecture(graph) {
   if (forbiddenBuiltin.length) {
     violations.push(`这些域不许 import node:*：${few(forbiddenBuiltin.map(use => `${use.from} → ${use.specifier}`))}`);
   }
-  const forbiddenPackage = graph.externals.filter(use => use.kind === 'package' && !DOMAIN_RULES[use.domain]?.package);
+  const forbiddenPackage = graph.externals.filter(use => use.kind === 'package'
+    && !DOMAIN_RULES[use.domain]?.package
+    && !(DOMAIN_RULES[use.domain]?.packages ?? []).includes(use.specifier));
   if (forbiddenPackage.length) {
-    violations.push(`这些域不许 import 外部包（本包零运行时依赖）：${few(forbiddenPackage.map(use => `${use.from} → ${use.specifier}`))}`);
+    violations.push(`这些域不许 import 外部包（本包零自带运行时依赖；宿主 peer 白名单见 DOMAIN_RULES.packages）：${few(forbiddenPackage.map(use => `${use.from} → ${use.specifier}`))}`);
   }
 
   const escaped = graph.dataLoads.filter(load => load.kind === 'escape' || load.kind === 'unresolved');
@@ -519,6 +524,17 @@ test('反证：模块级成环会被抓出来', () => {
     ],
   );
   assert.match(checkArchitecture(graph).join('\n'), /模块级依赖成环/);
+});
+
+test('外部包白名单：只有登记过的宿主 peer 能过，其他包仍然拒绝', () => {
+  const allowed = synthetic(['bin/a.ts'], [], {
+    externals: [{ from: 'bin/a.ts', domain: 'bin', specifier: '@deepseek-ai/schemastery', kind: 'package' }],
+  });
+  assert.deepEqual(checkArchitecture(allowed), []);
+  const denied = synthetic(['bin/a.ts'], [], {
+    externals: [{ from: 'bin/a.ts', domain: 'bin', specifier: 'lodash', kind: 'package' }],
+  });
+  assert.match(checkArchitecture(denied).join('\n'), /不许 import 外部包/);
 });
 
 test('反证：node:*、外部包、扫描根之外的源码、散落的 require 都会被拦下', () => {

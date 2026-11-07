@@ -15,6 +15,22 @@ const plugin = pathToFileURL(path.join(root, 'bin/dsh-plugin.ts')).href;
 // scripts/、templates/、schemas/、docs/、preset/skills 都在这个目录里。
 const packageSkills = path.join(root, 'preset', 'skills').split(path.sep).join('/');
 
+/**
+ * 把宿主提供的 schemastery 连同它的依赖放进目标 node_modules。
+ *
+ * 插件入口是静态 `import z from '@deepseek-ai/schemastery'`（与 dsh-win-pwsh7 同一条：
+ * 宿主的模块解析只在加载期生效，运行期 dynamic import 拿不到）。这两个边界夹具里没有
+ * 宿主，所以按宿主的形状补出来；真实 profile 里这些包在宿主那一层。
+ */
+function provideHostSchema(target) {
+  for (const name of ['@deepseek-ai/schemastery', '@deepseek-ai/cosmokit', '@standard-schema/spec']) {
+    const from = path.join(root, 'node_modules', ...name.split('/'));
+    const to = path.join(target, 'node_modules', ...name.split('/'));
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.cpSync(from, to, { recursive: true });
+  }
+}
+
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-bundle-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -214,10 +230,22 @@ test('registry failures are reported without stopping the host or deleting learn
   assert.equal(fs.readFileSync(data, 'utf8'), 'my learning data');
 });
 
+test('public entry re-exports the plugin contract (inject / apply / Config)', async () => {
+  // 宿主读的是 package.json exports["."] 那个 `.mjs`，不是 `bin/dsh-plugin.ts`：
+  // Config 只写在 TS 里、入口忘了转出去，schema 就永远读不到（Config provider 报 absent）。
+  const entry = await import(pathToFileURL(path.join(root, 'bin', 'dsh-plugin.mjs')).href);
+  assert.deepEqual(entry.inject, ['agentPresets']);
+  assert.equal(typeof entry.apply, 'function');
+  assert.equal(typeof entry.Config, 'function', '入口没有转出 Config：插件页的配置表单不会出现');
+});
+
 test('an install-boundary failure is reported without stopping the host or creating installation files', t => {
   const f = fixture(t);
   const copied = path.join(f.dir, 'dsh-plugin.ts');
   fs.copyFileSync(path.join(root, 'bin/dsh-plugin.ts'), copied);
+  // schemastery 由宿主提供（`dsh-win-pwsh7` 同一条静态 import）：这里把宿主那份放进临时
+  // 目录，模拟「宿主在，但插件边界缺 lib/」；var 的 installPayload 桩照旧制造边界失败。
+  provideHostSchema(f.dir);
   // 把插件入口单独拷到一个没有 lib/ 的目录里：顶层静态 import 会让这条用例在解析期就崩，
   // 这里的桩模拟的是**安装器边界失败**（老宿主 / 缺依赖），插件该只警告、不建安装文件。
   fs.writeFileSync(path.join(f.dir, 'studymate.mjs'),
@@ -271,6 +299,8 @@ test('packed npm package loads CLI and both plugins inside node_modules', t => {
   const archive = path.join(packs, JSON.parse(packed.stdout)[0].filename);
   passed(npm(['install', archive, '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false'], consumer));
   const installed = path.join(consumer, 'node_modules', '@yunmiao', 'studymate');
+  // 同样的道理：schemastery 由宿主提供，消费者目录里补一份（真实 profile 里它在宿主那一层）。
+  provideHostSchema(consumer);
   // 必须是 npm 解出来的真实 node_modules 路径；源码检出与 npm link 都复现不了这次故障。
   assert.equal(fs.lstatSync(installed).isSymbolicLink(), false);
   const version = JSON.parse(fs.readFileSync(path.join(installed, 'package.json'), 'utf8')).version;
@@ -285,8 +315,9 @@ test('packed npm package loads CLI and both plugins inside node_modules', t => {
   fs.writeFileSync(path.join(foreign, 'index.ts'), 'export const marker: number = 1;\n');
   run(['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
-    import { inject, apply } from '@yunmiao/studymate';
+    import { inject, apply, Config } from '@yunmiao/studymate';
     assert.deepEqual(inject, ['agentPresets']);
+    assert.equal(typeof Config, 'function', '打包件的入口没有转出 Config');
     const configs = [], effects = [], warnings = [];
     console.warn = message => warnings.push(String(message));
     let disposed = 0;
