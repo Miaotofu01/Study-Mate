@@ -27,15 +27,33 @@ import { fileURLToPath } from 'node:url';
 
 import { dshHome } from '../workspace.ts';
 
-/** 四个要搬进导出目录的第三方构建（相对各自包的根）。 */
-const FILES = {
-  react: ['react', ['cjs', 'react.production.js']],
-  reactDomCore: ['react-dom', ['cjs', 'react-dom.production.js']],
-  reactDom: ['react-dom', ['cjs', 'react-dom-client.production.js']],
-  // react-dom-client 顶上就向模块表要 scheduler，而 scheduler 是 react-dom 的**嵌套依赖**
-  // （顶层不一定有）——所以它也从 react-dom 自己的位置解析，别在候选根上另找一份。
-  scheduler: ['react-dom', ['node_modules', 'scheduler', 'cjs', 'scheduler.production.js']],
-} as const;
+type ResolveFrom = (from: NodeJS.Require) => string;
+
+/** 包根目录用 `require.resolve('<包>/package.json')` 定位：pnpm / 嵌套布局下也准。 */
+function packageFile(pkg: string, ...tail: string[]): ResolveFrom {
+  return (from) => path.join(path.dirname(from.resolve(`${pkg}/package.json`)), ...tail);
+}
+
+/**
+ * scheduler 是 react-dom 的依赖，但落到磁盘哪一层取决于装法：npm 与 pnpm 的默认（public-hoist）
+ * 都把它提升到**顶层** node_modules，react-dom/node_modules 下通常没有；只有嵌套布局才有自己
+ * 的一份。所以别手拼 `react-dom/node_modules/scheduler/...`（那样扁平安装必然被当成缺件），
+ * 而是从 react-dom 包根出发 require 解析，让 Node 自己先看 react-dom/node_modules、再上溯到
+ * 顶层——两种布局都能命中。
+ */
+function schedulerFile(from: NodeJS.Require): string {
+  const reactDomDir = path.dirname(from.resolve('react-dom/package.json'));
+  const fromReactDom = createRequire(path.join(reactDomDir, 'noop.cjs'));
+  return path.join(path.dirname(fromReactDom.resolve('scheduler/package.json')), 'cjs', 'scheduler.production.js');
+}
+
+/** 四个要搬进导出目录的第三方构建。 */
+const FILES: Record<'react' | 'reactDomCore' | 'reactDom' | 'scheduler', ResolveFrom> = {
+  react: packageFile('react', 'cjs', 'react.production.js'),
+  reactDomCore: packageFile('react-dom', 'cjs', 'react-dom.production.js'),
+  reactDom: packageFile('react-dom', 'cjs', 'react-dom-client.production.js'),
+  scheduler: schedulerFile,
+};
 
 export interface ReactSources {
   /** 从哪个根解析出来的（诊断与产物清单用；**不进产物**）。 */
@@ -77,10 +95,8 @@ function resolveIn(root: string): Omit<ReactSources, 'root' | 'source'> | null {
   try {
     const from = createRequire(path.join(root, 'noop.cjs'));
     const found: Record<string, string> = {};
-    for (const [key, [pkg, tail]] of Object.entries(FILES) as [keyof typeof FILES, readonly [string, readonly string[]]][]) {
-      // 包根目录用 require.resolve('<包>/package.json') 定位：pnpm / 嵌套布局下也准
-      const packageDir = path.dirname(from.resolve(`${pkg}/package.json`));
-      const file = path.join(packageDir, ...tail);
+    for (const [key, resolveFile] of Object.entries(FILES) as [keyof typeof FILES, ResolveFrom][]) {
+      const file = resolveFile(from);
       if (!fs.existsSync(file)) return null;
       found[key] = file;
     }
