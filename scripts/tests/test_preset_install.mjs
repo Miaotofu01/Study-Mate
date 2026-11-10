@@ -33,10 +33,11 @@ const BEGIN = '# BEGIN STUDYMATE LEARNING PRESET';
 const BUNDLE = '@yunmiao/studymate';
 
 /** 解析一份补丁文件。`!!js` 与 CordisLoader 同口径：读成它的标量原文。
-    生产代码（`PATCH_PARSE_OPTIONS`）还开了多行 plain 标量：DSH 设置页会把长文本折行。 */
+    生产代码（`PATCH_PARSE_OPTIONS`）还开了多行 plain / 引号标量：DSH 设置页与宿主写盘都会把长文本折行。 */
 function parsed(file) {
   return parseYaml(fs.readFileSync(file, 'utf8'), {
     file, tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
+    quotedScalarContinuation: true,
   });
 }
 
@@ -278,6 +279,28 @@ test('profile 补丁里的多行 plain 标量不挡注册（DSH 0.2.1 设置页�
   const rows = parsed(f.patch);
   assert.equal(rows[0].config.models[0].description,
     'Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost.');
+  assert.ok(rows.some((row) => row.insert?.[0]?.config?.id === 'learning'));
+});
+
+test('profile 补丁里的跨行双引号标量不挡注册（宿主按 80 列重排写盘的真实形态）', (t) => {
+  const f = fixture(t);
+  // 宿主用 yaml 库默认的 lineWidth 80 写盘：长的双引号字符串被折到下一行，仍是合法 YAML。
+  fs.writeFileSync(f.patch, [
+    '- id: some-plugin',
+    '  config:',
+    '    hover:',
+    '      textZh: "Nov 4–15: Receive a daily free allowance. Subscribers enjoy higher',
+    '        quotas."',
+    '',
+  ].join('\n'), 'utf8');
+  const bundled = invoke(f, { version: null, bundle: true });
+  assert.equal(bundled.mode, 'bundle');
+  assert.equal(bundled.config.id, 'learning');
+  const declared = invoke(f);
+  assert.equal(declared.mode, 'declarative');
+  const rows = parsed(f.patch);
+  assert.equal(rows[0].config.hover.textZh,
+    'Nov 4–15: Receive a daily free allowance. Subscribers enjoy higher quotas.');
   assert.ok(rows.some((row) => row.insert?.[0]?.config?.id === 'learning'));
 });
 
