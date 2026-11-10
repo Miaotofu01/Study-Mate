@@ -231,7 +231,7 @@ const PROBE = `(() => {
       const el = q('[role="progressbar"]');
       return el ? { label: el.getAttribute('aria-label'), now: el.getAttribute('aria-valuenow'), min: el.getAttribute('aria-valuemin'), max: el.getAttribute('aria-valuemax') } : null;
     })(),
-    motionOptions: qa('.smb-select option').map((one) => one.value),
+    motionOptions: qa('.smb-motionpick .smb-select option').map((one) => one.value),
     motionLabel: q('.smb-motionpick') ? q('.smb-motionpick').getAttribute('title') : null,
     bodyText: document.body.innerText.slice(0, 400),
     pageText: document.body.innerText,
@@ -244,7 +244,7 @@ const CONTRAST_TARGETS = {
     ['.smb-course__goal', '主页·科目目标（二级文字）'],
     ['.smb-hero__sub', '主页·说明文字'],
     ['.smb-chip', '主页·状态 chip'],
-    ['.smb-select', '顶栏·动效档选择器'],
+    ['.smb-motionpick .smb-select', '顶栏·动效档选择器'],
   ],
   subject: [
     ['.smb-subhead__goal', '科目页·目标'],
@@ -340,6 +340,9 @@ try {
 
   /* 动效四档：切档 → 计算样式跟着变；系统偏好 → auto 落 reduced */
   await session.scene('reading-motion', async (ctx) => {
+    // 先把系统偏好钉成「不要求减少动效」：headless Chrome 在部分机器上默认报 reduce，
+    // 不钉的话「auto 取 full 时长」那条断言量到的是机器的偏好，而不是产品的默认行为。
+    await session.emulate({ reducedMotion: 'no-preference' });
     await ctx.navigate(fixture, { settle: 1200 });
     const read = `(() => {
       const root = document.querySelector('.smb-root');
@@ -352,7 +355,7 @@ try {
     const seen = { auto: await ctx.evaluate(read) };
     for (const level of ['full', 'reduced', 'off']) {
       await ctx.evaluate(`(() => {
-        const select = document.querySelector('.smb-select');
+        const select = document.querySelector('.smb-motionpick .smb-select');
         select.value = '${level}';
         select.dispatchEvent(new Event('change', { bubbles: true }));
       })()`);
@@ -368,7 +371,7 @@ try {
 
     // 系统说「减少动效」：auto 档要落到 reduced，显式档位不受影响
     await ctx.evaluate(`(() => {
-      const select = document.querySelector('.smb-select');
+      const select = document.querySelector('.smb-motionpick .smb-select');
       select.value = 'auto';
       select.dispatchEvent(new Event('change', { bubbles: true }));
     })()`);
@@ -377,7 +380,7 @@ try {
     const reduced = await ctx.evaluate(read);
     check('prefers-reduced-motion: reduce 时 auto 档落到 70ms', reduced.token === '70ms', JSON.stringify(reduced));
     await ctx.evaluate(`(() => {
-      const select = document.querySelector('.smb-select');
+      const select = document.querySelector('.smb-motionpick .smb-select');
       select.value = 'full';
       select.dispatchEvent(new Event('change', { bubbles: true }));
     })()`);
@@ -388,6 +391,51 @@ try {
       await ctx.evaluate(`window.localStorage.getItem('studymate.motion.v1')`) === 'full');
     await session.emulate({});   // 还原，别把偏好漏给后面的场景
     return { ...seen, reducedBySystem: reduced, forced };
+  });
+
+  /* 字号四档：切档 → 正文档跟着换、行高比不变、记在本地偏好里 */
+  await session.scene('reading-font', async (ctx) => {
+    await ctx.navigate(fixture, { settle: 1200 });
+    const read = `(() => {
+      const root = document.querySelector('.smb-root');
+      const style = getComputedStyle(root);
+      return {
+        attr: root.getAttribute('data-font'),
+        body: parseFloat(style.getPropertyValue('--smb-fs-body')),
+        line: parseFloat(style.getPropertyValue('--smb-lh-body')),
+        options: Array.from(document.querySelectorAll('.smb-fontpick option')).map((one) => one.value),
+      };
+    })()`;
+    const pick = async (level) => {
+      await ctx.evaluate(`(() => {
+        const select = document.querySelector('.smb-fontpick .smb-select');
+        select.value = '${level}';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      })()`);
+      await ctx.sleep(200);
+      return ctx.evaluate(read);
+    };
+    const seen = { standard: await ctx.evaluate(read) };
+    check('四档齐全（standard / medium / large / xlarge）',
+      JSON.stringify(seen.standard.options) === JSON.stringify(['standard', 'medium', 'large', 'xlarge']),
+      JSON.stringify(seen.standard.options));
+    for (const level of ['medium', 'large', 'xlarge', 'standard']) seen[level] = await pick(level);
+    check('档位写到了 data-font 上',
+      seen.medium.attr === 'medium' && seen.large.attr === 'large' && seen.xlarge.attr === 'xlarge',
+      JSON.stringify([seen.medium.attr, seen.large.attr, seen.xlarge.attr]));
+    check('正文档随档位变大（standard < medium < large < xlarge）',
+      seen.standard.body < seen.medium.body && seen.medium.body < seen.large.body
+      && seen.large.body < seen.xlarge.body,
+      JSON.stringify([seen.standard.body, seen.medium.body, seen.large.body, seen.xlarge.body]));
+    check('行高比四档一致（换字号不换疏密）',
+      seen.standard.line === seen.medium.line && seen.medium.line === seen.large.line
+      && seen.large.line === seen.xlarge.line,
+      JSON.stringify([seen.standard.line, seen.medium.line, seen.large.line, seen.xlarge.line]));
+    check('localStorage 里记下了这一档（本地偏好）',
+      await ctx.evaluate(`window.localStorage.getItem('studymate.font.v1')`) === 'standard');
+    // 还原成「没选过」：后面的场景按默认档量字号
+    await ctx.evaluate(`window.localStorage.removeItem('studymate.font.v1')`);
+    return seen;
   });
 
   /* 对比度：在真引擎里量「实际用上的颜色」（三个层级各取几个取样点） */
