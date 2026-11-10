@@ -166,6 +166,53 @@ test('真实 DSH 设置页形态：长 description 折行不会让补丁解析�
     'Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost.');
 });
 
+test('跨行引号标量：显式开启后按 YAML 折行规则读，默认仍报错', () => {
+  const opts = { quotedScalarContinuation: true };
+  assert.deepEqual(parseYaml('a:\n  k: "hello\n    world."\n', opts), { a: { k: 'hello world.' } });
+  // 行尾空白与行首缩进都去掉；每个空行折成一个换行；闭合引号后的行尾注释照常去掉，下一个键照常读
+  assert.deepEqual(parseYaml('a: "first  \n\n\n  second" # 注释\nb: 1\n', opts), { a: 'first\n\nsecond', b: 1 });
+  // 双引号里行尾的 \ 转义掉换行：不补空格
+  assert.deepEqual(parseYaml('a: "con\\\n  cat"\n', opts), { a: 'concat' });
+  // 续行里的 # 是正文，不是注释
+  assert.deepEqual(parseYaml('a: "x\n  # y"\n', opts), { a: 'x # y' });
+  // 单引号：'' 仍是一个引号
+  assert.deepEqual(parseYaml("- 'it''s\n  ok'\n- next\n", opts), ["it's ok", 'next']);
+  // 读到文档末尾还没闭合：照旧报错，行号指向引号开头那一行
+  assert.throws(() => parseYaml('a: 1\nb: "never\n  closed\n', opts), (error) => {
+    assert.match(error.message, /引号没有闭合/);
+    assert.equal(error.line, 2);
+    return true;
+  });
+  // 闭合引号后面的多余内容，报在闭合那一行
+  assert.throws(() => parseYaml('a: "x\n  y" z\n', opts), (error) => error.line === 2 && /多余内容/.test(error.message));
+  // 默认关闭：学习文件仍按老规矩报错
+  assert.throws(() => parseYaml('a: "x\n  y"\n'), /引号没有闭合/);
+});
+
+test('真实 DSH 宿主写盘形态：80 列折行的双引号长字符串不会让补丁解析失败', () => {
+  // 宿主用 `String(document)` 写盘（yaml 库默认 lineWidth 80），列表项映射里的长字符串被折成两行
+  const patch = [
+    '- id: some-plugin',
+    '  config:',
+    '    items:',
+    '      - id: promo',
+    '        hover:',
+    '          textZh: "Nov 4–15: Receive a daily free allowance. Subscribers enjoy higher',
+    '            quotas."',
+    '        enabled: true',
+    '',
+  ].join('\n');
+  const options = {
+    tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
+    quotedScalarContinuation: true,
+  };
+  assert.deepEqual(parseYaml(patch, options)[0].config.items[0], {
+    id: 'promo',
+    hover: { textZh: 'Nov 4–15: Receive a daily free allowance. Subscribers enjoy higher quotas.' },
+    enabled: true,
+  });
+});
+
 test('标签加块标量：`!!js >-` 先折行再过标签，profile 补丁里的 embedding 三项读得出来', () => {
   const options = {
     tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
