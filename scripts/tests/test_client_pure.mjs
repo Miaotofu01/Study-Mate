@@ -55,7 +55,7 @@ function loadPure() {
 }
 
 const PURE = loadPure();
-const { coachPlacement, motionFor, MOTION_LEVELS, MOTION_MS } = PURE;
+const { coachPlacement, motionFor, MOTION_LEVELS, MOTION_MS, fontTokens, FONT_LEVELS, FONT_BODY } = PURE;
 
 /* ── 动效四档 ──────────────────────────────────────────────────────────── */
 
@@ -96,6 +96,63 @@ test('prefers-reduced-motion 真的生效：auto 档在媒体查询里被改写�
   // 显式档位不受系统偏好影响：媒体查询里只许出现 auto
   const inside = CSS.slice(CSS.indexOf('@media (prefers-reduced-motion'), CSS.indexOf('@media (prefers-reduced-motion') + 300);
   assert.ok(!/data-motion="(full|reduced|off)"/.test(inside), '显式档位不该被系统偏好改写');
+});
+
+/* ── 字号四档 ──────────────────────────────────────────────────────────── */
+
+const px = (text) => Number(text.replace('px', ''));
+
+test('字号四档：standard / medium / large / xlarge 一个不少，且逐档变大', () => {
+  assert.deepEqual([...FONT_LEVELS], ['standard', 'medium', 'large', 'xlarge']);
+  const bodies = FONT_LEVELS.map((level) => FONT_BODY[level]);
+  for (let i = 1; i < bodies.length; i += 1) {
+    assert.ok(bodies[i] > bodies[i - 1], `${FONT_LEVELS[i]} 档的正文不比上一档大——选了等于没选`);
+  }
+});
+
+test('fontTokens：standard 档就是 token 块的默认值（不是另抄一份）', () => {
+  const std = fontTokens('standard');
+  for (const [name, value] of Object.entries(std)) {
+    assert.equal(value, TOKENS.get(name).fallback, `standard 档的 ${name} 与 token 块的默认值对不上`);
+  }
+  assert.equal(FONT_BODY.standard, px(std['--smb-fs-body']), 'FONT_BODY.standard 与字号阶梯的正文档对不上');
+});
+
+test('fontTokens：整梯等比放大，档与档的相对关系不变', () => {
+  // 每一档都必须是「正文档 × 同一个比例」——只放大正文会让 lead 反被正文顶上去
+  for (const level of FONT_LEVELS) {
+    const got = fontTokens(level);
+    const ratio = FONT_BODY[level] / FONT_BODY.standard;
+    for (const [name, value] of Object.entries(got)) {
+      const base = px(TOKENS.get(name).fallback);
+      assert.equal(px(value), Math.round(base * ratio), `${level} 档的 ${name} 没有按正文比例放大`);
+    }
+  }
+  // 坏值（改坏的 localStorage / 旧版本留下的值）退回标准档，不是崩掉
+  assert.deepEqual({ ...fontTokens('特大') }, { ...fontTokens('standard') });
+  assert.deepEqual({ ...fontTokens(undefined) }, { ...fontTokens('standard') });
+});
+
+test('CSS 里的四档与 fontTokens 一一对应（不是两份真相）', () => {
+  for (const level of FONT_LEVELS) {
+    const want = fontTokens(level);
+    if (level === 'standard') {
+      // 标准档不另写 CSS 块：它就是 .smb-root 的默认值（上一条已逐项断过）
+      assert.ok(!new RegExp('\\.smb-root\\[data-font="standard"\\]').test(CSS), '标准档不该再抄一份 CSS 块');
+      continue;
+    }
+    const block = new RegExp('\\.smb-root\\[data-font="' + level + '"\\]\\s*\\{([\\s\\S]*?)\\}').exec(CSS);
+    assert.ok(block, `CSS 里没有 .smb-root[data-font="${level}"] 块——档位切了没反应`);
+    for (const [name, value] of Object.entries(want)) {
+      const found = new RegExp(name + ':\\s*([0-9.]+px)').exec(block[1]);
+      assert.ok(found, `CSS 的 ${level} 档缺 ${name}`);
+      assert.equal(found[1], value, `${level} 档的 ${name} 与 fontTokens 对不上`);
+    }
+    // 换档只换字号：行高比四档一致，字距的疏密不跟着变成第二个变量
+    const lh = /--smb-lh-body:\s*([0-9.]+)/.exec(block[1]);
+    assert.ok(lh, `CSS 的 ${level} 档缺 --smb-lh-body`);
+    assert.equal(lh[1], TOKENS.get('--smb-lh-body').fallback, `${level} 档的行高比与默认档不一致`);
+  }
 });
 
 /* ── 首次引导定位几何 ──────────────────────────────────────────────────── */
