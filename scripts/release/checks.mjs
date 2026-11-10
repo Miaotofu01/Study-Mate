@@ -301,6 +301,8 @@ const groups = {
       'scripts/tests/test_client_tokens.mjs',
       'scripts/tests/test_client_typography.mjs',
       'scripts/tests/test_client_pure.mjs',
+      // 字号四档：顶栏下拉框与它写本地偏好那一步（坏值退回默认档、不占用 .smb-select）。
+      'scripts/tests/test_client_font.mjs',
       // #88 三栏几何：ADR-0011 的让位顺序（右栏先拿 / 左栏先让 / 中栏保底 420）与
       // 「并排装不下就把那一栏盖在正文上」的降级。同样是纯函数——「任何画布宽度下都
       // 有一栏打得开」是代数，浏览器里一条条试既慢又试不全。
