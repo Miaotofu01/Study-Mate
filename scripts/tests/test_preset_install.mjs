@@ -37,6 +37,8 @@ const BUNDLE = '@yunmiao/studymate';
 function parsed(file) {
   return parseYaml(fs.readFileSync(file, 'utf8'), {
     file, tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
+    // 与生产代码 `PATCH_PARSE_OPTIONS` 逐项一致（#220：合法 YAML 不该在用户配置上被拒）
+    quotedScalarContinuation: true,
   });
 }
 
@@ -409,6 +411,25 @@ test('切原生尊重 profile 或 home 补丁里的手动停用', (t) => {
       assert.equal(fs.readFileSync(location, 'utf8'), manual);
     }
   }
+});
+
+test('用户补丁里的「双引号 + 行尾反斜杠续行」是合法 YAML（#220）：读得懂，且那几行原样留着', (t) => {
+  const f = fixture(t);
+  // 这是 PyYAML 也接受的写法：双引号标量里行尾 `\` 表示「续行」，换行与续行缩进都不进值。
+  // 补丁文件是**用户的**配置，我们不能因为它长得少见面就报错。
+  const manual = [
+    '- id: my-plugin',
+    '  config:',
+    '    note: "第一行\\',
+    '      第二行"',
+    '',
+  ].join('\n');
+  fs.writeFileSync(f.patch, manual, 'utf8');
+  invoke(f);
+  const after = fs.readFileSync(f.patch, 'utf8');
+  assert.ok(after.includes(manual.trimEnd()), '安装器动了用户那几行（只该追加托管块）');
+  assert.equal(parsed(f.patch).find(row => row.id === 'my-plugin').config.note, '第一行第二行',
+    '双引号续行的折行口径应与 PyYAML 一致（换行与续行缩进都吃掉）');
 });
 
 test('studyMate 的 group 行不被当成可停用的插件', (t) => {
