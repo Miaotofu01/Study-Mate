@@ -34,7 +34,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
 
 const internals = clientInternals();
-const { MathSpan, mathNodes, mathSource, MATH_ENDPOINT, Question, SubjectiveBody } = internals;
+const { MathSpan, mathNodes, mathParagraphs, mathSource, MATH_ENDPOINT, Question, SubjectiveBody } = internals;
 
 /** 元素树里所有 `type === MathSpan` 的节点（连同它们的 props）。 */
 function mathSpans(node, found = []) {
@@ -204,4 +204,32 @@ test('渲染整份文本时不会把渲染函数当纯文本用（viewText 走�
   const node = renderMath({ tex: 'x^2' });
   assert.equal(typeof viewText(node), 'string');
   assert.equal(viewText(null), '');
+});
+
+test('题库字段：围栏里的 $ 不配对，\\$ 是字面美元号（#271）', () => {
+  // 题面里贴 shell：一行两个以上 $，围栏内一律逐字保留（与正文 format.ts:693 同口径）
+  const fenced = [
+    '跑这一段：',
+    '',
+    '```sh',
+    'for f in $(ls); do if [ -f "$f"]; then echo "处理 $f"; fi; done',
+    '```',
+    '',
+    '它处理了几份？',
+  ].join('\n');
+  const nodes = mathParagraphs(fenced, 'q');
+  assert.equal(mathSpans(nodes).length, 0, '围栏里的 $ 不许配对成公式');
+  const rendered = nodes.map((node) => String(
+    Array.isArray(node.children) ? node.children.join('') : node.children,
+  )).join('|');
+  assert.ok(rendered.includes('for f in $(ls); do if [ -f "$f"]; then echo "处理 $f"; fi; done'),
+    '围栏内的代码行原样保留');
+
+  // 围栏外仍是同一条判据：公式照排
+  assert.equal(mathSpans(mathParagraphs('方程 $x^2 = 4$ 有几个根？', 't')).length, 1);
+
+  // `\$` 与正文同口径：字面美元号，不参与配对
+  const escaped = mathNodes(String.raw`价格是 \$5 与 \$10。`, 'p');
+  assert.equal(mathSpans(escaped).length, 0);
+  assert.equal(escaped.join(''), '价格是 $5 与 $10。');
 });
