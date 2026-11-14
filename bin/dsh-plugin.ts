@@ -96,7 +96,7 @@ export async function apply(
   try {
     const { setWorkspaceOverride } = await import('../lib/workspace.ts');
     const workspaceRef = config?.workspace;
-    setWorkspaceOverride(() => {
+    const dispose = setWorkspaceOverride(() => {
       try {
         const value = workspaceRef && typeof workspaceRef.get === 'function' ? workspaceRef.get() : undefined;
         return typeof value === 'string' ? value : '';
@@ -104,6 +104,14 @@ export async function apply(
         return '';
       }
     });
+    // 与其余注册同一种姿势：卸载/禁用时拆掉自己那一份，别让模块级引用指着一个已经没了的 config。
+    if (typeof ctx.effect === 'function') {
+      try {
+        ctx.effect(() => dispose, 'studymate: 原生配置 workspace');
+      } catch {
+        dispose();
+      }
+    }
   } catch {
     // 拷出去跑的边界夹具没有 lib/：没有 override 就等于沿用安装器配置
   }

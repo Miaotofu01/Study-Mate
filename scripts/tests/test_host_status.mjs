@@ -135,6 +135,27 @@ test('状态：override 为空时静默退回安装器 YAML', t => {
   assert.equal(buildStatus({ profile: 'web' }).source, 'installer-config');
 });
 
+test('状态：拆除只清自己接的那一份——晚到的那次不该被先走的那次抹掉', t => {
+  const home = tempHome(t);
+  const installed = path.join(home, '安装器工作区');
+  fs.mkdirSync(installed, { recursive: true });
+  writeConfig(installed);
+
+  const first = path.join(home, '第一次接的');
+  const second = path.join(home, '第二次接的');
+  const disposeFirst = setWorkspaceOverride(() => first);
+  const disposeSecond = setWorkspaceOverride(() => second);
+  t.after(() => setWorkspaceOverride(null));
+  assert.equal(typeof disposeFirst, 'function');
+
+  assert.equal(resolveWorkspace(), second);
+  disposeFirst();  // 前一个实例卸载
+  assert.equal(resolveWorkspace(), second, '先拆的那份把后接的来源抹掉了');
+  disposeSecond();
+  assert.equal(resolveWorkspace(), installed);
+  assert.equal(resolveWorkspaceSource(), 'installer-config');
+});
+
 test('状态路由：GET 恒 200，形状与 buildStatus 一致', async t => {
   const home = tempHome(t);
   const workspace = path.join(home, '学习资料');

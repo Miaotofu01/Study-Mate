@@ -65,9 +65,17 @@ function stringField(file: string, key: string): string {
  */
 let workspaceOverride: (() => string) | null = null;
 
-/** 接上原生 config 的 workspace 来源；传 null 拆除（测试与插件卸载用）。 */
-export function setWorkspaceOverride(source: (() => string) | null): void {
-  workspaceOverride = typeof source === 'function' ? source : null;
+/**
+ * 接上原生 config 的 workspace 来源；传 null 拆除。返回**拆除函数**：
+ * 它只清自己接上的那一份——同一进程里两个实例先后接过这个引用时，先走的那次
+ * 卸载不该把后接的那份抹掉（模块级单例，所以「谁接的谁拆」只能靠闭包比身份）。
+ */
+export function setWorkspaceOverride(source: (() => string) | null): () => void {
+  const next = typeof source === 'function' ? source : null;
+  workspaceOverride = next;
+  return () => {
+    if (workspaceOverride === next) workspaceOverride = null;
+  };
 }
 
 export function resolveWorkspace(file: string = configFile()): string {

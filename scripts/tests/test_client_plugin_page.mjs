@@ -6,7 +6,8 @@
      · **subject 自过滤**：`plugins.detail.section` 挂在每个插件页上，`item` 形态没有 `pkg`。
        判错就把状态卡画到别人的插件页上（或直接抛）。这里拿三种 subject 各渲染一次。
      · **i18n**：文案是 locale 字典里的键，不是中文字面量。zh/en 必须键集一致、en 零 CJK、
-       每个用到的键都有定义、同一 key 的占位符一致（否则切到英文会露出 `{n}`）。
+       每个用到的键都有定义、同一 key 的占位符一致（否则切到英文会露出 `{n}`）；反方向也钉
+       ——字典里定义的键必须有人用，否则组件收窄之后那批死文案会一直躺在两本字典里。
 
    还钉注册面：两个槽位的 name/id/order/key/locale 逐字，`locale` 注册的命名空间与字典对得上。
    真正点「选择目录 / 保存」的行为在真宿主上验（`scripts/tests/README.md` 的真宿主一节）。
@@ -23,7 +24,7 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const source = fs.readFileSync(`${ROOT}lib/client.js`, 'utf8');
 const internals = clientInternals();
 const {
-  PAGE_NS, PAGE_ROW_KEY, STATUS_ENDPOINT, DICT_ZH, DICT_EN, PAGE_CSS,
+  PAGE_NS, PAGE_ROW_ID, PAGE_ROW_KEY, STATUS_ENDPOINT, DICT_ZH, DICT_EN, PAGE_CSS,
   WorkspaceSection, WorkspaceSectionBody, WorkspaceConfigCard, WorkspaceConfigBody,
   statusView, progressOf, pickDirectoryOnce,
 } = internals;
@@ -105,11 +106,11 @@ test('插件页：locale 注册 zh/en 两本基线与两个官方槽位', () => 
 
 test('插件页：subject 自过滤——bundle 与自己的 row 才画，停用/别人的页面都不画', () => {
   const mine = { kind: 'bundle', pkg: { name: PAGE_NS } };
-  const myRow = { kind: 'row', pkg: { name: PAGE_NS }, row: { rowId: 'studymate', enabled: true } };
+  const myRow = { kind: 'row', pkg: { name: PAGE_NS }, row: { rowId: PAGE_ROW_ID, enabled: true } };
   const other = { kind: 'bundle', pkg: { name: '@example/other' } };
-  const otherRow = { kind: 'row', pkg: { name: '@example/other' }, row: { rowId: 'studymate', enabled: true } };
+  const otherRow = { kind: 'row', pkg: { name: '@example/other' }, row: { rowId: PAGE_ROW_ID, enabled: true } };
   const disabledBundle = { kind: 'bundle', pkg: { name: PAGE_NS, enabled: false } };
-  const disabledRow = { kind: 'row', pkg: { name: PAGE_NS }, row: { rowId: 'studymate', enabled: false } };
+  const disabledRow = { kind: 'row', pkg: { name: PAGE_NS }, row: { rowId: PAGE_ROW_ID, enabled: false } };
   const item = { kind: 'item', id: 'some-official' }; // item 没有 pkg：不能先摸 pkg.name
   assert.equal(WorkspaceSection({ subject: other, t }), null);
   assert.equal(WorkspaceSection({ subject: otherRow, t }), null);
@@ -198,7 +199,7 @@ test('插件页：配置卡渲染原生表单（输入 + 选择… + 保存/恢�
     set: async () => true,
     unset: async () => true,
   };
-  const configForms = { get: id => (id === 'studymate' ? form : undefined) };
+  const configForms = { get: id => (id === PAGE_ROW_ID ? form : undefined) };
   const uiWorkspace = { pickDirectory: async () => '/picked' };
   const { ctx } = fakeCtx({ locale: locale.service, configForms, uiWorkspace });
   loadClient().plugin.apply(ctx);
@@ -366,4 +367,32 @@ test('插件页 i18n：两本字典键集一致、en 零 CJK、占位符一致�
   for (const key of used) {
     assert.equal(Object.prototype.hasOwnProperty.call(DICT_ZH, key), true, `用到的 key 没有定义：${key}`);
   }
+  // 反向门：字典里每个键都得有人用。状态卡收窄成「工作区 + 科目」之后，运维向那批
+  // （来源 / 安装方式 / 监听 / 今天）与三档词表一起成了死文案——旧门只扫「用到必须有定义」
+  // 这一个方向，删了组件却忘了删文案照样全绿。
+  for (const key of zhKeys) {
+    assert.ok(used.has(key), `字典里的 key 没有任何地方用：${key}`);
+  }
+});
+
+test('插件页：状态卡按 updated_at 取最新的四门（字典序最大即最新，与 library 的 today 同源）', () => {
+  const subject = (slug, updated_at) => ({ slug, name: slug, updated_at, stats: { 已学完: 1 } });
+  const view = statusView({
+    ok: true, configured: true, initialized: true, workspace: '/w', source: 'installer-config',
+    mode: 'native', today: '2026-11-07', unreadable: [], watch: { watching: true, backend: 'node-fs' },
+    // readdir 顺序给：最新的排最后，若照原顺序取前四就会把最旧那门画上去。
+    subjects: [subject('a', '2026-01-01'), subject('b', '2026-03-01'), subject('c', '2026-02-01'),
+      subject('d', '2026-05-01'), subject('e', '2026-04-01')],
+  }, t);
+  assert.deepEqual(view.facts.map(fact => fact.key),
+    ['workspace', 'subject:d', 'subject:e', 'subject:b', 'subject:c']);
+  assert.equal(view.note, DICT_ZH.subject_more.replace('{n}', '1'));
+});
+
+test('插件页：目录留空后保存等价于「恢复默认」——不在 user 覆盖里留空串', () => {
+  // 桩的 useState 是只读的（没有 DOM、setState 是空操作），所以「填 → 提交」这条链
+  // 在 Node 里驱不动；这里钉的是那条分支本身：留空走 unset，非空才 set。
+  assert.match(source,
+    /const accepted = next \? await form\.set\('workspace', next\) : await form\.unset\('workspace'\)/u);
+  assert.ok(source.includes("const next = value.trim();"), '保存前必须先 trim，空串与空白都算「留空」');
 });
