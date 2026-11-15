@@ -536,6 +536,33 @@ test('大纲与题库的坏数据当场抛错，不静默降级成空值', () =>
   assert.throws(() => readLibrary({ workspace: badEdge.workspace }), /缺少 from\/to/);
 });
 
+test('#291 misconceptions.yaml 顶层写成映射时当场说清形状，不再一路带到 .forEach', () => {
+  const badShape = makeWorkspace(subjectTree('math-analysis-1', {
+    ...minimalSubject(),
+    'misconceptions.yaml': 'items: []\n',
+  }));
+  // 以前这里盲 cast 成数组，错被推迟到读取端的 `.forEach`，报错只说
+  // 「misconceptionRaw.forEach is not a function」——看不出是哪个文件、该改成什么
+  assert.throws(
+    () => readLibrary({ workspace: badShape.workspace }),
+    /misconceptions\.yaml 顶层必须是 YAML 列表，这里读到的是映射（顶层键：items）/,
+  );
+  assert.throws(() => readLibrary({ workspace: badShape.workspace }), /没有记录时写 \[\]/);
+
+  // 开隔离时点名那一门，错误原样带出来
+  const payload = readLibrary({ workspace: badShape.workspace, isolateBrokenSubjects: true });
+  assert.deepEqual(payload.subjects, []);
+  assert.deepEqual(payload.unreadable.map((item) => item.dir), ['math-analysis-1']);
+  assert.match(payload.unreadable[0].error, /顶层必须是 YAML 列表/);
+
+  // 空文件 / 只有注释不是坏形状：与「缺失」同义，给空清单
+  const commentary = makeWorkspace(subjectTree('demo', {
+    ...minimalSubject(),
+    'misconceptions.yaml': '# 还没有记录\n',
+  }));
+  assert.deepEqual(readLibrary({ workspace: commentary.workspace }).subjects[0].misconceptions, []);
+});
+
 test('缺失的可选文件一律给空值，不让整份 payload 崩掉', () => {
   const { workspace } = makeWorkspace(subjectTree('demo', {
     'subject.yaml': 'slug: demo\nname: 只有大纲\n',

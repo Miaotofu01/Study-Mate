@@ -280,7 +280,23 @@ function readYaml(file: string): Record<string, any> {
 function readYamlList(file: string): any[] {
   if (!isFile(file)) return [];
   // isFile 已经证明读得到；解析器只接受字符串，这里按它的契约收窄
-  return (parseYaml(readTextIfPresent(file) as string, { file }) || []) as any[];
+  const data = parseYaml(readTextIfPresent(file) as string, { file });
+  // 空文件、只有注释、顶层 `null`：没有记录，和「缺失」同义（缺失的可选文件一律给空值）
+  if (data === null) return [];
+  // 顶层写成映射（典型是 `items: []`）时，只做类型收窄会把这个错一路带到消费点，
+  // 最后在 `.forEach` 上炸成「misconceptionRaw.forEach is not a function」——离现场好几层，
+  // 学生看不出该改哪个文件、也看不出该改成什么（#291）。这里当场报形状。
+  if (!Array.isArray(data)) {
+    let shape: string;
+    if (data && typeof data === 'object') {
+      const keys = Object.keys(data as Record<string, unknown>);
+      shape = keys.length ? `映射（顶层键：${keys.join('、')}）` : '空映射 {}';
+    } else {
+      shape = `一个 ${typeof data} 值`;
+    }
+    throw new Error(`${file} 顶层必须是 YAML 列表，这里读到的是${shape}；没有记录时写 []`);
+  }
+  return data;
 }
 
 /** 收集一棵目录下所有文件的名字（只要 basename，与参考实现的 rglob + p.name 一致）。 */
