@@ -46,6 +46,16 @@ function stubReact() {
   const Fragment = Symbol('react.fragment');
   return {
     Fragment,
+    // 类组件的基类（#174 ② 的渲染边界要 `extends React.Component`）。这份桩只求「工厂能物化」：
+    // 边界里的 getDerivedStateFromError / componentDidCatch 在 Node 侧一次也跑不到。
+    Component: class Component {
+      constructor(props) { this.props = props; this.state = this.state || {}; }
+
+      setState(patch) {
+        const next = typeof patch === 'function' ? patch(this.state, this.props) : patch;
+        this.state = Object.assign({}, this.state, next || {});
+      }
+    },
     createElement: (type, props, ...children) => ({
       type, props: props || {},
       children: children.length <= 1 ? children[0] : children,
