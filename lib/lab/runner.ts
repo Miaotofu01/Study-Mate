@@ -182,12 +182,41 @@ function buildEnv(workspace: string, sandboxHome: string): NodeJS.ProcessEnv {
   };
 }
 
+/**
+ * 删掉本次运行的沙箱目录。
+ *
+ * 不能用 `fs.rmSync(target, { recursive: true })`：Node 24.13.0 在 Windows 上对**路径含非
+ * ASCII 字符**的目标做同步递归删除会把进程打死（0xC0000005 / 0xC0000409，无任何输出）；
+ * 连非递归的 `rmSync(文件)` 在同样的路径上也会**静默不删**。沙箱目录落在 `os.tmpdir()` 下，
+ * 用户机器上那是 `<家目录>/AppData/Local/Temp`，家目录一中文就中招。所以这里逐层删：
+ * `unlinkSync` 与 `rmdirSync` 在同一条路径上正常（本机 Node 24 / Node 22 都验过）。
+ *
+ * 删不掉不是运行结果的一部分，静默（它自己会被系统回收）。
+ */
 function rmQuiet(target: string): void {
-  try {
-    fs.rmSync(target, { recursive: true, force: true });
-  } catch {
-    // 临时目录删不掉不是运行结果的一部分，静默（它自己会被系统回收）
-  }
+  const drop = (current: string): void => {
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch {
+      return;
+    }
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(current)) drop(path.join(current, name));
+      try {
+        fs.rmdirSync(current);
+      } catch {
+        // 目录里有别人新写的文件（学生脚本还在跑）：留着，别为清理去跟它较劲
+      }
+      return;
+    }
+    try {
+      fs.unlinkSync(current);
+    } catch {
+      // 同上
+    }
+  };
+  drop(target);
 }
 
 /**

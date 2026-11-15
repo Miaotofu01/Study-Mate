@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 
 import { assertOutput, execute, fakeContext, useHome, writeSubject } from './fixtures/tools.mjs';
 import { COPY_ALL } from './fixtures/copy.mjs';
+import { removeFile, removeTree } from './fixtures/fs-rm.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const lab = await import('../../lib/lab/index.ts');
@@ -401,8 +402,10 @@ test('`~` 不展开：拒绝解释它（不解释就不会指错地方）', asyn
 test('反证：没有题库 / 题型不对 / 证据为空 / 题号不存在 —— 四种都拒', async (t) => {
   const ctx = labContext();
   // 没有题库文件（夹具默认会给一份，这里删掉那份——「没有题库」是这一组的第一个反证）
+  // 用 removeFile 而不是 fs.rmSync：工作区在 `学习资料/` 这种非 ASCII 目录下，Node 24 的
+  // rmSync 会**静默不删**（返回成功，文件还在），这一组反证就变成了「题库还在，命令照跑」。
   const noPool = writeLabSubject(t);
-  fs.rmSync(noPool.quiz, { force: true });
+  removeFile(noPool.quiz);
   let out = await execute(ctx, 'studymate_lab_run', { subject: 'demo', node: 'var', question: '什么是变量#0' });
   assert.equal(out.状态, '拒了');
   assert.match(out.拒.为什么, /题库/);
@@ -728,7 +731,7 @@ test('反证：盘上有骨架也不算命令来源——「证据」空着照�
 
 test('骨架自检：在干净目录里把干净态与作答态各跑一遍，退出码原样转述', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-lab-skeleton-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  t.after(() => removeTree(directory));
   const copied = path.join(directory, 'lab');
   fs.cpSync(SKELETON, copied, COPY_ALL);
 
@@ -825,11 +828,13 @@ test('两个运行入口都在、都只调 check.sh：干净态与作答态各�
 
 test('反证：没有任务目录的 lab —— 两个入口都非零退出，且印出卡在哪一步', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-lab-notask-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  t.after(() => removeTree(directory));
   const copied = path.join(directory, 'lab');
   fs.cpSync(SKELETON, copied, COPY_ALL);
   // 「没有任务目录」= 骨架里那个示例任务目录搬走（`solutions/` 留着——它本来就不算任务目录）
-  fs.rmSync(path.join(copied, '0000-示例'), { recursive: true, force: true });
+  // `0000-示例` 本身就是非 ASCII：Node 24 的 rmSync 在这里要么崩、要么静默不删，两种都让
+  // 这条反证失去意义（目录还在 → 脚本当然找得到 → 断言「任务目录不在」必然红）。
+  removeTree(path.join(copied, '0000-示例'));
 
   for (const entry of ['干净态.sh', '作答态.sh']) {
     const result = spawnSync('sh', [entry], { cwd: copied, encoding: 'utf8', windowsHide: true });
@@ -847,7 +852,7 @@ test('反证：没有任务目录的 lab —— 两个入口都非零退出，�
 
 test('对照：任务目录在的时候两个入口照旧（失败路径的判据不是「一律非零」）', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-lab-ok-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  t.after(() => removeTree(directory));
   const copied = path.join(directory, 'lab');
   fs.cpSync(SKELETON, copied, COPY_ALL);
 
