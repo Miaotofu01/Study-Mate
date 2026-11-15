@@ -14,10 +14,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { EXIT_SKIP } from './harness.mjs';
+import { requireBrowser } from './harness.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT = path.join(HERE, '..', '..', '..', 'lib', 'client.js');   // scripts/tests/browser → 仓库根
@@ -28,32 +28,16 @@ const SETTLE_MS = 1800;       // 实现里的恢复重试窗口是 1500ms，留�
 
 /* ── 浏览器二进制：探测 ─────────────────────────────────────────────── */
 
-function findChrome() {
-  const candidates = [process.env.STUDYMATE_CHROME, 'google-chrome', 'chromium', 'chromium-browser', 'chrome']
-    .filter(Boolean);
-  for (const command of candidates) {
-    const probe = spawnSync(command, ['--version'], { encoding: 'utf8', windowsHide: true });
-    if (!probe.error && probe.status === 0) {
-      return { command, version: String(probe.stdout || '').trim() };
-    }
-  }
-  return null;
-}
-
-const chrome = findChrome();
-if (!chrome) {
-  console.log('跳过：没探测到 Chrome / Chromium。'
-    + '设 STUDYMATE_CHROME=<可执行文件>，或装上 google-chrome / chromium 再跑这一套。');
-  /* 退出码 3 = `harness.mjs` 的 `EXIT_SKIP`（「跳过，不算通过」），与同组另外九套一个口径。
-     这里曾经是 `process.exit(0)`：单独跑这一套时它报「成功」而一条断言都没做——而本文件
-     第 13 行的文件头写着「找不到就明确跳过并说明，不静默绿」。0 与 3 在门禁那里是两件事：
-     `checks.mjs` 判成功的方式是 `status === 0`。 */
-  process.exit(EXIT_SKIP);
-}
+/* #123：探测只留 `harness.mjs` 那一份。这里以前自己抄了一份 `findChrome()`——只试裸命令名、
+   不查安装位置，Windows 上因此永远「跳过」。现在与同组其它套一个口径：找不到就带理由跳过
+   （`requireBrowser` 内部按 `EXIT_SKIP` 退出，退出码 3 不算通过）。 */
+const chrome = requireBrowser('reading_position');   // { path, source }
 
 /* ── 夹具：`lib/client.js` + 最小装载器 → 一份能上屏的资源表 ─────────── */
 
-const { buildAssets, kernelSource } = await import(FIXTURE);
+/* 说明符必须是 `file://` URL：Windows 上 `import('C:\\…')` 会被当成协议 `c:` 直接报错
+   （`ERR_UNSUPPORTED_ESM_URL_SCHEME`）。这一行以前被上面那个「永远跳过」的探测挡着，没机会跑到。 */
+const { buildAssets, kernelSource } = await import(pathToFileURL(FIXTURE).href);
 const assets = buildAssets(fs.readFileSync(CLIENT, 'utf8'), kernelSource());
 const route = (name) => assets.find((asset) => asset.path === name) || null;
 
@@ -63,7 +47,7 @@ const PROFILE = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'smtest-r
 const PORT = 9700 + Math.floor(Math.random() * 250);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 
-const child = spawn(chrome.command, [
+const child = spawn(chrome.path, [
   '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
   '--disable-extensions', '--hide-scrollbars',
   `--user-data-dir=${PROFILE}`,
@@ -83,7 +67,7 @@ async function pageTarget() {
     } catch (error) { /* 还没起来 */ }
     await sleep(100);
   }
-  throw new Error(`${chrome.command} 没起来（调试端口 ${PORT} 上没有页面目标）`);
+  throw new Error(`${chrome.path} 没起来（调试端口 ${PORT} 上没有页面目标）`);
 }
 
 let ws;
@@ -97,7 +81,7 @@ function check(label, ok, detail) {
   console.error(`  ✖ ${label}${detail === undefined ? '' : `\n      ${JSON.stringify(detail)}`}`);
 }
 
-console.log(`阅读位置套件：${chrome.command}（${chrome.version}）`);
+console.log(`阅读位置套件：${chrome.path}（发现于 ${chrome.source}）`);
 
 try {
   const page = await pageTarget();
@@ -419,6 +403,48 @@ try {
     return window.__sm.probe();
   })()`);
   check('课件页不归零：进课件页走恢复而不是回顶部', kept.pageY > 100, kept);
+
+  /* ── 验收 6：首帧正文只有一屏、位置当下够不到（#214）────────────────── */
+
+  /* 真课件上屏时图与公式还没把高度撑起来，那一刻的正文比上次读的时候矮——极端情况就是矮到
+     一屏都装得下（`maxScroll` 是 0）。旧实现拿被夹到 0 的目标跟当前位置 0 比，正好相等，
+     于是判「已到位」，恢复当场收尾、一次都没滚过，这就是「总是从顶部开始」（#214）。
+     这一段把那一刻复现出来：上屏时正文被压成 0 高，150ms 后才「长」出来（恢复重试窗口
+     1500ms，够它长），要求落回存下来的位置。
+
+     先离开课件再摆位置：离开那一帧会把当下的位置补写一次，先摆会被它覆盖。
+     压高度用文档级的 <style>：课件页重挂会重建自己的 DOM，塞在小节里的东西跟着没了，
+     而 <style> 挂在 document.head 上活得更久，正好让「上屏那一刻」是矮的。 */
+  const shortThenGrow = await probe(`(async () => {
+    window.__sm.click('.smb-brand');
+    await new Promise((r) => setTimeout(r, 300));
+    window.__sm.setPrefs({ 'demo/reading-position': { sectionId: 'sec-gone', offset: 0, scrollTop: 2600, progress: 0 } });
+    const before = document.getElementById('__sm-short');
+    if (before) before.remove();
+    const style = document.createElement('style');
+    style.id = '__sm-short';
+    style.textContent = '.smb-center__body [data-section] { height: 0 !important; overflow: hidden !important; }';
+    document.head.appendChild(style);
+    const grown = await new Promise((resolve) => {
+      window.__sm.click('[data-proto="continue"]');
+      setTimeout(() => {
+        const box = document.querySelector('.smb-center__body');
+        const short = box ? box.scrollHeight - box.clientHeight : -1;   // 上屏那一刻能滚到多远
+        document.getElementById('__sm-short').remove();
+        window.dispatchEvent(new Event('resize'));
+        resolve({ grew: true, short });
+      }, 150);
+    });
+    await new Promise((r) => setTimeout(r, ${SETTLE_MS + 300}));
+    const after = window.__sm.probe();
+    return { ...grown, after };
+  })()`);
+  check('验收 6 · 上屏那一刻正文确实够不到存下来的位置（不然这一段是空跑）',
+    shortThenGrow.grew === true && shortThenGrow.short >= 0 && shortThenGrow.short < 100
+      && shortThenGrow.after.max >= 2600 + TOLERANCE,
+    { short: shortThenGrow.short, grew: shortThenGrow.grew, max: shortThenGrow.after.max });
+  check(`验收 6 · 先矮后长：没停在顶部，落到存下来的位置（${shortThenGrow.after.pageY} / 2600，容差 ${TOLERANCE * 3}）`,
+    Math.abs(shortThenGrow.after.pageY - 2600) <= TOLERANCE * 3, shortThenGrow.after);
 
   console.log(`\n阅读位置（真 Chrome + 真 client.js）：${passed} 项通过，${failures} 项失败`);
 } catch (error) {
