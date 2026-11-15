@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 
 import { installPreset } from '../../lib/preset.ts';
 import { parseYaml } from '../../lib/yaml.ts';
+import { COPY_ALL } from './fixtures/copy.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PLUGIN = '@deepseek-ai/dsh-agent-preset';
@@ -33,10 +34,11 @@ const BEGIN = '# BEGIN STUDYMATE LEARNING PRESET';
 const BUNDLE = '@yunmiao/studymate';
 
 /** 解析一份补丁文件。`!!js` 与 CordisLoader 同口径：读成它的标量原文。
-    生产代码（`PATCH_PARSE_OPTIONS`）还开了多行 plain 标量：DSH 设置页会把长文本折行。 */
+    生产代码（`PATCH_PARSE_OPTIONS`）还开了多行 plain / 引号标量：DSH 设置页与宿主写盘都会把长文本折行。 */
 function parsed(file) {
   return parseYaml(fs.readFileSync(file, 'utf8'), {
     file, tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
+    quotedScalarContinuation: true,
   });
 }
 
@@ -60,8 +62,8 @@ function fixture(t) {
   const staged = path.join(home, 'staged-learning');
   const stagedQa = path.join(home, 'staged-qa');
   fs.mkdirSync(home, { recursive: true });
-  fs.cpSync(path.join(ROOT, 'preset', 'learning'), staged, { recursive: true });
-  fs.cpSync(path.join(ROOT, 'preset', 'qa'), stagedQa, { recursive: true });
+  fs.cpSync(path.join(ROOT, 'preset', 'learning'), staged, COPY_ALL);
+  fs.cpSync(path.join(ROOT, 'preset', 'qa'), stagedQa, COPY_ALL);
   const patch = path.join(home, 'profiles', 'web', 'cordis.patch.yml');
   fs.mkdirSync(path.dirname(patch), { recursive: true });
   return { temporary, home, staged, stagedQa, target: path.join(home, '.agent-presets', 'learning'), patch };
@@ -278,6 +280,28 @@ test('profile 补丁里的多行 plain 标量不挡注册（DSH 0.2.1 设置页�
   const rows = parsed(f.patch);
   assert.equal(rows[0].config.models[0].description,
     'Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost.');
+  assert.ok(rows.some((row) => row.insert?.[0]?.config?.id === 'learning'));
+});
+
+test('profile 补丁里的跨行双引号标量不挡注册（宿主按 80 列重排写盘的真实形态）', (t) => {
+  const f = fixture(t);
+  // 宿主用 yaml 库默认的 lineWidth 80 写盘：长的双引号字符串被折到下一行，仍是合法 YAML。
+  fs.writeFileSync(f.patch, [
+    '- id: some-plugin',
+    '  config:',
+    '    hover:',
+    '      textZh: "Nov 4–15: Receive a daily free allowance. Subscribers enjoy higher',
+    '        quotas."',
+    '',
+  ].join('\n'), 'utf8');
+  const bundled = invoke(f, { version: null, bundle: true });
+  assert.equal(bundled.mode, 'bundle');
+  assert.equal(bundled.config.id, 'learning');
+  const declared = invoke(f);
+  assert.equal(declared.mode, 'declarative');
+  const rows = parsed(f.patch);
+  assert.equal(rows[0].config.hover.textZh,
+    'Nov 4–15: Receive a daily free allowance. Subscribers enjoy higher quotas.');
   assert.ok(rows.some((row) => row.insert?.[0]?.config?.id === 'learning'));
 });
 

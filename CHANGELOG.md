@@ -1,5 +1,102 @@
 # 更新日志
 
+<!-- studymate-release:v2.0.4 -->
+## [2.0.4](https://github.com/Miaotofu01/Study-Mate/releases/tag/v2.0.4) - 2026-11-06
+
+### 已合并的 Pull Request
+
+- fix(解析器): 支持 profile 补丁里的「标签 + 块标量」，学习模式不再静默跳过 ([#219](https://github.com/Miaotofu01/Study-Mate/pull/219))
+- fix(预设): 学习模式不再引用已下线的 list-agents 子路径（\#244） ([#248](https://github.com/Miaotofu01/Study-Mate/pull/248))
+- fix(预设): 学习模式在 DSH 0.2.2 上加载失败——已删除的子路径行改按可解析性停用（\#244） ([#249](https://github.com/Miaotofu01/Study-Mate/pull/249))
+
+### 所有提交
+
+- fix(解析器): 支持 profile 补丁里的「标签 + 块标量」，学习模式不再静默跳过 ([6ad2eb3](https://github.com/Miaotofu01/Study-Mate/commit/6ad2eb382c92c422d0f976ec032e30077bc471cb))
+
+  > DSH 设置页生成的 graph-memory embedding 三项写成 \`!!js &gt;-\`：标签后面跟块标量头。
+  > 块标量判定只认裸头（\`BLOCK\_SCALAR\_RE\`），\`!!js &gt;-\` 于是落到 \`parseInlineValue\`，
+  > 剥掉标签后把 \`&gt;-\` 递归进去，撞「不支持块标量」；若续行先被接管，又撞「续行里出现 ": "」。
+  > 整份 profile 补丁读不出来 → \`installPreset\` 抛错 → \`bin/dsh-plugin.ts\` 只 console.warn，
+  > 两条预设都不注册，\`studymate-config.yaml\` 也不落盘，阅读端报 no-workspace。
+  > 
+  > - 新增 \`blockScalarHeader()\`：裸头直接认，不是就 \`splitTag\` 再判一次
+  > - \`parseMapping\` / \`parseSequence\` / \`parseChild\` 三处调用点改用它的结果，
+  >   读出的正文按标签口径过 \`applyTag\`（scalar 原文、expression 给 {\_\_jsExpr}）
+  > - 默认仍旧严格：\`blockScalars\` 未开时照旧报错
+  > - 补回归测试：\`!!js &gt;-\` 折行、\`!!js |\` 保换行、列表项带标签块标量、键下一行才给块头、expression 口径
+  > 
+  > Closes \#218
+
+- fix(解析器): 孩子块的缩进指示按父节点算，补上标签×块标量的出处（\#218） ([018a155](https://github.com/Miaotofu01/Study-Mate/commit/018a155ab0adaf42175363d49e4beff4fc46ea99))
+
+  > - \`parseChild\` 的块标量分支交给 \`readBlockScalar\` 的是\*\*父节点缩进\*\*（原来传的是
+  >   块头那一行的缩进），\`key:\\n  |2\\n    x\` 因此读成 \`"x"\` 而不是 PyYAML 的
+  >   \`"  x"\`——静默少两个空格，违背文件头「宁可炸，也不要静默解析错」。
+  > - 同一个分支从 \`plainScalarContinuation\` 下面提到外面：\`blockScalars\` 这个选项
+  >   承诺的就是 \`|\` / \`&gt;\`，只开它不续行也得认 \`key:\\n  |\`。
+  > - 文件头补一句标签与块标量的\*\*交叉\*\*（\`!!js &gt;-\`）；工程约束 §五 那条改成指向文件头
+  >   （一处定义，别处只给指针），并补上 \#209 的 \`plainScalarContinuation\`——原文还写着
+  >   「刻意不支持标签与块标量」。
+  > - 测试补一条边界：\`|2\` / \`|1\` 孩子的缩进、只开 \`blockScalars\` 时的裸块头、标签关时仍拒。
+  > 
+  > Refs \#218
+
+- Merge pull request \#219 from 544244857/fix/标签加块标量 ([d8114f3](https://github.com/Miaotofu01/Study-Mate/commit/d8114f38363272852b339d6788b2f8f007243b43))
+
+  > fix(解析器): 支持 profile 补丁里的「标签 + 块标量」，学习模式不再静默跳过
+
+- fix(预设): 学习模式不再引用已下线的 list-agents 子路径（\#244） ([8c55310](https://github.com/Miaotofu01/Study-Mate/commit/8c5531074b9007006672259c17cc8510fb4214b2))
+- fix(预设): 不再硬挂 DSH 0.2.2 已删除的 list-agents 子路径（\#244） ([1fe3ae3](https://github.com/Miaotofu01/Study-Mate/commit/1fe3ae3819d002c3eeebaae0a0398d58d8f8e536))
+
+  > 0.2.2-rc.1 把 \`list\_agents\` 并进主包，删掉了 \`dsh-tool-subagent-control/list-agents\`
+  > 这个子路径导出。预设里那行还硬挂着，加载器解析不到，宿主把「有一行起不来」判成\*\*整条
+  > 预设 broken\*\*——「学习模式」在预设列表里显示加载失败，按它建的老会话也跟着恢复不了。
+  > 0.2.1 及以前反过来只认这条子路径行，所以不能删掉，只能按「这个宿主上还解析得到吗」停用：
+  > 判据与加载器同一套（\`createRequire(baseUrl)\`），解析不到才停用。
+  > 
+  > 顺带跟上 0.2.2 的子代理配置键：\`modelSelectionSettings\` 拆成了 \`modelSelection\`（给工具开
+  > provider/model 参数）与 \`modelDiscovery\`（注册 list\_subagent\_models）。三个键一起写——宿主
+  > 对不认识的键静默忽略，同一份预设在两代上都能开出这个能力。
+  > 
+  > 宿主契约套件加一条：用宿主安装根上的 \`createRequire().resolve\` 逐行解析预设里的模块，
+  > 解析不到的必须带停用条件、并按宿主的方式求值为 true。这条判据在 0.2.2 上对旧预设报红、
+  > 对新预设报绿，都验过。
+
+- test(套件): 真宿主套件跟上 DSH 0.2.2 的执行器与注册表 API ([7dece6d](https://github.com/Miaotofu01/Study-Mate/commit/7dece6df53dca535c4af1108d14c857463b21ded))
+
+  > 0.2.2 换掉了两样东西，套件本身先红了，红的不是产品：
+  > 
+  > - 工具执行器换成「一批调用」：\`execute({calls:\[{id,name,arguments}\]})\` 回
+  >   \`{results:\[{callId,result}\]}\`，之前是单次 \`{callId,name,arguments}\` 直接回结果。
+  >   判据取宿主有没有 \`dsh-tool-executor-native\`（0.2.2 新加的包），不看版本号。
+  > - 注册表不再导出 \`livePresetMounts\`：改读服务自己的 \`compositionInventory()\`，每行带
+  >   \`moduleName\` 与 \`fiberState\`（2 = Active）。原生工具也换到会话作用域里读——0.2.1 起
+  >   没有「预设那一层」的公开句柄，模型看到的那份正是 \`schemas(agent)\`。
+  > 
+  > 还有一处哨兵：0.2.2 把 desktop 档位判给 Electron 应用独占，当当探针借 \`resolvedProfile\`
+  > 绕过 CLI 那道检查时，宿主自己的 shutdown 收不了尾、5s 后 forceExit，marker 若排在它后面就
+  > 永远发不出去（桌面档位那条一直「Probe produced no result」）。结果先同步写 fd 1，再收尾。
+  > 
+  > 两代宿主各跑一遍，六条场景全绿：0.2.1-rc.2 与 0.2.2-rc.1。
+
+- Merge pull request \#248 from Xiaoyuan0v0/fix/preset-list-agents ([28cc372](https://github.com/Miaotofu01/Study-Mate/commit/28cc37207c35ddd82563eecc7ab41b577e7c2309))
+
+  > fix(预设): 学习模式不再引用已下线的 list-agents 子路径（\#244）
+
+- merge: 合入 main（\#248 已删掉那条子路径行，这里恢复成带停用条件的写法） ([97ad0d3](https://github.com/Miaotofu01/Study-Mate/commit/97ad0d343186af08d8c9f899c1f8b7817be56428))
+
+  > \#248 把 \`tool-subagent-list-agents\` 整行删了，0.2.2 上对；但 0.2.1 及以前的宿主只认这条
+  > 子路径行，删了等于在旧宿主上静默少一个 \`list\_agents\` 工具。这里保留 \#248 的判断（0.2.2 上
+  > 不能硬挂），改成按「这个宿主上还解析得到吗」停用，两代都成立。
+
+- Merge pull request \#249 from Miaotofu01/fix/244-dsh-022 ([c5ad842](https://github.com/Miaotofu01/Study-Mate/commit/c5ad84295c643b13f0627780b913c7b980649293))
+
+  > fix(预设): 学习模式在 DSH 0.2.2 上加载失败——已删除的子路径行改按可解析性停用（\#244）
+
+
+[完整比较](https://github.com/Miaotofu01/Study-Mate/compare/v2.0.3...v2.0.4)
+<!-- /studymate-release:v2.0.4 -->
+
 <!-- studymate-release:v2.0.3 -->
 ## [2.0.3](https://github.com/Miaotofu01/Study-Mate/releases/tag/v2.0.3) - 2026-10-21
 

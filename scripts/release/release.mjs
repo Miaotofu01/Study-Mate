@@ -170,6 +170,30 @@ function requireWorkflow() {
   if (!process.env.GH_TOKEN) throw new Error('Missing the workflow GitHub token.');
 }
 
+/**
+ * `npm pack --json` 的载荷。npm 11 及以前打出来是**数组**，npm 12 起改成**以包名为键的对象**：
+ * 两处按数组取下标的地方（`test_bundle.mjs` 与 `packPackage()`）都会拿到 `undefined`，
+ * 于是本地在 npm 12 上门禁必红、发布脚本抛 `Cannot read properties of undefined`（#250）。
+ *
+ * 我们一次只打一个包，所以两种形状取到的都是那唯一一项；认不出来的形状直接报错——
+ * 打包校验宁可红，也不能拿 `undefined` 当成「校验过了」。
+ */
+export function packEntry(stdout) {
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch (error) {
+    throw new Error(`npm pack --json 的输出不是 JSON：${error.message || error}`);
+  }
+  const entries = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' ? Object.values(parsed) : null;
+  if (!entries || entries.length !== 1 || !entries[0] || typeof entries[0] !== 'object') {
+    throw new Error(`npm pack --json 的形状认不出来（npm 11 是数组，npm 12 起是以包名为键的对象）：${String(stdout).slice(0, 200)}`);
+  }
+  return entries[0];
+}
+
 export function validatePack(pack) {
   if (pack.name !== PACKAGE || !VERSION.test(pack.version)) throw new Error('Unexpected npm package identity.');
   const files = pack.files.map(file => file.path);
@@ -203,7 +227,7 @@ export function validatePack(pack) {
 
 function packPackage() {
   const directory = mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), 'studymate-pack-'));
-  const [pack] = JSON.parse(command('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', directory]).stdout);
+  const pack = packEntry(command('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', directory]).stdout);
   validatePack(pack);
   const file = join(directory, pack.filename);
   const integrity = `sha512-${createHash('sha512').update(readFileSync(file)).digest('base64')}`;

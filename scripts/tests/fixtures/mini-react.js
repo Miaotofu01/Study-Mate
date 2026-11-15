@@ -193,6 +193,59 @@
     console.error('[mini-react] effect 抛错：' + (error && error.message));
   }
 
+  /* ── 类组件与错误边界 ─────────────────────────────────────────────────────
+     阅读端的错误边界（#174 ②）是类组件：`getDerivedStateFromError` 是 React 里唯一
+     能接住「子树渲染抛异常」的姿势，函数组件做不到。整树重建的渲染器照样能给出一个
+     可信的近似：
+       · 实例按「路径 + 类型」缓存（与 hook 槽同一套 key），state 留在实例上；
+       · 子树渲染抛出来的错误继续往上冒，每层类组件先看自己有没有
+         `getDerivedStateFromError` / `componentDidCatch`：有就地兜底重画一次，没有往上抛。
+     被边界接住的错误不再算成页面问题（真 React 里它也不会冒到 window.onerror），
+     所以这里**不** report——否则套件会把「故意造的那一次崩」记成场景问题。 */
+
+  const instanceByPath = new Map();
+
+  function Component(props) {
+    this.props = props;
+    this.state = this.state || {};
+  }
+  Component.prototype.isReactComponent = true;
+  Component.prototype.setState = function setState(patch, after) {
+    const next = typeof patch === 'function' ? patch(this.state, this.props) : patch;
+    this.state = Object.assign({}, this.state, next || {});
+    schedule();
+    if (typeof after === 'function') after();
+  };
+
+  function renderClass(node, key, parent) {
+    const { type, props, children } = node;
+    let inst = instanceByPath.get(key);
+    if (!inst) {
+      inst = new type(props);
+      instanceByPath.set(key, inst);
+    }
+    // 真 React 的 props.children 就是那串子节点（单个时不包数组），类组件里读的就是它
+    inst.props = Object.assign({}, props, children.length
+      ? { children: children.length === 1 ? children[0] : children }
+      : null);
+    const paint = () => renderVNode(normalize(inst.render()), key + '#', parent);
+    const catches = typeof type.getDerivedStateFromError === 'function'
+      || typeof inst.componentDidCatch === 'function';
+    if (!catches) { paint(); return; }
+    try {
+      paint();
+    } catch (error) {
+      const patch = typeof type.getDerivedStateFromError === 'function'
+        ? type.getDerivedStateFromError(error)
+        : { error };
+      inst.state = Object.assign({}, inst.state, patch || { error });
+      if (typeof inst.componentDidCatch === 'function') {
+        try { inst.componentDidCatch(error, { componentStack: '' }); } catch (ignored) { /* 兜底自己别再抛 */ }
+      }
+      paint();
+    }
+  }
+
   /* ── 渲染 ──────────────────────────────────────────────────────────────── */
 
   function applyProps(el, props) {
@@ -245,6 +298,10 @@
     }
     if (typeof type === 'function') {
       const key = path + '@' + typeKey(type);
+      if (type.prototype && type.prototype.isReactComponent) {
+        renderClass(node, key, parent);
+        return;
+      }
       if (!hooksByPath.has(key)) hooksByPath.set(key, []);
       const savedSlots = slots;
       const savedCursor = cursor;
@@ -302,8 +359,8 @@
   }
 
   global.MiniReact = {
-    createElement, Fragment, useState, useEffect, useMemo, useCallback, useRef, mount,
-    /** 清掉所有 hook 槽、effect 与手贴名单（套件里换株重挂时用）。 */
-    reset() { hooksByPath.clear(); pendingEffects = []; handPainted.clear(); root = null; vnode = null; },
+    createElement, Fragment, Component, useState, useEffect, useMemo, useCallback, useRef, mount,
+    /** 清掉所有 hook 槽、effect、类组件实例与手贴名单（套件里换株重挂时用）。 */
+    reset() { hooksByPath.clear(); instanceByPath.clear(); pendingEffects = []; handPainted.clear(); root = null; vnode = null; },
   };
 }(window));

@@ -57,6 +57,16 @@ function hooksRuntime() {
     useRef(initial) { const index = cursor++; if (!(index in cells)) cells[index] = { current: initial }; return cells[index]; },
     createElement() { return null; },
     Fragment: Symbol('Fragment'),
+    // #174 ② 的渲染边界要 `extends React.Component`：这里只为「工厂能物化」给一个最小基类。
+    // 这份桩不渲染 DOM，边界的 `getDerivedStateFromError` 一次也跑不到。
+    Component: class Component {
+      constructor(props) { this.props = props; this.state = this.state || {}; }
+
+      setState(patch) {
+        const next = typeof patch === 'function' ? patch(this.state, this.props) : patch;
+        this.state = Object.assign({}, this.state, next || {});
+      }
+    },
   };
   return {
     React,

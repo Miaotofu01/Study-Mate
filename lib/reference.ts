@@ -54,6 +54,16 @@ const NAME_MAX = 60;
 /** 标题被清成一个空名字时的兜底：宁可用一个呆名字，也不要写不出文件。 */
 const FALLBACK_STEM = '参考资料';
 
+/* Windows 的保留设备名：`CON`、`NUL`、`COM1`、`LPT1` 这些**主干**在 Win32 上无论带不带
+   扩展名都建不出来（`CON.md` 也一样落到设备上），`WriteFile` 直接报错或写进设备。
+   它们在 Linux/macOS 上完全合法，所以只有落盘名这一层要管：撞上就退兜底名，
+   再靠 -2/-3 区分同名。 */
+const RESERVED_STEMS = new Set([
+  'con', 'prn', 'aux', 'nul', 'conin$', 'conout$',
+  ...Array.from({ length: 9 }, (_, index) => `com${index + 1}`),
+  ...Array.from({ length: 9 }, (_, index) => `lpt${index + 1}`),
+]);
+
 /** 同名文件最多试到 -999：到这一步不是碰撞，是有人在灌垃圾。 */
 const COLLISION_MAX = 999;
 
@@ -232,19 +242,24 @@ function quoteScalar(text: string): string {
   return plainUnsafe ? quotedScalar(value) : value;
 }
 
-/* 标题 → 文件名主干：去掉路径分隔符（含 Windows 的盘符/ADS 冒号）与控制字符、去掉开头
+/* 标题 → 文件名主干：去掉路径分隔符（含 Windows 的盘符/ADS 冒号）与 Windows 落不了盘的
+   字符（`< > " | ? *`——Linux 上合法、Windows 上 CreateFile 直接失败）、控制字符，去掉开头
    与结尾的点（开头是点会变成隐藏文件，我的清单口子正好会跳过它，等于写了个看不见的文件；
    结尾的点在 Windows 上会被文件系统抹掉），空白折叠成一个空格，按**码位**截到 NAME_MAX。
-   CJK 原样保留：中文标题是常态，不该为它另起一套规则。 */
+   落出来的主干若是 Windows 保留设备名（`CON`、`NUL`、`COM1`…），同样退兜底名——那些名字
+   在 Win32 上建不出来，没有扩展名也是设备。
+   CJK 原样保留：中文标题是常态，不该为它另起一套规则。只净化落盘名：显示标题、front matter
+   与来源栅栏仍用原值。 */
 function fileNameStem(title: string): string {
   const flat = [...String(title)]
-    .filter((ch) => !/[\u0000-\u001f\u007f]/.test(ch) && !'/\\:'.includes(ch))
+    .filter((ch) => !/[\u0000-\u001f\u007f<>"|?*]/.test(ch) && !'/\\:'.includes(ch))
     .join('')
     .replace(/\s+/gu, ' ')
     .trim()
     .replace(/^[.\s]+|[.\s]+$/gu, '');
   const stem = [...flat].slice(0, NAME_MAX).join('').replace(/[.\s]+$/gu, '');
-  return stem === '' ? FALLBACK_STEM : stem;
+  if (stem === '' || RESERVED_STEMS.has(stem.toLowerCase())) return FALLBACK_STEM;
+  return stem;
 }
 
 /* ── 清单与版本号 ──────────────────────────────────────────────────────── */
