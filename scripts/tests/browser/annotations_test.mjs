@@ -404,6 +404,91 @@ try {
       resolved.states.every((text) => text !== '这条标注的原文已变'), JSON.stringify(resolved.states));
     return { highlights: resolved.highlights, hashChanged: next.ranges[0].hash !== before };
   });
+
+  /* 3. ④ 多选标注 → 拼一条引用进答疑（走现成的 chip 机制，不新开路由、不写标注） */
+  await session.scene('annotations-ask', async (ctx) => {
+    await openLesson(ctx, fixture);
+
+    // 在带公式的那一段再建一条标注（第二段起）：划「公式那一句」五个字
+    const selected = await ctx.evaluate(`(() => {
+      const para = Array.from(document.querySelectorAll('.smb-doc p')).find((el) => el.textContent.indexOf('公式那一句') === 0);
+      if (!para) return 'no-para';
+      const node = document.createTreeWalker(para, NodeFilter.SHOW_TEXT).nextNode();
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.setEnd(node, 5);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      return sel.toString();
+    })()`);
+    check('第二段（含公式）也能划选建标注', selected === '公式那一句', String(selected));
+    await ctx.sleep(250);
+    await ctx.evaluate(`document.querySelector('[data-proto="annotation-pick"]').click()`);
+    await ctx.sleep(250);
+    await ctx.evaluate(`(() => {
+      const ta = document.querySelector('[data-proto="annotation-editor"] textarea');
+      ta.value = '公式这一句的注释';
+      ta.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await ctx.sleep(150);
+    const writesBefore = host.posts.length;
+    await ctx.evaluate(`document.querySelector('[data-proto="annotation-save"]').click()`);
+    await ctx.sleep(700);
+    check('第二条标注写成（整份数组写回，两条都在）', host.posts.length === writesBefore + 1 && state.items.length === 2,
+      JSON.stringify({ posts: host.posts.length, items: state.items.length }));
+
+    // 展开列表 → 勾选两条
+    await ctx.evaluate(`document.querySelector('[data-proto="annotations-toggle"]').click()`);
+    await ctx.sleep(250);
+    for (let i = 0; i < 2; i++) {
+      await ctx.evaluate(`document.querySelectorAll('[data-proto="annotation-pick"]')[${i}].click()`);
+      await ctx.sleep(200);
+    }
+    const picked = await ctx.evaluate(`(() => {
+      const boxes = Array.from(document.querySelectorAll('[data-proto="annotation-pick"]'));
+      const ask = document.querySelector('[data-proto="annotations-ask"]');
+      return { checked: boxes.map((el) => !!el.checked), askText: ask ? ask.textContent.trim() : null, disabled: ask ? !!ask.disabled : null };
+    })()`);
+    check('多选两条标注：checkbox 都勾上，按钮写着「带着 2 条标注提问」',
+      JSON.stringify(picked.checked) === '[true,true]' && picked.askText === '带着 2 条标注提问' && !picked.disabled,
+      JSON.stringify(picked));
+
+    const annotationsBefore = JSON.stringify(state.items);
+    await ctx.evaluate(`document.querySelector('[data-proto="annotations-ask"]').click()`);
+    await ctx.sleep(800);
+    const ask = await ctx.evaluate(`(() => {
+      const chip = document.querySelector('[data-proto="qa-quote"]');
+      const toggle = document.querySelector('[data-proto="qa-quote-toggle"]');
+      const tab = document.querySelector('[data-proto="tab-ask"]');
+      const panel = document.querySelector('.smb-askbody');
+      return {
+        chip: chip ? chip.textContent.trim() : null,
+        tabSelected: tab ? tab.getAttribute('aria-selected') : null,
+        panel: !!panel,
+        chipToggle: !!toggle,
+      };
+    })()`);
+    check('点「带着 2 条标注提问」把右栏切到「问答」tab', ask.tabSelected === 'true', JSON.stringify(ask));
+    check('问答面板输入框上方出现一条引用 chip（走现成 #106 机制）',
+      !!ask.chip && ask.chip.indexOf('引用') >= 0 && ask.chip.indexOf('标注 1') >= 0 && ask.chip.indexOf('标注 2') >= 0,
+      JSON.stringify(ask.chip));
+
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-quote-toggle"]').click()`);
+    await ctx.sleep(250);
+    const full = await ctx.evaluate(`(() => {
+      const box = document.querySelector('[data-proto="qa-quote-full"]');
+      return box ? box.textContent : null;
+    })()`);
+    check('点开 chip 看全文：两条标注的原文 + 注释都在',
+      !!full && full.indexOf('标注 1（第') >= 0 && full.indexOf('标注 2（第') >= 0
+      && full.indexOf('注释：') >= 0,
+      JSON.stringify(full && full.slice(0, 80)));
+    check('提问只拼引用、不改标注数据（没有多发写请求）', JSON.stringify(state.items) === annotationsBefore,
+      JSON.stringify({ posts: host.posts.length }));
+    return { chip: ask.chip, full: full && full.slice(0, 60) };
+  });
 } catch (error) {
   failures += 1;
   console.error('套件抛错：', error);

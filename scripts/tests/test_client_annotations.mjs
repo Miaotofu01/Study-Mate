@@ -15,7 +15,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
-import { clientInternals } from './fixtures/client_harness.mjs';
+import { clientInternals, viewText, findByProp } from './fixtures/client_harness.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CLIENT = path.join(ROOT, 'lib', 'client.js');
@@ -40,7 +40,7 @@ function loadKernel() {
   for (const [name, value] of Object.entries(globals)) context[name] = value;
   return vm.runInContext(
     kernelSource() + '\n;({ INLINE, inlinePlainText, blockPlainText, blockHash, annotationRangeOf,'
-    + ' flattenBlocks, resolveRange, resolveAnnotation, reassignRange,'
+    + ' flattenBlocks, resolveRange, resolveAnnotation, reassignRange, annotationQuoteFor,'
     + ' excerptOfRange, offsetInText, ANNOTATION_STATE_RANK });',
     context,
     { filename: 'lib/client.js#annotate-kernel' },
@@ -50,7 +50,7 @@ function loadKernel() {
 const K = loadKernel();
 const {
   inlinePlainText, blockPlainText, blockHash, annotationRangeOf, flattenBlocks,
-  resolveRange, resolveAnnotation, reassignRange, offsetInText,
+  resolveRange, resolveAnnotation, reassignRange, annotationQuoteFor, excerptOfRange, offsetInText,
 } = K;
 
 const client = clientInternals();
@@ -394,4 +394,95 @@ test('写队列的版本围栏：过期读数不采纳，在飞时不采纳', ()
   assert.equal(writer.acceptPayload(key, { present: true, version: 'v1', items: [] }), true);
   writer.push({ lineKey: key, subject: 's', node: 'n', items: [], expectedVersion: 'v1', operationId: 'op' });
   assert.equal(writer.acceptPayload(key, { present: true, version: 'v2', items: [] }), false, '有写在飞时不采纳 payload');
+});
+
+/* ═══ 七、④ 多选标注拼一条引用 chip ═══ */
+
+test('annotationQuoteFor：每段「标注 N（第 L 段）：摘录」+「注释：…」，空注释与空摘录省略', () => {
+  const quote = annotationQuoteFor([
+    { id: 'a', note: '这里要注意左右极限', ranges: [fullRangeOf(para, 0, 4)] },
+    { id: 'b', note: '', ranges: [fullRangeOf(lesson.blocks.find((b) => b.type === 'quote'), 0, 2)] },
+  ], { path: 'lessons/0001-limit.md', blocks: lesson.blocks });
+  assert.equal(quote.text, [
+    '标注 1（第 3 段）：这一节讲',
+    '注释：这里要注意左右极限',
+    '标注 2（第 29 段）：极限',
+  ].join('\n'));
+  assert.deepEqual(plain(quote.anchor), { lesson: 'lessons/0001-limit.md', section: '', sectionTitle: '' });
+
+  // 原文已变（hash 对不上）→ 摘录省略，注释照留
+  const stale = { id: 'c', note: '旧注释', ranges: [{ line: para.line, kind: 'para', hash: 'deadbeef', start: 0, end: 4 }] };
+  assert.equal(annotationQuoteFor([stale], { path: 'x.md', blocks: lesson.blocks }).text, '标注 1（第 3 段）\n注释：旧注释');
+});
+
+test('annotationQuoteFor：空选择给空文本（空引用不产 chip）', () => {
+  const empty = annotationQuoteFor([], { path: 'x.md', blocks: lesson.blocks });
+  assert.equal(empty.text, '');
+  assert.equal(client.referenceInsertFor(empty), null, '空引用喂给 chip 机制必须得 null');
+  assert.equal(annotationQuoteFor(null, { blocks: lesson.blocks }).text, '');
+  assert.equal(annotationQuoteFor([{ id: 'x', note: '', ranges: [] }], { path: 'x.md', blocks: lesson.blocks }).text, '标注 1');
+});
+
+test('annotationQuoteFor：多选顺序稳定——同样输入两次逐字相同，换顺序文本跟着换', () => {
+  const first = { id: 'a', note: '甲', ranges: [fullRangeOf(para, 0, 2)] };
+  const second = { id: 'b', note: '乙', ranges: [fullRangeOf(para, 2, 4)] };
+  const one = annotationQuoteFor([first, second], { path: 'x.md', blocks: lesson.blocks });
+  const two = annotationQuoteFor([first, second], { path: 'x.md', blocks: lesson.blocks });
+  const reversed = annotationQuoteFor([second, first], { path: 'x.md', blocks: lesson.blocks });
+  assert.equal(one.text, two.text);
+  assert.notEqual(one.text, reversed.text);
+  assert.ok(one.text.startsWith('标注 1（第 3 段）：'), '第一条在前');
+});
+
+test('④ 拼出来的 quote 走现成的 chip 机制：编解码逐字往返、来源锚点带这一课', () => {
+  const quote = annotationQuoteFor(
+    [{ id: 'a', note: '注意这里', ranges: [fullRangeOf(para, 0, 4)] }],
+    { path: 'lessons/0001-limit.md', blocks: lesson.blocks },
+  );
+  const insert = client.referenceInsertFor(quote);
+  assert.ok(insert && insert.ref && insert.label, '非空引用要能进草稿');
+  const decoded = client.decodeQuoteRef(insert.ref);
+  assert.equal(decoded.text, quote.text, '原文 + 注释逐字往返');
+  assert.equal(decoded.anchor.lesson, 'lessons/0001-limit.md');
+  // 提交那一刻进消息的那段文字：原文 + 来源锚点（#106 的既有口径，不改）
+  const serialized = client.quoteForModel(insert.ref);
+  assert.ok(serialized.startsWith('【引用】'), serialized.slice(0, 20));
+  assert.ok(serialized.indexOf('标注 1（第 3 段）：这一节讲') >= 0);
+});
+
+test('④ 列表：checkbox 多选 +「带着 N 条标注提问」入口（没选时禁用）', () => {
+  const items = [
+    { id: 'a', note: '第一条', ranges: [fullRangeOf(para, 0, 2)] },
+    { id: 'b', note: '第二条', ranges: [fullRangeOf(para, 2, 4)] },
+  ];
+  const noop = () => {};
+  const props = {
+    annotations: { items }, lesson, open: true, selected: new Set(), error: '',
+    onToggleOpen: noop, onToggleSelect: noop, onJump: noop, onReassign: noop, onEdit: noop, onAsk: noop,
+  };
+  // 没选中：按钮禁用，文字是「带着 0 条标注提问」
+  const emptyTree = client.AnnotationPanel(Object.assign({}, props));
+  const disabled = findByProp(emptyTree, 'data-proto', 'annotations-ask')[0];
+  assert.ok(disabled, '列表里要有「带着 N 条标注提问」按钮');
+  assert.equal(disabled.props.disabled, true);
+  assert.ok(viewText(emptyTree).includes('带着 0 条标注提问'));
+
+  // 选中一条：按钮可用、数字跟着变；checkbox 的 onChange 把 id 交给调用方
+  const picked = [];
+  const tree = client.AnnotationPanel(Object.assign({}, props, {
+    selected: new Set(['a']),
+    onToggleSelect: (id) => picked.push(id),
+  }));
+  const enabled = findByProp(tree, 'data-proto', 'annotations-ask')[0];
+  assert.equal(enabled.props.disabled, false);
+  assert.ok(viewText(tree).includes('带着 1 条标注提问'));
+  const checkboxes = findByProp(tree, 'data-proto', 'annotation-pick');
+  assert.equal(checkboxes.length, 2, '每条标注一个 checkbox');
+  checkboxes[1].props.onChange();
+  assert.deepEqual(picked, ['b']);
+  // 点提问按钮走的是现成 quote 机制（onAsk），不在面板里拼字符串
+  let asked = 0;
+  const askTree = client.AnnotationPanel(Object.assign({}, props, { selected: new Set(['a']), onAsk: () => { asked += 1; } }));
+  findByProp(askTree, 'data-proto', 'annotations-ask')[0].props.onClick();
+  assert.equal(asked, 1);
 });
