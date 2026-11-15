@@ -412,6 +412,11 @@ const groups = {
       'scripts/tests/test_export_leak_guard.mjs',
       'scripts/tests/test_export_tool_task.mjs',
       'scripts/tests/test_export_cli.mjs',
+      // #225 ⑤ / ADR-0015：导出产物的**标注只读快照**——真导出后 data.js 里
+      // `window.__STUDYMATE_EXPORT__.library.offline === true`、对应节点的 annotations 逐字
+      // 带出（items / ranges 与盘上一致）；产物里 studymate-client.js 仍与 lib/client.js
+      // 逐字相同（同一套渲染）、泄漏守卫干净；只读模式下列表/弹层的写入口不出现。
+      'scripts/tests/test_export_annotations.mjs',
       // #91 的 Host 半：随包发的 KaTeX dist（CSS ↔ 字体的双向对账、版本对账、精确 MIME）
       // 与它的投送路由（一条文件一条精确路由、路径落在 /api 之内、取址判据）。
       // 阅读端那一半（题库字段只接数学式、降级可读）在 test_client_math.mjs；
