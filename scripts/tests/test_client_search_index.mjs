@@ -237,6 +237,43 @@ test('#78 未知指令剩下的原文照索引，不静默丢内容', () => {
   assert.deepEqual(fragments, [{ text: '还没认识的块里的原文', label: '在哪' }]);
 });
 
+test('#174 ③ 缺题干的题也进索引：写成 stem 的用原文，什么都没有的用占位', () => {
+  const index = buildIndex([subject({
+    nodes: [nodeWith('## 小节\n\n::: quiz 单选 锚点：demo#q1\n:::', {
+      pool: {
+        'demo#q1': [
+          { q: '正常的一道题：hello-repo 在哪', opts: ['甲', '乙'], ans: 0 },
+          { stem: '题干被写成了 stem 的 hello-repo 题', opts: ['甲', '乙'], ans: 0 },
+          { opts: ['只有选项的一题', '乙'], ans: 0 },
+          { ans: 0 },
+        ],
+      },
+    })],
+  })]);
+
+  // ① 正常题照旧进索引，一条不多一条不少
+  const normal = index.find((hit) => hit.kind === '题目' && hit.text === '正常的一道题：hello-repo 在哪');
+  assert.ok(normal, '正常题丢了：' + JSON.stringify(textsOf(index)));
+  assert.equal(normal.label, undefined);
+
+  // ② 字段名写错的那种：内容还在 → 用原文，label 指出字段名不对 + 第几题
+  const stray = index.find((hit) => hit.kind === '题目' && hit.text === '题干被写成了 stem 的 hello-repo 题');
+  assert.ok(stray, '写成 stem 的题被静默丢了：' + JSON.stringify(textsOf(index)));
+  assert.equal(stray.label, '缺题干（字段名写成了 stem）· 第 2 题');
+  // 搜题干里那个词，两条都要命中（正常题 + 写错字段名的那道）
+  assert.equal(findHits(index, 'hello-repo').filter((hit) => hit.kind === '题目').length, 2);
+
+  // ③ 只剩选项的：用选项拼一段，标「缺题干 · 第几题」
+  const optsOnly = index.find((hit) => hit.kind === '题目' && hit.text === '缺题干：只有选项的一题 / 乙');
+  assert.ok(optsOnly, '只剩选项的那道题没进索引：' + JSON.stringify(textsOf(index)));
+  assert.equal(optsOnly.label, '缺题干 · 第 3 题');
+
+  // ④ 连选项都没有的：至少留一条占位，别无声无息
+  const blank = index.find((hit) => hit.kind === '题目' && hit.text === '缺题干 · 第 4 题');
+  assert.ok(blank, '什么都没有的那道题没进索引：' + JSON.stringify(textsOf(index)));
+  assert.equal(blank.label, '题目数据不全');
+});
+
 /* ── 2. 术语表：规范叫法 + 别名 + 分组标题 ──────────────────────────────── */
 
 const GLOSSARY_SUBJECT = subject({
