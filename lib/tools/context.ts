@@ -4,6 +4,12 @@
    替掉「总控开场自己读一堆文件」：一次调用拿到**结构化摘要**——工作区路径、时区与今天、
    科目清单（含当前节点与状态）、最近学习记录、共享记忆的画像三节、可用能力。
 
+   摘要的**返回结构**（`OUTPUT_SCHEMA`）是宿主契约，一个字不动（ADR-0014）；模型真正读到的
+   是 `output.render` 拼出来的文本，所以画像三节也必须出现在那段文本里——否则 `description`
+   与技能口径承诺的东西模型看不到。文本里只带画像三节（`execute` 用
+   `readMemory(...).injectable` 投影，`积累` 已被排除），并按 `MEMORY_RENDER_BUDGET` 个字符
+   截断、注明「已截断」。
+
    读域：workspace / memory / subjects / curriculum / progress / records。
    它们互相之间不越界：`subjects` 的切片里没有题库、没有课件正文（见 `vault.ts` 的逐域投影），
    真去读 pool 会当场抛 DomainViolationError。
@@ -214,6 +220,55 @@ function summarize(input: {
     });
 }
 
+/* ── 摘要文本：共享记忆那一段 ──────────────────────────────────────────── */
+
+/**
+ * 摘要文本里最多带多少**字符（码点）**的画像三节。
+ *
+ * 口径是「码点」不是 UTF-16 单元（`[...text].length`）：一个 emoji 算一个字符；与宿主那条
+ * 工具结果裁剪阈值的尺子一致（`preset/learning/agent.cordis.yml` 的 `thresholdChars: 8192`，
+ * 人读版见 `preset/skills/learning-system/references/tools.md` 讲核验工具「返回值刻意短」
+ * 的那一节）。2048 只占四分之一，摘要加上工作区与科目行也不会撞上宿主的静默裁剪。
+ */
+export const MEMORY_RENDER_BUDGET = 2048;
+
+/** 渲染时从 `memory` 那一格（`MEMORY_SCHEMA`）读的键；`present` 不参与排版（见下面注释）。 */
+interface MemorySummary {
+  file?: unknown;
+  markdown?: unknown;
+}
+
+/**
+ * 共享记忆在摘要文本里的那几行：**没有可注入的画像内容就一段都不出现**。
+ *
+ * 「没有」有三种：没有这份文件、文件里只有 `积累`、空骨架——`execute` 交给这里的
+ * `markdown` 是 `readMemory(...).injectable` 投影，这三种情况都是空串。此处不再看
+ * `present`：新工作区没有共享记忆是常态，不占一行；要判文件在不在，看结构化返回值的
+ * `memory.present`（渲染文本只负责「模型要读什么」）。
+ *
+ * 超预算就按码点截到 [`MEMORY_RENDER_BUDGET`]，下一行注明「已截断」并给完整原文路径：
+ * 截断是提示（要细节按路径去读），不是错误；摘要是压缩视图，不是记忆本体。
+ *
+ * 为什么这里不再自己分一次节：哪几节能进上下文只在 `lib/core/memory.ts` 定义一次
+ * （`PROFILE_SECTIONS` / `injectable`），`积累` 与科目记忆一个字都到不了这里——渲染只做
+ * 排版与预算，复制一份白名单就会漂。
+ */
+function renderMemory(memory: MemorySummary | undefined): string[] {
+  const markdown = typeof memory?.markdown === 'string' ? memory.markdown : '';
+  if (markdown === '') return [];
+  const chars = [...markdown];
+  const heading = '共享记忆的画像三节：';
+  if (chars.length <= MEMORY_RENDER_BUDGET) return ['', heading, markdown];
+  const file = typeof memory?.file === 'string' && memory.file !== '' ? memory.file : '';
+  return [
+    '',
+    heading,
+    chars.slice(0, MEMORY_RENDER_BUDGET).join(''),
+    `（画像三节超过 ${MEMORY_RENDER_BUDGET} 字符，已截断`
+      + `${file === '' ? '' : `；完整原文见 ${file}`}）`,
+  ];
+}
+
 export function workspaceContextTool(ctx: ServiceReader): StudyToolSpec {
   return {
     name: 'studymate_workspace_context',
@@ -246,6 +301,8 @@ export function workspaceContextTool(ctx: ServiceReader): StudyToolSpec {
               + `（${value.workspace.timeZone}）；${model}`,
             ...(lines.length > 0 ? lines : ['（还没有科目）']),
             ...value.notes,
+            // 共享记忆放最后：前面的行是「现在在哪」，画像是「这个人怎么学」；没有就一段都不加
+            ...renderMemory(value.memory),
           ].join('\n'),
         }];
       },
