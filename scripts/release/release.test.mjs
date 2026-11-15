@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { addChangelog, bumpVersion, mergedPullRequests, notesFromChangelog, registryVersion,
   releaseNotes, releasePlan, validatePack, verifyPublished, verifyPublishOrder, publishWaitSeconds,
-  publicationPending, waitForPublished,
+  publicationPending, waitForPublished, CLIENT_ENTRY, CLIENT_NOTICES,
   buildReleasePlugin, ensureGithubRelease, ensureReleaseAsset, withInstallationNotes } from './release.mjs';
 
 const repository = 'Miaotofu01/Study-Mate';
@@ -162,7 +162,9 @@ test('npm publication waiting tolerates delayed registry visibility and reports 
   assert.throws(() => publishWaitSeconds(), /RELEASE_NPM_WAIT_SECONDS/);
 });
 
-const tarballFiles = ['package.json', 'README.md', 'cordis.patch.yml', 'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs',
+// 正式包里的客户端产物：exports["./client"] → dist/client.js，旁边是它的第三方许可全文。
+const tarballFiles = ['package.json', 'README.md', 'cordis.patch.yml', CLIENT_ENTRY, CLIENT_NOTICES,
+  'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs',
   'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'bin/openai-interaction.mjs', 'bin/openai-skill-ui.mjs',
   'openai/studymate/scripts/interaction_state.mjs', 'openai/studymate/skills/learning-system/references/codex-interaction.md',
   'openai/studymate/.codex-plugin/plugin.json', 'docs/使用/Codex与ChatGPT.md',
@@ -184,8 +186,16 @@ test('every package.json files pattern passes the tarball allowlist', () => {
     if (pattern.includes('*')) return pattern.replace('*', 'probe');
     return pattern;
   };
-  const samples = patterns.map(pattern => ({ path: sample(pattern) }));
-  validatePack({ ...tarballPack(), files: [...tarballPack().files, ...samples] });
+  // 基线 = 已知的必需项，加上每个模式的一份样本（同一路径去重）。
+  // 不再往夹具上**再拼一份**样本：那样「files 加了白名单没认的目录」不会红，
+  // 「必需项真缺了」也会被糊过去。
+  const paths = new Set(tarballPack().files.map(file => file.path));
+  for (const pattern of patterns) paths.add(sample(pattern));
+  validatePack({ ...tarballPack(), files: [...paths].map(path => ({ path })) });
+  // 客户端入口与许可全文必须在 files 里（少了它们，tarball 缺文件只在发布时才被发现）。
+  for (const file of [CLIENT_ENTRY, CLIENT_NOTICES]) {
+    assert.ok(patterns.includes(file), `package.json files 漏了 ${file}`);
+  }
 });
 
 test('tarball inspection rejects personal workspace, credentials and incomplete payloads', () => {
@@ -204,14 +214,106 @@ test('tarball inspection rejects personal workspace, credentials and incomplete 
   }
 });
 
-test('release CLI refuses local runs before touching repository or contacting registries', () => {
+// 正式包的 tarball 里多了一样东西是 `dist/`：客户端 bundle（exports["./client"] → dist/client.js）
+// 与它的许可全文。两张表分头维护的老毛病在这里更险——白名单写成 `dist/**` 通配，
+// 网页验收产物（dist/notes-preview/）、构建报告（dist/client-build-report.json）就会跟着发出去。
+test('the client bundle and its notices ship, and nothing else under dist/ does', () => {
+  const pack = tarballPack();
+  validatePack(pack);
+  for (const file of [CLIENT_ENTRY, CLIENT_NOTICES]) {
+    assert.throws(() => validatePack({ ...pack, files: pack.files.filter(entry => entry.path !== file) }),
+      error => error.message === `npm tarball is missing ${file}.`);
+  }
+  // 名字接近但不是那两个名字的一律发不出去：`dist/client.js.map` 被整名匹配挡住
+  // （`$` 不吃 `.map`）。这几条也是白名单写法本身的反证：
+  //   · `dist/client.min.js`、`dist/probe/client.js` —— 「前缀通配」写法；
+  //   · `dist/client.txt`、`dist/client-notices.js` —— 把两个名字写成一个可选式
+  //     `dist/client(?:-notices)?\.(?:js|txt)` 时意外放行的组合，白名单必须是两条完整路径。
+  for (const path of ['dist/client-build-report.json', 'dist/notes-preview/index.html',
+    'dist/notes-preview/assets/notes.js', 'dist/notes.cjs', 'dist/notes.css', 'dist/client.min.js',
+    'dist/client.js.map', 'dist/probe/client.js', 'dist/client.txt', 'dist/client-notices.js']) {
+    const expected = `Unexpected or private file in npm tarball: ${path}.`;
+    assert.throws(() => validatePack({ ...pack, files: [...pack.files, { path }] }),
+      { message: expected }, `dist 白名单放行了 ${path}`);
+  }
+});
+
+test('release CLI refuses local runs before touching repository, building or contacting registries', () => {
   const before = readFileSync(new URL('../../package.json', import.meta.url));
-  const result = spawnSync(process.execPath, ['scripts/release/release.mjs', 'prepare'], {
-    encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: 'false' },
-  });
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /only allowed/);
+  // 换上会留下痕迹的 npm 垫片：发布路径一旦在拒绝之前就构建客户端，这里就看得到。
+  const shims = mkdtempSync(join(tmpdir(), 'studymate-release-shim-'));
+  const calls = join(shims, 'calls.txt');
+  writeFileSync(join(shims, 'npm'), `#!/bin/sh\necho "$@" >> '${calls}'\nexit 0\n`, { mode: 0o755 });
+  writeFileSync(join(shims, 'npm.cmd'), `@echo off\r\necho %*>> "${calls}"\r\nexit /b 0\r\n`);
+  const key = Object.keys(process.env).find(name => name.toLowerCase() === 'path') || 'PATH';
+  const env = { ...process.env, GITHUB_ACTIONS: 'false', [key]: `${shims}${process.platform === 'win32' ? ';' : ':'}${process.env[key]}` };
+  try {
+    const result = spawnSync(process.execPath, ['scripts/release/release.mjs', 'prepare'], { encoding: 'utf8', env });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /only allowed/);
+    assert.equal(existsSync(calls), false, '本地运行不许触发任何 npm 调用（包括 build:client）');
+  } finally {
+    rmSync(shims, { recursive: true, force: true });
+  }
   assert.deepEqual(readFileSync(new URL('../../package.json', import.meta.url)), before);
+});
+
+test('the real npm pack call always builds the client first: build, then pack --ignore-scripts', () => {
+  const source = readFileSync(new URL('./release.mjs', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('export function packPackage('));
+  const build = body.indexOf('build(execute);');
+  const pack = body.indexOf("execute('npm', ['pack', '--json', '--ignore-scripts'");
+  assert.ok(build >= 0, 'packPackage 必须自己构建客户端产物');
+  assert.ok(pack > build, '构建必须在 npm pack 之前，且同一段里紧挨着');
+  // pack 用 --ignore-scripts 是既定口径（prepack 不触发），所以不能靠 prepack 兜底。
+  const client = readFileSync(new URL('../../scripts/build-client.mjs', import.meta.url), 'utf8');
+  for (const output of ['client.js', 'client-notices.txt']) {
+    assert.ok(client.includes(`path.join(destination, '${output}')`), `build-client.mjs 不再产出 ${output}`);
+  }
+  const packageInfo = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+  assert.equal(packageInfo.exports['./client'], './dist/client.js');
+  for (const file of [CLIENT_ENTRY, CLIENT_NOTICES]) assert.ok(packageInfo.files.includes(file), `files 漏了 ${file}`);
+  // 构建期工具必须是 devDependencies：发布 job 装 --include=dev，而 Host 运行时依赖保持为空。
+  assert.equal(packageInfo.dependencies, undefined);
+  for (const tool of ['esbuild', 'postcss', 'postcss-selector-parser']) {
+    assert.ok(packageInfo.devDependencies[tool], `${tool} 应在 devDependencies`);
+  }
+});
+
+// publish job 是一个全新的 checkout：checks job 装的 node_modules 看不见，构建期工具只能自己装。
+// 构建则**由 release.mjs 自己负责**——prepare 在 commit/tag 之前就通过 packPackage 构建并试打包
+// （所以构建失败进不了版本 commit 与 tag），publish 打包前再构建一次。workflow 里不另加一次
+// 显式 build：那是同一个 fresh job 里的无意义重复，真正保证产物的是 packPackage 那条路径。
+test('the release workflow installs devDependencies, and prepare builds inside its pack before the tag', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
+  const jobs = workflow.slice(workflow.indexOf('jobs:'));
+  const publish = jobs.slice(jobs.indexOf('\n  publish:'));
+  // 只认步骤的 run: 行（注释不算），顺序才是真的执行顺序。
+  const steps = [...publish.matchAll(/^\s+run: (.+)$/gm)].map(match => match[1].trim());
+  const install = steps.findIndex(step => step.startsWith('npm ci --include=dev'));
+  const prepare = steps.indexOf('node scripts/release/release.mjs prepare');
+  const pack = steps.indexOf('node scripts/release/release.mjs publish');
+  assert.ok(install >= 0, '发布 job 必须装 devDependencies（全新的 checkout 里没有 checks job 的 node_modules）');
+  assert.ok(install < prepare, '装依赖必须在 prepare 之前：prepare 里要打包');
+  assert.ok(pack > prepare, '顺序必须是：装 devDependencies → prepare → publish');
+  assert.equal(steps.filter(step => step === 'npm run build:client').length, 0,
+    'workflow 不再重复构建：prepare 与 publish 通过 packPackage 各自紧跟一次真打包地构建');
+
+  // prepare 里的构建必须发生在 commit/tag 之前——顺序在源码里钉死。
+  const source = readFileSync(new URL('./release.mjs', import.meta.url), 'utf8');
+  const prepareBody = source.slice(source.indexOf('async function prepare()'), source.indexOf('export async function registryVersion('));
+  const commit = prepareBody.indexOf("'-m', `chore(release): ${plan.tag}`");
+  const tag = prepareBody.indexOf(`'-a', plan.tag`);
+  const push = prepareBody.indexOf("['push', '--atomic', 'origin'");
+  const guard = prepareBody.indexOf('packPackage(); // Refuse an incomplete or private tarball before creating refs.');
+  assert.ok(guard > 0, 'prepare 必须在创建 ref 之前试打包');
+  assert.ok(commit > guard && tag > guard && push > guard, '构建/试打包必须发生在版本 commit、tag 与 push 之前');
+  // validatePack 必须显式点名这两个文件：通配会让 dist 下别的产物一起放行。
+  assert.doesNotMatch(source, /dist\\\/\.\*|dist\\\/\*\*/s);
+  // 两个名字只能写成两条完整路径：可选式会把 client.txt / client-notices.js 也放行。
+  assert.ok(source.includes(String.raw`|dist\/client\.js|dist\/client-notices\.txt|`),
+    '白名单必须是两条完整路径的显式 alternation');
+  assert.doesNotMatch(source, /\/client\(\?:-notices\)\?/, '白名单不能把两个名字写成一个可选式');
 });
 
 function assetFixture() {

@@ -92,8 +92,8 @@ function stubReact() {
 let cached = null;
 
 /** 加载一次、缓存：每个套件进程里 client.js 只需要跑一遍工厂。 */
-export function loadClient() {
-  if (cached) return cached;
+export function loadClient(options) {
+  if (cached && options === undefined) return cached;
 
   const source = fs.readFileSync(CLIENT_FILE, 'utf8');
   const loaded = [];
@@ -124,9 +124,10 @@ export function loadClient() {
     throw new Error(`阅读端多要了一个模块：${name}（宿主只冻结 ${RUNTIME_MODULES.join(' / ')}）`);
   };
 
-  const plugin = entry.factory(requireStub);
-  cached = { id: entry.id, plugin, requested, source };
-  return cached;
+  const plugin = entry.factory(requireStub, options);
+  const result = { id: entry.id, plugin, requested, source };
+  if (options === undefined) cached = result;
+  return result;
 }
 
 /**
@@ -137,13 +138,13 @@ export function loadClient() {
  * 浏览器里没人设这个全局，所以那一步在真宿主里是空操作。
  * 回调用完立刻删掉，别给后续加载留痕。
  */
-export function clientInternals() {
+export function clientInternals(options) {
   const key = '__studymate_client_internals';
   const previous = globalThis[key];
   let internals = null;
   globalThis[key] = (value) => { internals = value; };
   try {
-    loadClient();
+    loadClient(options);
   } finally {
     if (previous === undefined) delete globalThis[key];
     else globalThis[key] = previous;

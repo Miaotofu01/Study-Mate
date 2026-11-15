@@ -301,6 +301,20 @@ const groups = {
       'scripts/tests/test_client_tokens.mjs',
       'scripts/tests/test_client_typography.mjs',
       'scripts/tests/test_client_pure.mjs',
+      // #262：正式客户端单入口、CSS/许可/React 边界；笔记核心契约不依赖浏览器或真宿主。
+      'scripts/tests/test_client_bundle.mjs',
+      'scripts/tests/test_notes_imports.mjs',
+      'scripts/tests/test_notes_media.mjs',
+      'scripts/tests/test_notes_editor_gutter.mjs',
+      'scripts/tests/test_notes_native_contract.mjs',
+      // #268：独立笔记数据域、跨进程版本栅栏与原生自动保存（默认纯 Node，无浏览器前置）。
+      'scripts/tests/test_notes_store.mjs',
+      'scripts/tests/test_notes_route.mjs',
+      'scripts/tests/test_notes_persistence.mjs',
+      'scripts/tests/test_notes_curriculum.mjs',
+      // #270 编辑交互后续：真实局部 Markdown 标记与原稿坐标格式命令。
+      'scripts/tests/test_notes_inline_editor.mjs',
+      'scripts/tests/test_notes_markdown_formatting.mjs',
       // #88 三栏几何：ADR-0011 的让位顺序（右栏先拿 / 左栏先让 / 中栏保底 420）与
       // 「并排装不下就把那一栏盖在正文上」的降级。同样是纯函数——「任何画布宽度下都
       // 有一栏打得开」是代数，浏览器里一条条试既慢又试不全。
@@ -316,6 +330,10 @@ const groups = {
       // 那半边用 client_harness.mjs 的 React 桩调 `Block`；真浏览器里点一下在
       // browser/related_links_test.mjs。
       'scripts/tests/test_client_related.mjs',
+      // #270：legacy 学习端接线——课程引用按 workspace + slug + 节点 id 精确解析、右栏笔记 tab、
+      // 左栏课程/笔记平级切换、无课件节点仍能开三栏，以及笔记里那张只读课程卡。夹具用假 notes
+      // 子模块 + React 桩，不依赖组合产物已经构建。
+      'scripts/tests/test_client_learning_notes.mjs',
       // #175：判分要点（criteria）是共享字段——预测验证 / 交付物的展开面板也要显示它，
       // 开放题照旧两块。同一套夹具（client_harness.mjs）把 SubjectiveBody 逐题型调起来。
       'scripts/tests/test_client_quiz_fields.mjs',
@@ -325,6 +343,8 @@ const groups = {
       // 夹具在 scripts/tests/fixtures/tools.mjs —— `fixtures/` 目录被上面的遍历显式跳过。
       'scripts/tests/test_tools_guard.mjs',
       'scripts/tests/test_tools_context.mjs',
+      // #263：测试 effect 按作用域拆卸，真实监听关闭后再删临时 HOME，子进程自然退出。
+      'scripts/tests/test_tools_effect_cleanup.mjs',
       'scripts/tests/test_tools_validate.mjs',
       'scripts/tests/test_tools_rewrite.mjs',
       // 工具 schema 的**宿主子集**：多一个关键字、或把 `type` 写成数组，整批工具在真宿主里
@@ -438,6 +458,17 @@ const groups = {
     //   · #76 阅读位置三级恢复 + 锚点四态复核；
     //   · #72 作答落盘（把阅读端打进一个说 HTTP 的迷你宿主，真的落盘到工作区文件）。
     node: [
+      // #262：共享笔记组件的独立网页，Playwright 真交互；DSH 会话只用占位。
+      'browser/notes_test.mjs',
+      'browser/notes_brand_test.mjs',
+      // #268：真实临时 notes HTTP/数据域；独立页仍纯内存，不接真实会话。
+      'browser/notes_persistence_test.mjs',
+      // #270：学习端节点笔记接线——空节点、默认本、左右同一原稿、拖动只改关联、
+      // 软删除恢复、无界节点视图同分类、课程卡只读与精确跳回。真临时 HOME，不 seedDemo。
+      'browser/notes_curriculum_test.mjs',
+      // #270：共享局部编辑与单格式栏的原稿保真、安全、IME 与受控生命期。
+      'browser/notes_live_editor_test.mjs',
+      'browser/notes_inline_editor_test.mjs',
       'browser/reading_test.mjs',
       'browser/reading_position_test.mjs',
       'browser/attempts_test.mjs',
