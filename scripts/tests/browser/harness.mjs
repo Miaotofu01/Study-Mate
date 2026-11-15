@@ -29,17 +29,38 @@ export const EXIT_SKIP = 3;
 
 /* ── 浏览器探测 ────────────────────────────────────────────────────────── */
 
-/** 环境变量优先，其次 PATH 上的常见名字，最后是 macOS 的 .app 内置路径。 */
+/** 环境变量优先，其次 PATH 上的常见名字，最后是各平台的常见安装路径。 */
 const ENV_KEYS = ['STUDYMATE_CHROME', 'CHROME_BIN', 'CHROMIUM_BIN', 'PUPPETEER_EXECUTABLE_PATH'];
-const PATH_NAMES = [
-  'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
-  'chrome', 'google-chrome-beta', 'google-chrome-unstable',
-];
-const APP_PATHS = [
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/Applications/Chromium.app/Contents/MacOS/Chromium',
-  '~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-];
+/* Windows 上的 Chrome / Edge **不保证在 PATH 上**（PATH 里能查到的多半只是 `chrome` 这种快捷名），
+   所以那边照样按名字查一次，真正的兜底是下面的安装位置（#123）。 */
+const PATH_NAMES = process.platform === 'win32'
+  ? ['chrome', 'chrome.exe', 'msedge', 'msedge.exe', 'chromium', 'chromium.exe']
+  : ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
+    'chrome', 'google-chrome-beta', 'google-chrome-unstable'];
+
+/**
+ * 各平台的常见安装位置。macOS 是 .app 里的内置二进制；Windows 是 `Program Files` 与
+ * `LOCALAPPDATA` 下的 `Application\chrome.exe` / `msedge.exe` ——**Edge 是 Windows 10 起
+ * 系统自带的那个**，所以它是这一档最后一个能指望的候选。
+ */
+function installPaths() {
+  if (process.platform === 'win32') {
+    const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA]
+      .filter(Boolean);
+    const products = [
+      ['Google', 'Chrome', 'Application', 'chrome.exe'],
+      ['Microsoft', 'Edge', 'Application', 'msedge.exe'],
+      ['Chromium', 'Application', 'chrome.exe'],
+    ];
+    return roots.flatMap((root) => products.map((parts) => join(root, ...parts)));
+  }
+  const home = process.env.HOME || '~';
+  return [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    join(home, 'Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
+  ];
+}
 
 function executable(file) {
   try {
@@ -50,10 +71,12 @@ function executable(file) {
   }
 }
 
+/** `which` 在 Windows 上不存在——这里以前一律调 `which`，Windows 上的探测因此必然落空（#123）。 */
 function onPath(name) {
-  const found = spawnSync('which', [name], { encoding: 'utf8' });
+  const finder = process.platform === 'win32' ? 'where' : 'which';
+  const found = spawnSync(finder, [name], { encoding: 'utf8', windowsHide: true });
   if (found.status !== 0) return null;
-  const file = (found.stdout || '').trim().split('\n')[0];
+  const file = (found.stdout || '').trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0];
   return file || null;
 }
 
@@ -70,21 +93,23 @@ export function findBrowser() {
     const file = onPath(name);
     if (file && executable(file)) return { path: file, source: 'PATH:' + name };
   }
-  for (const file of APP_PATHS) {
-    const expanded = file.replace(/^~/, process.env.HOME || '~');
-    if (executable(expanded)) return { path: expanded, source: 'app:' + file };
+  for (const file of installPaths()) {
+    if (executable(file)) return { path: file, source: 'app:' + file };
   }
   return null;
 }
 
 /** 探测失败时给人看的一段说明：试过哪些、怎么覆盖。 */
 export function probeHelp() {
+  const appLine = process.platform === 'win32'
+    ? '  · Windows 的 Program Files / LOCALAPPDATA 下的 Chrome、Edge、Chromium（Edge 是系统自带的那个）'
+    : '  · macOS 的 /Applications/*.app 内置路径';
   return [
     '没找到 Chromium 系浏览器，这个套件**跳过**（不是通过）。',
     '试过这些：',
     '  · 环境变量 ' + ENV_KEYS.join(' / ') + '（指到可执行文件的绝对路径）',
     '  · PATH 上的 ' + PATH_NAMES.join(' / '),
-    '  · macOS 的 /Applications/*.app 内置路径',
+    appLine,
     '装上任意一个，或 `STUDYMATE_CHROME=/path/to/chrome npm run test:browser` 指过去。',
   ].join('\n');
 }

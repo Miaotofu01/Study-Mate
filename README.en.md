@@ -7,7 +7,7 @@
 <p align="center">
 <img src="https://img.shields.io/badge/DSH-Learning%20Mode%20preset-1c5a40" alt="DSH Learning Mode preset">
 <img src="https://img.shields.io/badge/Antigravity-multi--agent%20plugin-4285f4" alt="Antigravity plugin">
-<img src="https://img.shields.io/badge/Node.js-22.19%2B%20%7C%2024-339933" alt="Node.js">
+<img src="https://img.shields.io/badge/Node.js-24%2B-339933" alt="Node.js">
 <img src="https://img.shields.io/github/license/Miaotofu01/Study-Mate" alt="MIT License">
 </p>
 

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { moveIntoPlace } from './fs-swap.mjs';
 import { adaptAntigravitySkill, adaptAntigravityAgent, AGENT_ROLES } from './antigravity-skill-compat.mjs';
 import { writeDocsPayload } from './docs-payload.mjs';
 import { writeZip } from './zip.mjs';
@@ -128,17 +129,17 @@ export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity
       for (const [fresh, destination] of [[plugin, target], [zipFile, archive]]) {
         const backup = path.join(staging, `backup-${replacements.length}`);
         const existed = fs.existsSync(destination);
-        if (existed) fs.renameSync(destination, backup);
+        if (existed) moveIntoPlace(destination, backup);
         const change = { destination, backup, existed, installed: false };
         replacements.push(change);
-        fs.renameSync(fresh, destination);
+        moveIntoPlace(fresh, destination);
         change.installed = true;
       }
     } catch (error) {
       try {
         for (const change of replacements.reverse()) {
           if (change.installed) fs.rmSync(change.destination, { recursive: true, force: true });
-          if (change.existed) fs.renameSync(change.backup, change.destination);
+          if (change.existed) moveIntoPlace(change.backup, change.destination);
         }
       } catch (rollbackError) {
         preserveStaging = true;

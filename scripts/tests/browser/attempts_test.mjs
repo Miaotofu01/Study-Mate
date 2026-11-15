@@ -333,6 +333,76 @@ try {
       JSON.stringify(onDisk['题'][QUESTION]['上次结果']));
     return { statuses: fresh.map((p) => p.status), notes: seen.notes };
   });
+
+  /* 4. 一道坏题（题干缺字段）：一块占位，面板与其它题照常（#174 验收） */
+  await session.scene('attempts-missing-stem', async (ctx) => {
+    const quizFile = path.join(subjectDir, 'lessons', `0001-${NODE_ID}.quiz.json`);
+    // 题库里把题干写成了 `stem`（模型重出题时最常见的坏形状）：作为第三题塞进去。
+    const items = JSON.parse(fs.readFileSync(quizFile, 'utf8'))[ANCHOR];
+    items.push({ stem: '题干写成 stem 的坏题', opts: ['甲', '乙'], ans: 0, why: '补上题干之后这一段才有用。' });
+    fs.writeFileSync(quizFile, JSON.stringify({ [ANCHOR]: items }, null, 2) + '\n');
+
+    await openLesson(ctx);
+    const seen = await ctx.evaluate(`(() => {
+      const qs = document.querySelectorAll('.smb-q');
+      const miss = document.querySelector('.smb-q__missing');
+      const body = document.querySelector('.smb-center__body');
+      return {
+        questions: qs.length,
+        missing: miss ? { proto: miss.dataset.proto, missing: miss.dataset.missing, text: miss.textContent.trim() } : null,
+        options: document.querySelectorAll('.smb-opt').length,
+        bodyOk: !!body,
+      };
+    })()`);
+    check('正文还在、三道题都在右栏（坏的那道没把整个面板带走）',
+      seen.bodyOk && seen.questions === 3, JSON.stringify({ questions: seen.questions, bodyOk: seen.bodyOk }));
+    check('坏题渲染成占位（带 question-missing 钩子）',
+      !!seen.missing && seen.missing.proto === 'question-missing' && seen.missing.missing === 'q',
+      JSON.stringify(seen.missing));
+    check('占位说得出是哪一道题（节点 + 题号）',
+      !!seen.missing && /节点 fn\.call · 第 3 题/.test(seen.missing.text), JSON.stringify(seen.missing && seen.missing.text));
+    check('好题的选项照常（2 + 2，坏题自己的 2 个也没丢）', seen.options === 4, String(seen.options));
+    return { questions: seen.questions, missing: seen.missing, options: seen.options };
+  });
+
+  /* 5. 一道会崩的题（`opts` 写成字符串）：只有它那一格变成兜底，其余照常（#174 ②） */
+  await session.scene('attempts-boundary', async (ctx) => {
+    const quizFile = path.join(subjectDir, 'lessons', `0001-${NODE_ID}.quiz.json`);
+    const items = JSON.parse(fs.readFileSync(quizFile, 'utf8'))[ANCHOR];
+    // `opts` 是字符串：`(item.opts || []).map` 里没有 map，Question 渲染时直接抛 TypeError
+    items.push({ q: '这一道会在渲染时抛异常', opts: '不是数组', ans: 0, why: '看边界怎么接' });
+    fs.writeFileSync(quizFile, JSON.stringify({ [ANCHOR]: items }, null, 2) + '\n');
+
+    await openLesson(ctx);
+    const seen = await ctx.evaluate(`(() => {
+      const zone = document.querySelector('.smb-boundary[data-proto="question-crash"]');
+      return {
+        questions: document.querySelectorAll('.smb-q').length,
+        boundaries: document.querySelectorAll('.smb-boundary').length,
+        zone: zone ? zone.textContent.trim() : null,
+        options: document.querySelectorAll('.smb-opt').length,
+        bodyOk: !!document.querySelector('.smb-center__body'),
+      };
+    })()`);
+    check('正文还在，坏题只占一格（其余三道照常渲染）',
+      seen.bodyOk && seen.questions === 3 && seen.boundaries === 1,
+      JSON.stringify({ questions: seen.questions, boundaries: seen.boundaries, bodyOk: seen.bodyOk }));
+    check('兜底卡片说得出是哪一道题',
+      !!seen.zone && /节点 fn\.call · 第 4 题/.test(seen.zone), JSON.stringify(seen.zone));
+    check('好题的选项一个没丢', seen.options === 4, String(seen.options));
+
+    // 「重试」：点了重画一次。数据还是坏的，所以卡片会再出现——重点是**面板活着**，不用刷页。
+    await ctx.evaluate(`document.querySelector('.smb-boundary[data-proto="question-crash"] button').click()`);
+    await ctx.sleep(400);
+    const after = await ctx.evaluate(`(() => ({
+      boundaries: document.querySelectorAll('.smb-boundary').length,
+      questions: document.querySelectorAll('.smb-q').length,
+      bodyOk: !!document.querySelector('.smb-center__body'),
+    }))()`);
+    check('点「重试」重画一次，面板没被带走（坏数据下卡片照旧在）',
+      after.bodyOk && after.boundaries === 1 && after.questions === 3, JSON.stringify(after));
+    return { questions: seen.questions, boundaries: seen.boundaries };
+  });
 } catch (error) {
   check('作答落盘的浏览器 QA 跑完（浏览器起来、夹具能开）', false, String(error && error.stack || error));
   await session.scene('attempts-error', async (ctx) => { ctx.note('harness', String(error && error.stack || error)); });
