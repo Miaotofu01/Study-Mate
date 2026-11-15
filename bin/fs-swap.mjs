@@ -23,7 +23,11 @@ export function moveIntoPlace(from, to) {
     if (!FALLBACK_CODES.has(error?.code)) throw error;
     // 目标还在（Windows 不允许用 rename 顶掉一个已存在的目录）→ 先清干净再复制。
     fs.rmSync(to, { recursive: true, force: true });
-    fs.cpSync(from, to, { recursive: true, force: true });
+    // `filter` 不是为了过滤，是为了**绕开 Node 的 Windows 原生拷贝快路径**：不带 filter 时
+    // 目标路径只要含非 UTF-8 字符（中文用户名、带重音的目录名）就静默一个文件都不拷，
+    // 偶尔还直接 0xC0000005 崩掉（nodejs/node#59636）。恒真的 filter 强制走 JS 实现。
+    // 仓库里 `bin/studymate.mjs` 的 copyPayload 也是这么绕的，改的时候两处一起看。
+    fs.cpSync(from, to, { recursive: true, force: true, filter: () => true });
     fs.rmSync(from, { recursive: true, force: true });
     return 'copy';
   }

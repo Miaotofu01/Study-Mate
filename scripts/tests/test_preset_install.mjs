@@ -60,8 +60,11 @@ function fixture(t) {
   const staged = path.join(home, 'staged-learning');
   const stagedQa = path.join(home, 'staged-qa');
   fs.mkdirSync(home, { recursive: true });
-  fs.cpSync(path.join(ROOT, 'preset', 'learning'), staged, { recursive: true });
-  fs.cpSync(path.join(ROOT, 'preset', 'qa'), stagedQa, { recursive: true });
+  // 目录名故意带引号与中文：既验路径引号，也验安装器在非 ASCII 路径上真能落盘。
+  // `filter` 是绕 Node 的 Windows 原生拷贝快路径（nodejs/node#59636：非 ASCII 目标路径下
+  // 不带 filter 会静默一个文件都不拷），不是用来过滤的。
+  fs.cpSync(path.join(ROOT, 'preset', 'learning'), staged, { recursive: true, filter: () => true });
+  fs.cpSync(path.join(ROOT, 'preset', 'qa'), stagedQa, { recursive: true, filter: () => true });
   const patch = path.join(home, 'profiles', 'web', 'cordis.patch.yml');
   fs.mkdirSync(path.dirname(patch), { recursive: true });
   return { temporary, home, staged, stagedQa, target: path.join(home, '.agent-presets', 'learning'), patch };

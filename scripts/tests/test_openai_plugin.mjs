@@ -194,6 +194,22 @@ test('成品落位：rename 被系统拒掉时退回「清目标 + 复制 + 删�
   assert.equal(fs.existsSync(fresh), false, '源目录不能留下残壳');
 });
 
+test('成品落位：兜底复制对中文目标路径也真的落盘', (t) => {
+  // Node 的 Windows 原生拷贝快路径（`cpSync` 不带 filter）在非 ASCII 目标路径上会静默
+  // 一个文件都不拷（nodejs/node#59636）。这条钉住退路里那句话必须还能把文件搬到中文目录。
+  const directory = fixture(t);
+  const fresh = path.join(directory, 'fresh');
+  const target = path.join(directory, '成品 张三');
+  fs.mkdirSync(path.join(fresh, 'sub'), { recursive: true });
+  fs.writeFileSync(path.join(fresh, 'sub', 'a.txt'), 'x');
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(target, 'stale.txt'), '旧');
+
+  assert.equal(moveIntoPlace(fresh, target), 'copy');
+  assert.equal(fs.readFileSync(path.join(target, 'sub', 'a.txt'), 'utf8'), 'x');
+  assert.equal(fs.existsSync(fresh), false);
+});
+
 test('成品落位：路径写错（ENOENT）不许被兜底伪装成成功', (t) => {
   const directory = fixture(t);
   assert.throws(() => moveIntoPlace(path.join(directory, '没有这个目录'), path.join(directory, 'x')),

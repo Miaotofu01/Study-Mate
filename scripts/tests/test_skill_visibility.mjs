@@ -128,7 +128,9 @@ test('预设里少了技能目录占位符就装不上（搬家没把这条守�
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-placeholder-'));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const packageDir = path.join(base, '包');
-  fs.cpSync(path.join(ROOT, 'bin'), path.join(packageDir, 'bin'), { recursive: true });
+  // `filter` 是绕 Node 的 Windows 原生拷贝快路径（nodejs/node#59636：非 ASCII 目标路径
+  // 下不带 filter 会静默一个文件都不拷），不是用来过滤的。'包' 这个目录名正好会踩中。
+  fs.cpSync(path.join(ROOT, 'bin'), path.join(packageDir, 'bin'), { recursive: true, filter: () => true });
   fs.symlinkSync(path.join(ROOT, 'lib'), path.join(packageDir, 'lib'),
     process.platform === 'win32' ? 'junction' : 'dir');
   fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(packageDir, 'package.json'));

@@ -257,14 +257,16 @@ test('preset/qa/agent.cordis.yml 带 __STUDYMATE_SKILLS__；缺了安装必须�
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-qa-placeholder-'));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const packageDir = path.join(base, '包');
-  fs.cpSync(path.join(ROOT, 'bin'), path.join(packageDir, 'bin'), { recursive: true });
+  // `filter` 是绕 Node 的 Windows 原生拷贝快路径（nodejs/node#59636：非 ASCII 目标路径下
+  // 不带 filter 会静默一个文件都不拷），不是用来过滤的。'包' 这个目录名正好会踩中。
+  fs.cpSync(path.join(ROOT, 'bin'), path.join(packageDir, 'bin'), { recursive: true, filter: () => true });
   fs.symlinkSync(path.join(ROOT, 'lib'), path.join(packageDir, 'lib'),
     process.platform === 'win32' ? 'junction' : 'dir');
   fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(packageDir, 'package.json'));
   fs.cpSync(path.join(ROOT, 'preset', 'learning'), path.join(packageDir, 'preset', 'learning'),
-    { recursive: true });
+    { recursive: true, filter: () => true });
   fs.cpSync(path.join(ROOT, 'preset', 'qa'), path.join(packageDir, 'preset', 'qa'),
-    { recursive: true });
+    { recursive: true, filter: () => true });
   const agentFile = path.join(packageDir, 'preset', 'qa', 'agent.cordis.yml');
   fs.writeFileSync(agentFile, fs.readFileSync(agentFile, 'utf8')
     .replaceAll('__STUDYMATE_SKILLS__', 'preset/skills'));
