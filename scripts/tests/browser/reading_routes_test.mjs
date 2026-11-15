@@ -601,6 +601,9 @@ const LESSON_PROBE = `(() => {
   // 三栏壳自己的宽（不是视口宽）：三条栏加起来、中栏保底这些账都记在它身上
   const frame = lesson ? Math.round(lesson.getBoundingClientRect().width) : 0;
   const railBars = qa('.smb-railbar').reduce((n, el) => n + el.getBoundingClientRect().width, 0);
+  // 右手把只要跨过**右边那一条**窄轨：右边的窄轨宽单独量，别拿两条的和去减
+  const railBarRight = q('.smb-railbar--right');
+  const railBarRightWidth = railBarRight ? railBarRight.getBoundingClientRect().width : 0;
   const railToken = getComputedStyle(q('.smb-root')).getPropertyValue('--smb-rail').trim();
   // 右手把的落点：贴在这一栏的内侧边缘上（窄轨 + 这一栏的宽），量出来对账
   const handle = q('.smb-panehandle[data-side="right"]');
@@ -626,6 +629,7 @@ const LESSON_PROBE = `(() => {
     modes: lesson ? { left: lesson.getAttribute('data-left-mode'), right: lesson.getAttribute('data-right-mode') } : null,
     rails: qa('.smb-rail').length,
     railBars: Math.round(railBars),
+    railBarRight: Math.round(railBarRightWidth),
     railToken,
     frame,
     centerBox: box('.smb-center'),
@@ -1099,7 +1103,8 @@ try {
 
       const lessonMetrics = {
         viewport: viewport.key, size: [seen.width, viewport.height], panes: seen.panes, modes: seen.modes,
-        rails: seen.rails, railBarWidth: seen.railBars, railToken: seen.railToken, frame: seen.frame,
+        rails: seen.rails, railBarWidth: seen.railBars, railBarRight: seen.railBarRight,
+        railToken: seen.railToken, frame: seen.frame,
         centerWidth: seen.centerBox && seen.centerBox.w, rightWidth: seen.rightBox && seen.rightBox.w,
         docWidth: seen.docBox && seen.docBox.w,
         docShareOfCenter: seen.docBox && seen.centerBox ? Math.round(seen.docBox.w / seen.centerBox.w * 100) / 100 : null,
@@ -1610,11 +1615,12 @@ try {
     const wrongMode = lessons.filter((one) => !one.seen || one.seen.modes.right !== PANE_MODES[one.viewport]);
     check('三档的右栏形态与画布一致（该并排就并排、装不下就盖在正文上）', wrongMode.length === 0,
       wrongMode.map((one) => `${one.viewport}：${one.seen && one.seen.modes.right}（该是 ${PANE_MODES[one.viewport]}）`).join('；'));
-    // 把手落点 = 窄轨 + 这一栏的宽（抽屉也算这一栏）。脚本里若自己写死一份窄轨宽，这里就对不上
+    // 把手落点 = 右边的窄轨 + 这一栏的宽（抽屉也算这一栏）。脚本里若自己写死一份窄轨宽，这里就对不上；
+    // 减的是**右边那一条**（railBarRight），不是两条的和（railBarWidth）——右边只有一条窄轨
     const misaligned = lessons.filter((one) => one.seen && (!one.seen.handle
-      || Math.abs(one.seen.handle.dx - (one.seen.frame - one.seen.railBarWidth - one.seen.handle.pane)) > 1));
+      || Math.abs(one.seen.handle.dx - (one.seen.frame - one.seen.railBarRight - one.seen.handle.pane)) > 1));
     check('三档下把手都贴在栏的内侧边缘上（窄轨宽是量出来的，不是脚本里写死的）', misaligned.length === 0,
-      misaligned.map((one) => `${one.viewport}：${JSON.stringify(one.seen.handle)} 画布 ${one.seen.frame} 窄轨 ${one.seen.railBarWidth}`).join('；'));
+      misaligned.map((one) => `${one.viewport}：${JSON.stringify(one.seen.handle)} 画布 ${one.seen.frame} 右窄轨 ${one.seen.railBarRight}`).join('；'));
     check('三档下正文列都占得住中栏（铺满也算，但绝不是正中一条细条）',
       lessons.every((one) => one.seen && one.seen.docShareOfCenter !== null && one.seen.docShareOfCenter >= 0.6),
       lessons.map((one) => `${one.viewport}:${one.seen && one.seen.docShareOfCenter}`).join(' '));

@@ -321,6 +321,9 @@ const groups = {
       'scripts/tests/test_client_panes.mjs',
       // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
       'scripts/tests/test_client_reading_position.mjs',
+      // #174 题干的可读性判定：缺 `q` 的题渲染占位而不是 `undefined.split` 把整个 slot 带走
+      // （同样是切源码标记求值，不需要浏览器）。
+      'scripts/tests/test_client_question_stem.mjs',
       // #77 交付物题的界面：代跑事实块只显示事实（命令 / 退出码 / 两条流 / 截断），
       // 界面文案里一个判决词都没有，入口只有一颗「跑一次」按钮且不点不跑。
       // 渲染函数在工厂闭包里，靠 fixtures/client_harness.mjs 的 React 桩调起来。
@@ -398,6 +401,10 @@ const groups = {
       // 「插件激活时注册、卸载时注销」是承重的（提交那一刻找不到 owner 会让整次发送失败），
       // 插入/换掉/撤掉那条调用序列用假输入门面（occurrences + draftRev CAS）逐条钉住。
       'scripts/tests/test_client_ask_chip.mjs',
+      // #241：答疑面板不再「挂载即建」空会话。「标题 → sessionId」的记忆表（localStorage，
+      // 读写不抛）+ 挂载的三级顺序（记忆 → 标题快照 → 才建）+ 建成写回。沙箱 window 要带
+      // localStorage（client_harness 那份没有），所以这份套件自己加载插件实例。
+      'scripts/tests/test_client_ask_memory.mjs',
       // 监听域 lib/watch/**（#74）：变更通知的形状与域映射（纯）、目录集合监听（真 fs）、
       // 两条推送路（真 HTTP，bridge 与宿主同形）、阅读端「未变即同引用」（VM 里跑 lib/client.js）。
       // 真 DSH 里的端到端在 scripts/tests/test_dsh_runtime.mjs 的监听探针里。

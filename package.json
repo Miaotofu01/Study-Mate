@@ -66,7 +66,7 @@
     "test:types": "node scripts/release/typecheck.mjs",
     "test:openai": "node --test scripts/tests/test_openai_plugin.mjs",
     "test:antigravity": "node --test scripts/tests/test_antigravity_plugin.mjs",
-    "test:installer": "node --test scripts/tests/test_installer.mjs scripts/tests/test_bundle.mjs",
+    "test:installer": "node --test scripts/tests/test_installer.mjs scripts/tests/test_bundle.mjs scripts/tests/test_pack_json.mjs",
     "test:static": "node scripts/release/checks.mjs --static",
     "test:browser": "npm run build:notes:preview && node scripts/release/checks.mjs --browser",
     "guard:export": "node scripts/release/export_guard.mjs",
