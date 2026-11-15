@@ -127,6 +127,40 @@ test('块标量：| 保换行、> 折行，块后面还能接同级键', () => {
   ].join('\n'), opts), ['第一项', '第二项']);
 });
 
+test('块标量的折行与 chomping 逐字对齐 PyYAML（#224）', () => {
+  const opts = { blockScalars: true };
+  // 期望值全部是 PyYAML 6.0.1 跑出来的原文，不是手推的——下面是 issue #224 里那张对拍表，
+  // 逐行照抄（五例）。
+  assert.deepEqual(parseYaml('a: >\n  x\n   y\n', opts), { a: 'x\n y\n' });
+  assert.deepEqual(parseYaml('a: >-\n  x\n   y\n', opts), { a: 'x\n y' });
+  assert.deepEqual(parseYaml('a: >2-\n   x\n   y\n', opts), { a: ' x\n y' });
+  assert.deepEqual(parseYaml('a: |+\n  x\n  y\n\n', opts), { a: 'x\ny\n\n' });
+  assert.deepEqual(parseYaml('a: >+\n  x\n  y\n\n', opts), { a: 'x y\n\n' });
+  // 比块缩进更深的续行（more-indented）不参与折行：它自己的换行要留着，
+  // 多出来的前导空格属于正文。以前这里被折成一个空格（"x  y"），静默少一层缩进。
+  assert.deepEqual(parseYaml('a: >\n  x\n   y\n  z\n   w\n', opts), { a: 'x\n y\nz\n w\n' });
+  // 普通行之间的空行：n 个空行给 n 个换行（不是折成空格，也不是 n+1）
+  assert.deepEqual(parseYaml('a: >-\n  一\n\n  二\n', opts), { a: '一\n二' });
+  assert.deepEqual(parseYaml('a: >-\n  一\n\n\n  二\n', opts), { a: '一\n\n二' });
+  // `+`(keep) 的尾随空行必须留到最后统一处理：以前在循环里就被 pop 掉了，
+  // 于是 `|+` 尾部的空行整段丢失（issue 里最直观的一处不一致）。
+  assert.deepEqual(parseYaml('a: |+\n  x\n  y\n\n', opts), { a: 'x\ny\n\n' });
+  assert.deepEqual(parseYaml('a: >+\n  x\n  y\n\n', opts), { a: 'x y\n\n' });
+  assert.deepEqual(parseYaml('a: |+\n\n\n', opts), { a: '\n\n' });
+  // clip 只补最后内容行**自己**的行尾换行：文末没有换行就一个也不补
+  assert.deepEqual(parseYaml('a: |\n  x', opts), { a: 'x' });
+  assert.deepEqual(parseYaml('a: |\n', opts), { a: '' });
+  // 块结束在下一个同级键之前：尾随空行按 chomping 收，别算进后面那个键
+  assert.deepEqual(parseYaml('a: >\n  x\n\nb: 2\n', opts), { a: 'x\n', b: 2 });
+  assert.deepEqual(parseYaml('a: >+\n  x\n\nb: 2\n', opts), { a: 'x\n\n', b: 2 });
+  // CRLF 与 LF 同口径（行尾的 \r 属于换行符，不进正文）
+  assert.deepEqual(parseYaml('a: >\r\n  x\r\n   y\r\n\r\n  z\r\n', opts), { a: 'x\n y\n\nz\n' });
+  // 列表项、嵌套键下的折行：缩进参考的是父节点那一层
+  assert.deepEqual(parseYaml('- >\n  x\n   y\n- 尾\n', opts), ['x\n y\n', '尾']);
+  assert.deepEqual(parseYaml('outer:\n  inner: >\n    x\n     y\n', opts), { outer: { inner: 'x\n y\n' } });
+  assert.deepEqual(parseYaml('a: >2\n    x\n   y\n', opts), { a: '  x\n y\n' });
+});
+
 test('多行 plain 标量：显式开启后按 YAML 折行规则读，默认仍报错', () => {
   const opts = { plainScalarContinuation: true };
   assert.deepEqual(parseYaml('a: first line\n  second line\n', opts), { a: 'first line second line' });
