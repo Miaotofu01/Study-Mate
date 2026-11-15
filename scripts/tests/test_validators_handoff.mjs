@@ -349,7 +349,10 @@ test('manifest 不是合法 JSON：带真实行列阻断', () => {
   const verdict = gate(stage);
   const problem = assertBlocked(verdict, '不是合法 JSON');
   assert.equal(problem.line, 4, '行号指向出错的那一行，不是第 1 行');
-  assert.equal(problem.file, path.join(stage, 'handoff.json'));
+  // 盘上入口是 path.join 拼的（Windows 全反斜杠）；校验器回的是它自己走过的路径，
+  // 可能混着 `/`。逐字符比会只差分隔符，按同一套 path 规则归一后再比，仍然是整条路径全等。
+  assert.equal(path.normalize(problem.file), path.normalize(path.join(stage, 'handoff.json')));
+  assert.ok(fs.existsSync(problem.file), '指到的文件要真实存在');
 });
 
 test('重复 JSON key：阻断（JSON.parse 会静默取最后一个，Python 侧本来会拒）', () => {
@@ -386,7 +389,8 @@ test('schema 违规逐条带行号：额外字段 / const / enum / pattern / 长
   assert.ok(find(verdict, '不允许额外字段'));
   for (const problem of verdict.problems) {
     assert.ok(problem.line >= 1);
-    assert.equal(problem.file, path.join(stage, 'handoff.json'));
+    assert.equal(path.normalize(problem.file), path.normalize(path.join(stage, 'handoff.json')));
+    assert.ok(fs.existsSync(problem.file), '指到的文件要真实存在');
   }
   // 行号不是清一色的 1：真解析位置才做得到
   assert.ok(new Set(verdict.problems.map((problem) => problem.line)).size > 1, JSON.stringify(messages(verdict)));

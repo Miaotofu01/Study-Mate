@@ -485,7 +485,9 @@ let routeWorkspace = '';
 
 before(() => {
   routeWorkspace = makeWorkspace().workspace;
-  fs.writeFileSync(path.join(DSH_HOME, 'studymate-config.yaml'), `workspace: "${routeWorkspace}"\n`);
+  // YAML 的双引号标量里反斜杠是转义符：Windows 路径直接插值会被读坏（`\U` 之类），
+  // 用 JSON.stringify 生成合法的双引号标量（JSON 的字符串转义是 YAML 双引号的子集）。
+  fs.writeFileSync(path.join(DSH_HOME, 'studymate-config.yaml'), `workspace: ${JSON.stringify(routeWorkspace)}\n`);
   process.env.DSH_HOME = DSH_HOME;
 });
 
