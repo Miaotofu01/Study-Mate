@@ -364,6 +364,45 @@ try {
     check('好题的选项照常（2 + 2，坏题自己的 2 个也没丢）', seen.options === 4, String(seen.options));
     return { questions: seen.questions, missing: seen.missing, options: seen.options };
   });
+
+  /* 5. 一道会崩的题（`opts` 写成字符串）：只有它那一格变成兜底，其余照常（#174 ②） */
+  await session.scene('attempts-boundary', async (ctx) => {
+    const quizFile = path.join(subjectDir, 'lessons', `0001-${NODE_ID}.quiz.json`);
+    const items = JSON.parse(fs.readFileSync(quizFile, 'utf8'))[ANCHOR];
+    // `opts` 是字符串：`(item.opts || []).map` 里没有 map，Question 渲染时直接抛 TypeError
+    items.push({ q: '这一道会在渲染时抛异常', opts: '不是数组', ans: 0, why: '看边界怎么接' });
+    fs.writeFileSync(quizFile, JSON.stringify({ [ANCHOR]: items }, null, 2) + '\n');
+
+    await openLesson(ctx);
+    const seen = await ctx.evaluate(`(() => {
+      const zone = document.querySelector('.smb-boundary[data-proto="question-crash"]');
+      return {
+        questions: document.querySelectorAll('.smb-q').length,
+        boundaries: document.querySelectorAll('.smb-boundary').length,
+        zone: zone ? zone.textContent.trim() : null,
+        options: document.querySelectorAll('.smb-opt').length,
+        bodyOk: !!document.querySelector('.smb-center__body'),
+      };
+    })()`);
+    check('正文还在，坏题只占一格（其余三道照常渲染）',
+      seen.bodyOk && seen.questions === 3 && seen.boundaries === 1,
+      JSON.stringify({ questions: seen.questions, boundaries: seen.boundaries, bodyOk: seen.bodyOk }));
+    check('兜底卡片说得出是哪一道题',
+      !!seen.zone && /节点 fn\.call · 第 4 题/.test(seen.zone), JSON.stringify(seen.zone));
+    check('好题的选项一个没丢', seen.options === 4, String(seen.options));
+
+    // 「重试」：点了重画一次。数据还是坏的，所以卡片会再出现——重点是**面板活着**，不用刷页。
+    await ctx.evaluate(`document.querySelector('.smb-boundary[data-proto="question-crash"] button').click()`);
+    await ctx.sleep(400);
+    const after = await ctx.evaluate(`(() => ({
+      boundaries: document.querySelectorAll('.smb-boundary').length,
+      questions: document.querySelectorAll('.smb-q').length,
+      bodyOk: !!document.querySelector('.smb-center__body'),
+    }))()`);
+    check('点「重试」重画一次，面板没被带走（坏数据下卡片照旧在）',
+      after.bodyOk && after.boundaries === 1 && after.questions === 3, JSON.stringify(after));
+    return { questions: seen.questions, boundaries: seen.boundaries };
+  });
 } catch (error) {
   check('作答落盘的浏览器 QA 跑完（浏览器起来、夹具能开）', false, String(error && error.stack || error));
   await session.scene('attempts-error', async (ctx) => { ctx.note('harness', String(error && error.stack || error)); });
