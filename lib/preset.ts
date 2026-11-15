@@ -353,7 +353,6 @@ function scanDocument(text: string): PatchDocument & { contentLines: Array<{ sta
  */
 const PATCH_PARSE_OPTIONS = {
   tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
-  quotedScalarContinuation: true,
 } as const;
 
 /** 解析并校验一份补丁文件；返回解析出的内容与插入位置。 */
@@ -535,12 +534,17 @@ function atomicWrite(file: string, text: string): void {
   if (stat?.isSymbolicLink()) throw new Error(`为避免改动其他目录，不覆盖符号链接：${file}`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temporary = path.join(path.dirname(file), `.studymate-${process.pid.toString(36)}-${Date.now().toString(36)}`);
+  let renamed = false;
   try {
     fs.writeFileSync(temporary, text, { encoding: 'utf8' });
     if (stat) fs.chmodSync(temporary, stat.mode);
     fs.renameSync(temporary, file);
+    renamed = true;
   } finally {
-    fs.rmSync(temporary, { force: true });
+    // rename 成功之后临时文件已经不存在了，不必再删一次。
+    // 而且这次「删一个已经不存在的临时文件」在 Node 24 + Windows + 中文路径下会直接把进程打崩
+    // （0xC0000005；同机 Node 22 不复现），中文用户名下安装器会整段静默失败。
+    if (!renamed) fs.rmSync(temporary, { force: true });
   }
 }
 
@@ -649,7 +653,6 @@ export function installPreset(options: InstallPresetOptions): PresetRegistration
         .filter(key => key in source).map(key => [key, source[key]]));
       const plugins = parseYaml(preset.agent, {
         file: preset.file, tags: 'expression', blockScalars: true, plainScalarContinuation: true,
-        quotedScalarContinuation: true,
       });
       if (!Array.isArray(plugins)) throw new Error(`${preset.id} 预设必须是插件列表；未修改配置`);
       // #138：StudyMate 的原生工具住在**主预设（学习模式）的作用域**里，不在 profile 根上——
