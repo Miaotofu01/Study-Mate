@@ -35,13 +35,15 @@ GitHub 发布 job 引用 `npm` environment，不要求设置审批人。仓库�
 2. 打开 **Actions → Release → Run workflow**，分支选择 `main`，选择版本增量。例如 `0.1.1` 选择 `patch` 会得到 `0.1.2`。
 3. 等待检查和发布完成。任务摘要会给出 npm 包、GitHub Release 和 OpenAI 插件 ZIP 链接。DSH 用户重跑安装命令；Codex 用户下载 ZIP，在已有插件页面上传新版本。
 
-发布前复用 **Checks**：在单个 Ubuntu runner 上用 Node 24 运行 `npm test`，覆盖类型检查、安装器、两个宿主插件打包、引擎与发布逻辑。日常提交也使用这套检查，不再自动运行多系统、多版本或真实 DSH 的重复矩阵。`npm ci` 装 devDependencies（`typescript` 与 `@types/node`）——类型门禁要它。
+发布前复用 **Checks**：在单个 Ubuntu runner 上用 Node 24 运行 `npm test`，覆盖类型检查、安装器、两个宿主插件打包、引擎与发布逻辑。日常提交也使用这套检查，不再自动运行多系统、多版本或真实 DSH 的重复矩阵。`npm ci` 装 devDependencies（`typescript`、`@types/node`、`esbuild` 等）——类型门禁与浏览器端的构建期前端包都要它。
 
 静态约束那一层（提示词规则、技能调用面、词表与发布元数据、宿主技能转换）**已并入 `npm test`**，发布前的 Checks 自然会跑；只想单独核对时仍可直接运行 `npm run test:static`。需要核对真实 DSH 兼容性时运行 `npm run test:dsh` 或 `npm run test:dsh-cli`。用法见 [测试说明](../../scripts/tests/README.md)。
 
 检查通过后，流程读取自上一版本 tag 以来的全部 commit，以及 GitHub 关联到这些 commit、已经合入 `main` 的 PR。提交标题和正文都会原样保留（提交写法见 [参与 StudyMate](../../CONTRIBUTING.md)；发布流程只做归类，不校验格式）。现有 `CHANGELOG.md` 内容保留，新条目放在前面。兼容历史 `v0.1` tag；若仓库没有版本 tag，则首次记录完整提交历史。
 
 随后更新 `package.json`（若有 npm lockfile，也同步根版本），原子推送版本 commit 和 `vX.Y.Z` tag。若 `main` 在检查期间发生变化，发布会停止，需要从最新 `main` 重新触发。正式发包前构建并核对同版本 OpenAI ZIP。包内容经过清单与完整性检查后，使用 `npm pack` 的同一个 tarball 发布到官方 npm registry，附带 provenance；确认 registry 的 SHA-512 完整性相同后创建 GitHub Release，并上传 `studymate-openai.zip`。
+
+**发布 job 是全新 checkout，得自己装构建期依赖。** 包里那份 `dist/client.js`（`exports["./client"]`，见 [ADR-0015](../adr/0015-无界笔记模块与独立数据域.md)）由发布脚本在打包前现构建，构建工具都在 devDependencies 里；`npm pack` 带 `--ignore-scripts`，`prepack` 不会替它构建。所以发布 job 先 `npm ci --include=dev --ignore-scripts` 装齐 devDependencies（测试 job 装的那份它看不见），构建与试打包都在**写版本 commit 和 tag 之前**完成——构建失败当场停住，不会留下推不回去的半截版本。
 
 **npm 的入库是异步的**：`npm publish` 返回成功只代表 npm 受理了这次发布，CLI 自己会提示 `Your package is being processed and may take a few minutes to become available.`。流程在发包后轮询 registry，等到这个版本可见并核对完整性一致，才创建 GitHub Release。等待窗口默认 30 分钟（前几分钟 5 秒一次，之后退避），由 `.github/workflows/release.yml` 的 `RELEASE_NPM_WAIT_SECONDS` 给出，job 超时留了余量（40 分钟）；要临时加长就调这两个数，窗口上限由 job 超时决定。
 
