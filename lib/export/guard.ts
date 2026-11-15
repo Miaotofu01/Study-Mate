@@ -5,24 +5,37 @@
    `file://` 下由浏览器执行，那里没有 `require` / `process` / `Buffer` / `node:*`；产物里出现
    它们，说明导出器把自己的运行环境漏进了学生的页面（F11 的原话：服务端专用依赖泄漏进浏览器包）。
 
-   扫描面是**分角色的**，因为「代码」与「数据」的判据不同：
+   扫描面是**分角色的**，因为「代码」与「数据」的判据不同。角色按**任意深度**的同名产物判：
+   导出目录里可以再套一份完整导出（一门科目单独导过一次，落在 `<科目>/` 里），那仍是同一套
+   `index.html` / `vendor/**` / `data.js` / `studymate-client.js` / `export.json`。只看根目录会让
+   子目录里这些产物落到 `page` 全规则扫，把客户端 bundle 与第三方构建里的 CommonJS 模块加载 / `process.`
+   报成泄漏（真实多科目导出树里一次 17 条，全是这一类误报）。
 
-     page（index.html / host.js / boot.js / studymate-client.js / vendor 的包装壳）
+     page（index.html / host.js / boot.js；根与科目子目录里的都算）
          全规则扫。这几个文件是浏览器要执行的，出现 Node 专用东西一定是漏了。
-     data（data.js）
+     client（studymate-client.js，任意深度）
+         **不按模式扫**：它是仓库里 `lib/client.js` 的逐字拷贝，`factory(require)` 是宿主模块
+         加载器的契约（理由的完整版见 `plan.ts` 的 `ProductRole`）。根目录那一份按哈希核对。
+     data（data.js，任意深度）
          只扫**载荷之前那一段**（`window.__STUDYMATE_EXPORT__ = ` 之前的注释与赋值）。
          载荷是 JSON，里面出现的 require 调用是课件正文（讲 Node 的那一课、代码块里的示例），
          拿它判失败是假阳性——它的角色是数据，只会被 JSON.parse，不会被执行。
-     manifest（export.json）
-         只查「机器路径」这一条：它是给人看的清单，不参与执行。
-     vendor（vendor/*.js）
+     manifest（export.json，任意深度）
+         只查「机器路径」这一条：它是给人看的清单，不参与执行。科目子目录里那份只当清单扫描，
+         不引入哈希核对——哈希只对根导出那份清单做，子目录导出可能是别的版本导出来的。
+     vendor（任意深度 vendor/*.js）
          **不按规则扫内容**，按哈希核对：壳里那一段必须是上游构建的逐字节拷贝
          （`splitVendor` 切出内容 → sha256 → 与 `export.json` 的 `third_party[].sha256` 比）。
          CommonJS 构建自己就写着 module.exports / 向模块表要 scheduler / 读 NODE_ENV
          ——那是它的**内容**，包装壳（`window.__smDefine(…)` 两行）才是我们写的代码。
          壳被改过就切不出内容，篡改立刻暴露。
-     asset
+     asset（assets/** 下的一切，以及 pdf / 图片 / 字体 / 压缩包这类二进制扩展名）
          二进制，不扫。
+
+   为什么二进制扩展名按 asset 算：PDF（多科目导出目录里常见的样张、学生自己放的材料）、图片、
+   字体、压缩包都不是导出器写的文本产物，是原样拷贝的资料；读成 utf8 只会得到乱码，拿规则去扫
+   原文只会假阳性（真实样本里那份 PDF 带着一条 `file:///` 机器路径——那是文档里本来就有的链接，
+   不是导出器漏出来的，被当文本扫才报成了 machine-path）。守卫管的是导出器自己写出来的文本产物。
 
    另有一条**机器路径**规则：导出这台机器的绝对路径（工作区、落点）不许进产物。产物是能拷走、
    能分享的东西，里面写死 `/home/…` 只会让它在别人机器上露馅。
@@ -37,7 +50,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-import { MANIFEST_FILE, splitVendor } from './page.ts';
+import { ASSETS_DIR, CLIENT_FILE, DATA_FILE, MANIFEST_FILE, VENDOR_DIR, splitVendor } from './page.ts';
 import type { ProductRole } from './plan.ts';
 import type { ExportManifest } from './plan.ts';
 import { MANIFEST_FORMAT } from './plan.ts';
@@ -258,12 +271,47 @@ export function checkExport(
   return { checked: files.filter((file) => typeof file.text === 'string').length, violations, manifestProblems };
 }
 
+/**
+ * 读不成 UTF-8 文本的扩展名：按 asset 跳过（理由见文件头「为什么二进制扩展名按 asset 算」）。
+ * 只收「肯定不是文本」的那些；`.svg` / `.css` / `.md` 这类文本不在此列——它们要是产物，
+ * 照角色扫才有意义。
+ */
+const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
+  // 文档（样张、学生自己放的材料）
+  '.pdf',
+  // 图片
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.bmp', '.ico', '.tif', '.tiff',
+  // 字体
+  '.woff', '.woff2', '.ttf', '.otf', '.eot',
+  // 压缩包与音视频、wasm
+  '.zip', '.gz', '.tgz', '.tar', '.7z', '.rar',
+  '.mp3', '.mp4', '.webm', '.wav', '.ogg', '.wasm',
+]);
+
+/** `rel` 的目录部分里有没有一段正好叫 `name`（角色只看路径段，不看它在第几层）。 */
+function hasDirSegment(rel: string, name: string): boolean {
+  const segments = rel.split('/');
+  segments.pop(); // 去掉文件名那一段
+  return segments.includes(name);
+}
+
+/**
+ * 产物角色：按**任意深度**的同名产物判。
+ *
+ * 导出目录里可以再套一份完整导出（多科目导出树：`<科目>/index.html`、`<科目>/vendor/…`、
+ * `<科目>/export.json` 与根目录是同一套产物）。角色只跟「文件名 + 路径段」有关，跟它在第几层
+ * 无关——只看根目录会让子目录里的 client / vendor / data / manifest 落到 `page` 全规则扫，
+ * 把必然假阳性的 CommonJS 模块加载 / `process.` / `module.exports` 报成泄漏。
+ */
 function roleOf(rel: string): ProductRole {
-  if (rel.startsWith('assets/')) return 'asset';
-  if (rel.startsWith('vendor/')) return 'vendor';
-  if (rel === 'studymate-client.js') return 'client';
-  if (rel === 'data.js') return 'data';
-  if (rel === MANIFEST_FILE) return 'manifest';
+  const base = rel.slice(rel.lastIndexOf('/') + 1);
+  // 二进制先判：读成 utf8 只会得到乱码，扫出来的东西没有意义（PDF 见文件头）。
+  if (BINARY_EXTENSIONS.has(path.posix.extname(base).toLowerCase())) return 'asset';
+  if (hasDirSegment(rel, ASSETS_DIR)) return 'asset';
+  if (hasDirSegment(rel, VENDOR_DIR)) return 'vendor';
+  if (base === CLIENT_FILE) return 'client';
+  if (base === DATA_FILE) return 'data';
+  if (base === MANIFEST_FILE) return 'manifest';
   return 'page';
 }
 
