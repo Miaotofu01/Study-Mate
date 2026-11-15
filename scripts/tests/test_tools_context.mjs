@@ -120,6 +120,49 @@ test('#190 摘要：记忆里没有画像内容（只有 `积累`）时 `markdow
   assert.match(value.memory.file, /[\\/]\.learning[\\/]MEMORY\.yaml$/);
 });
 
+/** 旧格式（2.0.x 前，`##` 分节 + bullet）的共享记忆：2.0.4 审计后读侧补了兜底。
+    内容与 `MEMORY_YAML` 的画像节同一份，转成新格式后投影应当一致。 */
+const LEGACY_MEMORY_MD = [
+  '## 我是谁',
+  '- 现有技能：终端',
+  '',
+  '## 学习习惯',
+  '- 常见卡点：喜欢动手试。',
+  '',
+  '## 积累',
+  '- fish 脾气：这台机器上 fish 不吃双横线。',
+  '',
+].join('\n');
+
+/** 旧格式兜底后的投影（与新格式里那两节的内容一致）。 */
+const LEGACY_MEMORY_PROJECTION = [
+  '我是谁:',
+  '  现有技能: 终端',
+  '',
+  '学习习惯:',
+  '  常见卡点: 喜欢动手试。',
+].join('\n');
+
+test('2.0.4 迁移期 摘要：只有旧名那份文件时照读画像三节，并在 notes 里给出迁移提示', async (t) => {
+  const f = withTools(t);
+  fs.writeFileSync(path.join(f.workspace, '.learning', 'MEMORY.md'), LEGACY_MEMORY_MD);
+
+  const value = await execute(f.ctx, 'studymate_workspace_context', {});
+  await assertOutput(assert, f.ctx.definitions.get('studymate_workspace_context'), value);
+
+  assert.equal(value.memory.present, true, '旧文件在盘上，`present` 照实为 true');
+  assert.equal(value.memory.markdown, LEGACY_MEMORY_PROJECTION, '旧格式的画像三节要按同一份投影给出');
+  assert.match(value.memory.file, /[\\/]\.learning[\\/]MEMORY\.md$/, '回报实际读到的旧文件路径');
+  for (const fragment of ['积累', 'fish 脾气', '不吃双横线']) {
+    assert.equal(value.memory.markdown.includes(fragment), false,
+      `摘要里出现了「${fragment}」：${value.memory.markdown}`);
+  }
+  // 总控开场唯一能看到「请迁移」的地方：notes 里要有旧格式提示 + 迁移命令
+  const note = value.notes.find((one) => one.includes('旧格式'));
+  assert.ok(note, `notes 里缺迁移提示：${JSON.stringify(value.notes)}`);
+  assert.match(note, /migrate/);
+});
+
 /** #191 科目记忆：只对这门课成立的做法与事实（科目目录下那份）。用词在共享记忆里一次都不
     出现——否定断言不会因为共用词而假阳性。 */
 const SUBJECT_MEMORY_YAML = [

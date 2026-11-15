@@ -35,7 +35,7 @@ import { parseAnchors, reconcileAnchors } from './core/anchors.ts';
 import type { AnchorMatch } from './core/anchors.ts';
 import { cmpCodePoints } from './core/format.ts';
 // 共享记忆的注入边界（#190）：载荷里的 `memory_md` 只取画像三节，`积累` 永不进上下文。
-import { MEMORY_FILE, readMemory } from './core/memory.ts';
+import { readSharedMemory } from './memory-file.ts';
 // 题型与字段的判据在纯函数域（词表只有一份：lib/core/rules.ts 的 QUESTION_KINDS）。
 // 未知题型要带**题库文件与行号**报出来——行号来自扫 JSON 原文，不是文本搜索。
 import { checkPoolKinds } from './core/questions.ts';
@@ -700,8 +700,10 @@ export function buildLibrary(
     today: updated.length === 0 ? '' : updated[updated.length - 1].slice(0, 10),
     /* #190：载荷里只放共享记忆的**画像三节**投影（字段名与形状照旧，见 ADR-0014「宿主契约不动」）。
        `积累` 是角色攒下的干活笔记，与整份科目记忆一样永不进上下文——载荷是给页面展开的，
-       展开的东西同样只该是学生画像；只有 `积累` 的文件投影成空串。 */
-    memory_md: readMemory({ shared: readTextIfPresent(path.join(learningDir, MEMORY_FILE)) }).injectable,
+       展开的东西同样只该是学生画像；只有 `积累` 的文件投影成空串。
+       旧格式兜底（只有改名前的共享记忆文件时按旧格式读并提示迁移）在 `lib/memory-file.ts`
+       一处处理，否则「读哪一份 / 旧格式怎么读」会在三个消费点各写一遍。 */
+    memory_md: readSharedMemory(workspace).view.injectable,
     subjects,
     unreadable,
   };
