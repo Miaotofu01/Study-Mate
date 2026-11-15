@@ -20,6 +20,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { buildOpenAiPlugin } from '../../bin/openai-plugin.mjs';
+import { moveIntoPlace } from '../../bin/fs-swap.mjs';
 import { extractZip, readZip } from './fixtures/zip.mjs';
 import { missingTemplateFiles } from './fixtures/templates.mjs';
 
@@ -163,3 +164,39 @@ test('CLI 构建插件时不碰 DSH 配置', (t) => {
   assert.equal(invalid.status, 1);
   assert.match(invalid.stderr, /用法/);
 });
+
+test('成品落位：同卷空目标走原子 rename', (t) => {
+  const directory = fixture(t);
+  const fresh = path.join(directory, 'fresh');
+  const target = path.join(directory, 'target');
+  fs.mkdirSync(path.join(fresh, 'inner'), { recursive: true });
+  fs.writeFileSync(path.join(fresh, 'inner', 'a.txt'), 'x');
+
+  assert.equal(moveIntoPlace(fresh, target), 'rename');
+  assert.equal(fs.readFileSync(path.join(target, 'inner', 'a.txt'), 'utf8'), 'x');
+  assert.equal(fs.existsSync(fresh), false, 'rename 之后源目录不该还在');
+});
+
+test('成品落位：rename 被系统拒掉时退回「清目标 + 复制 + 删源」', (t) => {
+  const directory = fixture(t);
+  const fresh = path.join(directory, 'fresh');
+  const target = path.join(directory, 'target');
+  fs.mkdirSync(path.join(fresh, 'inner'), { recursive: true });
+  fs.writeFileSync(path.join(fresh, 'inner', 'a.txt'), 'x');
+  // 目标非空：Windows 上目录 rename 必 EPERM，Linux 上必 ENOTEMPTY——两边都进兜底。
+  // 这正是安装器 / 构建器第二次落位时会撞上的形态。
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(target, 'stale.txt'), '旧');
+
+  assert.equal(moveIntoPlace(fresh, target), 'copy');
+  assert.equal(fs.existsSync(path.join(target, 'stale.txt')), false, '旧内容要被新成品顶掉');
+  assert.equal(fs.readFileSync(path.join(target, 'inner', 'a.txt'), 'utf8'), 'x');
+  assert.equal(fs.existsSync(fresh), false, '源目录不能留下残壳');
+});
+
+test('成品落位：路径写错（ENOENT）不许被兜底伪装成成功', (t) => {
+  const directory = fixture(t);
+  assert.throws(() => moveIntoPlace(path.join(directory, '没有这个目录'), path.join(directory, 'x')),
+    /ENOENT/, 'ENOENT 是路径错，退化只会把真的 bug 藏起来');
+});
+
