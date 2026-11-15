@@ -275,6 +275,12 @@ const groups = {
       // 「POST 落盘 → 另起一次读仍带得回上次选了 X」（跨请求 = 刷新页面那条）、
       // 冲突拒绝不写盘、主观题自评落盘、题库逐字不变。
       'scripts/tests/test_host_attempts_route.mjs',
+      // #225 ③ / ADR-0015：课件页标注的 Host 半——annotations/ 的落盘形状、独立幂等台账、
+      // expectedVersion 冲突拒绝并重读、全量替换（创建/编辑/删除/清空）、路径越界；
+      // payload 的 node.annotations={present,version,items} 与监听域的 annotations 片；
+      // 以及写入口 POST /api/studymate/annotations 的注册形状与状态码映射。
+      'scripts/tests/test_host_annotations.mjs',
+      'scripts/tests/test_host_annotations_route.mjs',
       // 纯函数域 lib/core/**：内容格式的解析与锚点题库对账（格式只有一个真相）
       'scripts/tests/test_core_format.mjs',
       'scripts/tests/test_core_anchors.mjs',
