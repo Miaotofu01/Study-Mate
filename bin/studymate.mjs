@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { moveIntoPlace } from './fs-swap.mjs';
 import { adaptSkill } from './skill-compat.mjs';
 import { buildOpenAiPlugin } from './openai-plugin.mjs';
 import { buildAntigravityPlugin } from './antigravity-plugin.mjs';
@@ -455,17 +456,17 @@ export function installPayload({ workspaceArg, profile, version, desktop = false
     for (const [staged, target] of targets) {
       const backup = path.join(staging, `backup-${replacements.length}`);
       const existed = fs.existsSync(target);
-      if (existed) fs.renameSync(target, backup);
+      if (existed) moveIntoPlace(target, backup);
       const change = { target, backup, existed, installed: false };
       replacements.push(change);
-      fs.renameSync(staged, target);
+      moveIntoPlace(staged, target);
       change.installed = true;
     }
   } catch (error) {
     try {
       for (const change of replacements.reverse()) {
         if (change.installed) fs.rmSync(change.target, { recursive: true, force: true });
-        if (change.existed) fs.renameSync(change.backup, change.target);
+        if (change.existed) moveIntoPlace(change.backup, change.target);
       }
     } catch (rollbackError) {
       preserveStaging = true;

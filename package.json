@@ -1,6 +1,6 @@
 {
   "name": "@yunmiao/studymate",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "StudyMate learning skills and lesson engine for DeepSeek Harness, Google Antigravity, Codex and ChatGPT Work.",
   "type": "module",
   "bin": {
@@ -58,7 +58,7 @@
     "test:types": "node scripts/release/typecheck.mjs",
     "test:openai": "node --test scripts/tests/test_openai_plugin.mjs",
     "test:antigravity": "node --test scripts/tests/test_antigravity_plugin.mjs",
-    "test:installer": "node --test scripts/tests/test_installer.mjs scripts/tests/test_bundle.mjs",
+    "test:installer": "node --test scripts/tests/test_installer.mjs scripts/tests/test_bundle.mjs scripts/tests/test_pack_json.mjs",
     "test:static": "node scripts/release/checks.mjs --static",
     "test:browser": "node scripts/release/checks.mjs --browser",
     "guard:export": "node scripts/release/export_guard.mjs",
@@ -68,7 +68,7 @@
     "test:dsh-cli": "node --test scripts/tests/test_dsh_plugin_cli.mjs"
   },
   "engines": {
-    "node": "^22.19.0 || >=24.0.0"
+    "node": ">=24.0.0"
   },
   "license": "MIT",
   "author": "Cattofu",

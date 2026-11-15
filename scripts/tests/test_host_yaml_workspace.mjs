@@ -127,6 +127,40 @@ test('块标量：| 保换行、> 折行，块后面还能接同级键', () => {
   ].join('\n'), opts), ['第一项', '第二项']);
 });
 
+test('块标量的折行与 chomping 逐字对齐 PyYAML（#224）', () => {
+  const opts = { blockScalars: true };
+  // 期望值全部是 PyYAML 6.0.1 跑出来的原文，不是手推的——下面是 issue #224 里那张对拍表，
+  // 逐行照抄（五例）。
+  assert.deepEqual(parseYaml('a: >\n  x\n   y\n', opts), { a: 'x\n y\n' });
+  assert.deepEqual(parseYaml('a: >-\n  x\n   y\n', opts), { a: 'x\n y' });
+  assert.deepEqual(parseYaml('a: >2-\n   x\n   y\n', opts), { a: ' x\n y' });
+  assert.deepEqual(parseYaml('a: |+\n  x\n  y\n\n', opts), { a: 'x\ny\n\n' });
+  assert.deepEqual(parseYaml('a: >+\n  x\n  y\n\n', opts), { a: 'x y\n\n' });
+  // 比块缩进更深的续行（more-indented）不参与折行：它自己的换行要留着，
+  // 多出来的前导空格属于正文。以前这里被折成一个空格（"x  y"），静默少一层缩进。
+  assert.deepEqual(parseYaml('a: >\n  x\n   y\n  z\n   w\n', opts), { a: 'x\n y\nz\n w\n' });
+  // 普通行之间的空行：n 个空行给 n 个换行（不是折成空格，也不是 n+1）
+  assert.deepEqual(parseYaml('a: >-\n  一\n\n  二\n', opts), { a: '一\n二' });
+  assert.deepEqual(parseYaml('a: >-\n  一\n\n\n  二\n', opts), { a: '一\n\n二' });
+  // `+`(keep) 的尾随空行必须留到最后统一处理：以前在循环里就被 pop 掉了，
+  // 于是 `|+` 尾部的空行整段丢失（issue 里最直观的一处不一致）。
+  assert.deepEqual(parseYaml('a: |+\n  x\n  y\n\n', opts), { a: 'x\ny\n\n' });
+  assert.deepEqual(parseYaml('a: >+\n  x\n  y\n\n', opts), { a: 'x y\n\n' });
+  assert.deepEqual(parseYaml('a: |+\n\n\n', opts), { a: '\n\n' });
+  // clip 只补最后内容行**自己**的行尾换行：文末没有换行就一个也不补
+  assert.deepEqual(parseYaml('a: |\n  x', opts), { a: 'x' });
+  assert.deepEqual(parseYaml('a: |\n', opts), { a: '' });
+  // 块结束在下一个同级键之前：尾随空行按 chomping 收，别算进后面那个键
+  assert.deepEqual(parseYaml('a: >\n  x\n\nb: 2\n', opts), { a: 'x\n', b: 2 });
+  assert.deepEqual(parseYaml('a: >+\n  x\n\nb: 2\n', opts), { a: 'x\n\n', b: 2 });
+  // CRLF 与 LF 同口径（行尾的 \r 属于换行符，不进正文）
+  assert.deepEqual(parseYaml('a: >\r\n  x\r\n   y\r\n\r\n  z\r\n', opts), { a: 'x\n y\n\nz\n' });
+  // 列表项、嵌套键下的折行：缩进参考的是父节点那一层
+  assert.deepEqual(parseYaml('- >\n  x\n   y\n- 尾\n', opts), ['x\n y\n', '尾']);
+  assert.deepEqual(parseYaml('outer:\n  inner: >\n    x\n     y\n', opts), { outer: { inner: 'x\n y\n' } });
+  assert.deepEqual(parseYaml('a: >2\n    x\n   y\n', opts), { a: '  x\n y\n' });
+});
+
 test('多行 plain 标量：显式开启后按 YAML 折行规则读，默认仍报错', () => {
   const opts = { plainScalarContinuation: true };
   assert.deepEqual(parseYaml('a: first line\n  second line\n', opts), { a: 'first line second line' });
@@ -164,6 +198,53 @@ test('真实 DSH 设置页形态：长 description 折行不会让补丁解析�
   };
   assert.equal(parseYaml(patch, options)[0].config.models[0].description,
     'Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost.');
+});
+
+test('跨行引号标量：显式开启后按 YAML 折行规则读，默认仍报错', () => {
+  const opts = { quotedScalarContinuation: true };
+  assert.deepEqual(parseYaml('a:\n  k: "hello\n    world."\n', opts), { a: { k: 'hello world.' } });
+  // 行尾空白与行首缩进都去掉；每个空行折成一个换行；闭合引号后的行尾注释照常去掉，下一个键照常读
+  assert.deepEqual(parseYaml('a: "first  \n\n\n  second" # 注释\nb: 1\n', opts), { a: 'first\n\nsecond', b: 1 });
+  // 双引号里行尾的 \ 转义掉换行：不补空格
+  assert.deepEqual(parseYaml('a: "con\\\n  cat"\n', opts), { a: 'concat' });
+  // 续行里的 # 是正文，不是注释
+  assert.deepEqual(parseYaml('a: "x\n  # y"\n', opts), { a: 'x # y' });
+  // 单引号：'' 仍是一个引号
+  assert.deepEqual(parseYaml("- 'it''s\n  ok'\n- next\n", opts), ["it's ok", 'next']);
+  // 读到文档末尾还没闭合：照旧报错，行号指向引号开头那一行
+  assert.throws(() => parseYaml('a: 1\nb: "never\n  closed\n', opts), (error) => {
+    assert.match(error.message, /引号没有闭合/);
+    assert.equal(error.line, 2);
+    return true;
+  });
+  // 闭合引号后面的多余内容，报在闭合那一行
+  assert.throws(() => parseYaml('a: "x\n  y" z\n', opts), (error) => error.line === 2 && /多余内容/.test(error.message));
+  // 默认关闭：学习文件仍按老规矩报错
+  assert.throws(() => parseYaml('a: "x\n  y"\n'), /引号没有闭合/);
+});
+
+test('真实 DSH 宿主写盘形态：80 列折行的双引号长字符串不会让补丁解析失败', () => {
+  // 宿主用 `String(document)` 写盘（yaml 库默认 lineWidth 80），列表项映射里的长字符串被折成两行
+  const patch = [
+    '- id: some-plugin',
+    '  config:',
+    '    items:',
+    '      - id: promo',
+    '        hover:',
+    '          textZh: "Nov 4–15: Receive a daily free allowance. Subscribers enjoy higher',
+    '            quotas."',
+    '        enabled: true',
+    '',
+  ].join('\n');
+  const options = {
+    tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
+    quotedScalarContinuation: true,
+  };
+  assert.deepEqual(parseYaml(patch, options)[0].config.items[0], {
+    id: 'promo',
+    hover: { textZh: 'Nov 4–15: Receive a daily free allowance. Subscribers enjoy higher quotas.' },
+    enabled: true,
+  });
 });
 
 test('标签加块标量：`!!js >-` 先折行再过标签，profile 补丁里的 embedding 三项读得出来', () => {

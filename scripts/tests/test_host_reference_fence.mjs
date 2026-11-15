@@ -137,6 +137,49 @@ test('标题里的引号与换行折成一行，不会插出一行假的来源�
     '标题里的换行不许再插出一行 source:');
 });
 
+test('Windows 落不了盘的文件名字符只从落盘名里去掉：显示标题与来源标记照旧', () => {
+  const { workspace, referenceDir } = makeSubject();
+  const title = 'a<b>c"d|e?f*g';
+  const result = writeReference({
+    workspace, subject: SUBJECT, title, markdown: '正文\n',
+    expectedVersion: referenceVersion({ workspace, subject: SUBJECT }),
+    operationId: op('illegal-name'), now: 0,
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  // `< > " | ? *` 在 Windows 上落不了盘，只从文件名主干里去掉；标题本身不改。
+  assert.equal(result.entry.path, 'abcdefg.md');
+  assert.equal(result.entry.title, title, '显示标题是原值，不是净化后的文件名');
+  assert.equal(result.entry.source, 'learner');
+  assert.ok(fs.existsSync(path.join(referenceDir, 'abcdefg.md')));
+
+  const text = fs.readFileSync(path.join(referenceDir, 'abcdefg.md'), 'utf8');
+  assert.equal(text.split('\n').filter((line) => line.startsWith('source:')).length, 1,
+    '来源栅栏仍然只有一行');
+  // 读回来还是同一份资料：front matter 里的标题没有被文件名净化牵连
+  const read = readReference({ workspace, subject: SUBJECT, relPath: 'abcdefg.md' });
+  assert.equal(read?.entry.title, title);
+  assert.equal(read?.entry.source, 'learner');
+});
+
+test('Windows 保留设备名当标题：退兜底名，仍然写得出来', () => {
+  // `CON`、`NUL`、`COM1` 这类主干在 Win32 上无论带不带扩展名都建不出来（`CON.md` 也落到
+  // 设备上）。它们只在 Windows 上坏，所以断言不按平台跳过：落盘名一律用兜底名。
+  const { workspace, referenceDir } = makeSubject();
+  for (const [index, title] of ['CON', 'nul', 'COM1', 'LPT9'].entries()) {
+    const result = writeReference({
+      workspace, subject: SUBJECT, title, markdown: '正文\n',
+      expectedVersion: referenceVersion({ workspace, subject: SUBJECT }),
+      operationId: op(`device-${index}`), now: 0,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    // 第一条拿兜底名，重名的按 -2/-3 排下去；设备名一个都不许进落盘名
+    assert.match(result.entry.path, /^参考资料(-\d+)?\.md$/, `${title} 落成了 ${result.entry.path}`);
+    assert.equal(result.entry.title, title, '显示标题仍是原值');
+    assert.ok(fs.existsSync(path.join(referenceDir, result.entry.path)));
+  }
+});
+
 /* ── operationId 幂等 ─────────────────────────────────────────────────── */
 
 test('同一个 operationId 重放只回原回执，不落第二条记录', () => {

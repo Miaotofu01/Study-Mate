@@ -353,6 +353,7 @@ function scanDocument(text: string): PatchDocument & { contentLines: Array<{ sta
  */
 const PATCH_PARSE_OPTIONS = {
   tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
+  quotedScalarContinuation: true,
 } as const;
 
 /** 解析并校验一份补丁文件；返回解析出的内容与插入位置。 */
@@ -648,6 +649,7 @@ export function installPreset(options: InstallPresetOptions): PresetRegistration
         .filter(key => key in source).map(key => [key, source[key]]));
       const plugins = parseYaml(preset.agent, {
         file: preset.file, tags: 'expression', blockScalars: true, plainScalarContinuation: true,
+        quotedScalarContinuation: true,
       });
       if (!Array.isArray(plugins)) throw new Error(`${preset.id} 预设必须是插件列表；未修改配置`);
       // #138：StudyMate 的原生工具住在**主预设（学习模式）的作用域**里，不在 profile 根上——

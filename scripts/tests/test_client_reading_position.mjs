@@ -132,8 +132,8 @@ test('三级：连 scrollTop 都没有（或太离谱被夹掉）才退到比例
 });
 
 test('三级都退无可退：没有存过位置就回顶部，且 tier 是空串', () => {
-  assert.deepEqual(plain(resolveReadingTargets(null, SECTIONS, 1600)), { tier: '', top: 0, section: -1 });
-  assert.deepEqual(plain(resolveReadingTargets({}, SECTIONS, 1600)), { tier: '', top: 0, section: -1 });
+  assert.deepEqual(plain(resolveReadingTargets(null, SECTIONS, 1600)), { tier: '', top: 0, aim: 0, section: -1 });
+  assert.deepEqual(plain(resolveReadingTargets({}, SECTIONS, 1600)), { tier: '', top: 0, aim: 0, section: -1 });
   // 标题那一段没有 data-section，正文里一个候选都量不到时只能回顶部
   const none = resolveReadingTargets({ sectionId: 'sec-2', offset: 10 }, [], 1600);
   assert.equal(none.tier, '');
@@ -156,9 +156,14 @@ test('目标一律夹进可滚范围：不会滚到不存在的像素上', () =>
   assert.equal(beyond.top, 1600);
   const negative = resolveReadingTargets({ sectionId: 'x', scrollTop: -40 }, SECTIONS, 1600);
   assert.equal(negative.top, 0);
-  // 还量不到可滚高度（首帧）时一切目标都被夹到 0，但 tier 仍说清是哪一级兜的
+  // 还量不到可滚高度（首帧）时一切落点都被夹到 0，但 tier 仍说清是哪一级兜的
   assert.equal(resolveReadingTargets({ sectionId: 'sec-1', offset: 30 }, SECTIONS, 0).top, 0);
   assert.equal(resolveReadingTargets({ sectionId: 'sec-1', offset: 30 }, SECTIONS, 0).tier, 'section');
+  // 夹的是**落点**，不是意图（#214）：首帧正文只有一屏时 `top` 被夹成 0，`aim` 仍然是
+  // 上次真读到的那一处——恢复该不该收尾只能拿 `aim` 比
+  assert.equal(resolveReadingTargets({ sectionId: 'sec-1', offset: 30 }, SECTIONS, 0).aim, 630);
+  assert.equal(past.aim, 2000);                       // sec-2 节首 1200 + 段内偏移（夹到本节末尾 800）
+  assert.equal(beyond.aim, 5000);                      // offset 那一级：存下来的原像素
 });
 
 test('坏几何不静默取第一个：这一级的 top 不是数就退下一级', () => {
@@ -204,12 +209,15 @@ test('存下来的位置按 id 认小节，不按下标：插入一节不会让�
 
 /* ── 什么时候可以下结论「恢复完了」 ───────────────────────────────────── */
 
-test('恢复是否到位：落在目标附近就算到；还差得远且滚得动就再试', () => {
-  assert.equal(readingPositionSettled(1000, 1000, 1600), true);
-  assert.equal(readingPositionSettled(1000, 980, 1600), true);      // 容差之内
-  assert.equal(readingPositionSettled(1000, 300, 1600), false);     // 没到位，应重试
-  // 布局还在长：像素目标当下滚不到（clamp 在底部）——先接受，等长起来再重算
-  assert.equal(readingPositionSettled(1000, 200, 200), true);
-  // 这一篇远比存下来的目标长（正文加长了），而位置还卡在半路：继续重试
-  assert.equal(readingPositionSettled(1000, 300, 3000), false);
+test('恢复是否到位：只看离目标够不够近；够不到、正文还在长都不算到位', () => {
+  assert.equal(readingPositionSettled(1000, 1000, false), true);
+  assert.equal(readingPositionSettled(1000, 980, false), true);      // 容差之内
+  assert.equal(readingPositionSettled(1000, 300, false), false);     // 没到位，应重试
+  // #214：正文还矮的那一帧目标被夹成 0，以前跟「0 处的位置」一比就判「到位」，恢复当场
+  // 收尾、停在顶部。旧断言把这条错误行为写成了「布局还在长：先接受，等长起来再重算」——
+  // 可代码里 `run.done = true` 之后就再没有「重算」，于是每次重进课件都回到顶部。
+  assert.equal(readingPositionSettled(1750, 0, false), false);       // 够不到 ≠ 到位
+  assert.equal(readingPositionSettled(1750, 0, true), false);        // 正文还在长：这一帧不作数
+  assert.equal(readingPositionSettled(1000, 1000, true), false);     // 到位了也在长：再等一帧
+  assert.equal(readingPositionSettled(0, 0, false), true);           // 目标本来就是顶部才算到位
 });

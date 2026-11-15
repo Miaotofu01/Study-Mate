@@ -24,6 +24,7 @@ import test from 'node:test';
 
 import { parseYaml } from '../../lib/yaml.ts';
 import { useHome, writeSubject } from './fixtures/tools.mjs';
+import { COPY_ALL } from './fixtures/copy.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const QA_PRESET_FILE = path.join(ROOT, 'preset', 'qa', 'agent.cordis.yml');
@@ -257,14 +258,12 @@ test('preset/qa/agent.cordis.yml 带 __STUDYMATE_SKILLS__；缺了安装必须�
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-qa-placeholder-'));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const packageDir = path.join(base, '包');
-  fs.cpSync(path.join(ROOT, 'bin'), path.join(packageDir, 'bin'), { recursive: true });
+  fs.cpSync(path.join(ROOT, 'bin'), path.join(packageDir, 'bin'), COPY_ALL);
   fs.symlinkSync(path.join(ROOT, 'lib'), path.join(packageDir, 'lib'),
     process.platform === 'win32' ? 'junction' : 'dir');
   fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(packageDir, 'package.json'));
-  fs.cpSync(path.join(ROOT, 'preset', 'learning'), path.join(packageDir, 'preset', 'learning'),
-    { recursive: true });
-  fs.cpSync(path.join(ROOT, 'preset', 'qa'), path.join(packageDir, 'preset', 'qa'),
-    { recursive: true });
+  fs.cpSync(path.join(ROOT, 'preset', 'learning'), path.join(packageDir, 'preset', 'learning'), COPY_ALL);
+  fs.cpSync(path.join(ROOT, 'preset', 'qa'), path.join(packageDir, 'preset', 'qa'), COPY_ALL);
   const agentFile = path.join(packageDir, 'preset', 'qa', 'agent.cordis.yml');
   fs.writeFileSync(agentFile, fs.readFileSync(agentFile, 'utf8')
     .replaceAll('__STUDYMATE_SKILLS__', 'preset/skills'));
