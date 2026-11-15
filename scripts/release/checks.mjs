@@ -313,6 +313,12 @@ const groups = {
       'scripts/tests/test_client_panes.mjs',
       // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
       'scripts/tests/test_client_reading_position.mjs',
+      // #225 ③ / ADR-0015：课件页标注的锚点内核（STUDY_ANNOTATE_KERNEL 标记夹住，零 DOM）与
+      // 渲染契约——parseBlocks 的绝对行号（含嵌套指令 body 的 baseLine）、块纯文本 + 哈希、
+      // 四态判定（多匹配不静默取第一个）、失效重指、多选拼引用；渲染那半边用 client_harness 的
+      // React 桩调真组件。真浏览器里划选、高亮覆盖层与刷新后仍在在 --browser 组的
+      // browser/annotations_test.mjs。
+      'scripts/tests/test_client_annotations.mjs',
       // #174 题干的可读性判定：缺 `q` 的题渲染占位而不是 `undefined.split` 把整个 slot 带走
       // （同样是切源码标记求值，不需要浏览器）。
       'scripts/tests/test_client_question_stem.mjs',
@@ -454,6 +460,10 @@ const groups = {
       'browser/reading_test.mjs',
       'browser/reading_position_test.mjs',
       'browser/attempts_test.mjs',
+      // #225 ③ / ADR-0015：课件页标注的真浏览器验收——划选正文 → 浮层里写注释 → 高亮覆盖层与
+      // 行内小标记出现 → 点开可读/可编辑/可删除；重新挂载（刷新）后从 payload 读回；原文改过后
+      // 显式 stale、不贴到错位置。夹具与 attempts_test.mjs 同一套（真 lib/client.js + 假 HTTP 宿主）。
+      'browser/annotations_test.mjs',
       // #74：真浏览器里「改文件 → 监听 → SSE → 页面自己更新（不刷新）」的端到端。
       // 其余几套测的是阅读端的静态面；这一套要的是**真的 EventSource**接我们那条流式 Response。
       'browser/watch_push_test.mjs',
