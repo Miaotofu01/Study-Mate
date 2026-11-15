@@ -333,6 +333,37 @@ try {
       JSON.stringify(onDisk['题'][QUESTION]['上次结果']));
     return { statuses: fresh.map((p) => p.status), notes: seen.notes };
   });
+
+  /* 4. 一道坏题（题干缺字段）：一块占位，面板与其它题照常（#174 验收） */
+  await session.scene('attempts-missing-stem', async (ctx) => {
+    const quizFile = path.join(subjectDir, 'lessons', `0001-${NODE_ID}.quiz.json`);
+    // 题库里把题干写成了 `stem`（模型重出题时最常见的坏形状）：作为第三题塞进去。
+    const items = JSON.parse(fs.readFileSync(quizFile, 'utf8'))[ANCHOR];
+    items.push({ stem: '题干写成 stem 的坏题', opts: ['甲', '乙'], ans: 0, why: '补上题干之后这一段才有用。' });
+    fs.writeFileSync(quizFile, JSON.stringify({ [ANCHOR]: items }, null, 2) + '\n');
+
+    await openLesson(ctx);
+    const seen = await ctx.evaluate(`(() => {
+      const qs = document.querySelectorAll('.smb-q');
+      const miss = document.querySelector('.smb-q__missing');
+      const body = document.querySelector('.smb-center__body');
+      return {
+        questions: qs.length,
+        missing: miss ? { proto: miss.dataset.proto, missing: miss.dataset.missing, text: miss.textContent.trim() } : null,
+        options: document.querySelectorAll('.smb-opt').length,
+        bodyOk: !!body,
+      };
+    })()`);
+    check('正文还在、三道题都在右栏（坏的那道没把整个面板带走）',
+      seen.bodyOk && seen.questions === 3, JSON.stringify({ questions: seen.questions, bodyOk: seen.bodyOk }));
+    check('坏题渲染成占位（带 question-missing 钩子）',
+      !!seen.missing && seen.missing.proto === 'question-missing' && seen.missing.missing === 'q',
+      JSON.stringify(seen.missing));
+    check('占位说得出是哪一道题（节点 + 题号）',
+      !!seen.missing && /节点 fn\.call · 第 3 题/.test(seen.missing.text), JSON.stringify(seen.missing && seen.missing.text));
+    check('好题的选项照常（2 + 2，坏题自己的 2 个也没丢）', seen.options === 4, String(seen.options));
+    return { questions: seen.questions, missing: seen.missing, options: seen.options };
+  });
 } catch (error) {
   check('作答落盘的浏览器 QA 跑完（浏览器起来、夹具能开）', false, String(error && error.stack || error));
   await session.scene('attempts-error', async (ctx) => { ctx.note('harness', String(error && error.stack || error)); });
