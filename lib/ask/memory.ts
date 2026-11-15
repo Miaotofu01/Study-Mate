@@ -14,22 +14,17 @@
    读不到**不是错误**：没有共享记忆的新工作区照样能问、能答。
    ───────────────────────────────────────────────────────────────────────── */
 
-import fs from 'node:fs';
 import path from 'node:path';
 
-import { MEMORY_FILE, readMemory } from '../core/memory.ts';
+import { readSharedMemory } from '../memory-file.ts';
 
 /**
  * 真宿主里的共享记忆：`.learning/MEMORY.yaml`；读不到就是空串（不是错误）。
  *
  * 返回的是**可注入的画像三节投影**——`积累`、规范之外的节、以及空骨架都不带（画像三节一条
- * 内容都没有时就是空串，调用方照「空记忆不注入」处理）。
+ * 内容都没有时就是空串，调用方照「空记忆不注入」处理）。旧工作区只有改名前的那份共享记忆
+ * 时按旧格式读（`lib/memory-file.ts` 兜底），投影规则与读新文件完全同一份。
  */
 export function readMemoryFromWorkspace(workspace: string): string {
-  try {
-    const text = fs.readFileSync(path.resolve(workspace, '.learning', MEMORY_FILE), 'utf8');
-    return readMemory({ shared: text }).injectable;
-  } catch {
-    return '';
-  }
+  return readSharedMemory(path.resolve(workspace)).view.injectable;
 }

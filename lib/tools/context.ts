@@ -13,6 +13,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 import { probeModel } from './capability.ts';
+import { legacyMemoryNotice } from '../memory-file.ts';
 import { readMemory } from '../core/memory.ts';
 import type { ServiceReader } from './capability.ts';
 import type { StudyToolSpec } from './define.ts';
@@ -293,16 +294,19 @@ export function workspaceContextTool(ctx: ServiceReader): StudyToolSpec {
         notes.push(`工作区 ${facts.path} 里还没有可用科目（建课建到一半、大纲里一个节点都没有的目录不算）——先建一个。`);
       }
 
-      const raw = run.access.read<{ file: string; present: boolean; markdown: string }>('memory');
+      const raw = run.access.read<{ file: string; present: boolean; markdown: string; legacy?: boolean }>('memory');
       /* #190：`markdown` 只放**画像三节**的投影——`积累` 是角色攒下的干活笔记，永不进上下文。
          形状（`file` / `present` / `markdown` 三个键）一个字都没动：它是插件与总控之间的字段
          契约，改的是值，不是契约（ADR-0014「宿主契约不动」）。`present` 照实报「文件在不在」，
-         所以「只有 `积累`」的文件是 `present: true` + 空 `markdown`。 */
+         所以「只有 `积累`」的文件是 `present: true` + 空 `markdown`。
+         旧格式兜底命中时（工作区只有改名前的共享记忆）就在 notes 里直接说一句、给出迁移命令：
+         这是总控开场唯一能看到的一行，比只写进宿主日志有用。 */
       const memory = {
         file: raw.file,
         present: raw.present,
         markdown: readMemory({ shared: raw.markdown }).injectable,
       };
+      if (raw.legacy === true) notes.push(legacyMemoryNotice(raw.file));
       const wanted = typeof args.subject === 'string' ? args.subject.trim() : '';
       const selected = summarize({ subjects, curriculum, progress, records, wanted });
       if (wanted !== '' && selected.length === 0) {

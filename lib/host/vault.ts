@@ -28,8 +28,9 @@ import { readLibrary } from '../library.ts';
 import { configFile, resolveWorkspace } from '../workspace.ts';
 import { parseYaml, YamlParseError } from '../yaml.ts';
 import { cmpCodePoints } from '../core/format.ts';
-// 共享记忆的文件名取自纯函数域（#190）：这个名字只有一个出处，消费点不再各写一份。
-import { MEMORY_FILE } from '../core/memory.ts';
+// 共享记忆的文件名与旧格式兜底（读哪一份、旧格式怎么读）只有 `lib/memory-file.ts` 一处；
+// 消费点不再各写一份「找 MEMORY.yaml / 读原文」。
+import { readSharedMemory } from '../memory-file.ts';
 import { readAttempts, attemptsVersion } from '../attempts.ts';
 import type { Domain } from './domains.ts';
 
@@ -418,9 +419,15 @@ export function createWorkspaceVault(): Vault {
         const workspace = workspaceOrThrow(domain);
         // 这里回的是**文件原文**（域的名分是「读这份文件」）；「哪几节能进上下文」的投影
         // 在消费点做（`lib/tools/context.ts` 取三节，导出/备份这类用途要的是整份）。
-        const file = path.join(workspace, '.learning', MEMORY_FILE);
-        const view = readFileView(file);
-        return { file, present: view.present, markdown: view.text };
+        // 旧工作区只有改名前的共享记忆文件时按旧格式读（转换在纯函数域，选哪份文件在
+        // memory-file.ts），`legacy` 让摘要工具能就地把「请迁移」提示给学生。
+        const read = readSharedMemory(workspace);
+        return {
+          file: read.file,
+          present: read.present,
+          markdown: read.text ?? '',
+          legacy: read.legacy,
+        };
       }
 
       case 'subjects': {
