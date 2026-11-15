@@ -1,0 +1,88 @@
+.app-shell.v2 .tree-row { width: 100%; background: transparent; text-align: left; }
+.app-shell.v2 .canvas-stage[aria-hidden="true"] { opacity: 0; z-index: -1; }
+.app-shell.v2 .knowledge-card:not(.is-reading) .card-body * { user-select: none; }
+.app-shell.v2 .tree-file { padding-right: 2px; }
+.app-shell.v2 .tree-file-open { display:flex;align-items:center;gap:7px;flex:1;min-width:0;align-self:stretch;border:0;background:none;color:inherit;text-align:left;padding:0;cursor:pointer;font:inherit; }
+.app-shell.v2 .tree-file-open .tree-icon { flex-shrink:0; }
+.app-shell.v2 .tree-actions { flex-shrink:0; }
+.app-shell.v2 .tree-footer { margin-top:auto;align-items:center; }
+.app-shell.v2 .resource-detail { padding:16px;gap:16px; }
+.app-shell.v2 .resource-detail h2 { font-size:16px; }
+.app-shell.v2 .detail-actions { display:flex;gap:8px;align-items:center;flex-shrink:0; }
+.app-shell.v2 .detail-actions .danger { margin-left:auto; }
+.app-shell.v2 .document-content { min-height:0; }
+.app-shell.v2 .document-content:only-child { min-height:100%; }
+.app-shell.v2 .document-editor-host { display:block;flex:none;height:auto;min-height:0;overflow:visible;width:min(100%,1000px);margin:0 auto 20px; }
+.app-shell.v2 .editor-pane { display:block;flex:none;width:100%;min-height:160px;overflow:hidden;border:1px solid #e4eae6;border-radius:7px 7px 0 0; }
+.app-shell.v2 .editor-pane .cm-editor { height:100%; }
+.app-shell.v2 .editor-pane .cm-scroller { overscroll-behavior:contain; }
+.app-shell.v2 .editor-pane .cm-content { min-height:100%; }
+.app-shell.v2 .editor-resize-hit { display:grid;place-items:center;width:100%;height:10px;background:#f1f5f2;border:1px solid #e4eae6;border-top:0;border-radius:0 0 6px 6px; }
+.app-shell.v2 .editor-resize-hit span { width:36px;height:3px;background:#c1d0c6;border-radius:3px; }
+.app-shell.v2 .document-scroll.is-split { padding-top:16px; }
+.app-shell.v2 .document-scroll.is-split .document-content { padding-top:16px;border-top:1px solid #edf1ee; }
+.app-shell.v2 .document-media { display:block;width:100%;height:62vh;border:0;object-fit:contain; }
+.app-shell.v2 .markdown-preview { overflow-wrap:anywhere; }
+.app-shell.v2 .markdown-preview pre { white-space:pre;overflow:auto;tab-size:2;max-width:100%; }
+.app-shell.v2 .markdown-preview pre code { display:block;min-width:max-content; }
+.app-shell.v2 .markdown-preview code.hljs { color:#33453d;background:transparent; }
+.app-shell.v2 .hljs-comment,.app-shell.v2 .hljs-quote { color:#8a958f;font-style:italic; }
+.app-shell.v2 .hljs-keyword,.app-shell.v2 .hljs-selector-tag,.app-shell.v2 .hljs-built_in { color:#9b5073; }
+.app-shell.v2 .hljs-string,.app-shell.v2 .hljs-regexp,.app-shell.v2 .hljs-template-variable { color:#3c7b58; }
+.app-shell.v2 .hljs-title,.app-shell.v2 .hljs-title.function_,.app-shell.v2 .hljs-title.class_ { color:#356eaa; }
+.app-shell.v2 .hljs-number,.app-shell.v2 .hljs-literal { color:#b36c3f; }
+.app-shell.v2 .hljs-attr,.app-shell.v2 .hljs-property { color:#967238; }
+.app-shell.v2 .hljs-tag { color:#7b8090; }
+.app-shell.v2 .markdown-preview .katex-display { max-width:100%;overflow:auto hidden;padding-bottom:3px; }
+.app-shell.v2 .markdown-preview .markdown-image-placeholder { display:inline-flex;align-items:center;padding:4px 8px;border:1px dashed #cddbd2;border-radius:4px;color:#7a8981;font-size:11px; }
+.app-shell.v2 .knowledge-card { height:100%;min-height:0; }
+.app-shell.v2 .knowledge-card .card-body { min-height:0;flex:1;overscroll-behavior:contain; }
+.app-shell.v2 .knowledge-card .card-body p:first-child { margin-top:0; }
+.app-shell.v2 .knowledge-card .card-drag-handle h3 { cursor:inherit; }
+.app-shell.v2 .knowledge-card.is-reading .card-drag-handle,.app-shell.v2 .knowledge-card.is-reading .card-drag-handle h3 { cursor:default; }
+.app-shell.v2 .knowledge-card .card-menu { flex:0 0 auto;cursor:pointer; }
+.app-shell.v2 .card-body .media-preview { display:block;min-height:0;max-height:none;width:100%;height:100%;margin:0;object-fit:contain;border:0;pointer-events:none; }
+/* 静态页 / SVG 的 iframe 需要自己滚动；图片仍不接收指针，避免抢卡片拖动。 */
+.app-shell.v2 .card-body .media-preview.media-scrollable { pointer-events:auto; }
+.app-shell.v2 .text-node { padding:18px 20px;background:#fffdf4;border-color:#e9e2c8; }
+.app-shell.v2 .text-node .text-node-content { width:100%;height:100%;overflow:auto;overscroll-behavior:contain; }
+.app-shell.v2 .text-node .text-node-editor { display:block;width:100%;height:100%;color:#39463f;font-family:inherit;font-size:14px;line-height:1.6; }
+.app-shell.v2 .text-node.is-reading { cursor:text; }
+.app-shell.v2 .text-node.is-reading .text-node-content { user-select:text; }
+.app-shell.v2 .react-flow__resize-control.handle { cursor:nwse-resize; }
+.app-shell.v2 .react-flow__resize-control.handle.top.right,.app-shell.v2 .react-flow__resize-control.handle.bottom.left { cursor:nesw-resize; }
+.app-shell.v2 .inline-edge-editor { z-index:20; }
+.app-shell.v2 .relation-label { cursor:text; }
+.app-shell.v2 .canvas-toolbar { gap:2px; }
+.app-shell.v2 .canvas-toolbar i { height:19px;width:1px;background:#e8ede9;margin:0 4px; }
+.app-shell.v2 .canvas-toolbar .icon-button.active { color:#1c7164;background:#e7f2ec; }
+.app-shell.v2 .chat-connection-state { display:flex;align-items:center;gap:6px;padding:10px 14px;border-bottom:1px solid #f0f3f1; }
+.app-shell.v2 .connection-dot { width:6px;height:6px;border-radius:50%;background:#b8c1bb; }
+.app-shell.v2 .chat-connect { display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:150px;margin:auto 12px;padding:12px;border:0;color:#a0aca4;text-align:center; }
+.app-shell.v2 .chat-connect p { max-width:230px;font-size:11px;line-height:1.8;color:#8e9a93;margin:0; }
+.app-shell.v2 .chat-composer-actions { display:flex;align-items:center;gap:6px; }
+.app-shell.v2 .chat-composer .topbar-spacer { flex:1; }
+.app-shell.v2 .chat-composer textarea { resize:vertical;max-height:260px; }
+.app-shell.v2 .quote-chip { max-width:100%; }
+.app-shell.v2 .quote-chip>span { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.app-shell.v2 .quote-chip>.icon-button { width:17px;height:17px;flex-shrink:0; }
+.app-shell.v2 .chat-send:disabled { background:#f0f3f0;color:#b1bdb5;opacity:1;cursor:not-allowed; }
+.app-shell.v2 .quote-picker .text-input { margin-bottom:5px; }
+.app-shell.v2 .quote-picker button { border:0;background:transparent;text-align:left; }
+.app-shell.v2 .quote-picker button:hover { background:#eff5f0; }
+.app-shell.v2 .help-grid { font-size:12px;line-height:1.8;color:#64746b; }
+.app-shell.v2 .modal label { display:flex;flex-direction:column;gap:6px;margin:13px 0;color:#64746b;font-size:12px; }
+.app-shell.v2 .modal-actions { display:flex;justify-content:flex-end;gap:8px;margin-top:18px; }
+.app-shell.v2 .modal .import-error { max-height:55vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere; }
+.app-shell.v2 .toast { left:50%;right:auto;bottom:22px;transform:translateX(-50%);max-width:calc(100vw - 32px);width:max-content; }
+.app-shell.v2 .side-panel.is-collapsed { border-width: 0; }
+.app-shell.v2 .panel-resize-hit:hover { background:#1c71641a; }
+.app-shell.v2 .panel-resize-hit:active { background:#1c71643d; }
+@media(max-width:600px) {
+  .app-shell.v2 .canvas-toolbar { max-width:calc(100% - 16px);gap:1px;padding:5px 6px; }
+  .app-shell.v2 .canvas-toolbar .icon-button { width:28px;height:30px; }
+  .app-shell.v2 .canvas-toolbar i { margin:0 2px; }
+  .app-shell.v2 .canvas-toolbar .zoom-label { width:30px;font-size:9px; }
+  .app-shell.v2 .document-toolbar { flex-wrap:wrap;padding:8px 12px;gap:8px; }
+  .app-shell.v2 .document-toolbar input { flex-basis:100%; }
+}

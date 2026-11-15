@@ -52,6 +52,17 @@ jobs:
           package-manager-cache: false
       - name: Use npm with Trusted Publishing support
         run: npm install --global npm@11 --ignore-scripts
+      # 正式发包的 tarball 里有 dist/client.js（package.json 的 exports["./client"]），它由
+      # release.mjs 的 packPackage 在**每次真正打包之前**现跑构建产出（打包带 --ignore-scripts，
+      # prepack 不触发，产物只能由那条路径自己保证）。构建期工具 esbuild / postcss 全在
+      # devDependencies 里，而这里是一个全新的 checkout（checks job 的 npm ci 看不见），
+      # 所以发布 job 自己必须装齐 devDependencies。这里**不再额外跑一次构建**：prepare 在
+      # commit/tag 之前就会通过 packPackage 构建并试打包，构建失败当场停住、不会留下版本
+      # commit 与 tag；publish 打包前也会再构建一次，每次构建都紧跟一次真打包。
+      # --ignore-scripts：本仓库的 devDependencies 只需要解包（esbuild 走平台包，生命周期脚本
+      # 是多余的）；产物由 release.mjs 自己的 npm run 产出，不靠依赖的 install/postinstall。
+      - name: Install build-time devDependencies
+        run: npm ci --include=dev --ignore-scripts
       - name: Prepare changelog, version commit and tag
         run: node scripts/release/release.mjs prepare
       - name: Build plugin ZIP, publish npm through OIDC, and attach ZIP to GitHub Release
