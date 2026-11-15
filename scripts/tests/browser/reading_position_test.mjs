@@ -404,6 +404,48 @@ try {
   })()`);
   check('课件页不归零：进课件页走恢复而不是回顶部', kept.pageY > 100, kept);
 
+  /* ── 验收 6：首帧正文只有一屏、位置当下够不到（#214）────────────────── */
+
+  /* 真课件上屏时图与公式还没把高度撑起来，那一刻的正文比上次读的时候矮——极端情况就是矮到
+     一屏都装得下（`maxScroll` 是 0）。旧实现拿被夹到 0 的目标跟当前位置 0 比，正好相等，
+     于是判「已到位」，恢复当场收尾、一次都没滚过，这就是「总是从顶部开始」（#214）。
+     这一段把那一刻复现出来：上屏时正文被压成 0 高，150ms 后才「长」出来（恢复重试窗口
+     1500ms，够它长），要求落回存下来的位置。
+
+     先离开课件再摆位置：离开那一帧会把当下的位置补写一次，先摆会被它覆盖。
+     压高度用文档级的 <style>：课件页重挂会重建自己的 DOM，塞在小节里的东西跟着没了，
+     而 <style> 挂在 document.head 上活得更久，正好让「上屏那一刻」是矮的。 */
+  const shortThenGrow = await probe(`(async () => {
+    window.__sm.click('.smb-brand');
+    await new Promise((r) => setTimeout(r, 300));
+    window.__sm.setPrefs({ 'demo/reading-position': { sectionId: 'sec-gone', offset: 0, scrollTop: 2600, progress: 0 } });
+    const before = document.getElementById('__sm-short');
+    if (before) before.remove();
+    const style = document.createElement('style');
+    style.id = '__sm-short';
+    style.textContent = '.smb-center__body [data-section] { height: 0 !important; overflow: hidden !important; }';
+    document.head.appendChild(style);
+    const grown = await new Promise((resolve) => {
+      window.__sm.click('[data-proto="continue"]');
+      setTimeout(() => {
+        const box = document.querySelector('.smb-center__body');
+        const short = box ? box.scrollHeight - box.clientHeight : -1;   // 上屏那一刻能滚到多远
+        document.getElementById('__sm-short').remove();
+        window.dispatchEvent(new Event('resize'));
+        resolve({ grew: true, short });
+      }, 150);
+    });
+    await new Promise((r) => setTimeout(r, ${SETTLE_MS + 300}));
+    const after = window.__sm.probe();
+    return { ...grown, after };
+  })()`);
+  check('验收 6 · 上屏那一刻正文确实够不到存下来的位置（不然这一段是空跑）',
+    shortThenGrow.grew === true && shortThenGrow.short >= 0 && shortThenGrow.short < 100
+      && shortThenGrow.after.max >= 2600 + TOLERANCE,
+    { short: shortThenGrow.short, grew: shortThenGrow.grew, max: shortThenGrow.after.max });
+  check(`验收 6 · 先矮后长：没停在顶部，落到存下来的位置（${shortThenGrow.after.pageY} / 2600，容差 ${TOLERANCE * 3}）`,
+    Math.abs(shortThenGrow.after.pageY - 2600) <= TOLERANCE * 3, shortThenGrow.after);
+
   console.log(`\n阅读位置（真 Chrome + 真 client.js）：${passed} 项通过，${failures} 项失败`);
 } catch (error) {
   failures += 1;
