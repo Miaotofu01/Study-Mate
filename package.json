@@ -68,7 +68,7 @@
     "test:dsh-cli": "node --test scripts/tests/test_dsh_plugin_cli.mjs"
   },
   "engines": {
-    "node": "^22.19.0 || >=24.0.0"
+    "node": ">=24.0.0"
   },
   "license": "MIT",
   "author": "Cattofu",
