@@ -307,6 +307,9 @@ const groups = {
       'scripts/tests/test_client_panes.mjs',
       // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
       'scripts/tests/test_client_reading_position.mjs',
+      // #174 题干的可读性判定：缺 `q` 的题渲染占位而不是 `undefined.split` 把整个 slot 带走
+      // （同样是切源码标记求值，不需要浏览器）。
+      'scripts/tests/test_client_question_stem.mjs',
       // #77 交付物题的界面：代跑事实块只显示事实（命令 / 退出码 / 两条流 / 截断），
       // 界面文案里一个判决词都没有，入口只有一颗「跑一次」按钮且不点不跑。
       // 渲染函数在工厂闭包里，靠 fixtures/client_harness.mjs 的 React 桩调起来。
