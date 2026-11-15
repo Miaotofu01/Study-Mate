@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 
 import { installPreset } from '../../lib/preset.ts';
 import { parseYaml } from '../../lib/yaml.ts';
+import { COPY_ALL } from './fixtures/copy.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PLUGIN = '@deepseek-ai/dsh-agent-preset';
@@ -60,8 +61,8 @@ function fixture(t) {
   const staged = path.join(home, 'staged-learning');
   const stagedQa = path.join(home, 'staged-qa');
   fs.mkdirSync(home, { recursive: true });
-  fs.cpSync(path.join(ROOT, 'preset', 'learning'), staged, { recursive: true });
-  fs.cpSync(path.join(ROOT, 'preset', 'qa'), stagedQa, { recursive: true });
+  fs.cpSync(path.join(ROOT, 'preset', 'learning'), staged, COPY_ALL);
+  fs.cpSync(path.join(ROOT, 'preset', 'qa'), stagedQa, COPY_ALL);
   const patch = path.join(home, 'profiles', 'web', 'cordis.patch.yml');
   fs.mkdirSync(path.dirname(patch), { recursive: true });
   return { temporary, home, staged, stagedQa, target: path.join(home, '.agent-presets', 'learning'), patch };
