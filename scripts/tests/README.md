@@ -148,7 +148,10 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 | `browser/shot.mjs` | 浅色/深色截图与元素边界记录（手动） |
 
 浏览器二进制**探测**，不钉死 `google-chrome`：先看 `STUDYMATE_CHROME` / `CHROME_BIN` / `CHROMIUM_BIN` /
-`PUPPETEER_EXECUTABLE_PATH`，再看 PATH 上的 `google-chrome` / `chromium` / `chrome` 等，最后看 macOS 的 `.app` 路径。
+`PUPPETEER_EXECUTABLE_PATH`，再看 PATH 上的常见名字（Windows 用 `where` 查、且那边是 `chrome` / `msedge`），
+最后看安装位置——macOS 的 `.app` 内置二进制，或 Windows 的 `Program Files` / `LOCALAPPDATA` 下的
+Chrome、Edge、Chromium（Edge 是 Windows 10 起系统自带的那个，所以 Windows 上通常不需要设环境变量）。
+探测只有 `browser/harness.mjs` 一份，套件各自再抄一份就是漂移的来源（#123）。
 
 **找不到浏览器时套件明确跳过**：打一段说明（试过哪些、怎么指）并以退出码 **3** 退出——跳过不算通过，
 所以不会出现「没跑过却报绿」。`npm test`（默认门禁）不含 `--browser`，CI 不受影响。
