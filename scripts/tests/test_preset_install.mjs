@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { installPreset } from '../../lib/preset.ts';
 import { parseYaml } from '../../lib/yaml.ts';
 import { COPY_ALL } from './fixtures/copy.mjs';
+import { removeFile, removeTree } from './fixtures/fs-rm.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PLUGIN = '@deepseek-ai/dsh-agent-preset';
@@ -57,7 +58,9 @@ function rows(data) {
 /** 在临时 HOME 里摆一份可安装的预设目录（真预设的副本：学习 + 答疑）。 */
 function fixture(t) {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-preset-'));
-  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  // 临时 HOME 里有一层中文目录（`dsh O'Brien 中文/`）：递归 rmSync 在非 ASCII 上会崩，
+  // 清理走 fs-rm.mjs 的安全写法。
+  t.after(() => removeTree(temporary));
   const home = path.join(temporary, "dsh O'Brien 中文");
   const staged = path.join(home, 'staged-learning');
   const stagedQa = path.join(home, 'staged-qa');
@@ -517,7 +520,10 @@ test('坏的 bundle 清单或坏补丁失败且不写盘', (t) => {
     assert.equal(fs.readFileSync(f.patch, 'utf8'), '[]\n');
     assert.deepEqual(fs.readFileSync(path.join(f.staged, 'agent.cordis.yml')), before);
   }
-  fs.rmSync(manifest);
+  // `f.home` 里带中文（`dsh O'Brien 中文/`）：Node 24 的 rmSync 在这个路径上删文件会
+  // **静默不删**，于是下一个用例读到的还是上一轮那份 `bundles: [null]`，报出来的是
+  // 「必须是包名列表」而不是「补丁缺标记」——换成 unlinkSync 才有「清单已删」这个前提。
+  removeFile(manifest);
   fs.writeFileSync(f.patch, `${BEGIN}\n- id: incomplete\n`, 'utf8');
   assert.throws(() => invoke(f, { bundle: true }), /标记/);
 });
