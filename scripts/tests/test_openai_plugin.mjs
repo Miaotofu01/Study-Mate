@@ -23,6 +23,7 @@ import { buildOpenAiPlugin } from '../../bin/openai-plugin.mjs';
 import { moveIntoPlace } from '../../bin/fs-swap.mjs';
 import { extractZip, readZip } from './fixtures/zip.mjs';
 import { missingTemplateFiles } from './fixtures/templates.mjs';
+import { removeFile } from './fixtures/fs-rm.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const cli = path.join(root, 'bin/studymate.mjs');
@@ -142,7 +143,7 @@ test('归档构建失败时保留上一份插件与 ZIP', (t) => {
   const bytes = fs.readFileSync(first.archive);
   const manifest = fs.readFileSync(path.join(first.plugin, '.codex-plugin/plugin.json'));
   // 让写盘目标变成一个目录：归档那一步必然失败。
-  fs.rmSync(first.archive);
+  removeFile(first.archive);
   fs.mkdirSync(first.archive);
   assert.throws(() => buildOpenAiPlugin({ output }));
   assert.deepEqual(fs.readFileSync(path.join(first.plugin, '.codex-plugin/plugin.json')), manifest);

@@ -52,6 +52,7 @@ import {
 } from '../../lib/core/memory.ts';
 import { legacyUnreadableNotice, readSharedMemory } from '../../lib/memory-file.ts';
 import { migrateMemoryWorkspace } from '../../lib/memory-migrate.ts';
+import { removeFile } from './fixtures/fs-rm.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -482,7 +483,7 @@ test('2.0.4 迁移期 migrate：旧 md 迁成新文件 + 改名备份，重跑�
   assert.equal(fs.readFileSync(newFile, 'utf8'), before);
 
   // 回滚：删新文件、备份改回旧名 → 读侧又回到旧格式兜底（内容仍在）
-  fs.rmSync(newFile);
+  removeFile(newFile);
   fs.renameSync(result.backup, oldFile);
   const rolledBack = readSharedMemory(workspace, { warn: false });
   assert.equal(rolledBack.legacy, true);

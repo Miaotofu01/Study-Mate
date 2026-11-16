@@ -16,6 +16,7 @@ import {
   gifBytes, htmlBytes, jpegBytes, pngBytes, truncatedBytes, webpBytes, webpExtendedBytes, webpLossyBytes,
 } from './fixtures/images.mjs';
 import { imageKindOfExtension, parseImageHeader, parseSizeCell } from '../../lib/core/image.ts';
+import { removeFile } from './fixtures/fs-rm.mjs';
 
 const tools = await loadTools();
 
@@ -426,11 +427,11 @@ test('索引缺失 / 索引写错地方 / 缺列 / 表头不一致 —— 逐条
 
   // 索引写错地方：pool.md 落在图片库目录里
   const dir = writePoolIndex(f.subject, `${POOL_HEADER}\n`, {});
-  fs.rmSync(path.join(f.subject.dir, 'assets', 'img', 'pool.md'));
+  removeFile(path.join(f.subject.dir, 'assets', 'img', 'pool.md'));
   fs.writeFileSync(path.join(dir, 'pool.md'), `${POOL_HEADER}\n`);
   value = await call(f.ctx, 'studymate_validate_pool', { paths: ['demo'] });
   assert.ok(find(value.reports[0], '索引写错了地方'), messages(value.reports[0]).join('\n'));
-  fs.rmSync(path.join(dir, 'pool.md'));
+  removeFile(path.join(dir, 'pool.md'));
 
   writePoolIndex(f.subject, '| 文件 | 主题标签 |\n|---|---|\n');
   value = await call(f.ctx, 'studymate_validate_pool', { paths: ['demo'] });

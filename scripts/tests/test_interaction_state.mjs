@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import {
   FIELDS, StateError, answer_state, initial_state, load_json, read_state, update_state, workspace_path,
 } from '../../openai/studymate/scripts/interaction_state.mjs';
+import { removeFile } from './fixtures/fs-rm.mjs';
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
   '../../openai/studymate/scripts/interaction_state.mjs');
@@ -303,7 +304,7 @@ test('提交成功但锁清不掉：如实报成功并留一条提醒', (t) => {
   assert.equal(read_state(f.workspace).answers['goal-1'].value, '应用');
   assert.ok(fs.existsSync(lock), '锁还在，提醒学生/维护者手动看一眼');
   assert.throws(() => update_state(f.workspace, business(), 2), /update locked/);
-  fs.rmSync(lock, { force: true });
+  removeFile(lock);
 });
 
 test('状态文件与科目目录的符号链接一律拒绝', { skip: process.platform === 'win32' && '符号链接在 Windows 上要开发者模式' }, (t) => {
@@ -314,7 +315,7 @@ test('状态文件与科目目录的符号链接一律拒绝', { skip: process.p
   const original = fs.readFileSync(outside);
   assert.throws(() => update_state(f.workspace, business(), 0), /symlink/);
   assert.deepEqual(fs.readFileSync(outside), original);
-  fs.rmSync(f.file);
+  removeFile(f.file);
   const outsideSubject = path.join(f.base, 'outside-subject');
   fs.mkdirSync(outsideSubject);
   const subjects = path.join(f.learning, 'subjects');

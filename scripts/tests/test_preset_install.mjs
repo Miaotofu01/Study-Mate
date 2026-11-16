@@ -534,7 +534,7 @@ test('符号链接一律不覆盖（预设或补丁）', { skip: process.platfor
   fs.writeFileSync(path.join(f.home, 'real.patch.yml'), '[]\n', 'utf8');
   fs.symlinkSync(path.join(f.home, 'real.patch.yml'), link);
   assert.throws(() => invoke(f, { patchOutput: link }), /符号链接/);
-  fs.rmSync(link);
+  removeFile(link);
   const presetLink = path.join(f.home, 'linked-preset');
   fs.mkdirSync(presetLink);
   fs.symlinkSync(path.join(f.staged, 'agent.cordis.yml'), path.join(presetLink, 'agent.cordis.yml'));
