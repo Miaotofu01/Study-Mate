@@ -50,7 +50,7 @@ import {
   LEGACY_MEMORY_FILE, MEMORY_FILE, PROFILE_SECTIONS,
   migrateLegacyMemory, readMemory, readMemoryFile,
 } from '../../lib/core/memory.ts';
-import { readSharedMemory } from '../../lib/memory-file.ts';
+import { legacyUnreadableNotice, readSharedMemory } from '../../lib/memory-file.ts';
 import { migrateMemoryWorkspace } from '../../lib/memory-migrate.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -406,6 +406,21 @@ test('2.0.4 迁移期：只有旧 md 时兜底读，投影与迁移后的新文�
   assert.equal(read.view.accumulations.length, 3);
 });
 
+test('2.0.4 迁移期：旧文件没有 `##` 分节时读不出来，提示语不许再说「内容不丢」', (t) => {
+  const prose = '只有一段散文，没有 `##` 分节。\n';
+  const workspace = tempWorkspace(t, { [LEGACY_MEMORY_FILE]: prose });
+  const read = readSharedMemory(workspace, { warn: false });
+  assert.equal(read.legacy, true, '旧文件在，仍算旧格式兜底');
+  assert.equal(read.present, true, '文件在盘上，present 照实为 true');
+  assert.equal(read.unreadable, true, '没有分节 = 读不出来（不是「内容为空」）');
+  assert.equal(read.text, null, '转换不出任何一节，text 是 null');
+  assert.equal(read.view.injectable, '', '注入是空串——所以「内容不丢」是骗人的');
+  const notice = legacyUnreadableNotice(read.file);
+  assert.match(notice, /读不出来/);
+  assert.match(notice, /migrate --dry-run/, '要给出下一步，别只说坏了');
+  assert.equal(notice.includes('内容不丢'), false, '这句话在这种盘面上是错的');
+});
+
 test('2.0.4 迁移期：旧格式提示每个进程只打一次（不刷屏）', (t) => {
   const workspace = tempWorkspace(t, { [LEGACY_MEMORY_FILE]: LEGACY_MEMORY });
   const calls = warnSpy(t);
@@ -542,4 +557,9 @@ test('2.0.4 迁移期 CLI：`studymate migrate` 跑得通、第二次报无需�
   const usage = run(['migrate', '--nope']);
   assert.equal(usage.status, 1);
   assert.match(usage.stderr, /用法：studymate migrate/);
+
+  // `--help` 是正常用法：印用法、退 0，别当成「不支持的参数」
+  const help = run(['migrate', '--help']);
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /用法：studymate migrate/);
 });

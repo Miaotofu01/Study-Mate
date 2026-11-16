@@ -19,7 +19,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 import { probeModel } from './capability.ts';
-import { legacyMemoryNotice } from '../memory-file.ts';
+import { legacyMemoryNotice, legacyUnreadableNotice } from '../memory-file.ts';
 import { readMemory } from '../core/memory.ts';
 import type { ServiceReader } from './capability.ts';
 import type { StudyToolSpec } from './define.ts';
@@ -351,7 +351,9 @@ export function workspaceContextTool(ctx: ServiceReader): StudyToolSpec {
         notes.push(`工作区 ${facts.path} 里还没有可用科目（建课建到一半、大纲里一个节点都没有的目录不算）——先建一个。`);
       }
 
-      const raw = run.access.read<{ file: string; present: boolean; markdown: string; legacy?: boolean }>('memory');
+      const raw = run.access.read<{
+        file: string; present: boolean; markdown: string; legacy?: boolean; unreadable?: boolean;
+      }>('memory');
       /* #190：`markdown` 只放**画像三节**的投影——`积累` 是角色攒下的干活笔记，永不进上下文。
          形状（`file` / `present` / `markdown` 三个键）一个字都没动：它是插件与总控之间的字段
          契约，改的是值，不是契约（ADR-0014「宿主契约不动」）。`present` 照实报「文件在不在」，
@@ -363,7 +365,11 @@ export function workspaceContextTool(ctx: ServiceReader): StudyToolSpec {
         present: raw.present,
         markdown: readMemory({ shared: raw.markdown }).injectable,
       };
-      if (raw.legacy === true) notes.push(legacyMemoryNotice(raw.file));
+      if (raw.legacy === true) {
+        // 读不出来（旧文件没有 `##` 分节、转换不出任何一节）与「读到了但请迁移」是两件事：
+        // 前者 `markdown` 是空串、注入不进去，提示语不许再说「内容不丢」。
+        notes.push(raw.unreadable === true ? legacyUnreadableNotice(raw.file) : legacyMemoryNotice(raw.file));
+      }
       const wanted = typeof args.subject === 'string' ? args.subject.trim() : '';
       const selected = summarize({ subjects, curriculum, progress, records, wanted });
       if (wanted !== '' && selected.length === 0) {
