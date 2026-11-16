@@ -1,0 +1,259 @@
+/* UI v3: variable-driven light/dark theme and full-bleed document workspace. */
+:root[data-theme="light"],
+.app-shell.v3[data-theme="light"] {
+  color-scheme: light;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --canvas: #f5f7f5;
+  --text: #293431;
+  --text-strong: #303c37;
+  --muted: #718079;
+  --border: #e2e8e4;
+  --border-soft: #edf1ee;
+  --accent: #1c7164;
+  --accent-strong: #15594f;
+  --accent-soft: #e8f2ef;
+  --input: #fbfcfb;
+  --code: #f2f5f3;
+  --grid-dot: #b7c5bd;
+  --minimap-mask: rgb(245 248 245 / 70%);
+  --edge-line: #73877d;
+  --code-gutter: #f5f7f5;
+  --code-selection: rgb(28 113 100 / 28%);
+  --shadow: 0 2px 9px rgb(36 54 47 / 7%), 0 10px 28px rgb(36 54 47 / 5%);
+}
+:root[data-theme="dark"],
+.app-shell.v3[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #1e2423;
+  --surface-raised: #252d2b;
+  --canvas: #151a19;
+  --text: #d7e0db;
+  --text-strong: #eef4f0;
+  --muted: #a0ada6;
+  --border: #39433f;
+  --border-soft: #303936;
+  --accent: #78c7b3;
+  --accent-strong: #9cddcb;
+  --accent-soft: #283d37;
+  --input: #202725;
+  --code: #202725;
+  --grid-dot: #46574e;
+  --minimap-mask: rgb(10 14 13 / 60%);
+  --edge-line: #91aa9d;
+  --code-gutter: #1a211e;
+  --code-selection: rgb(120 199 179 / 34%);
+  --shadow: 0 3px 12px rgb(0 0 0 / 24%), 0 12px 30px rgb(0 0 0 / 20%);
+}
+:root, .app-shell.v3 { --ink: var(--text); --line: var(--border); --teal: var(--accent); --teal-dark: var(--accent-strong); --teal-soft: var(--accent-soft); }
+.app-shell.v3[data-theme="light"], .app-shell.v3[data-theme="dark"] { color-scheme: inherit; }
+.app-shell.v3.is-hosted { width: 100%; height: 100%; min-height: 0; }
+.app-shell.v3 { color: var(--text); background: var(--canvas); color-scheme: inherit; }
+.app-shell.v3 .topbar,
+.app-shell.v3 .side-panel,
+.app-shell.v3 .inspector,
+.app-shell.v3 .document-stage,
+.app-shell.v3 .modal,
+.app-shell.v3 .panel-rail { color: var(--text); background: var(--surface); border-color: var(--border); }
+.app-shell.v3 .topbar { border-bottom-color: var(--border); }
+.app-shell.v3 .topbar-action,
+.app-shell.v3 .button.secondary,
+.app-shell.v3 .react-flow__minimap { color: var(--text); background: var(--surface-raised) !important; border-color: var(--border); }
+.app-shell.v3 .prototype-badge,.app-shell.v3 .badge { color: var(--muted); background: var(--accent-soft); }
+.app-shell.v3 .view-switch,.app-shell.v3 .editor-mode-switch { border-color: var(--border); background: var(--input); }
+.app-shell.v3 .view-switch button,.app-shell.v3 .editor-mode-switch button { color: var(--muted); }
+.app-shell.v3 .view-switch button.is-active,.app-shell.v3 .editor-mode-switch button.is-active { color: var(--accent); background: var(--surface-raised); }
+.app-shell.v3 .panel-header,.app-shell.v3 .tree-footer,.app-shell.v3 .chat-connect,.app-shell.v3 .chat-connection-state,
+.app-shell.v3 .chat-composer,.app-shell.v3 .inspector-heading,.app-shell.v3 .inspector-tabs,.app-shell.v3 .inspector-footer { border-color: var(--border-soft); }
+.app-shell.v3 .panel-header h1,.app-shell.v3 .panel-header h2,.app-shell.v3 .panel-header .panel-title,
+.app-shell.v3 .document-toolbar input,.app-shell.v3 .document-toolbar .document-title,
+.app-shell.v3 .inspector-title h2,.app-shell.v3 .title-input,.app-shell.v3 .modal-title { color: var(--text-strong); }
+.app-shell.v3 .tree-search,.app-shell.v3 .text-input,.app-shell.v3 .chat-session-select,
+.app-shell.v3 .chat-composer textarea,.app-shell.v3 .markdown-editor textarea { color: var(--text); background: var(--input); border-color: var(--border); }
+.app-shell.v3 input,.app-shell.v3 textarea { color: var(--text); }
+.app-shell.v3 input::placeholder,.app-shell.v3 textarea::placeholder { color: var(--muted); }
+.app-shell.v3 .tree-row { color: var(--text); }
+.app-shell.v3 .tree-row:hover { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.app-shell.v3 .tree-row.is-active { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 24%, var(--border)); background: var(--accent-soft); }
+.app-shell.v3 .tree-row.is-notebook,.app-shell.v3 .tree-label { color: var(--text); }
+.app-shell.v3 .tree-toggle,.app-shell.v3 .tree-icon,.app-shell.v3 .muted,.app-shell.v3 .chat-connection-state { color: var(--muted); }
+.app-shell.v3 .tree-tools .tree-search:focus,.app-shell.v3 .text-input:focus { border-color: var(--accent); }
+.app-shell.v3 .icon-button,.app-shell.v3 .tool-button { color: var(--muted); }
+.app-shell.v3 .icon-button:hover,.app-shell.v3 .tool-button:hover,.app-shell.v3 .button.ghost:hover { color: var(--accent); background: var(--accent-soft); }
+.app-shell.v3 .button.secondary:hover { background: var(--accent-soft); }
+.app-shell.v3 .button.danger { color: #d77d78; background: color-mix(in srgb, #a83030 12%, var(--surface)); border-color: color-mix(in srgb, #a83030 25%, var(--border)); }
+.app-shell.v3 .canvas-stage,.app-shell.v3 .main-stage { background: var(--canvas); }
+.app-shell.v3 .canvas-title,.app-shell.v3 .document-content,.app-shell.v3 .text-node-content { color: var(--text); }
+.app-shell.v3 .canvas-tip,.app-shell.v3 .canvas-toolbar,.app-shell.v3 .selection-tip,
+.app-shell.v3 .relation-label,.app-shell.v3 .inline-edge-editor,.app-shell.v3 .quote-picker { color: var(--text); background: var(--surface-raised); border-color: var(--border); }
+.app-shell.v3 .canvas-toolbar i,.app-shell.v3 .tool-divider { background: var(--border); }
+.app-shell.v3 .knowledge-card { color: var(--text); background: var(--surface-raised); border-color: var(--border); box-shadow: var(--shadow); }
+.app-shell.v3 .card-drag-handle,.app-shell.v3 .card-footer { border-color: var(--border-soft); }
+.app-shell.v3 .card-title-row h3,.app-shell.v3 .card-body h1,.app-shell.v3 .card-body h2,.app-shell.v3 .card-body h3,
+.app-shell.v3 .markdown-preview h1,.app-shell.v3 .markdown-preview h2,.app-shell.v3 .markdown-preview h3 { color: var(--text-strong); }
+.app-shell.v3 .card-body.markdown-preview,.app-shell.v3 .markdown-preview,.app-shell.v3 .detail-summary { color: var(--text); }
+.app-shell.v3 .markdown-preview th,.app-shell.v3 .markdown-preview code,.app-shell.v3 .markdown-preview pre,
+.app-shell.v3 .edge-preview,.app-shell.v3 .quote-chip { color: var(--text); background: var(--code); border-color: var(--border); }
+.app-shell.v3 .markdown-preview th,.app-shell.v3 .edge-preview { background: var(--surface-raised); }
+.app-shell.v3 .markdown-preview td,.app-shell.v3 .markdown-preview th { border-color: var(--border); }
+.app-shell.v3 .markdown-preview a,.app-shell.v3 .card-link,.app-shell.v3 .detail-url { color: var(--accent-strong); }
+.app-shell.v3 .text-node { color: var(--text); background: #fff9d9; border-color: #d9cd91; }
+.app-shell.v3[data-theme="dark"] .text-node { background: #393523; border-color: #746a42; }
+.app-shell.v3 .chat-message-content { color: var(--text); background: var(--surface-raised); border-color: var(--border); }
+.app-shell.v3 .chat-message.user .chat-message-content { background: var(--accent-soft); border-color: var(--border); }
+.app-shell.v3 .chat-composer { background: var(--surface); }
+.app-shell.v3 .chat-composer textarea { border: 0; background: transparent; }
+.app-shell.v3 .chat-composer.is-dragging,.app-shell.v3 .chat-panel.is-dragging,.app-shell.v3 .chat-drop-zone.is-dragging { outline: 2px dashed var(--accent); outline-offset: -5px; background: var(--accent-soft); }
+.app-shell.v3 .drag-overlay { pointer-events: none; }
+.app-shell.v3 .chat-send:disabled,.app-shell.v3 button:disabled { color: var(--muted); opacity: .52; cursor: not-allowed; }
+.app-shell.v3 .modal-backdrop { background: rgb(0 0 0 / 58%); }
+.app-shell.v3 .modal { border-color: var(--border); box-shadow: var(--shadow); }
+.app-shell.v3 .modal-description,.app-shell.v3 .help-grid,.app-shell.v3 .modal label { color: var(--muted); }
+.app-shell.v3 .help-row > * { border-color: var(--border-soft); }
+.app-shell.v3 .toast { color: var(--text-strong); background: var(--surface-raised); border: 1px solid var(--border); }
+.app-shell.v3 .document-stage { min-width: 0; min-height: 0; }
+.app-shell.v3 .document-toolbar { border-bottom-color: var(--border); }
+.app-shell.v3 .document-scroll { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; padding: 0; }
+.app-shell.v3 .document-scroll.is-edit,.app-shell.v3 .document-scroll.is-preview { display: flex; }
+.app-shell.v3 .document-scroll.is-split { display: grid; grid-template-columns: minmax(0, var(--document-source-width, 50%)) 6px minmax(0, 1fr); gap: 0; }
+.app-shell.v3 .document-source,.app-shell.v3 .document-preview-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: auto; }
+.app-shell.v3 .document-scroll.is-edit > .document-source { flex: 1; }
+.app-shell.v3 .document-scroll.is-preview > .document-preview-pane { flex: 1; }
+.app-shell.v3 .document-scroll.is-split > .document-source,.app-shell.v3 .document-scroll.is-split > .document-preview-pane { min-width: 0; min-height: 0; overflow: auto; }
+.app-shell.v3 .document-scroll > .document-content { width: 100%; max-width: none; min-width: 0; min-height: 100%; margin: 0; padding: 20px; overflow-wrap: anywhere; }
+.app-shell.v3 .document-scroll.is-split > .document-preview-pane .document-content { width: 100%; max-width: none; margin: 0; }
+.app-shell.v3 .document-split-handle { position: relative; z-index: 2; width: 6px; min-height: 100%; cursor: col-resize; touch-action: none; background: var(--edge-line); }
+.app-shell.v3 .document-split-handle:hover,.app-shell.v3 .document-split-handle:focus-visible { background: var(--accent); }
+.app-shell.v3 .document-editor-host.is-fill { display: flex; width: 100%; min-width: 0; min-height: 0; height: auto; flex: 1 1 auto; margin: 0; overflow: hidden; }
+.app-shell.v3 .document-editor-host.is-fill .editor-pane { display: flex; width: 100%; min-width: 0; min-height: 0; height: auto !important; flex: 1 1 auto; flex-direction: column; overflow: hidden; border: 0; border-radius: 0; }
+.app-shell.v3 .document-editor-host.is-fill .editor-pane .cm-editor { width: 100%; height: 100%; min-height: 0; flex: 1; color: var(--text); background: var(--surface); }
+.app-shell.v3 .document-editor-host.is-fill .editor-pane .cm-scroller { color: var(--text); background: var(--surface); }
+.app-shell.v3 .document-editor-host.is-fill .editor-pane .cm-gutters { color: var(--muted); background: var(--code-gutter); border-right: 1px solid var(--border); }
+.app-shell.v3 .document-editor-host.is-fill .editor-pane .cm-activeLineGutter { color: var(--text); background: var(--accent-soft); }
+.app-shell.v3 .document-editor-host.is-fill .editor-pane .cm-selectionBackground,.app-shell.v3 .document-editor-host.is-fill .editor-pane ::selection { background: var(--code-selection); }
+.app-shell.v3 .document-editor-host.is-fill .editor-resize-hit { display: none; }
+.app-shell.v3 .document-editor-host.is-fill .validation-error { margin: 4px 12px; }
+.app-shell.v3 .panel-rail { position: relative; z-index: 12; display: flex; width: 32px; min-width: 32px; flex: 0 0 32px; align-items: flex-start; justify-content: center; padding-top: 8px; border: 0; }
+.app-shell.v3 .panel-rail--left { border-right: 1px solid var(--border); }
+.app-shell.v3 .panel-rail--right { border-left: 1px solid var(--border); }
+.app-shell.v3 .panel-rail .icon-button { width: 28px; height: 30px; }
+.app-shell.v3 .side-panel.is-collapsed { width: 0 !important; flex-basis: 0 !important; overflow: hidden; }
+.app-shell.v3 .side-panel.is-collapsed .panel-inner { visibility: hidden; }
+.app-shell.v3 .panel-rail[hidden] { display: none; }
+.app-shell.v3 .document-scroll.is-split { --document-source-width: 50%; }
+.app-shell.v3[data-resizing="true"] *, .app-shell.v3[data-resizing="true"] { transition: none !important; }
+@media (min-width: 1100px) {
+  .app-shell.v3 .panel-rail { position: relative; }
+}
+@media (max-width: 1099px) {
+  .app-shell.v3 .right-panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 25; }
+  .app-shell.v3 .panel-rail--right { margin-left: auto; }
+}
+@media (max-width: 699px) {
+  .app-shell.v3 .left-panel { position: absolute; top: 0; bottom: 0; left: 0; z-index: 26; }
+  .app-shell.v3 .panel-rail--left { position: absolute; top: 0; bottom: 0; left: 0; z-index: 27; }
+  .app-shell.v3 .document-scroll.is-split { grid-template-columns: minmax(0, var(--document-source-width, 50%)) 6px minmax(0, 1fr); }
+  .app-shell.v3 .document-scroll > .document-content { padding: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell.v3 .side-panel,.app-shell.v3 .panel-rail { transition-duration: .01ms !important; }
+}
+/* The ReactFlow dot grid remains enabled; use the same theme palette. */
+.app-shell.v3 .react-flow__background pattern circle { fill: var(--grid-dot); }
+/* 共享侧栏编辑器没有画布 App 根，暗色代码也必须在 NoteEditor 内生效。 */
+:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-comment,:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-quote { color: #9eaaa3; }
+:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-keyword,:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-selector-tag,:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-built_in { color: #ef9ac2; }
+:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-string,:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-regexp,:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-template-variable { color: #95d5a4; }
+:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-title,:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-title.function_,:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-title.class_ { color: #91c8ff; }
+:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-number,:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-literal { color: #f3b17e; }
+:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-attr,:is(.app-shell.v3,.note-editor)[data-theme="dark"] .hljs-property { color: #e4ca82; }
+:is(.app-shell.v3,.note-editor)[data-theme="dark"] .markdown-preview code.hljs { color: var(--text); background: transparent; }
+.app-shell.v3[data-theme="dark"] .text-node-editor { color: var(--text); }
+.app-shell.v3[data-theme="dark"] .react-flow__minimap { background: var(--surface-raised) !important; }
+@media (max-width: 1099px) { .app-shell.v3 .right-panel.is-collapsed { box-shadow: none; } }
+@media (max-width: 699px) { .app-shell.v3 .left-panel.is-collapsed { box-shadow: none; } }
+@media (prefers-reduced-motion: reduce) { .app-shell.v3 *, .app-shell.v3 *::before, .app-shell.v3 *::after { scroll-behavior: auto !important; } }
+/* A viewport breakpoint change must not animate a panel between docked/overlay modes. */
+@media (max-width: 1099px), (min-width: 1100px) { .app-shell.v3[data-breakpoint-changing="true"] .side-panel { transition: none !important; } }
+@media (max-width: 699px), (min-width: 700px) { .app-shell.v3[data-breakpoint-changing="true"] .side-panel { transition: none !important; } }
+.app-shell.v3[data-theme="dark"] .react-flow__edge-textbg { fill: var(--surface-raised); }
+.app-shell.v3[data-theme="dark"] .react-flow__edge-text { fill: var(--text); }
+.app-shell.v3[data-theme="dark"] .react-flow__node-text { color: var(--text); }
+.app-shell.v3[data-theme="dark"] .cm-cursor { border-left-color: var(--text-strong); }
+.app-shell.v3[data-theme="dark"] .cm-activeLine { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.app-shell.v3[data-theme="dark"] .quote-picker button:hover { background: var(--accent-soft); }
+.app-shell.v3 .chat-empty-state { display: grid; justify-items: center; gap: 8px; padding: 24px 16px; color: var(--muted); text-align: center; }
+.app-shell.v3 .chat-composer { position: relative; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 14px; }
+.app-shell.v3 .chat-composer textarea { width: 100%; min-height: 56px; max-height: 220px; padding: 8px 4px; resize: vertical; outline: 0; }
+.app-shell.v3 .chat-composer-actions { display: flex; align-items: center; gap: 6px; }
+.app-shell.v3 .quote-picker { position: absolute; right: 0; bottom: calc(100% + 8px); left: 0; z-index: 20; box-shadow: var(--shadow); }
+.app-shell.v3 .chat-panel.dsh-chat { min-width: 0; }
+.app-shell.v3 .chat-messages { min-width: 0; }
+.app-shell.v3 .document-stage,.app-shell.v3 .document-scroll,.app-shell.v3 .document-source,.app-shell.v3 .document-preview-pane { min-width: 0; }
+.app-shell.v3 .document-content img,.app-shell.v3 .document-content iframe,.app-shell.v3 .document-content object { max-width: 100%; }
+.app-shell.v3 .document-scroll.is-edit > .document-editor-host,.app-shell.v3 .document-scroll.is-split .document-source > .document-editor-host { flex: 1 1 auto; }
+@media (max-width: 699px) { .app-shell.v3 .panel-rail { padding-top: 6px; } }
+@media (min-width: 700px) { .app-shell.v3 .left-panel:not(.is-collapsed) + .panel-rail--left { display: none; } }
+/* Fullbleed editor panes override earlier component stylesheet margins/borders. */
+.app-shell.v3 .document-editor-host.is-fill .editor-pane .cm-content { min-height: 100%; }
+.app-shell.v3 .document-editor-host.is-fill .editor-pane .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.app-shell.v3 .document-scroll.is-split > .document-source { border-right: 0; }
+.app-shell.v3 .document-scroll.is-split .document-split-handle { grid-column: 2; grid-row: 1; }
+.app-shell.v3 .document-scroll.is-split > .document-preview-pane { grid-column: 3; grid-row: 1; }
+.app-shell.v3 .document-scroll.is-split > .document-source { grid-column: 1; grid-row: 1; }
+@media (max-width: 699px) { .app-shell.v3 .document-scroll.is-split > .document-content { padding: 12px; } }
+@media (max-width: 699px) { .app-shell.v3 .document-scroll.is-split { overflow: hidden; } }
+.app-shell.v3[data-theme="dark"] .button.danger:hover { background: #482d2c; }
+.app-shell.v3 .chat-composer .chat-composer-actions .send-button:disabled { color: var(--muted); background: var(--code); opacity: .7; }
+.app-shell.v3 .panel-rail button { pointer-events: auto; }
+.app-shell.v3 .side-panel { transition: width 200ms ease, flex-basis 200ms ease; }
+.app-shell.v3[data-breakpoint-changing="true"] .side-panel { transition: none !important; }
+.app-shell.v3 .document-split-handle[aria-orientation="vertical"] { cursor: col-resize; }
+.app-shell.v3 .react-flow__minimap-mask { fill: var(--minimap-mask); }
+.app-shell.v3[data-theme="dark"] .react-flow__minimap-node { fill: #698f80; stroke: #a5c7b8; }
+.app-shell.v3[data-theme="dark"] .react-flow__minimap .react-flow__minimap-mask { fill: var(--minimap-mask); }
+.app-shell.v3 .document-scroll.is-edit .document-source { flex: 1 1 100%; }
+.app-shell.v3 .document-scroll.is-preview .document-preview-pane { flex: 1 1 100%; }
+.app-shell.v3 .document-scroll.is-edit > .document-editor-host { display: flex; min-height: 0; flex: 1 1 auto; }
+.app-shell.v3 .document-scroll.is-split .document-source > .document-editor-host { min-height: 0; }
+.app-shell.v3[data-theme="dark"] .markdown-preview pre { background: var(--code); }
+.app-shell.v3 .document-editor-host.is-fill .editor-pane .cm-focused { outline: none; }
+.app-shell.v3 .panel-rail--right { align-self: stretch; }
+.app-shell.v3 .panel-rail--left { align-self: stretch; }
+@media (max-width: 1099px) { .app-shell.v3 .panel-rail--right { position: absolute; top: 0; right: 0; bottom: 0; } }
+@media (max-width: 699px) { .app-shell.v3 .panel-rail--left { position: absolute; top: 0; bottom: 0; left: 0; } }
+.app-shell.v3 .panel-rail--left,.app-shell.v3 .panel-rail--right { pointer-events: none; }
+.app-shell.v3 .panel-rail--left > *,.app-shell.v3 .panel-rail--right > * { pointer-events: auto; }
+@media (min-width: 1100px) { .app-shell.v3 .workspace > .panel-rail--right { margin-left: 0; } }
+@media (max-width: 699px) { .app-shell.v3 .workspace > .left-panel:not(.is-collapsed) { box-shadow: 8px 0 26px rgb(0 0 0 / 16%); } }
+@media (max-width: 1099px) { .app-shell.v3 .workspace > .right-panel:not(.is-collapsed) { box-shadow: -8px 0 26px rgb(0 0 0 / 16%); } }
+.app-shell.v3[data-theme="dark"] .empty-state { color: var(--muted); }
+.app-shell.v3 .document-preview-pane .document-content { flex: 1 0 auto; }
+.app-shell.v3 .document-source > .document-editor-host { width: 100%; }
+.app-shell.v3 .chat-drop-zone { min-width: 0; }
+.app-shell.v3 .document-content table { max-width: 100%; }
+.app-shell.v3 .document-content pre { max-width: 100%; overflow: auto; }
+@media (max-width: 699px) { .app-shell.v3 .document-split-handle { width: 6px; } }
+.app-shell.v3[data-theme="dark"] .resource-type-icon { color: #a8cabe; background: #2b3d37; }
+.app-shell.v3[data-theme="dark"] .resource-type-icon[data-type="course"] { color: #e1c895; background: #413a2d; }
+.app-shell.v3[data-theme="dark"] .resource-type-icon[data-type="link"] { color: #a7c9e3; background: #293844; }
+.app-shell.v3 .document-scroll.is-split > .document-source { overflow-x: hidden; }
+.app-shell.v3 .document-scroll.is-split > .document-preview-pane { overflow-x: hidden; }
+.app-shell.v3 .document-scroll.is-split .document-content { flex: 1 0 auto; }
+.app-shell.v3 .chat-composer-actions button { flex: 0 0 auto; }
+.app-shell.v3 .chat-composer textarea:focus-visible { outline: none; }
+.app-shell.v3[data-theme="dark"] .status-dot { background: #78c7a0; }
+.app-shell.v3 .panel-rail .icon-button { border: 1px solid var(--border); background: var(--surface-raised); }
+.app-shell.v3 .panel-rail .icon-button:hover { border-color: var(--accent); }
+.app-shell.v3 .document-scroll.is-preview .document-content { width: 100%; }
+.app-shell.v3 .document-scroll.is-edit .document-source { overflow: hidden; }
+.app-shell.v3 .document-scroll.is-split .document-source,.app-shell.v3 .document-scroll.is-split .document-preview-pane { overscroll-behavior: contain; }
+.app-shell.v3 .modal-backdrop .modal { max-width: min(520px, 100%); }
+.app-shell.v3[data-theme="dark"] .validation-error { color: #ff9b93; }
+.app-shell.v3 .document-scroll.is-split { touch-action: pan-y; }
+.app-shell.v3 .document-split-handle { touch-action: none; }
+/* Remove v2's more-specific split padding; the editor starts at the toolbar edge. */
+.app-shell.v3 .document-scroll.is-split { padding: 0; }
+.app-shell.v3 .document-scroll .document-preview-pane .document-content { width: 100%; max-width: none; margin: 0; padding: 20px; border-top: 0; }
+@media (max-width: 699px) { .app-shell.v3 .document-scroll .document-preview-pane .document-content { padding: 14px; } }
+/* End v3 overrides. */

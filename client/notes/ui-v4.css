@@ -1,0 +1,525 @@
+@charset "UTF-8";
+/* ═══════════════════════════════════════════════════════════════════════════
+   UI v4：中性色壳层 + 真实可动的侧栏 + 看得见的分屏线 + 本轮新组件。
+
+   导入：theme-v3.css 之后（`import './theme-v3.css';` 下一行）。
+   作用域：所有规则都以 .app-shell.v4 开头，只作用于该根及其子树；
+   不碰 html/body/#root/:root，也不碰宿主的 .smb-*。
+   根类：`app-shell v2 v3 v4`（v4 依赖 v3 的几个变量，v4 必须最后导入）。
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. 色板 ────────────────────────────────────────────────────────────
+   亮色取正式「学习」阅读端的中性族（lib/client.js 的 --smb-* 兜底值：
+   bg #f6f7f9 / panel #fff / line #e6e8ee / text #1b1f27）。
+   层次：侧栏·顶栏 surface（白） > 画布 canvas（灰） > 编辑器 editor（灰且带分区）。
+   强调色只做「标记」：焦点环、主按钮、链接、主色选中——不给大块底色染色。 */
+
+.app-shell.v4[data-theme="light"] {
+  color-scheme: light;
+  --v4-surface: #ffffff;          /* 顶栏、侧栏、卡片、弹窗 */
+  --v4-surface-raised: #ffffff;   /* 浮起层：下拉、工具栏、小地图 */
+  --v4-canvas: #eef0f4;           /* 画布：比侧栏深一档 */
+  --v4-editor: #f0f1f4;           /* 编辑器（CodeMirror）底色 */
+  --v4-input: #f6f7f9;            /* 输入框，比表面略深 */
+  --v4-code: #f4f5f8;             /* 代码块、行内代码 */
+  --v4-hover: rgb(0 0 0 / 4%);
+  --v4-active: rgb(0 0 0 / 6.5%);
+  --v4-border: #e1e4ea;
+  --v4-border-strong: #cfd4de;
+  --v4-border-soft: #ecedf1;
+  --v4-text: #1b1f27;
+  --v4-text-2: #4d5666;
+  --v4-text-3: color-mix(in srgb, #6b7484 72%, #1b1f27);
+  --v4-text-4: color-mix(in srgb, #7e8798 52%, #1b1f27);
+  --v4-accent: #2f6fdc;           /* 只给主按钮 / 链接 */
+  --v4-accent-strong: #2559b4;
+  --v4-accent-soft: #eaf0fc;
+  --v4-focus: #2f6fdc;            /* 焦点环 */
+  --v4-select: #1b1f27;           /* 中性选中描边 */
+  --v4-select-ring: rgb(27 31 39 / 10%);
+  --v4-success: #1a7f43;
+  --v4-warning: #9a6700;
+  --v4-danger: #c3352b;
+  --v4-danger-text: color-mix(in srgb, #c3352b 78%, #1b1f27);
+  --v4-danger-soft: #fdf0ef;
+  --v4-danger-border: #f2cfcc;
+  /* 点阵：旧 #9ca3af 对画布 #eef0f4 约 2.1:1，缩到 1.6px 后几乎看不见；
+     #77808f 对同一画布约 3.5:1——亮色下点更清楚，但仍是背景纹理，不抢卡片的层级。 */
+  --v4-grid-dot: #77808f;
+  --v4-edge-line: #8c93a0;
+  --v4-minimap-mask: rgb(238 240 244 / 72%);
+  --v4-code-gutter: #eaecf0;
+  --v4-code-selection: rgb(47 111 220 / 20%);
+  /* 各表面的文字对比：1/2 档来自阅读端；3/4 档按 AA 往主文字色混 */
+  --v4-shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
+  --v4-shadow: 0 2px 6px rgb(16 24 40 / 6%), 0 8px 24px rgb(16 24 40 / 6%);
+  --v4-shadow-lg: 0 18px 48px rgb(16 24 40 / 18%);
+  --v4-overlay: rgb(17 21 28 / 40%);
+  --v4-panel-shadow-left: 8px 0 24px rgb(16 24 40 / 10%);
+  --v4-panel-shadow-right: -8px 0 24px rgb(16 24 40 / 10%);
+  --v4-rail: 0px;                 /* 左栏收起时内容左移的量：左栏是 flex 项、宽 0，所以是 0 */
+  --v4-rail-width: 32px;
+  --v4-dur: 200ms;
+  --v4-ease: cubic-bezier(.2, .7, .3, 1);
+}
+
+/* 暗色：同样中性，去掉 v3 的绿调（原 surface #1e2423 / canvas #151a19），
+   改用略偏蓝的中性深灰。层次：侧栏 surface > 编辑器 editor > 画布 canvas。 */
+.app-shell.v4[data-theme="dark"] {
+  color-scheme: dark;
+  --v4-surface: #1e1e21;
+  --v4-surface-raised: #26262a;
+  --v4-canvas: #17171a;
+  --v4-editor: #1a1a1d;
+  --v4-input: #242428;
+  --v4-code: #232327;
+  --v4-hover: rgb(255 255 255 / 6%);
+  --v4-active: rgb(255 255 255 / 9%);
+  --v4-border: #34343a;
+  --v4-border-strong: #47474f;
+  --v4-border-soft: #2b2b30;
+  --v4-text: #e3e4e8;
+  --v4-text-2: #a8adb8;
+  --v4-text-3: color-mix(in srgb, #8a909c 72%, #e3e4e8);
+  --v4-text-4: color-mix(in srgb, #767c88 52%, #e3e4e8);
+  --v4-accent: #6b9df0;
+  --v4-accent-strong: #9dbcfa;
+  --v4-accent-soft: #232a36;
+  --v4-focus: #6b9df0;
+  --v4-select: #e3e4e8;
+  --v4-select-ring: rgb(227 228 232 / 14%);
+  --v4-success: #4fa86a;
+  --v4-warning: #d0a134;
+  --v4-danger: #e06b62;
+  --v4-danger-text: color-mix(in srgb, #e06b62 82%, #e3e4e8);
+  --v4-danger-soft: #2e2020;
+  --v4-danger-border: #4a2e2d;
+  --v4-grid-dot: #5a5a63;         /* 对画布 #17171a 2.87:1（原 #46574e 2.54:1） */
+  --v4-edge-line: #6d7480;
+  --v4-minimap-mask: rgb(10 10 12 / 62%);
+  --v4-code-gutter: #1c1c20;
+  --v4-code-selection: rgb(107 157 240 / 30%);
+  --v4-shadow-sm: 0 1px 2px rgb(0 0 0 / 30%);
+  --v4-shadow: 0 2px 8px rgb(0 0 0 / 32%), 0 12px 32px rgb(0 0 0 / 28%);
+  --v4-shadow-lg: 0 24px 64px rgb(0 0 0 / 55%);
+  --v4-overlay: rgb(0 0 0 / 62%);
+  --v4-panel-shadow-left: 8px 0 24px rgb(0 0 0 / 45%);
+  --v4-panel-shadow-right: -8px 0 24px rgb(0 0 0 / 45%);
+}
+
+/* 把 v3 变量指到 v4 色板：v3/v2/styles.css 里所有 var(--surface) 之类的
+   规则自动变中性，不必逐条重写；--ink/--teal 等旧别名一并接管。 */
+.app-shell.v4[data-theme="light"],
+.app-shell.v4[data-theme="dark"] {
+  --surface: var(--v4-surface);
+  --surface-raised: var(--v4-surface-raised);
+  --canvas: var(--v4-canvas);
+  --editor: var(--v4-editor);
+  --input: var(--v4-input);
+  --code: var(--v4-code);
+  --text: var(--v4-text);
+  --text-strong: var(--v4-text);
+  --muted: var(--v4-text-3);
+  --border: var(--v4-border);
+  --border-soft: var(--v4-border-soft);
+  --accent: var(--v4-focus);
+  --accent-strong: var(--v4-accent-strong);
+  --accent-soft: var(--v4-accent-soft);
+  --grid-dot: var(--v4-grid-dot);
+  --minimap-mask: var(--v4-minimap-mask);
+  --edge-line: var(--v4-edge-line);
+  --code-gutter: var(--v4-code-gutter);
+  --code-selection: var(--v4-code-selection);
+  --shadow: var(--v4-shadow);
+  --ink: var(--v4-text);
+  --line: var(--v4-border);
+  --teal: var(--v4-focus);
+  --teal-dark: var(--v4-accent-strong);
+  --teal-soft: var(--v4-accent-soft);
+}
+
+/* ── 2. 根壳与顶栏 ───────────────────────────────────────────────────── */
+
+.app-shell.v4 { position: relative; color: var(--v4-text); background: var(--v4-canvas); font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif; }
+.app-shell.v4 .topbar { position: relative; z-index: 40; color: var(--v4-text); background: var(--v4-surface); border-bottom: 1px solid var(--v4-border); }
+.app-shell.v4 .brand-name { color: var(--v4-text); }
+.app-shell.v4 .brand-icon { color: var(--v4-text-2); background: var(--v4-input); border: 1px solid var(--v4-border); box-shadow: none; }
+.app-shell.v4 .brand-subtitle, .app-shell.v4 .breadcrumb { color: var(--v4-text-3); }
+.app-shell.v4 .breadcrumb strong { color: var(--v4-text-2); }
+.app-shell.v4 .prototype-badge, .app-shell.v4 .badge { color: var(--v4-text-3); background: var(--v4-input); border: 1px solid var(--v4-border-soft); }
+.app-shell.v4 .view-switch, .app-shell.v4 .editor-mode-switch { border: 1px solid var(--v4-border); background: var(--v4-input); }
+.app-shell.v4 .view-switch button, .app-shell.v4 .editor-mode-switch button { color: var(--v4-text-3); }
+.app-shell.v4 .view-switch button:hover, .app-shell.v4 .editor-mode-switch button:hover { color: var(--v4-text); }
+.app-shell.v4 .view-switch button.is-active, .app-shell.v4 .editor-mode-switch button.is-active { color: var(--v4-text); background: var(--v4-surface); box-shadow: var(--v4-shadow-sm); }
+.app-shell.v4 .icon-button, .app-shell.v4 .tool-button { color: var(--v4-text-2); }
+.app-shell.v4 .icon-button:hover, .app-shell.v4 .tool-button:hover, .app-shell.v4 .button.ghost:hover { color: var(--v4-text); background: var(--v4-hover); }
+.app-shell.v4 .tool-button.is-active, .app-shell.v4 .canvas-toolbar .icon-button.active { color: var(--v4-text); background: var(--v4-active); }
+.app-shell.v4 .topbar-action, .app-shell.v4 .button.secondary { color: var(--v4-text-2); border: 1px solid var(--v4-border); background: var(--v4-surface); }
+.app-shell.v4 .topbar-action:hover, .app-shell.v4 .button.secondary:hover { color: var(--v4-text); border-color: var(--v4-border-strong); background: var(--v4-hover); }
+.app-shell.v4 .button.primary { color: #fff; border-color: var(--v4-accent); background: var(--v4-accent); }
+.app-shell.v4 .button.primary:hover { border-color: var(--v4-accent-strong); background: var(--v4-accent-strong); }
+.app-shell.v4 .button.danger { color: var(--v4-danger-text); border-color: var(--v4-danger-border); background: var(--v4-danger-soft); }
+
+/* 顶栏最右的右栏开关：右栏不再是 flex 项，恢复入口只有这一处，所以永远可见、永远最后。
+   结构：<button class="icon-button topbar-panel-toggle" aria-expanded aria-controls="right-panel"> */
+.app-shell.v4 .topbar-panel-toggle { flex: 0 0 auto; width: 32px; height: 32px; margin-left: 2px; border: 1px solid var(--v4-border); border-radius: 8px; background: var(--v4-surface); }
+.app-shell.v4 .topbar-panel-toggle:hover { border-color: var(--v4-border-strong); background: var(--v4-hover); }
+.app-shell.v4 .topbar-panel-toggle[aria-expanded="true"] { color: var(--v4-text); border-color: var(--v4-border-strong); background: var(--v4-active); }
+
+/* 焦点环统一：中性壳层里只有焦点用品牌色。优先级 (0,2,0)，压得住
+   styles.css 的 `:root` 色值与 components-v2.css 的 `:is(button,…):focus-visible`。 */
+.app-shell.v4 :is(button, input, textarea, select, [tabindex]):focus-visible,
+.app-shell.v4 a:focus-visible { outline: 2px solid var(--v4-focus); outline-offset: 2px; }
+
+/* ── 3. 侧栏动画 ───────────────────────────────────────────────────────
+   原来不动的三处原因：① .panel-inner 是固定像素宽（--v2-left-width），外层变窄它不缩、
+   被 overflow 裁掉 → 像「被砍」；② .is-collapsed 立刻 visibility:hidden → 动画帧里只剩
+   空框；③ 左栏窄轨在收起后才插进 flex 流，宽度一下跳 32px。
+   v4 的做法（机制层面）：
+     · .panel-inner 宽改 100%，跟外层同步收；同时 translateX 平移，内容滑出而不是被砍；
+     · 收起不清 visibility：width:0 + overflow:hidden 裁切，opacity 延迟淡出作辅助；
+     · 窄轨常驻（mounted），宽度 0 ↔ 32px 过渡；收起用 aria-hidden + inert + .is-hidden，
+       不用 [hidden]/display:none，否则没有可过渡的帧；
+     · 拖宽时 [data-resizing="true"] 关掉所有 transition，不与跟手逻辑打架。 */
+
+.app-shell.v4 .workspace { overflow: hidden; }
+.app-shell.v4 .side-panel {
+  position: relative; z-index: 10; display: flex; flex: 0 0 auto; flex-direction: column;
+  min-width: 0; min-height: 0; overflow: hidden; background: var(--v4-surface); border-color: var(--v4-border);
+  transition: width var(--v4-dur) var(--v4-ease), flex-basis var(--v4-dur) var(--v4-ease),
+    opacity var(--v4-dur) var(--v4-ease) var(--v4-dur); /* 透明度晚 1/4 拍进场 */
+}
+.app-shell.v4 .left-panel { border-right: 1px solid var(--v4-border); }
+.app-shell.v4 .right-panel { border-left: 1px solid var(--v4-border); }
+.app-shell.v4 .side-panel .panel-inner {
+  width: 100%; min-width: 0; flex: 1 1 auto;
+  transform: translateX(0); transition: transform var(--v4-dur) var(--v4-ease);
+}
+.app-shell.v4 .left-panel.is-collapsed .panel-inner { transform: translateX(calc(-1 * var(--v4-rail))); }
+/* 收起态：宽度归零、淡出，但不清 visibility（v2/v3 设的 hidden 在此显式收回）。 */
+.app-shell.v4 .side-panel.is-collapsed {
+  width: 0; flex-basis: auto !important; opacity: .3; border-color: transparent;
+  pointer-events: none; box-shadow: none !important;
+}
+.app-shell.v4 .side-panel.is-collapsed .panel-inner { visibility: visible; pointer-events: none; }
+.app-shell.v4 .side-panel:not(.is-collapsed) { opacity: 1; }
+.app-shell.v4 .side-panel .panel-resize-hit { z-index: 12; }
+.app-shell.v4 .side-panel.is-collapsed .panel-resize-hit { display: none; }
+
+/* 窄轨：常驻、宽度过渡。.is-hidden 只是「缩到 0 + 不可交互」，不是 display:none。 */
+.app-shell.v4 .panel-rail {
+  position: relative; z-index: 12; display: flex; width: var(--v4-rail-width); min-width: 0;
+  flex: 0 0 var(--v4-rail-width); align-items: flex-start; justify-content: center;
+  padding-top: 8px; overflow: hidden; background: var(--v4-surface); border: 0;
+  transition: width var(--v4-dur) var(--v4-ease), flex-basis var(--v4-dur) var(--v4-ease),
+    padding var(--v4-dur) var(--v4-ease), opacity var(--v4-dur) var(--v4-ease);
+}
+/* 收起时：缩到 0，内容淡出不可点；aria-hidden/inert 由 JSX 管可访问性与焦点，
+   这里只补视觉与指针。 */
+.app-shell.v4 .panel-rail.is-hidden {
+  width: 0; min-width: 0; flex-basis: 0; padding: 0; opacity: 0; pointer-events: none; border-color: transparent;
+}
+.app-shell.v4 .panel-rail.is-hidden > * { pointer-events: none; visibility: hidden; }
+.app-shell.v4 .panel-rail:not(.is-hidden) > * { visibility: visible; }
+.app-shell.v4 .left-panel:not(.is-collapsed) + .panel-rail--left { display: flex; }
+.app-shell.v4 .panel-rail.is-hidden { border-width: 0; }
+.app-shell.v4 .panel-rail--left { border-right: 1px solid var(--v4-border); }
+.app-shell.v4 .panel-rail--right { border-left: 1px solid var(--v4-border); }
+.app-shell.v4 .panel-rail .icon-button { width: 28px; height: 30px; border: 1px solid var(--v4-border); border-radius: 7px; background: var(--v4-surface); }
+.app-shell.v4 .panel-rail .icon-button:hover { border-color: var(--v4-border-strong); background: var(--v4-hover); }
+/* 旧的 [hidden] 写法不再生效：改成同一套缩到 0，避免有人误加 hidden 时动画消失 */
+.app-shell.v4 .panel-rail[hidden] { display: flex; width: 0; min-width: 0; flex-basis: 0; padding: 0; opacity: 0; pointer-events: none; }
+.app-shell.v4 .panel-rail[hidden] > * { pointer-events: none; visibility: hidden; }
+
+/* 断点：≤1099px 右栏浮在画布上，≤699px 左栏也浮层。收起时不留阴影，不遮恢复入口。 */
+@media (max-width: 1099px) {
+  .app-shell.v4 .right-panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 25; box-shadow: var(--v4-panel-shadow-right); }
+  .app-shell.v4 .right-panel.is-collapsed { box-shadow: none; }
+  .app-shell.v4 .panel-rail--right { position: absolute; top: 0; right: 0; bottom: 0; z-index: 26; }
+}
+@media (max-width: 699px) {
+  .app-shell.v4 .left-panel { position: absolute; top: 0; bottom: 0; left: 0; z-index: 26; box-shadow: var(--v4-panel-shadow-left); }
+  .app-shell.v4 .left-panel.is-collapsed { box-shadow: none; }
+  .app-shell.v4 .left-panel:not(.is-collapsed) { max-width: min(320px, calc(100vw - var(--v4-rail-width) - 8px)); }
+  .app-shell.v4 .panel-rail--left { position: absolute; top: 0; bottom: 0; left: 0; z-index: 27; padding-top: 6px; border-right-color: transparent; background: transparent; }
+}
+/* 断点切换时不播侧栏 / 窄轨动画（v3 已有 data-breakpoint-changing 钩子） */
+.app-shell.v4[data-breakpoint-changing="true"] .side-panel,
+.app-shell.v4[data-breakpoint-changing="true"] .panel-rail { transition: none !important; }
+
+/* ── 4. 分屏分隔线：可视 2px、布局 2px、命中区 8px ───────────────────── */
+
+.app-shell.v4 .document-scroll.is-split { grid-template-columns: minmax(0, var(--document-source-width, 50%)) 2px minmax(0, 1fr); }
+.app-shell.v4 .document-scroll.is-split .document-split-handle {
+  position: relative; grid-column: 2; grid-row: 1; z-index: 3;
+  width: 2px; min-height: 100%; padding: 0; border: 0; touch-action: none;
+  cursor: col-resize; background: var(--v4-border); transition: background-color 140ms ease;
+}
+.app-shell.v4 .document-scroll.is-split .document-split-handle::before { position: absolute; top: 0; bottom: 0; left: -3px; width: 8px; content: ""; }
+/* 2px 握把用伪元素画，命中区在它两侧，不参与布局 */
+.app-shell.v4 .document-scroll.is-split .document-split-handle::after { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--v4-edge-line); content: ""; transition: background-color 140ms ease; }
+.app-shell.v4 .document-scroll.is-split .document-split-handle:hover::after { background: var(--v4-text-2); }
+.app-shell.v4 .document-scroll.is-split .document-split-handle:active::after { background: var(--v4-focus); }
+.app-shell.v4 .document-scroll.is-split .document-split-handle:focus-visible { outline: 2px solid var(--v4-focus); outline-offset: -1px; background: var(--v4-accent-soft); }
+.app-shell.v4 .document-scroll.is-split > .document-source { border-right: 0; }
+.app-shell.v4 .document-split-handle { touch-action: none; }
+.app-shell.v4[data-resizing="true"] { user-select: none; cursor: col-resize; }
+
+/* ── 5. 导入菜单 ────────────────────────────────────────────────────────
+   实际 JSX（ImportControls.jsx）：触发按钮 `icon-button import-menu-button`（只有图标，
+   aria-expanded 在它身上），菜单经 portal 挂到画布层并用 inline style 定位
+   （absolute + left/top），所以这里不再自己算位置、不再右翻。
+   叠加类顺序：`.icon-button` 在前，所以下面的 .import-menu-button 只做尺寸。 */
+
+.app-shell.v4 .import-menu { position: relative; display: inline-flex; }
+.app-shell.v4 .import-menu-button { flex: 0 0 auto; }
+.app-shell.v4 .import-menu-button[aria-expanded="true"] { color: var(--v4-text); background: var(--v4-active); }
+.app-shell.v4 .import-menu-button:disabled, .app-shell.v4 .import-menu-button[aria-disabled="true"] { color: var(--v4-text-4); cursor: not-allowed; }
+.app-shell.v4 .import-menu-items {
+  position: absolute; z-index: 80;
+  display: flex; width: max-content; min-width: 232px; max-width: min(280px, calc(100vw - 16px));
+  max-height: min(320px, calc(100dvh - 96px)); flex-direction: column; gap: 1px; overflow-y: auto;
+  padding: 4px; border: 1px solid var(--v4-border); border-radius: 9px;
+  background: var(--v4-surface-raised); box-shadow: var(--v4-shadow-lg);
+}
+.app-shell.v4 .import-menu-items[hidden] { display: none; }
+/* 两个菜单项各有「标题 + 说明」两行，取消 nowrap、单行居中 */
+.app-shell.v4 .import-menu-items :is([role="menuitem"], .menuitem) {
+  display: flex; width: 100%; min-width: 0; align-items: flex-start; gap: 8px; padding: 7px 9px;
+  color: var(--v4-text); border: 0; border-radius: 6px; background: transparent;
+  font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+}
+.app-shell.v4 .import-menu-items :is([role="menuitem"], .menuitem) svg { flex: 0 0 auto; margin-top: 1px; color: var(--v4-text-3); }
+.app-shell.v4 .import-menu-items :is([role="menuitem"], .menuitem) > span { min-width: 0; }
+.app-shell.v4 .import-menu-items :is([role="menuitem"], .menuitem) :is(b, strong, .import-menu-hint) {
+  display: block; color: var(--v4-text); font-size: 12px; font-weight: 650; line-height: 1.5;
+}
+.app-shell.v4 .import-menu-items :is([role="menuitem"], .menuitem) :is(small, .menuitem-hint) {
+  display: block; margin-top: 1px; color: var(--v4-text-3); font-size: 11px; font-weight: 400; line-height: 1.55;
+}
+.app-shell.v4 .import-menu-items :is([role="menuitem"], .menuitem):hover:not([aria-disabled="true"]) { background: var(--v4-hover); }
+.app-shell.v4 .import-menu-items :is([role="menuitem"], .menuitem):focus-visible { outline: 2px solid var(--v4-focus); outline-offset: -2px; }
+.app-shell.v4 .import-menu-items :is([role="menuitem"], .menuitem)[aria-disabled="true"] { color: var(--v4-text-4); cursor: not-allowed; }
+.app-shell.v4 .import-menu-items .menu-separator { height: 1px; margin: 4px 2px; background: var(--v4-border-soft); }
+.app-shell.v4 .import-menu-items .import-menu-error { padding: 6px 9px; color: var(--v4-danger-text); font-size: 11px; line-height: 1.5; }
+
+/* ── 6. 资源页头：右侧也是 .panel-header.resource-header，标题 span.panel-title ──
+   标题占满剩余宽并被省略，按钮 flex:0 0 auto 且 justify-content:flex-end，
+   保证标题先被压缩、按钮永不被挤或换行。 */
+
+.app-shell.v4 .resource-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; }
+.app-shell.v4 .resource-header > .panel-title,
+.app-shell.v4 .resource-header > .resource-header-title {
+  min-width: 0; flex: 1 1 auto; margin: 0; overflow: hidden; color: var(--v4-text);
+  font-size: 12px; font-weight: 650; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap;
+}
+.app-shell.v4 .resource-header-actions { display: flex; min-width: 0; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 2px; margin-left: auto; }
+.app-shell.v4 .resource-header-actions > * { flex: 0 0 auto; }
+@media (max-width: 520px) {
+  .app-shell.v4 .resource-header { gap: 8px; padding: 0 10px; }
+  .app-shell.v4 .resource-header-actions .button span { display: none; }
+}
+
+/* 面板 / 树 / 输入的中性化 */
+.app-shell.v4 .panel-header { border-bottom: 1px solid var(--v4-border-soft); }
+.app-shell.v4 .panel-header :is(h1, h2, .panel-title) { color: var(--v4-text); }
+.app-shell.v4 .tree-footer { border-top: 1px solid var(--v4-border-soft); }
+.app-shell.v4 .tree-search, .app-shell.v4 .text-input { color: var(--v4-text); border: 1px solid var(--v4-border); background: var(--v4-input); }
+.app-shell.v4 .tree-search:focus, .app-shell.v4 .text-input:focus { border-color: var(--v4-focus); outline: none; box-shadow: 0 0 0 3px var(--v4-accent-soft); }
+.app-shell.v4 .tree-search::placeholder, .app-shell.v4 .text-input::placeholder { color: var(--v4-text-4); }
+.app-shell.v4 .tree-row { color: var(--v4-text-2); border-radius: 6px; }
+.app-shell.v4 .tree-row:hover { background: var(--v4-hover); }
+.app-shell.v4 .tree-row.is-active { color: var(--v4-text); border-color: var(--v4-border); background: var(--v4-active); }
+.app-shell.v4 .tree-row.is-notebook { color: var(--v4-text); }
+.app-shell.v4 .tree-toggle { color: var(--v4-text-4); }
+.app-shell.v4 .tree-icon { color: var(--v4-text-3); }
+.app-shell.v4 .resource-type-icon { color: var(--v4-text-2); background: var(--v4-input); }
+.app-shell.v4 .panel-resize-hit:hover { background: var(--v4-active); }
+.app-shell.v4 .panel-resize-hit:active { background: var(--v4-select-ring); }
+.app-shell.v4 .panel-resize-hit:focus-visible { outline: 2px solid var(--v4-focus); outline-offset: -2px; }
+
+/* ── 7. 帮助弹窗：两段各自可滚，弹窗不出屏 ───────────────────────────── */
+
+.app-shell.v4 .modal-backdrop .modal.help-modal { width: min(860px, 100%); max-width: min(860px, 100%); }
+.app-shell.v4 .help-dialog { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); max-height: min(74dvh, 680px); min-height: 0; gap: 20px; overflow: hidden; }
+.app-shell.v4 .help-dialog > * { min-width: 0; }
+.app-shell.v4 .resource-detail > .resource-origin-badge { align-self: flex-start; white-space: normal; overflow-wrap: anywhere; }
+.app-shell.v4 .document-editor-host .cm-scroller { background: var(--editor); }
+@media (max-width: 699px) { .app-shell.v4 .help-dialog { display: flex; flex-direction: column; max-height: 72dvh; gap: 14px; } .app-shell.v4 .help-sections { max-height: 38dvh; flex: 1 1 auto; } .app-shell.v4 .help-shortcuts { max-height: 30dvh; flex: 1 1 auto; } }
+.app-shell.v4 .help-sections { display: flex; min-height: 0; flex-direction: column; gap: 10px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+.app-shell.v4 .help-sections section { display: flex; flex-direction: column; gap: 4px; }
+.app-shell.v4 .help-sections h3 { margin: 0; color: var(--v4-text); font-size: 12px; font-weight: 650; }
+.app-shell.v4 .help-sections :is(p, ul, ol) { margin: 0; color: var(--v4-text-2); font-size: 12px; line-height: 1.7; }
+.app-shell.v4 .help-sections :is(ul, ol) { padding-left: 1.3em; }
+.app-shell.v4 .help-shortcuts { min-height: 0; flex: 0 1 auto; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--v4-border); border-radius: 8px; background: var(--v4-surface); }
+.app-shell.v4 .help-shortcuts table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.app-shell.v4 .help-shortcuts caption { padding: 8px 10px; color: var(--v4-text-3); border-bottom: 1px solid var(--v4-border-soft); font-size: 10px; font-weight: 700; letter-spacing: .5px; text-align: left; text-transform: uppercase; }
+.app-shell.v4 .help-shortcuts :is(th, td) { padding: 7px 10px; color: var(--v4-text-2); text-align: left; vertical-align: top; border-bottom: 1px solid var(--v4-border-soft); overflow-wrap: anywhere; }
+.app-shell.v4 .help-shortcuts :is(th, td):first-child { width: 34%; color: var(--v4-text); }
+.app-shell.v4 .help-shortcuts thead th { position: sticky; top: 0; z-index: 1; color: var(--v4-text-3); background: var(--v4-input); font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; }
+.app-shell.v4 .help-shortcuts tbody tr:last-child > * { border-bottom: 0; }
+.app-shell.v4 .help-shortcuts tbody tr:hover > * { background: var(--v4-hover); }
+.app-shell.v4 .help-shortcuts :is(.kbd, kbd) { display: inline-block; padding: 1px 6px; color: var(--v4-text); border: 1px solid var(--v4-border); border-bottom-width: 2px; border-radius: 5px; background: var(--v4-surface-raised); font-family: ui-monospace, Consolas, monospace; font-size: 10px; line-height: 1.6; white-space: nowrap; }
+/* 旧版 .help-grid 一并中性化 */
+.app-shell.v4 .help-grid { color: var(--v4-text-2); }
+.app-shell.v4 .help-row > * { border-color: var(--v4-border-soft); }
+.app-shell.v4 .modal label { color: var(--v4-text-2); }
+.app-shell.v4 .modal-backdrop { background: var(--v4-overlay); }
+.app-shell.v4 .modal { color: var(--v4-text); border: 1px solid var(--v4-border); background: var(--v4-surface-raised); box-shadow: var(--v4-shadow-lg); }
+.app-shell.v4 .modal-title { color: var(--v4-text); }
+.app-shell.v4 .modal-description { color: var(--v4-text-3); }
+.app-shell.v4 .modal .import-error, .app-shell.v4 .validation-error { color: var(--v4-danger-text); }
+.app-shell.v4 .toast { color: var(--v4-text); border: 1px solid var(--v4-border); background: var(--v4-surface-raised); box-shadow: var(--v4-shadow); }
+
+/* ── 8. 导入模式弹窗 ────────────────────────────────────────────────────
+   <form class="modal import-mode-dialog"><fieldset class="import-mode-options">
+     <label class="import-mode-option"><input type="radio"><div><strong>标题</strong><small>说明</small></div></label> */
+
+.app-shell.v4 .import-mode-dialog { display: flex; max-width: min(560px, 100%); flex-direction: column; gap: 14px; }
+.app-shell.v4 .import-mode-options { display: flex; min-height: 0; flex-direction: column; gap: 8px; margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; border: 0; }
+/* 覆盖 components-v2.css 的 `.modal label{flex-direction:column}`（同权重、后写生效） */
+.app-shell.v4 .import-mode-option {
+  position: relative; display: flex; flex-direction: row; align-items: flex-start; gap: 10px;
+  margin: 0; padding: 11px 12px; color: var(--v4-text-2); border: 1px solid var(--v4-border);
+  border-radius: 9px; background: var(--v4-surface); font-size: 12px; line-height: 1.6;
+  cursor: pointer; transition: border-color 120ms ease, background-color 120ms ease;
+}
+.app-shell.v4 .import-mode-option:hover { border-color: var(--v4-border-strong); background: var(--v4-hover); }
+/* 选中：描边 + 细环，不给整块上色 */
+.app-shell.v4 .import-mode-option:has(input[type="radio"]:checked) { color: var(--v4-text); border-color: var(--v4-select); background: var(--v4-surface); box-shadow: 0 0 0 1px var(--v4-select), 0 0 0 4px var(--v4-select-ring); }
+.app-shell.v4 .import-mode-option:has(input:focus-visible) { outline: 2px solid var(--v4-focus); outline-offset: 2px; }
+.app-shell.v4 .import-mode-option :is(input[type="radio"], input[type="checkbox"]) { flex: 0 0 auto; margin: 3px 0 0; accent-color: var(--v4-focus); }
+.app-shell.v4 .import-mode-option :is(strong, .import-mode-title) { display: block; color: var(--v4-text); font-size: 12px; font-weight: 650; }
+.app-shell.v4 .import-mode-option :is(small, .import-mode-detail) { display: block; margin-top: 2px; color: var(--v4-text-3); font-size: 11px; line-height: 1.6; }
+.app-shell.v4 .import-mode-option[aria-disabled="true"], .app-shell.v4 .import-mode-option:has(input:disabled) { color: var(--v4-text-4); background: var(--v4-input); cursor: not-allowed; }
+.app-shell.v4 .import-mode-dialog .modal-actions { margin-top: 4px; }
+
+/* ── 9. 资源来源角标 / 引用标签 ─────────────────────────────────────── */
+
+.app-shell.v4 .resource-origin-badge {
+  display: inline-flex; max-width: 100%; align-items: center; gap: 4px; padding: 1px 6px;
+  color: var(--v4-text-3); border: 1px solid var(--v4-border); border-radius: 999px;
+  background: var(--v4-input); font-size: 10px; font-weight: 600; line-height: 1.6;
+  letter-spacing: .2px; white-space: nowrap; vertical-align: middle;
+}
+.app-shell.v4 .resource-origin-badge svg { flex: 0 0 auto; width: 11px; height: 11px; }
+.app-shell.v4 .resource-origin-badge[data-origin="link"] { color: var(--v4-text-2); border-style: dashed; }
+.app-shell.v4 .resource-origin-badge[data-origin="generated"] { color: var(--v4-text-2); border-color: var(--v4-border-strong); }
+.app-shell.v4 .resource-origin-badge[data-origin="missing"] { color: var(--v4-danger-text); border-color: var(--v4-danger-border); background: var(--v4-danger-soft); }
+.app-shell.v4 :is(.card-title-row, .card-footer) .resource-origin-badge { flex: 0 0 auto; }
+.app-shell.v4 .reference-label { display: inline-flex; align-items: center; gap: 4px; color: var(--v4-text-4); font-size: 10px; line-height: 1.6; letter-spacing: .2px; }
+.app-shell.v4 .reference-label::before { width: 5px; height: 5px; flex: 0 0 5px; border-radius: 50%; background: var(--v4-border-strong); content: ""; }
+.app-shell.v4 .reference-label[data-state="ok"]::before { background: var(--v4-success); }
+.app-shell.v4 .reference-label[data-state="pending"]::before { background: var(--v4-warning); }
+.app-shell.v4 .reference-label[data-state="error"]::before { background: var(--v4-danger); }
+.app-shell.v4 .card-footer .reference-label { margin-left: auto; }
+
+/* ── 10. 画布拖放提示：dragover 时加 .is-active ─────────────────────── */
+
+.app-shell.v4 .canvas-drop-hint {
+  position: absolute; inset: 12px; z-index: 20; display: grid; place-items: center; padding: 16px;
+  color: var(--v4-text-2); border: 2px dashed var(--v4-border-strong); border-radius: 12px;
+  background: color-mix(in srgb, var(--v4-surface) 72%, transparent);
+  font-size: 12px; line-height: 1.7; text-align: center; pointer-events: none; opacity: 0;
+  transition: opacity 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+.app-shell.v4 .canvas-drop-hint[hidden] { display: none; }
+.app-shell.v4 .canvas-drop-hint.is-active, .app-shell.v4 .canvas-drop-hint[data-active="true"],
+.app-shell.v4 .canvas-stage.is-drop-target .canvas-drop-hint { opacity: 1; color: var(--v4-text); border-color: var(--v4-focus); background: color-mix(in srgb, var(--v4-surface) 84%, transparent); }
+.app-shell.v4 .canvas-drop-hint svg { display: block; margin: 0 auto 6px; color: var(--v4-text-3); }
+.app-shell.v4 .canvas-drop-hint strong { display: block; color: var(--v4-text); font-weight: 650; }
+
+/* ── 11. 画布 / 编辑器 / 卡片 ───────────────────────────────────────── */
+
+.app-shell.v4 .main-stage, .app-shell.v4 .canvas-stage, .app-shell.v4 .canvas-stage.react-flow { background-color: var(--v4-canvas); }
+.app-shell.v4 .document-stage { background: var(--v4-surface); }
+.app-shell.v4 .document-toolbar { border-bottom: 1px solid var(--v4-border); background: var(--v4-surface); }
+.app-shell.v4 .document-toolbar input, .app-shell.v4 .document-toolbar .document-title { color: var(--v4-text); font-weight: 650; }
+.app-shell.v4 .document-scroll.is-split > .document-source { background: var(--v4-editor); }
+.app-shell.v4 .document-scroll.is-split > .document-preview-pane { background: var(--v4-surface); }
+/* 点阵是 ReactFlow Background 画出来的真点阵（gap 24px），这里只接颜色 */
+.app-shell.v4 .react-flow__background pattern circle { fill: var(--v4-grid-dot); }
+
+/* 编辑器：底用 --editor；行号栏的宽度 / 槽盒定位归 editor-gutter.js 的 gutterTheme，
+   这里只管颜色，不覆盖它的 min-width 与定位。 */
+.app-shell.v4 .editor-pane .cm-editor, .app-shell.v4 .document-editor-host .cm-editor { color: var(--v4-text); background: var(--v4-editor); }
+.app-shell.v4 .editor-pane .cm-gutters { color: var(--v4-text-4); background: var(--v4-code-gutter); border-right: 1px solid var(--v4-border); }
+.app-shell.v4 .editor-pane .cm-activeLine { background: var(--v4-hover); }
+.app-shell.v4 .editor-pane .cm-activeLineGutter { color: var(--v4-text-2); background: var(--v4-active); }
+.app-shell.v4 .editor-pane .cm-selectionBackground, .app-shell.v4 .editor-pane .cm-editor.cm-focused .cm-selectionBackground { background: var(--v4-code-selection); }
+.app-shell.v4 .editor-pane .cm-cursor { border-left-color: var(--v4-text); }
+.app-shell.v4 .editor-pane .cm-focused { outline: none; }
+.app-shell.v4 .document-editor-host:not(.is-fill) .editor-pane { border-color: var(--v4-border); border-radius: 8px 8px 0 0; }
+.app-shell.v4 .editor-resize-hit { border-color: var(--v4-border); background: var(--v4-input); }
+.app-shell.v4 .editor-resize-hit span { background: var(--v4-border-strong); }
+.app-shell.v4 .editor-resize-hit:hover { background: var(--v4-hover); }
+
+/* 卡片：白底 + 中性描边 + 中性选中环 */
+.app-shell.v4 .knowledge-card { color: var(--v4-text); border: 1px solid var(--v4-border); background: var(--v4-surface); box-shadow: var(--v4-shadow-sm); }
+.app-shell.v4 .knowledge-card:hover { border-color: var(--v4-border-strong); box-shadow: var(--v4-shadow); }
+.app-shell.v4 .knowledge-card.is-selected, .app-shell.v4 .knowledge-card.selected { border-color: var(--v4-text-2); box-shadow: 0 0 0 3px var(--v4-select-ring), var(--v4-shadow-sm); }
+.app-shell.v4 .card-drag-handle, .app-shell.v4 .card-footer { border-color: var(--v4-border-soft); }
+.app-shell.v4 .card-title-row h3, .app-shell.v4 .card-body :is(h1, h2, h3) { color: var(--v4-text); }
+.app-shell.v4 :is(.card-owner, .card-summary, .card-footer, .card-menu) { color: var(--v4-text-3); }
+/* 类型角标原本「课程 / 网页」各一种彩色底，统一成中性 chip，靠文字区分 */
+.app-shell.v4 .card-kind, .app-shell.v4 [data-type="course"] .card-kind, .app-shell.v4 [data-type="link"] .card-kind { color: var(--v4-text-3); border: 1px solid var(--v4-border-soft); background: var(--v4-input); }
+.app-shell.v4 .card-link, .app-shell.v4 .detail-url, .app-shell.v4 .markdown-preview a { color: var(--v4-accent); }
+/* 纯文本便签：保留淡黄以区分卡片，压低饱和度 */
+.app-shell.v4 .text-node { color: var(--v4-text); border-color: #e4dcc2; background: #fbf8ee; }
+.app-shell.v4[data-theme="dark"] .text-node { border-color: #4a4534; background: #2b2921; }
+
+/* 画布浮层：工具栏、提示、标签、小地图 */
+.app-shell.v4 .canvas-toolbar { border: 1px solid var(--v4-border); background: color-mix(in srgb, var(--v4-surface-raised) 96%, transparent); box-shadow: var(--v4-shadow); }
+.app-shell.v4 .canvas-toolbar i, .app-shell.v4 .tool-divider { background: var(--v4-border); }
+.app-shell.v4 :is(.canvas-tip, .selection-tip, .relation-label, .inline-edge-editor, .quote-picker) { color: var(--v4-text); border-color: var(--v4-border); background: var(--v4-surface-raised); }
+.app-shell.v4 .relation-label.selected { color: var(--v4-text); border-color: var(--v4-border-strong); background: var(--v4-active); }
+.app-shell.v4 .zoom-label, .app-shell.v4 .canvas-title svg { color: var(--v4-text-3); }
+.app-shell.v4 .canvas-title { color: var(--v4-text); }
+.app-shell.v4 .canvas-hint { color: var(--v4-text-4); }
+.app-shell.v4 .react-flow__minimap { border: 1px solid var(--v4-border) !important; background: var(--v4-surface-raised) !important; box-shadow: var(--v4-shadow-sm); }
+.app-shell.v4 .react-flow__minimap-mask { fill: var(--v4-minimap-mask); }
+.app-shell.v4[data-theme="dark"] .react-flow__minimap-node { fill: #545a66; stroke: #7d8492; }
+.app-shell.v4 .react-flow__handle { border-color: var(--v4-surface-raised); background: var(--v4-edge-line); box-shadow: 0 0 0 1px var(--v4-border-strong); }
+.app-shell.v4 .react-flow__handle:hover { background: var(--v4-text-2); }
+.app-shell.v4 .react-flow__resize-control.handle { border-color: var(--v4-surface-raised); background: var(--v4-text-2); box-shadow: 0 0 0 1px var(--v4-border-strong); }
+.app-shell.v4 .react-flow__resize-control.line { border-color: var(--v4-edge-line); }
+.app-shell.v4 .react-flow__edge-textbg { fill: var(--v4-surface-raised); }
+.app-shell.v4 .react-flow__edge-text { fill: var(--v4-text); }
+
+/* 详情 / 对话面板 */
+.app-shell.v4 :is(.inspector-heading, .inspector-tabs, .inspector-footer, .chat-connect, .chat-connection-state, .chat-composer) { border-color: var(--v4-border-soft); }
+.app-shell.v4 .inspector-title h2, .app-shell.v4 .title-input { color: var(--v4-text); }
+.app-shell.v4 .inspector-tabs button { color: var(--v4-text-3); }
+.app-shell.v4 .inspector-tabs button.is-active { color: var(--v4-text); }
+.app-shell.v4 .inspector-tabs button.is-active::after { background: var(--v4-text); }
+.app-shell.v4 :is(.detail-summary, .markdown-preview, .chat-message-content) { color: var(--v4-text); }
+.app-shell.v4 .chat-message-content { border-color: var(--v4-border); background: var(--v4-input); }
+.app-shell.v4 .chat-message.user .chat-message-content { border-color: var(--v4-border); background: var(--v4-active); }
+.app-shell.v4 .chat-composer { border: 1px solid var(--v4-border); border-radius: 14px; background: var(--v4-surface); }
+.app-shell.v4 .chat-composer textarea { color: var(--v4-text); background: transparent; }
+.app-shell.v4 .quote-chip { color: var(--v4-text-2); border-color: var(--v4-border); background: var(--v4-input); }
+.app-shell.v4 .quote-picker button:hover { background: var(--v4-hover); }
+.app-shell.v4 .chat-send:disabled { color: var(--v4-text-4); background: var(--v4-input); opacity: 1; }
+.app-shell.v4 .connection-dot { background: var(--v4-text-4); }
+.app-shell.v4 .status-dot { background: var(--v4-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--v4-success) 16%, transparent); }
+.app-shell.v4 .empty-state { color: var(--v4-text-3); }
+.app-shell.v4 .media-preview { background: var(--v4-input); }
+
+/* Markdown 正文里的代码、表格、kbd */
+.app-shell.v4 .markdown-preview :is(th, code, pre) { border-color: var(--v4-border); background: var(--v4-code); }
+.app-shell.v4 .markdown-preview th { background: var(--v4-surface-raised); }
+.app-shell.v4 .markdown-preview pre { border: 1px solid var(--v4-border); }
+.app-shell.v4 .kbd { color: var(--v4-text-2); border-color: var(--v4-border); background: var(--v4-input); }
+
+/* 滚动条：中性、细 */
+.app-shell.v4 * { scrollbar-color: var(--v4-border-strong) transparent; scrollbar-width: thin; }
+.app-shell.v4 ::-webkit-scrollbar { width: 10px; height: 10px; }
+.app-shell.v4 ::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 99px; background: var(--v4-border-strong); background-clip: content-box; }
+.app-shell.v4 ::-webkit-scrollbar-thumb:hover { background: var(--v4-text-4); background-clip: content-box; }
+.app-shell.v4 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ── 12. 减少动效：位置类过渡整段关掉，直接换终态（不停在半路） ──────── */
+@media (prefers-reduced-motion: reduce) {
+  .app-shell.v4 :is(.side-panel, .side-panel .panel-inner, .panel-rail, .canvas-drop-hint,
+    .document-split-handle, .document-split-handle::after, .import-menu-items) { transition: none !important; }
+}

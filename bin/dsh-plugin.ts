@@ -338,4 +338,8 @@ export async function apply(
   // 数学式时阅读端才来取。清单、MIME 与边界判据在 lib/math.ts，注册在 lib/math-route.ts
   // （一条文件一条精确路由），这个文件同样不认识它们的形状。
   import('../lib/math-route.ts').then((module) => module.registerMathRoute(ctx), (error) => { console.warn(`StudyMate：公式资源路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
+
+  // 无界笔记（#268）：独立 DSH 数据域，不复用学习工作区或 reference 的写入路径。
+  // 自己注入 connection；源码缺失/服务不支持时只让笔记显示不可用，不拖垮学习预设。
+  void import('../lib/notes/route.ts').then(({ registerNotesRoute }) => registerNotesRoute(ctx)).catch((error) => { console.warn(`StudyMate：无界笔记数据路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
 }

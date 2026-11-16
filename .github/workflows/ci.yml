@@ -29,5 +29,10 @@ jobs:
       # package-lock.json 装：lockfile 与 package.json 对不上时直接失败，门禁不会因为
       # 「依赖没装上」而少跑一环。Release 的 checks job 复用本文件，所以两处一起覆盖。
       - run: npm ci
+      # npm test 的第一段就是 `npm run build:client`：默认门禁**也构建客户端 bundle**
+      # （dist/client.js + dist/client-notices.txt，正式包的 exports["./client"] 靠它）。
+      # 它只用到 devDependencies 里的 esbuild / postcss，不需要浏览器，也不需要真实 DSH
+      # 或模型；真浏览器验收仍是单独的 test:notes:browser，不在这里。Release 的 checks
+      # job 复用本文件，所以正式发包前的同一道门禁也覆盖了这次构建。
       - name: Installer, plugin, lesson, release and static contract tests
         run: npm test

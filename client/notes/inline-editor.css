@@ -1,0 +1,382 @@
+/* 无界笔记 · 源码优先行内即时编辑器（MarkdownInlineEditor）的模块样式。
+   全部选择器都从模块根 `.markdown-inline-editor` 出发：不设全局字体、不覆盖阅读端类名。
+   颜色只取宿主主题已经给的语义变量（--text/--ink、--muted、--border、--surface、--accent-soft），
+   亮暗两侧都由变量自己切换，模块里不另设主题开关。
+
+   灰色分隔符（.md-syntax）的取色：--muted 在浅色下对白底约 4.1:1，达不到 AA，
+   所以往 --text 里混 28%，得到约 5.6:1；暗色下往 --text 里混 18%，对 #1e2423 约 7.5:1。
+   保留一条纯色回退，供不支持 color-mix 的环境使用。 */
+
+.markdown-inline-editor {
+  --md-inline-mono: ui-monospace, "Cascadia Code", Consolas, "Microsoft YaHei", monospace;
+  --md-syntax-color: #5d6b65;
+  --md-syntax-color: color-mix(in srgb, var(--muted, #718079) 72%, var(--text, #293431));
+  --md-inline-code-bg: #eef1ef;
+  --md-inline-code-bg: color-mix(in srgb, var(--code, var(--border, #e2e8e4)) 72%, var(--surface, #fff));
+  --md-selection-bg: var(--accent-soft, #e8f2ef);
+
+  /* 代码高亮只给类名（classHighlighter），颜色在这里按亮暗各给一套。
+     浅色取值对白底均 >= 4.5:1；深色沿用课程端已验证的一套。 */
+  --md-tok-comment: #5d6b65;
+  --md-tok-keyword: #8a2f6b;
+  --md-tok-string: #2f6f43;
+  --md-tok-title: #1f5d8a;
+  --md-tok-number: #8a4a12;
+  --md-tok-attrs: #6b5a12;
+  --md-tok-meta: #5d6b65;
+  --md-tok-invalid: #a12d2d;
+
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 160px;
+  overflow: hidden;
+  border: 1px solid var(--border, #dbe3de);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--text, var(--ink, #293431));
+}
+
+.markdown-inline-editor[data-theme="dark"] {
+  --md-syntax-color: #aab7b0;
+  --md-syntax-color: color-mix(in srgb, var(--muted, #a0ada6) 82%, var(--text, #d7e0db));
+  --md-inline-code-bg: #2a3230;
+  --md-inline-code-bg: color-mix(in srgb, var(--code, var(--border, #39433f)) 82%, var(--surface, #1e2423));
+  --md-tok-comment: #9eaaa3;
+  --md-tok-keyword: #ef9ac2;
+  --md-tok-string: #95d5a4;
+  --md-tok-title: #91c8ff;
+  --md-tok-number: #f3b17e;
+  --md-tok-attrs: #e4ca82;
+  --md-tok-meta: #9eaaa3;
+  --md-tok-invalid: #ff9c9c;
+}
+
+.markdown-inline-editor:focus-within {
+  border-color: #a9b8b1;
+  border-color: color-mix(in srgb, var(--text, #293431) 32%, var(--border, #dbe3de));
+}
+
+.markdown-inline-editor__host {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.markdown-inline-editor .cm-editor {
+  flex: 1 1 auto;
+  height: 100%;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+}
+
+.markdown-inline-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.markdown-inline-editor .cm-scroller {
+  overflow: auto;
+  overscroll-behavior: contain;
+  font-family: inherit;
+  line-height: 1.7;
+}
+
+.markdown-inline-editor .cm-content {
+  padding: 12px 14px 16px;
+  caret-color: var(--text, var(--ink, #293431));
+}
+
+.markdown-inline-editor .cm-line {
+  padding: 0;
+}
+
+.markdown-inline-editor .cm-cursor,
+.markdown-inline-editor .cm-dropCursor {
+  border-left-color: var(--text, var(--ink, #293431));
+}
+
+.markdown-inline-editor .cm-selectionBackground,
+.markdown-inline-editor .cm-selectionLayer .cm-selectionBackground,
+.markdown-inline-editor .cm-content ::selection {
+  background: var(--md-selection-bg);
+}
+
+.markdown-inline-editor .cm-panels {
+  background: var(--surface, #fff);
+  color: var(--text, var(--ink, #293431));
+}
+
+/* ── 显形的分隔符：真实文档字符，灰但不消失得没边 ─────────────────────────── */
+
+.markdown-inline-editor .md-syntax {
+  color: var(--md-syntax-color);
+  font-family: var(--md-inline-mono);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.markdown-inline-editor .md-syntax-hidden {
+  display: none;
+}
+
+/* ── 正文的语义呈现：只有分隔符显隐，粗体/斜体/链接始终是排版后的样子 ───────── */
+
+.markdown-inline-editor .md-strong {
+  font-weight: 700;
+}
+
+.markdown-inline-editor .md-emphasis {
+  font-style: italic;
+}
+
+.markdown-inline-editor .md-strike {
+  text-decoration: line-through;
+}
+
+.markdown-inline-editor .md-inline-code {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: var(--md-inline-code-bg);
+  font-family: var(--md-inline-mono);
+  font-size: 0.94em;
+}
+
+.markdown-inline-editor .md-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.markdown-inline-editor .md-image {
+  color: var(--md-syntax-color);
+  font-family: var(--md-inline-mono);
+}
+
+.markdown-inline-editor .md-heading {
+  font-weight: 700;
+}
+
+.markdown-inline-editor .md-list,
+.markdown-inline-editor .md-quote {
+  color: inherit;
+}
+
+/* ── 块级：栅栏、表格、引用条只上轻背景/边线，不抢正文 ───────────────────── */
+
+.markdown-inline-editor .md-code-fence {
+  color: var(--md-syntax-color);
+  font-family: var(--md-inline-mono);
+}
+
+/* 围栏行休息态被空替换收起，只留一条很薄的空白行，避免整段 ``` 常驻。 */
+.markdown-inline-editor .md-code-fence-off {
+  line-height: 0.55;
+}
+
+.markdown-inline-editor .md-code-body {
+  background: var(--md-inline-code-bg);
+  font-family: var(--md-inline-mono);
+}
+
+.markdown-inline-editor .md-line-table {
+  font-family: var(--md-inline-mono);
+  font-size: 0.96em;
+}
+
+.markdown-inline-editor .md-line-quote {
+  border-left: 2px solid var(--border, #dbe3de);
+  padding-left: 8px;
+}
+
+/* ── 非活动公式：KaTeX 渲染；点到它就把光标放回源码，源码就地显形 ─────────── */
+
+.markdown-inline-editor .md-math-inline {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: baseline;
+}
+
+/* 块 widget 只用 padding 留白：CM 量 border-box，不把 margin 算进高度，
+   否则后面的行块比真实 DOM 靠上，行内精确点选会落空。 */
+.markdown-inline-editor .md-math-block {
+  display: block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0;
+  padding: 8px 8px;
+  border: 1px solid var(--border, #dbe3de);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+}
+
+.markdown-inline-editor .md-math-source {
+  color: var(--md-syntax-color);
+  font-family: var(--md-inline-mono);
+  white-space: pre-wrap;
+}
+
+/* ── 非活动表格：安全 DOM 表格；不用 innerHTML，单元格内容只当文本 ─────────── */
+
+.markdown-inline-editor .md-table-widget {
+  margin: 0;
+  padding: 6px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border, #dbe3de);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+}
+
+.markdown-inline-editor .md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.96em;
+  line-height: 1.55;
+}
+
+.markdown-inline-editor .md-table th,
+.markdown-inline-editor .md-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border, #dbe3de);
+  border-right: 1px solid var(--border, #dbe3de);
+  color: inherit;
+  white-space: pre-wrap;
+}
+
+.markdown-inline-editor .md-table th {
+  background: var(--md-inline-code-bg);
+  font-weight: 600;
+}
+
+.markdown-inline-editor .md-table th:last-child,
+.markdown-inline-editor .md-table td:last-child {
+  border-right: 0;
+}
+
+.markdown-inline-editor .md-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.markdown-inline-editor .md-table strong {
+  font-weight: 700;
+}
+
+.markdown-inline-editor .md-table em {
+  font-style: italic;
+}
+
+.markdown-inline-editor .md-table code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--md-inline-code-bg);
+  font-family: var(--md-inline-mono);
+  font-size: 0.94em;
+}
+
+/* ── 非活动 GFM 任务：只读勾选框占位；进入编辑后由真实 [x]/[ ] 取代 ─────── */
+
+.markdown-inline-editor .md-task-widget {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15em;
+  height: 1.15em;
+  margin-right: 5px;
+  vertical-align: -0.18em;
+  cursor: text;
+}
+
+.markdown-inline-editor .md-task-widget input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--text, var(--ink, #293431));
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+/* ── 非活动图片：本地占位，URL 只进 title/data，永不发请求 ────────────────── */
+
+.markdown-inline-editor .md-image-placeholder {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px dashed var(--border, #dbe3de);
+  border-radius: 4px;
+  color: var(--md-syntax-color);
+  font-family: var(--md-inline-mono);
+  font-size: 0.92em;
+  cursor: text;
+}
+
+.markdown-inline-editor .md-image-placeholder::before {
+  content: "图 ";
+  opacity: 0.7;
+}
+
+/* ── 代码高亮：classHighlighter 输出的类名，全部限在本模块内 ─────────────── */
+
+.markdown-inline-editor .tok-comment,
+.markdown-inline-editor .tok-meta {
+  color: var(--md-tok-meta);
+  font-style: italic;
+}
+
+.markdown-inline-editor .tok-keyword,
+.markdown-inline-editor .tok-modifier,
+.markdown-inline-editor .tok-controlKeyword {
+  color: var(--md-tok-keyword);
+}
+
+.markdown-inline-editor .tok-string,
+.markdown-inline-editor .tok-special,
+.markdown-inline-editor .tok-regexp {
+  color: var(--md-tok-string);
+}
+
+.markdown-inline-editor .tok-number,
+.markdown-inline-editor .tok-bool,
+.markdown-inline-editor .tok-atom,
+.markdown-inline-editor .tok-literal {
+  color: var(--md-tok-number);
+}
+
+.markdown-inline-editor .tok-variableName,
+.markdown-inline-editor .tok-propertyName,
+.markdown-inline-editor .tok-attributeName,
+.markdown-inline-editor .tok-typeName,
+.markdown-inline-editor .tok-className,
+.markdown-inline-editor .tok-namespace {
+  color: var(--md-tok-title);
+}
+
+.markdown-inline-editor .tok-definition,
+.markdown-inline-editor .tok-function,
+.markdown-inline-editor .tok-labelName {
+  color: var(--md-tok-title);
+  font-weight: 600;
+}
+
+.markdown-inline-editor .tok-operator,
+.markdown-inline-editor .tok-punctuation,
+.markdown-inline-editor .tok-bracket,
+.markdown-inline-editor .tok-separator {
+  color: var(--md-tok-attrs);
+}
+
+.markdown-inline-editor .tok-invalid {
+  color: var(--md-tok-invalid);
+}
+
+/* ── 错误提示：只在超限/写入失败时出现，不是常驻说明 ─────────────────────── */
+
+.markdown-inline-editor .markdown-inline-editor__error {
+  margin: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border, #dbe3de);
+  background: var(--surface, #fff);
+  color: var(--text, var(--ink, #293431));
+  font-size: 12px;
+  line-height: 1.5;
+}

@@ -88,6 +88,8 @@ export interface ResolveReactOptions {
   probeGlobal?: boolean;
   /** 额外候选根（测试注入；排在显式环境变量之后）。 */
   roots?: readonly string[];
+  /** 包自己的 `node_modules`（默认取安装位置）；传 `null` 关掉这一跳（测试要造「一个都没有」）。 */
+  packageRoot?: string | null;
 }
 
 /** 一个候选根：`require` 从它出发解析包名。 */
@@ -155,7 +157,7 @@ export function reactCandidates(options: ResolveReactOptions = {}): { root: stri
   };
   add(env.STUDYMATE_REACT_DIR, '$STUDYMATE_REACT_DIR');
   for (const root of options.roots ?? []) add(root, '（调用方给的候选根）');
-  add(path.join(packageRoot, 'node_modules'), '包自己的 node_modules');
+  if (options.packageRoot !== null) add(options.packageRoot ?? path.join(packageRoot, 'node_modules'), '包自己的 node_modules');
   for (const entry of String(env.NODE_PATH || '').split(path.delimiter).filter(Boolean)) add(entry, '$NODE_PATH');
   if (options.probeGlobal !== false) add(globalNpmRoot(env), 'npm root -g');
   for (const profile of profileRoots(env)) add(profile.root, profile.source);

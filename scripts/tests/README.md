@@ -6,9 +6,20 @@
 npm test
 ```
 
-需要 Node.js（支持范围看 `package.json` 的 `engines`）。**不需要 Python**：引擎随包发 TypeScript，`node` 直接跑 `.ts`（Node 原生类型擦除）。`npm ci` 装 devDependencies（`typescript` 与 `@types/node`）——类型门禁要它们。**各命令的前置以本文件为准**，别处只给指针：Actions 实际用 Node 24，只在 Ubuntu 上跑一次，不展开系统和运行时矩阵。默认检查只跑安装器、插件打包、引擎（数据层/内容层）、静态契约与发布逻辑，不安装真实 DSH、pnpm 或浏览器，不调用模型。
+需要 Node.js（支持范围看 `package.json` 的 `engines`）。**不需要 Python**：引擎随包发 TypeScript，`node` 直接跑 `.ts`（Node 原生类型擦除）。`npm ci` 按根锁文件装 devDependencies：类型门禁与客户端构建都要它们。默认门禁先构建单一客户端 `dist/client.js` 及许可证，再跑 Node 套件；前端依赖只参加构建，不成为 Host 运行时依赖。**各命令的前置以本文件为准**，别处只给指针：Actions 实际用 Node 24，只在 Ubuntu 上跑一次，不展开系统和运行时矩阵。默认检查只跑安装器、插件打包、引擎（数据层/内容层）、静态契约与发布逻辑，不安装真实 DSH、pnpm 或浏览器，不调用模型。
 
 测试使用临时目录，不读写学生的 `workspace/`。
+
+### Windows 的实验骨架前置
+
+实验骨架用例会实际执行 `sh check.sh`，不会因缺少解释器而跳过。Ubuntu CI 已有 POSIX shell；Windows 本机需要 Git for Windows 的 Git Bash，并让 `sh` 在当前测试进程的 PATH 上。默认安装位置可以只在本次 PowerShell 会话中设置，不修改机器全局环境：
+
+```powershell
+$env:PATH = 'C:\Program Files\Git\bin;' + $env:PATH
+npm test
+```
+
+Git 装在其他位置时，用实际安装目录替换上面的路径。Node 与 `sh` 都应来自已安装的工具，不在测试过程中下载替代运行时。
 
 ## 按需运行
 
@@ -20,7 +31,8 @@ npm test
 | `npm run test:antigravity` | Antigravity 插件 ZIP、原生 agents、导出保护与重复构建 |
 | `npm run test:release` | 版本、changelog、重试和发布保护 |
 | `npm run test:static` | 技能调用面与提示词规则归属、词表与发布元数据、文档悬空引用、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
-| `npm run test:browser` | 十一套真实浏览器渲染测试（阅读端本体、阅读位置、作答落盘、监听推送、跑一次、导出产物、公式排版、四路由 × 三档视口、课件页正文与页头、问答会话与引用、课件页标注），浏览器二进制自动探测 |
+| `npm run test:notes:browser` | 构建共享网页并运行六套独立 Edge 回归：画布与占位会话、品牌切换、临时数据域持久化、学习节点联动、共享格式栏与局部编辑、底层编辑器。验证刷新和冲突保护、只读升级、真实灰色标记、原稿坐标和输入法、亮暗对比度、媒体边界及无操作零保存；不连接真实 DSH 或模型，前置见「浏览器套件与手动工具」 |
+| `npm run test:browser` | 阅读端与无界笔记的真实浏览器渲染测试（阅读端本体、阅读位置、作答落盘、监听推送、跑一次、导出产物、公式排版、四路由 × 三档视口、课件页正文与页头、问答会话与引用、课件页标注），浏览器二进制自动探测 |
 | `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录；native 安装下还验九个原生工具的注册、body 可调用（走真 dispatch）与越权抛，以及 #70 的引擎路径：`root` 指向已安装的包、`~/.dsh/studymate/engine/` 不再出现 |
 | `npm run test:dsh-contract` | **宿主契约守门**：拿真宿主自己的 schema 校验器（`dsh-tools` 的 `assertSupportedJsonSchema`）扫注册点上全部工具的 `parameters` 与 `output.schema`，并核对参考调用 `createWebhookSession` 的字段清单没漂，并逐行解析预设里的模块（宿主删掉的子路径必须带停用条件，`#244`）；附一条反证（已知不合规的 schema 必须报错）。同一个 `STUDYMATE_DSH_PACKAGE`，没设就跳过。指针与纪律在 [工程约束](../规范/工程约束.md) §三「宿主契约」 |
 | `npm run test:dsh-cli` | 真实 DSH CLI 安装、更新、卸载，还需要 `pnpm` |
@@ -47,6 +59,12 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | 套件 | 覆盖行为 |
 | --- | --- |
 | `test_installer.mjs`、`test_bundle.mjs` | npm 安装、更新与安装模式切换，Bundle 激活和清理，临时工作区数据保留 |
+| `test_client_bundle.mjs` | 正式单入口组合、宿主 React 复用、唯一学习面板与品牌两面切换、纯阅读端导出保留、CSS/字体/关键帧隔离、实际产物登记与许可随包 |
+| `test_notes_imports.mjs`、`test_notes_media.mjs` | 副本与引用身份、只读句柄重读/撤权、文件上限、静态 HTML/SVG/图片禁脚本与外网及像素/复杂度拒绝；测试字节现造现弃 |
+| `test_notes_editor_gutter.mjs` | 旧源码编辑器的行号位宽与连续选区纯契约；新共享正文的局部语法与格式命令由下列套件验收 |
+| `test_notes_inline_editor.mjs`、`test_notes_markdown_formatting.mjs` | Markdown 格式范围与真实标记、转义/代码隔离、原稿与编辑器坐标、混合换行保真、灰色/代码调色板；格式命令的局部事务、边界与安全链接 |
+| `test_notes_native_contract.mjs` | 显式会话引用的坐标/去重/取消/资源世代与权限失效栅栏、宿主槽位注册；临时 bundle 在系统临时目录创建并清理，不连接真实 DSH/模型 |
+| `test_notes_curriculum.mjs`、`test_client_learning_notes.mjs` | 完整来源身份、关联换节点不搬原件、多科目默认本与相机/分区字段往返、两面共享状态和学习左右栏接线；纯阅读端导出不出现死笔记入口 |
 | `test_openai_plugin.mjs` | ZIP 用**独立读取器**解开后不依赖源码或 DSH 即可跑交互断点（read → update → answer）、没有 0 字节文件也没有 Python 文件；构建可重复，失败时保留已有产物 |
 | `test_preset_install.mjs` | 预设注册（`lib/preset.ts`，原 Python 安装助手的**行为移植**）：版本边界各自独立、补丁形态保留与幂等（注释、`!!js`、CRLF、流式列表）、暂存与 `--patch-output`、手动声明/越界 profile/坏清单/符号链接一律在写盘之前失败、`--bundle` 给 DSH 的 config 形状 |
 | `test_interaction_state.mjs` | Codex 交互断点（`openai/studymate/scripts/interaction_state.mjs`）：工作区必须显式且初始化过、revision 栅栏、锁不等待、迟到/重复/已消费的 question id 不能推进、空回答不算、坏了的状态不许覆盖、提交成功但锁清不掉时如实报成功 |
@@ -55,7 +73,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_host_status.mjs` | 插件页状态路由（`GET /api/studymate/status`）：没配置 / 没科目 / 正常 / 一门坏四种状态都 **200**，只回事实与计数（不带课件/题库/作答）；原生 config 的 workspace 优先于安装器 YAML，来源标 `plugin-config` / `installer-config` |
 | `test_client_plugin_page.mjs` | 插件页的客户端契约：`plugins.row.config` / `plugins.detail.section` 两个官方槽位（name/key/id/order/locale）、`subject` 自过滤（别人的 bundle、row、无 `pkg` 的 item 都不画）、配置卡与状态卡的**卡片契约**（border / radius / 下沉 body / 标题 / facts、保存/重置在卡后）、状态投影与空态/错误态，以及 zh/en 字典键集、en 零 CJK、占位符一致、每个 `t(key)` 都有定义 |
 | `test_skill_frontmatter.mjs` | 12 份技能的调用面：5 个角色两个面都关、总控与 6 个协议两个面都开、布尔值形状 |
-| `test_skill_visibility.mjs` | 技能与工具的**可见边界**（#87）：照宿主的项目根规则走一遍当前 cwd，断言 `<项目根>/.dsh/skills` 与 `<项目根>/.agents/skills` 上什么都没有（工作目录在本仓库里也成立）；入方向——预设只在一个地方声明技能目录、那份声明指向包内真实存在的 12 份技能、占位符丢了安装时就抛；外加一条**特征化**断言把「工具/面板仍注册在 profile 根、不在预设作用域」这个与 spec 的已知偏离钉住（偏离记录在[工程约束](../规范/工程约束.md) §二「技能与工具的可见边界」） |
+| `test_skill_visibility.mjs` | 技能与工具的**可见边界**：照宿主项目根规则检查当前 cwd 的两条默认扫描根，不能出现 StudyMate 技能；空目录和开发者的其它本地技能不误报，StudyMate 的复制、改名、散装 Markdown 与链接都有反证（#267）。入方向仍是每份预设仅一处显式目录、包内真实技能与缺占位符即拒；工具入口在学习预设作用域，客户端面板保持包级声明（规则见[工程约束](../../docs/规范/工程约束.md) §二「技能与工具的可见边界」） |
 | `test_statuses.mjs` | 三档词表与 schema 逐字对齐、旧六档只活在读侧映射里、题型/课型词表与 schema 一致，以及 `lib/library.ts` 那份字面量与 `lib/core/rules.ts` 不分叉 |
 | `test_release_metadata.mjs` | `package.json` 的版本等于最新可达的 `v*` tag（本地浅克隆跳过，CI 里读不到 tag 就红） |
 | `test_antigravity_plugin.mjs` | Antigravity 插件包含 5 个原生子代理与 12 个技能、无 0 字节文件、占用的输出目录不被清空、构建可重复 |
@@ -74,6 +92,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_architecture_boundaries.mjs` | 架构边界与依赖无环（#69）：扫真实源码解析 `import` / `export … from` / 动态 `import()` 得到 import 图，按文件顶部那张**域规则表**判（`lib/` 一级目录 = 域，未知域默认拒绝，`lib/core/**` 不许碰 `node:*` 与域外东西），域图与模块图都断言无环；另有合成图的反证用例钉住判据本身 |
 | `test_tools_guard.mjs` | 原生工具域（`lib/tools/{domains,access,define,index,capability}.ts`）：九个工具的名字与**声明表**（谁读哪些域、写哪些字段，放宽一行就红）、`description` 只有一句话、注册走 `ctx.effect`；**反证**越权读与越权写必须抛 `DomainViolationError`（写越权时回调一次都不跑）；`requires:['model']` 在无模型时不跑 body 并返回 `{available:false, reason}` |
 | `test_tools_context.mjs` | `studymate_workspace_context` 的结构化摘要（工作区路径、今天、时区、科目现状含当前节点与三档、最近学习记录、可用能力），以及**逐域投影**：`subjects` 切片里没有题库、没有课件正文（顺着节点也读不到别的域） |
+| `test_tools_effect_cleanup.mjs` | 测试 effect 的作用域隔离、LIFO/幂等拆卸、异常传播与迟到登记拒绝；真实监听临时工作区后，先关闭监听再删除目录，子进程自然退出，不用强制退出掩盖泄漏（#263） |
 | `test_tools_validate.mjs` | 四个校验工具：数据层（大纲／进度／科目，逐条带行号）、内容层（格式 + 锚点四态 + 图片存在性 + 题库坏 JSON）、图片库（原 Python 校验器的行为移植：表头、命名、三列非空、日期、体积）、交接门禁（明确放行／阻断） |
 | `test_tools_rewrite.mjs` | 两个改写工具（位次重排与无题理由回填，原 Python 脚本的行为照搬）：位次重排（dry-run、换位、目标名被占、重复、认不出的命名）与 `empty_reason` 写入（位置、缩进、CRLF、拦下的六类）；`studymate_export` 的占位形状 |
 | `test_client_math.mjs` | 公式那一段的**阅读端契约**（#91，Node 里跑真 `lib/client.js`，React 是桩）：题库字段（题面 / 选项 / 解析 / 参考答案 / 判分要点）里的 `$…$` 出来的是同一个 `MathSpan`；题库字段**只接数学式**（粗体 / 反引号 / 链接保持字面量）；引擎没到位时元素里是 TeX 原文（降级可读），失败时多一句「公式没排出来：…」。**#96 加的**：按需携带那条判据（`lib/math.ts` 的 `hasMathInPlainText`）与阅读端的 `MATH_ONLY` **逐字对账**——正则从 `lib/client.js` 源码里取出来，改一边忘另一边就红。真排版在 `browser/math_test.mjs` |
@@ -131,13 +150,33 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 
 ## 浏览器套件与手动工具
 
-浏览器断言套件（`npm run test:browser`）都走同一个骨架 [browser/harness.mjs](browser/harness.mjs)：
-探测本机浏览器 → 起 CDP → 收**控制台错误 / 页面错误（未捕获异常）/ 失败请求** → 每个场景出截图与 `summary.json`。
-另收 `Network.requestWillBeSent` 进 `ctx.requests`（场景维度、不算问题）：断「零请求 / 发的是哪些」
-的套件用它（`file://` 下 `performance.getEntriesByType('resource')` 返回空数组）。
+`scripts/tests/browser/` 下是两套**骨架不同**的浏览器套件，别混着读：
+
+- **阅读端套件**（`test:browser` 组里的那些，下面列出的六份无界笔记套件除外）**都走同一个骨架** [browser/harness.mjs](browser/harness.mjs)：
+  探测本机浏览器 → 起 CDP → 收**控制台错误 / 页面错误（未捕获异常）/ 失败请求** → 每个场景出截图与 `summary.json`。
+  另收 `Network.requestWillBeSent` 进 `ctx.requests`（场景维度、不算问题）：断「零请求 / 发的是哪些」
+  的套件用它（`file://` 下 `performance.getEntriesByType('resource')` 返回空数组）。
+- **无界笔记套件** [browser/notes_test.mjs](browser/notes_test.mjs)（`npm run test:notes:browser`）是**例外**：
+  它自己用 Playwright 起一台独立 Edge（`channel: 'msedge'`、一次性 context），**不用** harness，也不复用它的
+  浏览器探测与产物格式。理由见该文件头：它要的浏览器（独立 Edge、一次性 context）与 harness 起的那台
+  （无头 Chrome + CDP）不是同一个，两边的控制台/请求收集也不共用。它的跳过与失败边界比阅读端套件更紧，
+  写在它自己的文件里。
+
+| 情况 | 阅读端套件（harness） | 无界笔记套件 |
+| --- | --- | --- |
+| 找不到浏览器 | 明确跳过，退出码 **3**（不算通过） | 浏览器二进制缺失时同样跳过，退出码 **3** |
+| 页面产物没建出来 | 各套件在场景里失败 | **直接红**（不跳过）：`dist/notes-preview/index.html` 不在就是构建链的问题，先跑 `npm run build:notes:preview`（`npm run test:notes:browser` 会先构建） |
+| Playwright 没装 | 不涉及 | **直接红**：它列在 devDependencies 里（`npm ci` 会装），不提供「没装就跳过」 |
+
+两套都在默认门禁之外（`npm test` 不含 `--browser`，也不含 `test:notes:browser`），CI 不受影响。
 
 | 文件 | 用途 |
 | --- | --- |
+| `browser/notes_brand_test.mjs` | 正式组合客户端的品牌双向切换：同一个学习面板、名称与自有图标互换、学习导航保留、笔记场景保活、隐藏面不接焦点和快捷键；独立 Edge + 隔离宿主夹具，不使用真实会话 |
+| `browser/notes_persistence_test.mjs` | 真客户端 + 临时 HOME 的保存、刷新、冲突、失败和格式1只读→取消/确认升级→逐字节备份；不碰个人笔记库 |
+| `browser/notes_curriculum_test.mjs` | 十项节点笔记场景：空节点、显式默认本、原稿共享、关联拖动、未来默认、软删除恢复、节点树/课程引用卡、只读课件跳转、笔记本画布隔离与相机；学习左右笔记亮→暗→亮、渲染/局部灰色标记/链接框的实测 AA，光标、弹窗和主题切换不改写原稿 |
+| `browser/notes_live_editor_test.mjs` | 实际共享 NoteEditor 与单格式栏：选区保持、格式局部事务、真实灰色字符、原始坐标/混合换行、链接冻结与失效拒绝、只读/超限修复、StrictMode/受控输入法和快捷键；用临时页面和隔离 Edge |
+| `browser/notes_inline_editor_test.mjs` | 底层局部编辑器：真实分隔符显隐/直接编辑、原始字节与撤销、外部更新/空正文/输入法、GFM 表格/任务标记/公式/代码/图片占位、安全与亮暗对比度 |
 | `browser/attempts_test.mjs` | 作答落盘（#72）：把阅读端打进一个说 HTTP 的迷你宿主，真落盘到工作区文件 |
 | `browser/annotations_test.mjs` | 课件页标注（#225 ③ / ADR-0015）：真浏览器里挂真 `lib/client.js`，划选正文 → 浮层里写注释 → 高亮覆盖层与行内小标记出现、点开可读/可编辑/可删除；重新挂载（刷新）后从 payload 读回；课件原文改过之后显式 stale、不贴到错位置。夹具与 `attempts_test.mjs` 同一套 |
 | `browser/watch_push_test.mjs` | 真浏览器里「改文件 → 监听 → SSE → 页面自己更新（不刷新）」的端到端（#74） |
@@ -155,10 +194,11 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 | `browser/shot.mjs` | 浅色/深色截图与元素边界记录（手动） |
 
 浏览器二进制**探测**，不钉死 `google-chrome`：先看 `STUDYMATE_CHROME` / `CHROME_BIN` / `CHROMIUM_BIN` /
-`PUPPETEER_EXECUTABLE_PATH`，再看 PATH 上的常见名字（Windows 用 `where` 查、且那边是 `chrome` / `msedge`），
+`PUPPETEER_EXECUTABLE_PATH`，再看 PATH 上的常见名字（Windows 用 `where` 查，那边是 `chrome` / `msedge`；macOS/Linux 是 `google-chrome` / `chromium` / `chrome` 等），
 最后看安装位置——macOS 的 `.app` 内置二进制，或 Windows 的 `Program Files` / `LOCALAPPDATA` 下的
 Chrome、Edge、Chromium（Edge 是 Windows 10 起系统自带的那个，所以 Windows 上通常不需要设环境变量）。
 探测只有 `browser/harness.mjs` 一份，套件各自再抄一份就是漂移的来源（#123）。
+（无界笔记套件走 Playwright 的 `channel: 'msedge'`，见上表。）
 
 **找不到浏览器时套件明确跳过**：打一段说明（试过哪些、怎么指）并以退出码 **3** 退出——跳过不算通过，
 所以不会出现「没跑过却报绿」。`npm test`（默认门禁）不含 `--browser`，CI 不受影响。

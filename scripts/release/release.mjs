@@ -1,5 +1,5 @@
 // No runtime dependencies; mutations are restricted to the upstream manual CI run.
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, fsyncSync, ftruncateSync, mkdtempSync, openSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -170,6 +170,13 @@ function requireWorkflow() {
   if (!process.env.GH_TOKEN) throw new Error('Missing the workflow GitHub token.');
 }
 
+// 正式包的客户端入口（ADR-0015 §2）：package.json 的 exports["./client"] 指向 dist/client.js，
+// 由 `build:client` 产出；它旁边的 client-notices.txt 是那份 bundle 的第三方许可全文。
+// 两张表都对不上就会出事：白名单少了它们 → 每次发布卡在打包校验；**放成 `dist/**` 通配** →
+// 网页验收产物（dist/notes-preview/）、构建报告（dist/client-build-report.json）跟着发出去。
+export const CLIENT_ENTRY = 'dist/client.js';
+export const CLIENT_NOTICES = 'dist/client-notices.txt';
+
 /**
  * `npm pack --json` 的载荷。npm 11 及以前打出来是**数组**，npm 12 起改成**以包名为键的对象**：
  * 两处按数组取下标的地方（`test_bundle.mjs` 与 `packPackage()`）都会拿到 `undefined`，
@@ -197,18 +204,20 @@ export function packEntry(stdout) {
 export function validatePack(pack) {
   if (pack.name !== PACKAGE || !VERSION.test(pack.version)) throw new Error('Unexpected npm package identity.');
   const files = pack.files.map(file => file.path);
-  // lib/ 是 Client 半（阅读端）与 Host 半的共享模块：package.json 的 exports["./client"]
-  // 指向 lib/client.js，宿主按这个字段取 bundle，所以它必须随包发出去。
+  // dist/ 只认这两个**完整路径**，其它 dist 产物一律不发；lib/ 仍是 Client 半（旧阅读端
+  // lib/client.js，构建的输入）与 Host 半的共享模块。
+  // 别把两个名字写成「client(-notices) 再跟 (js|txt)」那种可选式：那不是两个名字，
+  // 组合出来还放行 dist/client.txt 与 dist/client-notices.js——白名单只该认出确实要发的路径。
   // 根级的 README* / LICEN[CS]E* / COPYING* **不归 files 管**：npm 一定会把它们打进 tarball
   // （`files: ["lib"]` 的包照样进 README.en.md，npm 11 实测）。白名单认下这批——npm 塞进来、
   // 我们自己拦下，发布就卡在打包校验这步：#155（README.en.md，2026-10-10 的 Release）。
-  const allowed = /^(?:package\.json|cordis\.patch\.yml|CHANGELOG\.md|README(?:\.[^/]*)?|LICEN[CS]E(?:\.[^/]*)?|COPYING(?:\.[^/]*)?|bin\/[^/]+\.(?:mjs|ts)|lib\/.+|locale\/[^/]+\.json|openai\/studymate\/(?:\.codex-plugin\/plugin\.json|scripts\/[^/]+\.mjs|skills\/learning-system\/references\/[^/]+\.md)|antigravity\/studymate\/.+|preset\/(?:learning|qa|skills)\/.+|schemas\/[^/]+\.json|templates\/.+|docs\/(?:[^/]+\/)*[^/]+\.md|docs\/images\/.+)$/u;
+  const allowed = /^(?:package\.json|cordis\.patch\.yml|CHANGELOG\.md|README(?:\.[^/]*)?|LICEN[CS]E(?:\.[^/]*)?|COPYING(?:\.[^/]*)?|locale\/[^/]+\.json|dist\/client\.js|dist\/client-notices\.txt|bin\/[^/]+\.(?:mjs|ts)|lib\/.+|openai\/studymate\/(?:\.codex-plugin\/plugin\.json|scripts\/[^/]+\.mjs|skills\/learning-system\/references\/[^/]+\.md)|antigravity\/studymate\/.+|preset\/(?:learning|qa|skills)\/.+|schemas\/[^/]+\.json|templates\/.+|docs\/(?:[^/]+\/)*[^/]+\.md|docs\/images\/.+)$/u;
   for (const file of files) {
     if (!allowed.test(file) || /(^|\/)(?:\.env(?:\..*)?|\.npmrc|\.git|node_modules|__pycache__|\.DS_Store|[^/]+\.pyc)(\/|$)/.test(file)) {
-      throw new Error(`Unexpected or private file in npm tarball: ${file}`);
+      throw new Error(`Unexpected or private file in npm tarball: ${file}.`);
     }
   }
-  for (const required of ['cordis.patch.yml', 'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs', 'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'lib/preset.ts', 'locale/en.json', 'locale/zh.json', 'docs/images/icon.png', 'openai/studymate/.codex-plugin/plugin.json', 'docs/使用/Codex与ChatGPT.md', 'preset/learning/agent.cordis.yml', 'preset/qa/agent.cordis.yml', 'preset/skills/learning-system/SKILL.md', 'antigravity/studymate/plugin.json']) {
+  for (const required of ['cordis.patch.yml', CLIENT_ENTRY, CLIENT_NOTICES, 'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs', 'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'lib/preset.ts', 'locale/en.json', 'locale/zh.json', 'docs/images/icon.png', 'openai/studymate/.codex-plugin/plugin.json', 'docs/使用/Codex与ChatGPT.md', 'preset/learning/agent.cordis.yml', 'preset/qa/agent.cordis.yml', 'preset/skills/learning-system/SKILL.md', 'antigravity/studymate/plugin.json']) {
     if (!files.includes(required)) throw new Error(`npm tarball is missing ${required}.`);
   }
   for (const prefix of ['schemas/', 'templates/', 'docs/', 'locale/']) if (!files.some(file => file.startsWith(prefix))) throw new Error(`npm tarball is missing ${prefix}.`);
@@ -225,9 +234,22 @@ export function validatePack(pack) {
   }
 }
 
-function packPackage() {
+/** 构建客户端 bundle（`scripts/build-client.mjs`）：`exports["./client"]` 要的 dist/client.js
+ * 与它旁边的许可全文。解包后的客户端工具全在 devDependencies 里，所以调用方必须先
+ * `npm ci --include=dev`。 */
+export function buildClient(execute = command) {
+  execute('npm', ['run', '--silent', 'build:client']);
+}
+
+/** 每次真正打包之前都把客户端产物重新构建一遍：`npm pack` 带 `--ignore-scripts`，prepack
+ * 不会触发，产物只能由这条路径自己保证。顺序是硬的——先构建、后打包；构建失败就不打包，
+ * 旧产物不得混进 tarball。`prepack` 是本地 `npm pack`/`npm publish` 的同类保证，真打包路径
+ * 不走它，所以这里不能省。 */
+export function packPackage({ build = buildClient, execute = command } = {}) {
+  build(execute);
   const directory = mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), 'studymate-pack-'));
-  const pack = packEntry(command('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', directory]).stdout);
+  // 注入的 `execute` 与默认实现走同一个 `packEntry`：npm 11 的数组、npm 12 的对象都认（#250）。
+  const pack = packEntry(execute('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', directory]).stdout);
   validatePack(pack);
   const file = join(directory, pack.filename);
   const integrity = `sha512-${createHash('sha512').update(readFileSync(file)).digest('base64')}`;
@@ -500,6 +522,7 @@ async function publish() {
   }
   // A plugin build failure must happen before the immutable npm publication.
   const plugin = buildReleasePlugin(state.version);
+  // packPackage 会先重新构建客户端产物；prepare 里那次只是前哨（版本 commit/tag 之前就拦下坏包）。
   const pack = packPackage();
   if (pack.version !== state.version) throw new Error('Packed version differs from the prepared release.');
   let remote = await registryVersion(pack.version);

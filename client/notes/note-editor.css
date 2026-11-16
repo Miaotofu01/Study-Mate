@@ -1,0 +1,72 @@
+@charset "UTF-8";
+
+/* The surrounding sidebar owns the surface. This is not another card. The
+   canonical host tokens win when present; standalone fixtures have neutral
+   light/dark fallbacks instead of Crepe's green framed palette. */
+.note-editor {
+  --text: var(--smb-text, #29333d);
+  --ink: var(--smb-text, #29333d);
+  --muted: var(--smb-text-3, #5c6874);
+  --text-strong: var(--smb-text, #29333d);
+  --border: var(--smb-line-strong, #d9dfe5);
+  --line: var(--smb-line-strong, #d9dfe5);
+  --code: var(--smb-raise, #f1f3f5);
+  --code-gutter: var(--smb-bg, #f1f3f5);
+  --accent-soft: var(--smb-raise, #eaf0f5);
+  --accent: var(--smb-text-link, #205f91);
+  --teal: var(--smb-text-link, #205f91);
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.note-editor[data-theme="dark"] {
+  --text: var(--smb-text, #edf0f3);
+  --ink: var(--smb-text, #edf0f3);
+  --muted: var(--smb-text-3, #b3bdc7);
+  --text-strong: var(--smb-text, #edf0f3);
+  --border: var(--smb-line-strong, #454f5a);
+  --line: var(--smb-line-strong, #454f5a);
+  --code: var(--smb-raise, #252d36);
+  --code-gutter: var(--smb-bg, #252d36);
+  --accent-soft: var(--smb-raise, #303e4c);
+  --accent: var(--smb-text-link, #9ecdf3);
+  --teal: var(--smb-text-link, #9ecdf3);
+}
+.note-editor > [role="toolbar"] {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+}
+.note-editor .markdown-inline-editor,
+.note-editor .markdown-inline-editor:focus-within {
+  min-width: 0;
+  min-height: 240px;
+  flex: 1 1 auto;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.note-editor__preview {
+  min-width: 0;
+  padding: 10px 12px;
+  color: var(--text);
+}
+.note-editor__error {
+  margin: 6px 10px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.note-editor.is-readonly .note-editor__preview { padding: 0; }
+.document-scroll.is-inline > .note-editor { width: 100%; height: 100%; flex: 1 1 auto; }
+.document-scroll.is-inline > .note-editor .markdown-inline-editor { min-height: 0; }
+.document-scroll.is-inline > .note-editor .cm-editor { height: 100%; }
+.document-scroll.is-inline > .note-editor .cm-scroller { overflow: auto; }
