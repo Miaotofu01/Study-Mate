@@ -350,7 +350,7 @@ test('React 解析：显式根命中；一个候选都没有时给一句能照�
   const emptyHome = path.join(root, '空 home');
   fs.mkdirSync(emptyHome, { recursive: true });
   assert.throws(
-    () => resolveReact({ env: { STUDYMATE_REACT_DIR: empty, DSH_HOME: emptyHome }, probeGlobal: false, roots: [] }),
+    () => resolveReact({ env: { STUDYMATE_REACT_DIR: empty, DSH_HOME: emptyHome }, probeGlobal: false, roots: [], packageRoot: null }),
     (error) => {
       assert.ok(error instanceof ReactMissingError);
       assert.match(error.message, /EXPORT_REACT_MISSING/);
@@ -416,7 +416,7 @@ test('React 解析：扁平布局里四个构建缺一个都还是缺件，不�
     const emptyHome = path.join(root, '空 home');
     fs.mkdirSync(emptyHome, { recursive: true });
     assert.throws(
-      () => resolveReact({ env: { STUDYMATE_REACT_DIR: flat, DSH_HOME: emptyHome }, probeGlobal: false, roots: [] }),
+      () => resolveReact({ env: { STUDYMATE_REACT_DIR: flat, DSH_HOME: emptyHome }, probeGlobal: false, roots: [], packageRoot: null }),
       (error) => {
         assert.ok(error instanceof ReactMissingError, `少 ${build} 时必须是 ReactMissingError`);
         return true;

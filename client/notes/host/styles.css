@@ -1,0 +1,12 @@
+/* Native conversation layout only; build-client scopes every selector to the notes root. */
+.studymate-notes { width: 100%; height: 100%; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+.studymate-native-chat { display: flex; flex: 1; min-width: 0; min-height: 0; height: 100%; flex-direction: column; overflow: hidden; background: var(--surface); }
+.studymate-native-chat__session { padding: 10px 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid var(--border); }
+.studymate-native-chat__session label { font-size: 11px; color: var(--muted); }
+.studymate-native-chat__session select { width: 100%; min-width: 0; max-width: 100%; height: 32px; color: var(--text); background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+.studymate-native-chat__session button { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 6px; padding: 5px 8px; cursor: pointer; font-size: 12px; }
+.studymate-native-chat__body { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
+.studymate-native-chat__body > div { min-height: 0; flex: 1; height: 100%; }
+.studymate-native-chat__empty { margin: 0; padding: 24px 16px; line-height: 1.8; font-size: 12px; color: var(--muted); }
+.studymate-native-chat__error { margin: 0; padding: 8px 12px; color: var(--danger); }
+.studymate-native-chat.is-dragging { outline: 2px dashed var(--accent); outline-offset: -4px; }
