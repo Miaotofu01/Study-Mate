@@ -1833,6 +1833,13 @@ try {
     };
     const ms = (token) => parseFloat(String(token)) * (/ms\s*$/.test(String(token)) ? 1 : 1000);
 
+    // 先把「系统偏好」显式模拟成 no-preference，再读 auto 档：`auto` 的取值按设计就跟随
+    // `prefers-reduced-motion`，而宿主的默认偏好不是常量——同一份代码在验证机 CUPC 的桌面
+    // 会话下，Edge 默认就报 `reduce`（auto 于是拿 70ms），在普通桌面上才是 `no-preference`
+    // （140ms）。不断言宿主默认，断言产品在给定偏好下的行为；reduce 那一支在下面单独模拟。
+    await session.emulate({ reducedMotion: 'no-preference' });
+    await ctx.sleep(200);
+
     const seen = { auto: await ctx.evaluate(read) };
     check('[动效] 四档齐全',
       JSON.stringify(seen.auto.options) === JSON.stringify(['auto', 'full', 'reduced', 'off']),
