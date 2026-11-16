@@ -11,6 +11,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { readLibrary, buildLibrary } from '../../lib/library.ts';
+import { removeFile } from './fixtures/fs-rm.mjs';
 
 /* ── 临时工作区：跑完即弃 ─────────────────────────────────────────────── */
 
@@ -178,7 +179,7 @@ test('readLibrary 的顶层就那六个键，含义各自钉住', () => {
 test('2.0.4 迁移期 载荷：只有旧名那份文件时按旧格式读，投影照旧、`积累` 照旧不进载荷', () => {
   const { workspace } = oneSubjectWorkspace();
   // 把新文件换回旧格式：模拟 2.0.x 用户升级前的盘面（审计里的真实形态）
-  fs.rmSync(path.join(workspace, '.learning', 'MEMORY.yaml'));
+  removeFile(path.join(workspace, '.learning', 'MEMORY.yaml'));
   fs.writeFileSync(path.join(workspace, '.learning', 'MEMORY.md'), LEGACY_MEMORY_MD);
 
   const payload = readLibrary({ workspace });
