@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { moveIntoPlace } from './fs-swap.mjs';
+import { removeTreeSync } from '../lib/fs-remove.mjs';
 import { adaptSkill } from './skill-compat.mjs';
 import { buildOpenAiPlugin } from './openai-plugin.mjs';
 import { buildAntigravityPlugin } from './antigravity-plugin.mjs';
@@ -468,7 +469,7 @@ export function installPayload({ workspaceArg, profile, version, desktop = false
   } catch (error) {
     try {
       for (const change of replacements.reverse()) {
-        if (change.installed) fs.rmSync(change.target, { recursive: true, force: true });
+        if (change.installed) removeTreeSync(change.target);
         if (change.existed) moveIntoPlace(change.backup, change.target);
       }
     } catch (rollbackError) {
@@ -477,7 +478,7 @@ export function installPayload({ workspaceArg, profile, version, desktop = false
     }
     throw error;
   } finally {
-    if (!preserveStaging) fs.rmSync(staging, { recursive: true, force: true });
+    if (!preserveStaging) removeTreeSync(staging);
   }
   // `engine` 报的是**这次的引擎实际落在哪**（原生加载 = 包自身），调用方照这个值提示用户
   return { registration, engine: payload, preset, configFile, workspace: config.workspace, profile };

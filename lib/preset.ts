@@ -535,12 +535,17 @@ function atomicWrite(file: string, text: string): void {
   if (stat?.isSymbolicLink()) throw new Error(`为避免改动其他目录，不覆盖符号链接：${file}`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temporary = path.join(path.dirname(file), `.studymate-${process.pid.toString(36)}-${Date.now().toString(36)}`);
+  let renamed = false;
   try {
     fs.writeFileSync(temporary, text, { encoding: 'utf8' });
     if (stat) fs.chmodSync(temporary, stat.mode);
     fs.renameSync(temporary, file);
+    renamed = true;
   } finally {
-    fs.rmSync(temporary, { force: true });
+    // rename 成功之后临时文件已经不存在了，不必再删一次。
+    // 而且这次「删一个已经不存在的临时文件」在 Node 24 + Windows + 中文路径下会直接把进程打崩
+    // （0xC0000005；同机 Node 22 不复现），中文用户名下安装器会整段静默失败。
+    if (!renamed) fs.rmSync(temporary, { force: true });
   }
 }
 

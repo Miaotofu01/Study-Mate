@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { removeTreeSync } from '../lib/fs-remove.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { moveIntoPlace } from './fs-swap.mjs';
@@ -114,7 +115,7 @@ export function buildOpenAiPlugin({ output = path.resolve('dist') } = {}) {
     } catch (error) {
       try {
         for (const change of replacements.reverse()) {
-          if (change.installed) fs.rmSync(change.destination, { recursive: true, force: true });
+          if (change.installed) removeTreeSync(change.destination);
           if (change.existed) moveIntoPlace(change.backup, change.destination);
         }
       } catch (rollbackError) {
@@ -125,6 +126,6 @@ export function buildOpenAiPlugin({ output = path.resolve('dist') } = {}) {
     }
     return { plugin: target, archive, version: packageInfo.version };
   } finally {
-    if (!preserveStaging) fs.rmSync(staging, { recursive: true, force: true });
+    if (!preserveStaging) removeTreeSync(staging);
   }
 }
