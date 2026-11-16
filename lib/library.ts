@@ -35,7 +35,7 @@ import { parseAnchors, reconcileAnchors } from './core/anchors.ts';
 import type { AnchorMatch } from './core/anchors.ts';
 import { cmpCodePoints } from './core/format.ts';
 // 共享记忆的注入边界（#190）：载荷里的 `memory_md` 只取画像三节，`积累` 永不进上下文。
-import { MEMORY_FILE, readMemory } from './core/memory.ts';
+import { readSharedMemory } from './memory-file.ts';
 // 题型与字段的判据在纯函数域（词表只有一份：lib/core/rules.ts 的 QUESTION_KINDS）。
 // 未知题型要带**题库文件与行号**报出来——行号来自扫 JSON 原文，不是文本搜索。
 import { checkPoolKinds } from './core/questions.ts';
@@ -280,7 +280,23 @@ function readYaml(file: string): Record<string, any> {
 function readYamlList(file: string): any[] {
   if (!isFile(file)) return [];
   // isFile 已经证明读得到；解析器只接受字符串，这里按它的契约收窄
-  return (parseYaml(readTextIfPresent(file) as string, { file }) || []) as any[];
+  const data = parseYaml(readTextIfPresent(file) as string, { file });
+  // 空文件、只有注释、顶层 `null`：没有记录，和「缺失」同义（缺失的可选文件一律给空值）
+  if (data === null) return [];
+  // 顶层写成映射（典型是 `items: []`）时，只做类型收窄会把这个错一路带到消费点，
+  // 最后在 `.forEach` 上炸成「misconceptionRaw.forEach is not a function」——离现场好几层，
+  // 学生看不出该改哪个文件、也看不出该改成什么（#291）。这里当场报形状。
+  if (!Array.isArray(data)) {
+    let shape: string;
+    if (data && typeof data === 'object') {
+      const keys = Object.keys(data as Record<string, unknown>);
+      shape = keys.length ? `映射（顶层键：${keys.join('、')}）` : '空映射 {}';
+    } else {
+      shape = `一个 ${typeof data} 值`;
+    }
+    throw new Error(`${file} 顶层必须是 YAML 列表，这里读到的是${shape}；没有记录时写 []`);
+  }
+  return data;
 }
 
 /** 收集一棵目录下所有文件的名字（只要 basename，与参考实现的 rglob + p.name 一致）。 */
@@ -684,8 +700,10 @@ export function buildLibrary(
     today: updated.length === 0 ? '' : updated[updated.length - 1].slice(0, 10),
     /* #190：载荷里只放共享记忆的**画像三节**投影（字段名与形状照旧，见 ADR-0014「宿主契约不动」）。
        `积累` 是角色攒下的干活笔记，与整份科目记忆一样永不进上下文——载荷是给页面展开的，
-       展开的东西同样只该是学生画像；只有 `积累` 的文件投影成空串。 */
-    memory_md: readMemory({ shared: readTextIfPresent(path.join(learningDir, MEMORY_FILE)) }).injectable,
+       展开的东西同样只该是学生画像；只有 `积累` 的文件投影成空串。
+       旧格式兜底（只有改名前的共享记忆文件时按旧格式读并提示迁移）在 `lib/memory-file.ts`
+       一处处理，否则「读哪一份 / 旧格式怎么读」会在三个消费点各写一遍。 */
+    memory_md: readSharedMemory(workspace).view.injectable,
     subjects,
     unreadable,
   };

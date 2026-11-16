@@ -17,6 +17,15 @@
    改了措辞，注入的就是他改的措辞）。所以这里只切段、不构造值，跟 `resources.ts` 的
    分节器同一套读法（`##` 换成一级键）。
 
+   **旧格式（2.0.x 之前）的兼容是同一份词表的第二条读法**：改名前的共享记忆是
+   `.learning/MEMORY.md`，`## 我是谁` 这样的 Markdown 分节 + 自由 bullet。ADR-0014 原决定
+   「读侧不认旧名」，但审计发现 2.0.x 用户盘上只有旧格式时画像三节与「积累」会静默全丢
+   （内容形状同时变了，光改名读不出来）。所以这里补一条**只读兜底**与一次性迁移的纯函数：
+   `migrateLegacyMemory` 把旧分节机械地转成新 YAML（行序、键 + 一句话结构保留；转不了的
+   原样带过去并给 warning），`readMemoryWithLegacy` 让消费点在新文件缺席时读旧文件。
+   迁移是过渡，不是第二个格式：读侧只认「新名优先、旧名兜底」，`migrate` 把旧文件搬到
+   `.bak` 之后兜底分支自然不再命中；写侧永远只写 `MEMORY.yaml`。
+
    为什么「节」= 顶格的 `键:`：记忆是一份 YAML，节名就是一级键（`lib/yaml.ts` 的读法）。
    代码块、缩进的子键、行内注释都不算节。**第一个节名之前的引言不算节**——那是这份文件的
    定位说明（模板里的注释），既不是画像也不是积累。
@@ -300,4 +309,304 @@ export function readMemory(texts: MemoryTexts = {}): MemoryReport {
     ],
     empty: shared.empty && subject.empty,
   };
+}
+
+/* ── 旧格式（2.0.x 前）→ 新格式：读侧兜底与一次性迁移共用 ───────────────── */
+
+/** 改名前的共享记忆文件名。**只**在读侧兜底与一次性迁移里出现；写侧永远只写 `MEMORY_FILE`。 */
+export const LEGACY_MEMORY_FILE = 'MEMORY.md';
+
+/** 改名前的第四节（只装本机事实）；#190 起被 `积累` 取代，迁移时并进 `积累`。 */
+export const LEGACY_ACCUMULATION_HEADING = '跨科目观察';
+
+/** 旧格式的节标题：`## 我是谁`（`#` 的数量写死 2，改名前的文件就是这么排的）。 */
+const LEGACY_HEADING_RE = /^##[ \t]+(.*\S)[ \t]*$/;
+/** 旧格式的列表项：`- 内容`（缩进任意）。 */
+const LEGACY_ITEM_RE = /^([ \t]*)[-*+][ \t]+(.*\S)[ \t]*$/;
+/** 旧格式一条的「键 + 一句话」：优先中文冒号；ASCII 冒号只认后面带空白的写法（别把 URL 拆了）。 */
+const LEGACY_KEY_CN_RE = /^([^：]{1,40}?)[：][ \t]*(.*)$/;
+const LEGACY_KEY_ASCII_RE = /^([^:]{1,40}?):(?:[ \t]+(.*))?$/;
+
+/** 旧文件里的一节。 */
+interface LegacySection {
+  heading: string;
+  /** 这一节里的条目（保持行序）：键 + 内容行；没有键的条目（纯 bullet/散文）键是空串。 */
+  entries: LegacyEntry[];
+}
+
+interface LegacyEntry {
+  key: string;
+  content: string[];
+}
+
+/** 旧格式分节的解析：只做「哪一节、这一节有哪几条」，不判可见性、也不抛错。 */
+function parseLegacySections(text: string): LegacySection[] {
+  const lines = splitLines(text);
+  const sections: LegacySection[] = [];
+  let current: LegacySection | null = null;
+  let entry: LegacyEntry | null = null;
+
+  for (const raw of lines) {
+    const heading = LEGACY_HEADING_RE.exec(raw);
+    if (heading !== null) {
+      current = { heading: unquote((heading[1] ?? '').trim()), entries: [] };
+      sections.push(current);
+      entry = null;
+      continue;
+    }
+    // 第一个节名之前是这份文件的定位说明（标题与引言），不算节、也不迁移
+    if (current === null) continue;
+    if (raw.trim() === '') continue;
+
+    const item = LEGACY_ITEM_RE.exec(raw);
+    if (item !== null) {
+      const indent = (item[1] ?? '').replace(/\t/g, '    ').length;
+      const text = (item[2] ?? '').trim();
+      if (indent === 0) {
+        const { key, content } = splitLegacyKey(text);
+        entry = { key, content: content === '' ? [] : [content] };
+        current.entries.push(entry);
+      } else if (entry !== null) {
+        // 缩进的子 bullet 属于上一条（`各领域当前水平` 下面那几行）
+        entry.content.push(text);
+      } else {
+        entry = { key: '', content: [text] };
+        current.entries.push(entry);
+      }
+      continue;
+    }
+
+    // 非列表行：缩进的是上一条的续行，顶格的按一条无键内容收（内容不丢，迁移时降级成列表项）
+    const trimmed = raw.trim();
+    if ((raw.match(/^[ \t]*/)?.[0] ?? '').replace(/\t/g, '    ').length > 0 && entry !== null) {
+      entry.content.push(trimmed);
+    } else {
+      entry = { key: '', content: [trimmed] };
+      current.entries.push(entry);
+    }
+  }
+
+  // 键后面一条内容都没有：按本模块的判读口径本来就是「这一条还没有内容」，不算丢失
+  for (const section of sections) {
+    section.entries = section.entries.filter((one) => one.content.length > 0);
+  }
+  return sections;
+}
+
+/** `- 键：内容` → 键与内容；拆不出「短键」的整行当无键内容（原文照搬，不猜）。 */
+function splitLegacyKey(text: string): { key: string; content: string } {
+  const chinese = LEGACY_KEY_CN_RE.exec(text);
+  if (chinese !== null) return { key: (chinese[1] ?? '').trim(), content: (chinese[2] ?? '').trim() };
+  const ascii = LEGACY_KEY_ASCII_RE.exec(text);
+  if (ascii !== null) return { key: (ascii[1] ?? '').trim(), content: (ascii[2] ?? '').trim() };
+  return { key: '', content: text.trim() };
+}
+
+/** 一个标量写成 YAML 的 plain 形式安全吗（不安全就加双引号；写法与 `templates/` 的注释同一条规矩）。 */
+function plainSafe(value: string): boolean {
+  if (value === '') return false;
+  if (value.trim() !== value) return false;
+  if (/[\n\r\t]/.test(value)) return false;
+  // 行内出现 `: ` / ` #` 会改变结构（YAML 两个最容易踩的直觉坑）
+  if (/: | #/.test(value)) return false;
+  return !/^[-?:,[\]{}#&*!|>'"%@`]/.test(value);
+}
+
+/** 标量：plain 安全就原样写，否则用双引号（JSON 的转义是 YAML 双引号可接受的子集）。 */
+function yamlScalar(value: string): string {
+  return plainSafe(value) ? value : JSON.stringify(value);
+}
+
+/** 旧节名要当 YAML 一级键：ASCII 冒号会被本模块的 HEADING_RE 当成键值分界，换成中文冒号并说明。 */
+function yamlHeading(heading: string, warnings: string[]): string {
+  if (!heading.includes(':')) return plainSafe(heading) ? heading : JSON.stringify(heading);
+  const replaced = heading.replace(/:[ \t]*/g, '：').trim();
+  warnings.push(`旧节「${heading}」的标题里有 ASCII 冒号，已改用中文冒号保留为「${replaced}」：内容没有丢，节名请人工确认。`);
+  return plainSafe(replaced) ? replaced : JSON.stringify(replaced);
+}
+
+/** 一条目写成「键 + 一句话」；多条内容行写成键下的列表（行序保留）。 */
+function emitEntry(lines: string[], entry: LegacyEntry): void {
+  if (entry.key === '') {
+    // 没键的条目：每一行一个列表项（原文照搬，不硬造键）
+    for (const line of entry.content) lines.push(`  - ${yamlScalar(line)}`);
+    return;
+  }
+  if (entry.content.length === 1) {
+    lines.push(`  ${yamlScalar(entry.key)}: ${yamlScalar(entry.content[0] ?? '')}`);
+    return;
+  }
+  lines.push(`  ${yamlScalar(entry.key)}:`);
+  for (const line of entry.content) lines.push(`    - ${yamlScalar(line)}`);
+}
+
+/**
+ * 一节里的条目不能直接写进 YAML 映射的两个原因：没有键的条目会让映射与列表混在同一层
+ * （不是合法 YAML），重名键会互相覆盖（同名键只有最后一个生效）。这里统一补键/加序号，
+ * 并把改了什么写进 warning——内容一个字节都不动。
+ */
+function prepareEntries(entries: LegacyEntry[], label: string, warnings: string[]): LegacyEntry[] {
+  const out: LegacyEntry[] = [];
+  const seen = new Map<string, number>();
+  let unnamed = 0;
+  let duplicates = 0;
+  for (const entry of entries) {
+    let key = entry.key;
+    if (key === '') {
+      unnamed += 1;
+      key = unnamed === 1 ? '未命名条目' : `未命名条目（${unnamed}）`;
+    }
+    const count = seen.get(key) ?? 0;
+    seen.set(key, count + 1);
+    if (count > 0) {
+      duplicates += 1;
+      key = `${key}（${count + 1}）`;
+    }
+    out.push({ key, content: entry.content });
+  }
+  if (unnamed > 0) {
+    warnings.push(`「${label}」里有 ${unnamed} 条没有键的条目：已按「未命名条目 N」保留（内容原样；`
+      + '要按索引读请人工补键）。');
+  }
+  if (duplicates > 0) {
+    warnings.push(`「${label}」里有 ${duplicates} 个重名键：已加序号区分（YAML 同名键会互相覆盖，`
+      + '请人工合并或补键）。');
+  }
+  return out;
+}
+
+/** 空骨架：四节（科目记忆只有一节）都在、都没有内容——迁移后文件仍是这个模块认得的形状。 */
+function emptyMemoryYaml(kind: MemoryKind): string {
+  return `${MEMORY_SECTIONS[kind].map((heading) => `${heading}: {}`).join('\n')}\n`;
+}
+
+/** 旧格式迁移的产物：YAML 文本 + 需要人看一眼的地方 + 能不能自动迁移。 */
+export interface LegacyMemoryConversion {
+  /** 迁移后的 YAML（`migratable: false` 时是空串）。 */
+  yaml: string;
+  /** 迁移时不能机械转换、或做了并节的提示。**有 warning 也照常迁移**，只是让人复核。 */
+  warnings: string[];
+  /** 旧文件里有没有可识别的 `##` 分节。没有节、正文又不是空的 → false（不迁移，免得静默丢内容）。 */
+  migratable: boolean;
+  /** 迁移出来的节名（规范节在前、原样保留的旧节在后）。 */
+  sections: string[];
+}
+
+/**
+ * 把旧格式（`##` 分节 + bullet）的共享记忆机械地转成新 YAML。
+ *
+ * 转换规则（都为了「不静默丢」）：每节保留行序；`- 键：一句话` 变成 YAML 的「键: 值」，
+ * 键下缩进的子行变成键下的列表；没有键的 bullet/散文原样降级成列表项；`跨科目观察` 并进
+ * `积累`（#190 起后者取代前者）并给 warning；规范之外的旧节**原样保留为同名节**（不在注入
+ * 白名单里，内容仍可 grep）并给 warning。
+ */
+export function migrateLegacyMemory(kind: MemoryKind, text: string): LegacyMemoryConversion {
+  const parsed = parseLegacySections(text);
+  const canonical = MEMORY_SECTIONS[kind];
+  if (parsed.length === 0) {
+    if (text.trim() === '') {
+      return {
+        yaml: emptyMemoryYaml(kind),
+        warnings: ['旧文件是空的：已按新格式的空骨架迁移（四节都在、都没有内容）。'],
+        migratable: true,
+        sections: [...canonical],
+      };
+    }
+    return {
+      yaml: '',
+      warnings: ['旧文件里没有可识别的 `## 分节`：无法机械迁移，内容没有动（原文件保持原样）。请人工整理成新格式后再迁移。'],
+      migratable: false,
+      sections: [],
+    };
+  }
+
+  const warnings: string[] = [];
+  const buckets = new Map<string, LegacyEntry[]>();
+  const unknown: LegacySection[] = [];
+  for (const section of parsed) {
+    let heading = section.heading;
+    if (kind === 'shared' && heading === LEGACY_ACCUMULATION_HEADING) {
+      heading = ACCUMULATION_SECTION;
+      warnings.push(`旧节「${LEGACY_ACCUMULATION_HEADING}」已并入「${ACCUMULATION_SECTION}」：`
+        + '#190 起它被「积累」取代，条目键与行序原样保留，请人工复核（旧日期/短句成了键）。');
+    }
+    if (canonical.includes(heading)) {
+      buckets.set(heading, [...(buckets.get(heading) ?? []), ...section.entries]);
+    } else {
+      unknown.push(section);
+    }
+  }
+
+  const lines: string[] = [];
+  const emitted: string[] = [];
+  for (const heading of canonical) {
+    const entries = prepareEntries(buckets.get(heading) ?? [], heading, warnings);
+    if (entries.length === 0) {
+      lines.push(`${heading}: {}`);
+    } else {
+      lines.push(`${heading}:`);
+      for (const entry of entries) emitEntry(lines, entry);
+    }
+    emitted.push(heading);
+  }
+
+  const used = new Map<string, number>();
+  for (const section of unknown) {
+    let heading = yamlHeading(section.heading, warnings);
+    const seen = used.get(heading) ?? 0;
+    used.set(heading, seen + 1);
+    if (seen > 0) {
+      // YAML 里同名键只有最后一个生效：给后出现的几份加序号，不静默互相覆盖
+      const original = heading;
+      heading = `${original}（${seen + 1}）`;
+      warnings.push(`旧节「${original}」出现了 ${seen + 1} 次：已把后出现的几份保留为「${heading}」，`
+        + '请人工合成一节。');
+    }
+    warnings.push(`旧节「${section.heading}」不在四节规范内：已原样保留为同名节（不进任何上下文），`
+      + '需要长期保留请人工并进画像三节或「积累」。');
+    const entries = prepareEntries(section.entries, section.heading, warnings);
+    if (entries.length === 0) {
+      lines.push(`${heading}: {}`);
+    } else {
+      lines.push(`${heading}:`);
+      for (const entry of entries) emitEntry(lines, entry);
+    }
+    emitted.push(heading);
+  }
+
+  return { yaml: `${lines.join('\n')}\n`, warnings, migratable: true, sections: emitted };
+}
+
+/** 读侧兼容判读：新文件优先；只有旧文件时读旧格式并给「这是旧格式」的提示。 */
+export interface MemoryCompatRead {
+  view: MemoryFileView;
+  /** 交给下游的 YAML 文本：新文件原文，或旧文件转换后的 YAML；两份都没有是 `null`。 */
+  text: string | null;
+  /** 真读到的是旧格式 `MEMORY.md`（尚未迁移）。 */
+  legacy: boolean;
+  /** 旧格式转换的提示（并节/原样保留/无法迁移）。 */
+  warnings: string[];
+}
+
+/** 新名优先、旧名兜底的判读入口。写侧不存在「回退」：只写新文件。 */
+export function readMemoryWithLegacy(
+  kind: MemoryKind,
+  texts: { current?: string | null; legacy?: string | null } = {},
+): MemoryCompatRead {
+  if (typeof texts.current === 'string') {
+    return { view: readMemoryFile(kind, texts.current), text: texts.current, legacy: false, warnings: [] };
+  }
+  if (typeof texts.legacy === 'string') {
+    const conversion = migrateLegacyMemory(kind, texts.legacy);
+    if (!conversion.migratable) {
+      return { view: readMemoryFile(kind, null), text: null, legacy: true, warnings: conversion.warnings };
+    }
+    return {
+      view: readMemoryFile(kind, conversion.yaml),
+      text: conversion.yaml,
+      legacy: true,
+      warnings: conversion.warnings,
+    };
+  }
+  return { view: readMemoryFile(kind, null), text: null, legacy: false, warnings: [] };
 }
