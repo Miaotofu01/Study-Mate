@@ -545,7 +545,7 @@ const HOME_PROBE = `(() => {
     continueGo: text('.smb-continue__go'),
     continueEmpty: text('.smb-block .smb-empty'),
     progress: pbar ? { now: pbar.getAttribute('aria-valuenow'), max: pbar.getAttribute('aria-valuemax') } : null,
-    motionOptions: qa('.smb-select option').map((el) => el.value),
+    motionOptions: qa('.smb-motionpick .smb-select option').map((el) => el.value),
     layout: {
       wrapPaddingLeft: style('.smb-wrap', 'paddingLeft'),
       crumbMaxWidth: style('.smb-crumb', 'maxWidth'),
@@ -822,7 +822,7 @@ const CONTRAST_TARGETS = {
     ['.smb-course__stats span', '主页·三档计数'],
     ['.smb-chip', '主页·状态 chip'],
     ['.smb-crumb', '主页·面包屑'],
-    ['.smb-select', '顶栏·动效档选择器'],
+    ['.smb-motionpick .smb-select', '顶栏·动效档选择器'],
   ],
   subject: [
     ['.smb-subhead__goal', '科目页·目标'],
@@ -1814,7 +1814,7 @@ try {
     await ctx.navigate(fixture, { settle: 1200 });
     const read = `(() => {
       const root = document.querySelector('.smb-root');
-      const picker = document.querySelector('.smb-select');
+      const picker = document.querySelector('.smb-motionpick .smb-select');
       return {
         attr: root.getAttribute('data-motion'),
         token: getComputedStyle(root).getPropertyValue('--smb-motion').trim(),
@@ -1824,7 +1824,7 @@ try {
     })()`;
     const pickLevel = async (level) => {
       await ctx.evaluate(`(() => {
-        const select = document.querySelector('.smb-select');
+        const select = document.querySelector('.smb-motionpick .smb-select');
         select.value = '${level}';
         select.dispatchEvent(new Event('change', { bubbles: true }));
       })()`);
