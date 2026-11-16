@@ -40,6 +40,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { parseYaml } from './yaml.ts';
+import { removeTreeSync } from './fs-remove.mjs';
 
 const BEGIN = '# BEGIN STUDYMATE LEARNING PRESET';
 const END = '# END STUDYMATE LEARNING PRESET';
@@ -543,9 +544,10 @@ function atomicWrite(file: string, text: string): void {
     renamed = true;
   } finally {
     // rename 成功之后临时文件已经不存在了，不必再删一次。
-    // 而且这次「删一个已经不存在的临时文件」在 Node 24 + Windows + 中文路径下会直接把进程打崩
-    // （0xC0000005；同机 Node 22 不复现），中文用户名下安装器会整段静默失败。
-    if (!renamed) fs.rmSync(temporary, { force: true });
+    // 而且这次删除在 Node 24 + Windows + 中文路径下会出两种坏法：递归删目录直接崩
+    // （0xC0000005），非递归删**单个文件**则静默不删（返回成功、文件还在）。
+    // 所以一律走 removeTreeSync（逐层 unlink/rmdir，本机 Node 22/24 都验过）。
+    if (!renamed) removeTreeSync(temporary);
   }
 }
 
