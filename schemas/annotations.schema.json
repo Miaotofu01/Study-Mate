@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Annotations",
+  "description": "一个课件的标注数据（ADR-0015，即 ADR-0004 的「新增而非改动」破例 + ADR-0010 的作答数据族扩员）：`<科目>/annotations/<NNNN>-<节点id>.json`，与课件一一对应。学生在课件页划选正文留下的高亮与注释只落在这里，**绝不写回 .md / .quiz.json**——课件是模型写的、下次重写会整段覆盖；题库的锚点对账也依赖逐字内容。这是 ADR-0004 冻结的例外，但破法是**只新增**（新目录 + 新 schema）：不改任何已有文件名与内容、旧工作区没有 annotations/ 照样能开、零迁移。**版本号不在文件里**：它是读写两侧各自按文件内容算出来的（`lib/annotations.ts` 的 `annotationsVersion`），写之前先报自己看到的那个值当 `expectedVersion`，对不上就拒绝并重读。**块切分只由阅读端的 parseBlocks 说了算**（ADR-0015）：Host 半写入时不重新解析课件、读回也不解析，只做字节存储 + 版本栅栏（`operationId` 幂等 + `expectedVersion` 冲突拒绝）；range 指向的块是否还在，由客户端渲染时按 resolved / stale / ambiguous / missing 四态对账，**不由写入前的 Host 判据负责**。",
+  "type": "object",
+  "required": [
+    "节点",
+    "课件",
+    "最后写入",
+    "标"
+  ],
+  "properties": {
+    "节点": {
+      "type": "string",
+      "description": "节点 id（curriculum.yaml 的 nodes[].id），与课件一一对应"
+    },
+    "课件": {
+      "type": "string",
+      "description": "对应的课件文件名（<NNNN>-<节点id>.md），页面上按它回查"
+    },
+    "幂等键": {
+      "type": "string",
+      "description": "最近一次写入的 operationId。同一个 id 重放只回放上次回执、不写第二遍；落盘是为了跨进程对账（内存台账重启即失）"
+    },
+    "最后写入": {
+      "type": "string",
+      "description": "最近一次写入的时刻（ISO 8601）"
+    },
+    "标": {
+      "type": "object",
+      "description": "标注 id → 一条标注。一条标注 = 学生划选的若干段 + 一句注释；**一条标注可以跨块**（ranges 多项），块切分与区间都由客户端算好后交上来，Host 只存不改。整份是**全量替换**语义：创建、编辑、删除都靠一次写入表达，空对象 = 这条课件的标注已被清空。",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "id",
+          "note",
+          "ranges",
+          "created",
+          "modified"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "标注 id（与所属键相同，便于整条记录独立搬运）"
+          },
+          "note": {
+            "type": "string",
+            "description": "学生写的标注正文（纯文本）。允许空串——先划一段、回头补字是常态；Host 只 trim 首尾空白，不改写正文"
+          },
+          "ranges": {
+            "type": "array",
+            "minItems": 1,
+            "description": "标注覆盖的块与块内区间，至少一项（没划到东西就没有标注）。一条标注跨块时这里多项；Host 不合并、不重排、不按位置猜测哪一项对应哪个块。",
+            "items": {
+              "type": "object",
+              "required": [
+                "line",
+                "kind",
+                "hash",
+                "start",
+                "end"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "line": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "块所在的行号（1 起，指课件正文的行）：客户端 parseBlocks 切出来的块头位置"
+                },
+                "kind": {
+                  "type": "string",
+                  "description": "客户端块类型词表里的词（para / heading / quote / list / code / table / math / figure / callout / practice / resources / related / unknown 等）。词表归阅读端，Host 不校验这个词认得"
+                },
+                "hash": {
+                  "type": "string",
+                  "description": "块文本指纹（客户端按块内容算）。课件重写后拿它判这块变没变；Host 不重算、不校验它对应的块还在不在"
+                },
+                "start": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "块内字符区间的起点（码位偏移，0 起，含）"
+                },
+                "end": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "块内字符区间的终点（码位偏移，不含；必须 >= start）"
+                }
+              }
+            }
+          },
+          "created": {
+            "type": "string",
+            "description": "这条标注创建的时刻（ISO 8601）。由客户端给，Host 原样存——它不是写入时刻（最后写入 才是）"
+          },
+          "modified": {
+            "type": "string",
+            "description": "这条标注最近一次修改的时刻（ISO 8601）。只改 note 时由客户端更新它"
+          }
+        }
+      }
+    }
+  }
+}

@@ -275,6 +275,12 @@ const groups = {
       // 「POST 落盘 → 另起一次读仍带得回上次选了 X」（跨请求 = 刷新页面那条）、
       // 冲突拒绝不写盘、主观题自评落盘、题库逐字不变。
       'scripts/tests/test_host_attempts_route.mjs',
+      // #225 ③ / ADR-0015：课件页标注的 Host 半——annotations/ 的落盘形状、独立幂等台账、
+      // expectedVersion 冲突拒绝并重读、全量替换（创建/编辑/删除/清空）、路径越界；
+      // payload 的 node.annotations={present,version,items} 与监听域的 annotations 片；
+      // 以及写入口 POST /api/studymate/annotations 的注册形状与状态码映射。
+      'scripts/tests/test_host_annotations.mjs',
+      'scripts/tests/test_host_annotations_route.mjs',
       // 纯函数域 lib/core/**：内容格式的解析与锚点题库对账（格式只有一个真相）
       'scripts/tests/test_core_format.mjs',
       'scripts/tests/test_core_anchors.mjs',
@@ -307,6 +313,12 @@ const groups = {
       'scripts/tests/test_client_panes.mjs',
       // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
       'scripts/tests/test_client_reading_position.mjs',
+      // #225 ③ / ADR-0015：课件页标注的锚点内核（STUDY_ANNOTATE_KERNEL 标记夹住，零 DOM）与
+      // 渲染契约——parseBlocks 的绝对行号（含嵌套指令 body 的 baseLine）、块纯文本 + 哈希、
+      // 四态判定（多匹配不静默取第一个）、失效重指、多选拼引用；渲染那半边用 client_harness 的
+      // React 桩调真组件。真浏览器里划选、高亮覆盖层与刷新后仍在在 --browser 组的
+      // browser/annotations_test.mjs。
+      'scripts/tests/test_client_annotations.mjs',
       // #174 题干的可读性判定：缺 `q` 的题渲染占位而不是 `undefined.split` 把整个 slot 带走
       // （同样是切源码标记求值，不需要浏览器）。
       'scripts/tests/test_client_question_stem.mjs',
@@ -400,6 +412,11 @@ const groups = {
       'scripts/tests/test_export_leak_guard.mjs',
       'scripts/tests/test_export_tool_task.mjs',
       'scripts/tests/test_export_cli.mjs',
+      // #225 ⑤ / ADR-0015：导出产物的**标注只读快照**——真导出后 data.js 里
+      // `window.__STUDYMATE_EXPORT__.library.offline === true`、对应节点的 annotations 逐字
+      // 带出（items / ranges 与盘上一致）；产物里 studymate-client.js 仍与 lib/client.js
+      // 逐字相同（同一套渲染）、泄漏守卫干净；只读模式下列表/弹层的写入口不出现。
+      'scripts/tests/test_export_annotations.mjs',
       // #91 的 Host 半：随包发的 KaTeX dist（CSS ↔ 字体的双向对账、版本对账、精确 MIME）
       // 与它的投送路由（一条文件一条精确路由、路径落在 /api 之内、取址判据）。
       // 阅读端那一半（题库字段只接数学式、降级可读）在 test_client_math.mjs；
@@ -448,6 +465,10 @@ const groups = {
       'browser/reading_test.mjs',
       'browser/reading_position_test.mjs',
       'browser/attempts_test.mjs',
+      // #225 ③ / ADR-0015：课件页标注的真浏览器验收——划选正文 → 浮层里写注释 → 高亮覆盖层与
+      // 行内小标记出现 → 点开可读/可编辑/可删除；重新挂载（刷新）后从 payload 读回；原文改过后
+      // 显式 stale、不贴到错位置。夹具与 attempts_test.mjs 同一套（真 lib/client.js + 假 HTTP 宿主）。
+      'browser/annotations_test.mjs',
       // #74：真浏览器里「改文件 → 监听 → SSE → 页面自己更新（不刷新）」的端到端。
       // 其余几套测的是阅读端的静态面；这一套要的是**真的 EventSource**接我们那条流式 Response。
       'browser/watch_push_test.mjs',

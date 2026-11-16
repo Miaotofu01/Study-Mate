@@ -2,7 +2,7 @@
    StudyMate · 纯函数域 —— JSON Schema（Draft-07 最小子集）校验器
 
    为什么自己写：这个仓库是**零运行时依赖**的（`lib/yaml.ts` 顶部明说 Host 半装不进
-   npm 包），而 Python 侧那个 `jsonschema` 正随 Python 一起退场。`schemas/*.json` 六份
+   npm 包），而 Python 侧那个 `jsonschema` 正随 Python 一起退场。`schemas/*.json` 的每一份
    文档合计只用到 17 个关键字（见下面的枚举表），引一个通用实现换不来什么，反而把
    「零依赖」这条硬约束破掉。
 
@@ -17,7 +17,7 @@
 /** draft-07 里只是注解、对校验结果没有影响的关键字：读到就跳过，不算「未实现」。 */
 export const ANNOTATION_KEYWORDS: readonly string[] = ['$schema', 'title', 'description'];
 
-/** 本子集**实现**的断言关键字（六份 schema 实际用到的全集，逐个核对过）。 */
+/** 本子集**实现**的断言关键字（`schemas/*.json` 实际用到的全集，逐个核对过）。 */
 export const ASSERTION_KEYWORDS: readonly string[] = [
   'type', 'required', 'properties', 'items', 'additionalProperties',
   'enum', 'const', 'pattern', 'minLength', 'maxLength', 'minimum', 'maximum',
@@ -27,7 +27,7 @@ export const ASSERTION_KEYWORDS: readonly string[] = [
 /**
  * draft-07 里存在、但本子集**不实现**的关键字。写进 schema 会得到一条 `keyword` 等于它
  * 自己的问题（调用方按阻断处理），不会静默放行。替代方案：
- *   - `$ref` / `$defs` / `definitions`：把引用处**就地展开**（六份 schema 各自都很小，
+ *   - `$ref` / `$defs` / `definitions`：把引用处**就地展开**（每份 schema 都很小，
  *     展开后仍可读），或在调用方组装出展开后的 schema 再传进来。
  *   - `oneOf` / `anyOf` / `allOf` / `not` / `if`-`then`-`else`：改成显式的 `enum`+`const`
  *     组合；组合表达不了的（如「恰好满足其一」）留在领域校验器里用代码写，别塞进 schema。
