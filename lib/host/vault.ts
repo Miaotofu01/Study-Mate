@@ -417,16 +417,18 @@ export function createWorkspaceVault(): Vault {
 
       case 'memory': {
         const workspace = workspaceOrThrow(domain);
-        // 这里回的是**文件原文**（域的名分是「读这份文件」）；「哪几节能进上下文」的投影
-        // 在消费点做（`lib/tools/context.ts` 取三节，导出/备份这类用途要的是整份）。
-        // 旧工作区只有改名前的共享记忆文件时按旧格式读（转换在纯函数域，选哪份文件在
-        // memory-file.ts），`legacy` 让摘要工具能就地把「请迁移」提示给学生。
+        // 这里回的是**读到的正文**：新格式就是文件原文；迁移期旧文件回的是**转换结果**
+        // （`file` 指旧名，`unreadable` 说明连分节都认不出来、注入的会是空串）。
+        // 「哪几节能进上下文」的投影在消费点做（`lib/tools/context.ts` 取三节，导出/备份
+        // 这类用途要的是整份）。旧工作区只有改名前的共享记忆文件时按旧格式读（转换在纯函数域，
+        // 选哪份文件在 memory-file.ts），`legacy` 让摘要工具能就地把「请迁移」提示给学生。
         const read = readSharedMemory(workspace);
         return {
           file: read.file,
           present: read.present,
           markdown: read.text ?? '',
           legacy: read.legacy,
+          unreadable: read.unreadable,
         };
       }
 

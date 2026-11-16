@@ -31,6 +31,8 @@ export interface SharedMemoryRead {
   text: string | null;
   /** 真读到的是旧格式 `MEMORY.md`（尚未迁移）。 */
   legacy: boolean;
+  /** 旧格式且连 `##` 分节都认不出来：文件在、内容还在，但**读不出来**（不是「内容为空」）。 */
+  unreadable: boolean;
   /** 旧格式转换的提示（并节/原样保留/无法迁移）。 */
   warnings: string[];
   /** 判读结果。 */
@@ -40,10 +42,22 @@ export interface SharedMemoryRead {
 /** 已经提示过旧格式的文件：每个进程只提醒一次，别让每次开面板/每次读载荷都刷一行。 */
 const warnedLegacy = new Set<string>();
 
-/** 旧格式的提示语：给日志（与工作区摘要的 notes）用同一句。 */
+/** 旧格式、能机械迁移时的提示语：给日志（与工作区摘要的 notes）用同一句。 */
 export function legacyMemoryNotice(file: string): string {
-  return `共享记忆还是旧格式（${file}）：已按旧格式读取，内容不丢。`
+  return `共享记忆还是旧格式（${file}）：已按旧格式读取，规范内的分节照常生效。`
     + '运行 npx -y @yunmiao/studymate@latest migrate 可一次性迁移成 MEMORY.yaml（幂等；旧文件会改名备份）。';
+}
+
+/**
+ * 旧格式、但**没有 `##` 分节**（转换不出任何一节）时的提示语。
+ *
+ * 这种盘面下 `readSharedMemory` 的 `text` 是 `null`、注入的是空串——文件在、内容还在，
+ * 但一个字都读不出来。此时还说「内容不丢」就是骗人：学生以为它在上下文里。
+ */
+export function legacyUnreadableNotice(file: string): string {
+  return `共享记忆还是旧格式（${file}）：旧文件里没有可识别的 \`## 分节\`，读不出来`
+    + '（内容还在盘上，不是丢了）。先跑 npx -y @yunmiao/studymate@latest migrate --dry-run 看报告，'
+    + '再按报告手工整理，或把能识别的部分搬进 MEMORY.yaml。';
 }
 
 /** 读文本；文件不在（ENOENT/EISDIR/ENOTDIR）返回 `null`，别的读盘故障照旧抛。 */
@@ -68,27 +82,37 @@ export function readSharedMemory(workspace: string, options: { warn?: boolean } 
   const current = readTextIfPresent(currentFile);
   if (current !== null) {
     const compat = readMemoryWithLegacy('shared', { current });
-    return { file: currentFile, present: true, text: current, legacy: false, warnings: [], view: compat.view };
+    return {
+      file: currentFile, present: true, text: current, legacy: false, unreadable: false,
+      warnings: [], view: compat.view,
+    };
   }
 
   const legacyFile = path.join(learningDir, LEGACY_MEMORY_FILE);
   const legacy = readTextIfPresent(legacyFile);
   if (legacy !== null) {
     const compat = readMemoryWithLegacy('shared', { legacy });
+    // 转换不出任何一节 = 读不出来。这时不许再说「内容不丢」——说清楚读不出来，
+    // 才和 `text: null` / 注入空串的实际行为对得上。
+    const unreadable = compat.text === null;
     if (options.warn !== false && !warnedLegacy.has(legacyFile)) {
       warnedLegacy.add(legacyFile);
-      console.warn(legacyMemoryNotice(legacyFile));
+      console.warn(unreadable ? legacyUnreadableNotice(legacyFile) : legacyMemoryNotice(legacyFile));
     }
     return {
       file: legacyFile,
       present: true,
       text: compat.text,
       legacy: true,
+      unreadable,
       warnings: compat.warnings,
       view: compat.view,
     };
   }
 
   const compat = readMemoryWithLegacy('shared', {});
-  return { file: currentFile, present: false, text: null, legacy: false, warnings: [], view: compat.view };
+  return {
+    file: currentFile, present: false, text: null, legacy: false, unreadable: false,
+    warnings: [], view: compat.view,
+  };
 }

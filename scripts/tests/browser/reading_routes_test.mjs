@@ -545,7 +545,7 @@ const HOME_PROBE = `(() => {
     continueGo: text('.smb-continue__go'),
     continueEmpty: text('.smb-block .smb-empty'),
     progress: pbar ? { now: pbar.getAttribute('aria-valuenow'), max: pbar.getAttribute('aria-valuemax') } : null,
-    motionOptions: qa('.smb-select option').map((el) => el.value),
+    motionOptions: qa('.smb-motionpick .smb-select option').map((el) => el.value),
     layout: {
       wrapPaddingLeft: style('.smb-wrap', 'paddingLeft'),
       crumbMaxWidth: style('.smb-crumb', 'maxWidth'),
@@ -822,7 +822,7 @@ const CONTRAST_TARGETS = {
     ['.smb-course__stats span', '主页·三档计数'],
     ['.smb-chip', '主页·状态 chip'],
     ['.smb-crumb', '主页·面包屑'],
-    ['.smb-select', '顶栏·动效档选择器'],
+    ['.smb-motionpick .smb-select', '顶栏·动效档选择器'],
   ],
   subject: [
     ['.smb-subhead__goal', '科目页·目标'],
@@ -1814,7 +1814,7 @@ try {
     await ctx.navigate(fixture, { settle: 1200 });
     const read = `(() => {
       const root = document.querySelector('.smb-root');
-      const picker = document.querySelector('.smb-select');
+      const picker = document.querySelector('.smb-motionpick .smb-select');
       return {
         attr: root.getAttribute('data-motion'),
         token: getComputedStyle(root).getPropertyValue('--smb-motion').trim(),
@@ -1824,7 +1824,7 @@ try {
     })()`;
     const pickLevel = async (level) => {
       await ctx.evaluate(`(() => {
-        const select = document.querySelector('.smb-select');
+        const select = document.querySelector('.smb-motionpick .smb-select');
         select.value = '${level}';
         select.dispatchEvent(new Event('change', { bubbles: true }));
       })()`);
@@ -1832,6 +1832,13 @@ try {
       return ctx.evaluate(read);
     };
     const ms = (token) => parseFloat(String(token)) * (/ms\s*$/.test(String(token)) ? 1 : 1000);
+
+    // 先把「系统偏好」显式模拟成 no-preference，再读 auto 档：`auto` 的取值按设计就跟随
+    // `prefers-reduced-motion`，而宿主的默认偏好不是常量——同一份代码在验证机 CUPC 的桌面
+    // 会话下，Edge 默认就报 `reduce`（auto 于是拿 70ms），在普通桌面上才是 `no-preference`
+    // （140ms）。不断言宿主默认，断言产品在给定偏好下的行为；reduce 那一支在下面单独模拟。
+    await session.emulate({ reducedMotion: 'no-preference' });
+    await ctx.sleep(200);
 
     const seen = { auto: await ctx.evaluate(read) };
     check('[动效] 四档齐全',

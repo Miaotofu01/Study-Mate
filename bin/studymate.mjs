@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { moveIntoPlace } from './fs-swap.mjs';
+import { removeTreeSync } from '../lib/fs-remove.mjs';
 import { adaptSkill } from './skill-compat.mjs';
 import { buildOpenAiPlugin } from './openai-plugin.mjs';
 import { buildAntigravityPlugin } from './antigravity-plugin.mjs';
@@ -468,7 +469,7 @@ export function installPayload({ workspaceArg, profile, version, desktop = false
   } catch (error) {
     try {
       for (const change of replacements.reverse()) {
-        if (change.installed) fs.rmSync(change.target, { recursive: true, force: true });
+        if (change.installed) removeTreeSync(change.target);
         if (change.existed) moveIntoPlace(change.backup, change.target);
       }
     } catch (rollbackError) {
@@ -477,7 +478,7 @@ export function installPayload({ workspaceArg, profile, version, desktop = false
     }
     throw error;
   } finally {
-    if (!preserveStaging) fs.rmSync(staging, { recursive: true, force: true });
+    if (!preserveStaging) removeTreeSync(staging);
   }
   // `engine` 报的是**这次的引擎实际落在哪**（原生加载 = 包自身），调用方照这个值提示用户
   return { registration, engine: payload, preset, configFile, workspace: config.workspace, profile };
@@ -519,20 +520,24 @@ export function parseExportArgs(args) {
   return options;
 }
 
+/** `studymate migrate` 的用法行：参数解析与 `--help` 都印这一句，别写两份。 */
+const MIGRATE_USAGE = '用法：studymate migrate [--workspace <目录>] [--dry-run] [--json]';
+
 /**
  * `studymate migrate` 的参数：把旧工作区的共享记忆迁成新格式（实现与四条承诺在
  * `lib/memory-migrate.ts`，这里只解析）。`--dry-run` 先看产物不落盘。
  */
 export function parseMigrateArgs(args) {
-  const usage = '用法：studymate migrate [--workspace <目录>] [--dry-run] [--json]';
   const options = {};
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
+    // 子命令的 `--help` 也是正常用法：印用法、退 0，别报「不支持的参数」。
+    if (flag === '--help' || flag === '-h') { options.help = true; continue; }
     if (flag === '--dry-run') { options.dryRun = true; continue; }
     if (flag === '--json') { options.json = true; continue; }
     const value = args[i + 1];
     if (flag !== '--workspace' || !value || value.startsWith('--')) {
-      throw new Error(`不支持的参数：${args.join(' ')}\n${usage}`);
+      throw new Error(`不支持的参数：${args.join(' ')}\n${MIGRATE_USAGE}`);
     }
     i += 1;
     options.workspace = value;
@@ -546,9 +551,14 @@ export async function main(args = process.argv.slice(2)) {
     else if (args.length === 1 && ['--version', '-v'].includes(args[0])) console.log(metadata.version);
     else if (args[0] === 'migrate') {
       const options = parseMigrateArgs(args.slice(1));
-      // 动态 import：`install` / 构建不该被记忆迁移那一套拖进来（与 export 同一条纪律）。
-      const { migrateCommand } = await import('../lib/memory-migrate.ts');
-      process.exitCode = migrateCommand(options);
+      if (options.help === true) {
+        console.log(MIGRATE_USAGE);
+        process.exitCode = 0;
+      } else {
+        // 动态 import：`install` / 构建不该被记忆迁移那一套拖进来（与 export 同一条纪律）。
+        const { migrateCommand } = await import('../lib/memory-migrate.ts');
+        process.exitCode = migrateCommand(options);
+      }
     }
     else if (args[0] === 'export') {
       const options = parseExportArgs(args.slice(1));

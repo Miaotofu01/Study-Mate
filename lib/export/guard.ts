@@ -13,10 +13,10 @@
 
      page（index.html / host.js / boot.js；根与科目子目录里的都算）
          全规则扫。这几个文件是浏览器要执行的，出现 Node 专用东西一定是漏了。
-     client（studymate-client.js，任意深度）
+     client（根目录的，或同目录带 export.json 的那一份）
          **不按模式扫**：它是仓库里 `lib/client.js` 的逐字拷贝，`factory(require)` 是宿主模块
          加载器的契约（理由的完整版见 `plan.ts` 的 `ProductRole`）。根目录那一份按哈希核对。
-     data（data.js，任意深度）
+     data（根目录的，或同目录带 export.json 的那一份）
          只扫**载荷之前那一段**（`window.__STUDYMATE_EXPORT__ = ` 之前的注释与赋值）。
          载荷是 JSON，里面出现的 require 调用是课件正文（讲 Node 的那一课、代码块里的示例），
          拿它判失败是假阳性——它的角色是数据，只会被 JSON.parse，不会被执行。
@@ -31,6 +31,12 @@
          壳被改过就切不出内容，篡改立刻暴露。
      asset（assets/** 下的一切，以及 pdf / 图片 / 字体 / 压缩包这类二进制扩展名）
          二进制，不扫。
+
+   **同名不等于就是产物**：子目录里的 `client` / `data` 只在该目录自己有 `export.json`（也就是
+   一份完整导出）时按产物判；否则留在 `page`。学生往导出目录里随手放的 `lessons/data.js`、
+   `vendor/README.txt` 于是仍按页面扫——按名字硬判会反过来造出新的误报：data 角色缺载荷标记
+   报 `data-payload`、vendor 角色切不出包装壳报 `vendor-wrapper`。`vendor` 也只认 `.js`：
+   README / LICENSE 这类本来就不套包装壳。
 
    为什么二进制扩展名按 asset 算：PDF（多科目导出目录里常见的样张、学生自己放的材料）、图片、
    字体、压缩包都不是导出器写的文本产物，是原样拷贝的资料；读成 utf8 只会得到乱码，拿规则去扫
@@ -295,23 +301,39 @@ function hasDirSegment(rel: string, name: string): boolean {
   return segments.includes(name);
 }
 
+/** 一条相对路径所在目录（导出根自己算空串）。 */
+function dirOf(rel: string): string {
+  const cut = rel.lastIndexOf('/');
+  return cut === -1 ? '' : rel.slice(0, cut);
+}
+
 /**
- * 产物角色：按**任意深度**的同名产物判。
+ * 产物角色：按**同名的产物**判，但 `client` / `data` 认到子目录时必须先证明那儿是一份导出。
  *
  * 导出目录里可以再套一份完整导出（多科目导出树：`<科目>/index.html`、`<科目>/vendor/…`、
- * `<科目>/export.json` 与根目录是同一套产物）。角色只跟「文件名 + 路径段」有关，跟它在第几层
- * 无关——只看根目录会让子目录里的 client / vendor / data / manifest 落到 `page` 全规则扫，
- * 把必然假阳性的 CommonJS 模块加载 / `process.` / `module.exports` 报成泄漏。
+ * `<科目>/export.json` 与根目录是同一套产物）。这些同名产物要按各自角色判，否则子目录里的
+ * client / vendor / data 会落到 `page` 全规则扫，把必然假阳性的 CommonJS 模块加载 / `process.` /
+ * `module.exports` 报成泄漏。
+ *
+ * 但「同名」不等于「就是产物」：学生往导出目录里随手放一份 `lessons/data.js` 或
+ * `vendor/README.txt`，按名字硬判会把它们当成产物——data 角色缺载荷标记就报 `data-payload`、
+ * vendor 角色切不出包装壳就报 `vendor-wrapper`，误报只是换了个方向。所以：
+ *   · 根目录的 `studymate-client.js` / `data.js` 无条件按产物判（根就是一份导出）；
+ *   · 子目录里的，必须**同目录有 `export.json`**（完整导出的清单）才按产物判，否则留在 `page`；
+ *   · `vendor` 只认 `.js`（第三方构建是 JS；README / LICENSE 这类不套包装壳核对）；
+ *   · `export.json` 任意深度都按 `manifest` 判（清单本身只过「机器路径」一条，判错也不伤）。
  */
-function roleOf(rel: string): ProductRole {
+function roleOf(rel: string, exportRoots: ReadonlySet<string>): ProductRole {
   const base = rel.slice(rel.lastIndexOf('/') + 1);
   // 二进制先判：读成 utf8 只会得到乱码，扫出来的东西没有意义（PDF 见文件头）。
   if (BINARY_EXTENSIONS.has(path.posix.extname(base).toLowerCase())) return 'asset';
   if (hasDirSegment(rel, ASSETS_DIR)) return 'asset';
-  if (hasDirSegment(rel, VENDOR_DIR)) return 'vendor';
-  if (base === CLIENT_FILE) return 'client';
-  if (base === DATA_FILE) return 'data';
   if (base === MANIFEST_FILE) return 'manifest';
+  if (hasDirSegment(rel, VENDOR_DIR) && path.posix.extname(base).toLowerCase() === '.js') return 'vendor';
+  if (base === CLIENT_FILE || base === DATA_FILE) {
+    const dir = dirOf(rel);
+    if (dir === '' || exportRoots.has(dir)) return base === CLIENT_FILE ? 'client' : 'data';
+  }
   return 'page';
 }
 
@@ -328,8 +350,13 @@ function listFiles(dir: string, prefix = ''): string[] {
 /** 从盘上读一份导出目录（守卫的构建期入口用它，测试也用它）。 */
 export function readExportDir(dir: string): { files: GuardFile[]; manifest: ExportManifest | null } {
   const files: GuardFile[] = [];
-  for (const rel of listFiles(dir)) {
-    const role = roleOf(rel);
+  const rels = listFiles(dir);
+  // 哪些目录是一份完整导出（自己带 export.json）：只有这些目录里的同名产物才按产物角色判。
+  const exportRoots = new Set(
+    rels.filter((rel) => rel.slice(rel.lastIndexOf('/') + 1) === MANIFEST_FILE).map(dirOf),
+  );
+  for (const rel of rels) {
+    const role = roleOf(rel, exportRoots);
     const full = path.join(dir, rel);
     files.push(role === 'asset' ? { path: rel, role } : { path: rel, role, text: fs.readFileSync(full, 'utf8') });
   }

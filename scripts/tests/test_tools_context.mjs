@@ -163,6 +163,21 @@ test('2.0.4 迁移期 摘要：只有旧名那份文件时照读画像三节，�
   assert.match(note, /migrate/);
 });
 
+test('2.0.4 迁移期 摘要：旧文件没有 `##` 分节时明说读不出来，不说内容不丢', async (t) => {
+  const f = withTools(t);
+  fs.writeFileSync(path.join(f.workspace, '.learning', 'MEMORY.md'), '只有一段散文，没有 `##` 分节。\n');
+
+  const value = await execute(f.ctx, 'studymate_workspace_context', {});
+  await assertOutput(assert, f.ctx.definitions.get('studymate_workspace_context'), value);
+
+  assert.equal(value.memory.present, true, '旧文件在盘上，`present` 照实为 true');
+  assert.equal(value.memory.markdown, '', '读不出来：注入是空串');
+  const note = value.notes.find((one) => one.includes('旧格式'));
+  assert.ok(note, `notes 里缺旧格式提示：${JSON.stringify(value.notes)}`);
+  assert.match(note, /读不出来/, '要说明读不出来，别让学生以为已经在上下文里');
+  assert.equal(note.includes('内容不丢'), false, '这种盘面下「内容不丢」是错的');
+});
+
 /** #191 科目记忆：只对这门课成立的做法与事实（科目目录下那份）。用词在共享记忆里一次都不
     出现——否定断言不会因为共用词而假阳性。 */
 const SUBJECT_MEMORY_YAML = [
