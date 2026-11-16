@@ -249,7 +249,7 @@ test('科目与节点的键名是页面依赖的契约，逐个钉住', () => {
 
   const [node] = subject.nodes;
   assert.deepEqual(Object.keys(node).sort(), [
-    'anchors', 'attempts', 'concepts', 'id', 'kind', 'lab', 'lesson', 'lesson_md', 'level',
+    'anchors', 'annotations', 'attempts', 'concepts', 'id', 'kind', 'lab', 'lesson', 'lesson_md', 'level',
     'notes', 'number', 'objective', 'orphan_keys', 'orphans', 'pitfalls', 'pool', 'practice',
     'prerequisites', 'problem', 'question_kinds', 'raw_status', 'realworld', 'resources', 'tier',
     'title',

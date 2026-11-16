@@ -48,6 +48,11 @@ import { normalizeMisconceptions, misconceptionIssues as misconceptionIssuesOf }
 import type { Misconception } from './core/misconceptions.ts';
 // 作答数据（attempts/<NNNN>-<节点id>.json）与课件一一对应，绝不写回题库（ADR-0007）
 import { readAttempts, attemptsVersion } from './attempts.ts';
+// 课件页标注（annotations/<NNNN>-<节点id>.json）与 attempts 是**同一族**（ADR-0015）：
+// 同为学生对内容的反应、同为派生记录、同一个栅栏（operationId 幂等 + expectedVersion）。
+// 这里只读它、挂进 payload；写路径归 lib/annotations.ts（阅读端走 POST 路由）。
+import { readAnnotations, annotationsVersion } from './annotations.ts';
+import type { Annotation } from './annotations.ts';
 
 /* ── 形状 ──────────────────────────────────────────────────────────────────
    这一份 JSON 是与阅读端（lib/client.js）之间的契约：字段名、层级、空值口径都按它走。
@@ -117,6 +122,8 @@ interface SubjectNode {
   question_kinds: PoolKindIssue[];
   /** 这个节点的作答数据（attempts/<NNNN>-<节点id>.json）；没作答过就是空 */
   attempts: AttemptsView;
+  /** 这个节点的课件页标注（annotations/<NNNN>-<节点id>.json）；没标过就是空 */
+  annotations: AnnotationsView;
   lab: Lab | null;
 }
 
@@ -128,6 +135,22 @@ interface AttemptsView {
   version: string;
   /** 题 id（<锚点文本>#<题号>）→ 这道题的作答记录 */
   questions: Record<string, unknown>;
+}
+
+/**
+ * 阅读端要的标注数据（ADR-0015）：课件页把高亮与注释贴回正文时用。
+ *
+ * 与 `AttemptsView` 同一口径：`present` 区分「没标过」与「读不到」，`version` 是写回时
+ * 要带上的栅栏。标注**按 id 排序**给出去——对象键的顺序在 JSON 里不是契约，界面要稳定
+ * 就由这里定序。Host 不在这里判 range 指向的块还在不在（块切分只由客户端说了算）。
+ */
+interface AnnotationsView {
+  /** 文件在不在——界面据此区分「没标过」与「读不到」 */
+  present: boolean;
+  /** 写回时把它当 expectedVersion 带上来 */
+  version: string;
+  /** 当前全部标注，按 id 升序 */
+  items: Annotation[];
 }
 
 /** 一份科目的 payload。 */
@@ -539,6 +562,11 @@ function buildSubject(subjectDir: string, dirName: string, workspace: string): S
     const attempt = lessonFile === null
       ? null
       : readAttempts({ workspace, subject: slug, node: nodeId });
+    // 课件页标注：与 attempts 是同一族（ADR-0015），同样只读、坏了不抛。每个节点只走一次
+    // 读取（读不到时再取一次空基线版本号——第一次标注要带上它，不能是空串）。
+    const annotated = lessonFile === null
+      ? null
+      : readAnnotations({ workspace, subject: slug, node: nodeId });
 
     const run = (Object.hasOwn(progressNodes, nodeId) ? progressNodes[nodeId] : null) || {};
     // progress 只记有变化的节点，没写的按大纲里的初始快照算
@@ -576,6 +604,16 @@ function buildSubject(subjectDir: string, dirName: string, workspace: string): S
           ? attemptsVersion({ workspace, subject: slug, node: nodeId })
           : attempt.version,
         questions: attempt === null ? {} : attempt.data.题,
+      },
+      // 标注按 id 升序：对象键序不是契约，界面要稳定就由这里定序（与 attempts 的题 id 同一口径）
+      annotations: {
+        present: annotated !== null,
+        version: annotated === null
+          ? annotationsVersion({ workspace, subject: slug, node: nodeId })
+          : annotated.version,
+        items: annotated === null
+          ? []
+          : Object.values(annotated.data.标).sort((a, b) => cmpCodePoints(a.id, b.id)),
       },
       lab: readLab(path.join(subjectDir, 'lab'), number),
     });

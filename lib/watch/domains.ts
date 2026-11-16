@@ -44,6 +44,9 @@ export const WATCH_DOMAINS = [
   'lesson',
   'pool',
   'attempts',
+  // <科目>/annotations/ —— 课件页标注（ADR-0015，与 attempts 同族）：页面收到它就重取
+  // 那份 payload 里的 `node.annotations`；与 attempts 一样自成一域，不并进 lesson。
+  'annotations',
   'records',
   'reference',
   'lab',
@@ -67,6 +70,8 @@ function segments(relative: string): string[] {
 const SUBDIRECTORIES: Record<string, WatchDomain> = {
   lessons: 'lesson',
   attempts: 'attempts',
+  // 课件页标注（ADR-0015）：与 attempts 同族、同一个 payload 消费点，所以同样自成一域
+  annotations: 'annotations',
   'learning-records': 'records',
   reference: 'reference',
   lab: 'lab',

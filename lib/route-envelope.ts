@@ -35,7 +35,7 @@
  * 一个没有任何路由会回的错误分支写代码。
  */
 export const ROUTE_ERROR_CODES = [
-  'body-invalid', 'evidence-invalid', 'expected-version-required',
+  'annotations-invalid', 'body-invalid', 'evidence-invalid', 'expected-version-required',
   'file-shape-unknown', 'http-error', 'internal', 'lesson-missing', 'markdown-invalid',
   'method-not-allowed', 'model-unavailable', 'name-conflict',
   'network', 'no-workspace', 'node-invalid', 'operation-id-conflict', 'operation-id-invalid',
