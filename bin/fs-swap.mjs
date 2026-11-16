@@ -7,6 +7,7 @@
    慢一点但不会把安装 / 构建直接失败掉。 */
 
 import fs from 'node:fs';
+import { removeTreeSync } from '../lib/fs-remove.mjs';
 
 /** 值得退化重试的失败码。ENOENT 不在此列：那是路径写错了，退化只会把真 bug 藏起来。 */
 const FALLBACK_CODES = new Set(['EPERM', 'EACCES', 'EBUSY', 'EXDEV', 'ENOTEMPTY', 'EEXIST']);
@@ -22,13 +23,15 @@ export function moveIntoPlace(from, to) {
   } catch (error) {
     if (!FALLBACK_CODES.has(error?.code)) throw error;
     // 目标还在（Windows 不允许用 rename 顶掉一个已存在的目录）→ 先清干净再复制。
-    fs.rmSync(to, { recursive: true, force: true });
+    // 清目录用 removeTreeSync 而不是 fs.rmSync：后者在 Node 24 + Windows + 非 ASCII 路径上
+    // 会把进程直接打死（0xC0000005），详见 lib/fs-remove.mjs 的注释。
+    removeTreeSync(to);
     // `filter` 不是为了过滤，是为了**绕开 Node 的 Windows 原生拷贝快路径**：不带 filter 时，
     // 目标路径只要含非 UTF-8 字符（中文用户名、带重音的目录名）就静默一个文件都不拷，
     // 偶尔还直接 0xC0000005 崩掉（nodejs/node#59636）。恒真的 filter 强制走 JS 实现。
     // 仓库里 `bin/studymate.mjs` 的 copyPayload 也是这么绕的，改的时候两处一起看。
     fs.cpSync(from, to, { recursive: true, force: true, filter: () => true });
-    fs.rmSync(from, { recursive: true, force: true });
+    removeTreeSync(from);
     return 'copy';
   }
 }
