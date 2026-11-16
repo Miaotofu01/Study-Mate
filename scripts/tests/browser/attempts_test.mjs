@@ -146,6 +146,7 @@ async function startHost(workspace) {
   });
   const route = routes[0];
   const posts = [];
+  const eventClients = new Set();
   const html = fixtureHtml();
 
   const server = http.createServer(async (req, res) => {
@@ -175,8 +176,9 @@ async function startHost(workspace) {
         // 重取，不会干扰「只发了一笔 POST」与作答计数那几条断言。
         // 真通道的形状与两条推送路在 watch_push_test.mjs 与真 DSH 探针里验。
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
-        res.write(': studymate 夹具：变更推送不在这一套的验收面上\n\n');
-        res.on('close', () => { if (!res.writableEnded) res.end(); });
+        res.write(': studymate 夹具：变更推送默认不推数据（#213 的竞态场景会手动推一条）\n\n');
+        eventClients.add(res);
+        res.on('close', () => { eventClients.delete(res); if (!res.writableEnded) res.end(); });
         return;
       }
       if (url.pathname === '/api/studymate/attempts') {
@@ -196,7 +198,16 @@ async function startHost(workspace) {
     }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  return { server, posts, port: server.address().port, close: () => new Promise((r) => server.close(r)) };
+  return {
+    server, posts, port: server.address().port,
+    // 模拟「另一个标签页刚写过盘」：推一条真实形状的变更通知，让本页静默重读 payload
+    push: (notice) => {
+      const frame = 'data: ' + JSON.stringify(notice || { kind: 'changed' }) + '\n\n';
+      for (const res of eventClients) res.write(frame);
+      return eventClients.size;
+    },
+    close: () => new Promise((r) => server.close(r)),
+  };
 }
 
 /* ── 页面里的探针 ──────────────────────────────────────────────────────── */
@@ -299,7 +310,166 @@ try {
     return { review: seen.review, answered: seen.qsum };
   });
 
-  /* 3. 另一个写入者改过之后再作答：拒绝 → 重读 → 重来一次 → 如实说 */
+  /* 3. #213 主观题：受控草稿落盘 → 切 tab 不丢 → 刷新还在 → 自评快照 → 带进答疑 */
+  await session.scene('attempts-subjective-draft', async (ctx) => {
+    const ANSWER = '我先写下的作答：先解析名字，再求值参数。';
+    const SUBJECTIVE = ANCHOR + '#1';
+    await openLesson(ctx);
+
+    const typed = await ctx.evaluate(`(() => {
+      const ta = document.querySelector('[data-proto="subjective-answer"]');
+      if (!ta) return 'no-textarea';
+      ta.value = ${JSON.stringify(ANSWER)};
+      ta.dispatchEvent(new Event('change', { bubbles: true }));
+      return 'ok';
+    })()`);
+    check('主观题只有一个受控输入框（三种题型共用它）', typed === 'ok', String(typed));
+    await ctx.sleep(1300);   // 900ms 防抖 + 一笔写请求
+
+    check('只打字不自评：草稿落进顶层 草稿，不建题条目、不动作答历史',
+      fs.existsSync(attemptsFile)
+      && readAttempts()['草稿'] && readAttempts()['草稿'][SUBJECTIVE]
+      && readAttempts()['草稿'][SUBJECTIVE]['文本'] === ANSWER
+      && !readAttempts()['题'][SUBJECTIVE],
+      fs.existsSync(attemptsFile) ? JSON.stringify({ 草稿: readAttempts()['草稿'], 题: Object.keys(readAttempts()['题'] || {}) }) : '文件不在');
+    const answered = await ctx.evaluate(`(() => (document.querySelector('.smb-qsum .smb-meta') || {}).textContent || '')()`);
+    check('「已作答 N/M」不被草稿污染（仍是 1 / 2）', /作答 1 \/ 2/.test(answered), answered);
+
+    // 切到「问答」再切回「题目」：右栏卸载重挂，文本仍在（受控值来自顶部 drafts 状态）
+    await ctx.evaluate(`document.querySelector('[data-proto="tab-ask"]').click()`);
+    await ctx.sleep(300);
+    await ctx.evaluate(`document.querySelector('[data-proto="tab-quiz"]').click()`);
+    await ctx.sleep(300);
+    const afterTabs = await ctx.evaluate(`(() => {
+      const ta = document.querySelector('[data-proto="subjective-answer"]');
+      const meta = document.querySelector('[data-proto="answer-time"]');
+      return { value: ta ? ta.value : null, meta: meta ? meta.textContent.trim() : null };
+    })()`);
+    check('切 tab 之后文本还在（不是 local state 被卸载）', afterTabs.value === ANSWER, JSON.stringify(afterTabs));
+    check('卡片上显示上次作答时间（草稿回执里的「时」）', !!afterTabs.meta && /上次作答：\d{2}-\d{2} \d{2}:\d{2}/.test(afterTabs.meta), String(afterTabs.meta));
+
+    // 展开参考内容：输入框不丢字
+    const opened = await ctx.evaluate(`(() => {
+      const one = Array.from(document.querySelectorAll('button')).find((b) => /^展开参考/.test(b.textContent.trim()));
+      if (one) one.click();
+      return one ? one.textContent.trim() : null;
+    })()`);
+    await ctx.sleep(250);
+    const afterOpen = await ctx.evaluate(`(document.querySelector('[data-proto="subjective-answer"]') || {}).value || ''`);
+    check('展开参考内容之后文本不丢', !!opened && afterOpen === ANSWER, JSON.stringify({ opened, value: afterOpen.slice(0, 40) }));
+
+    // 自评：文本作为快照进历史条目（这是离散动作，允许进 作答历史）
+    const postsBefore = host.posts.length;
+    const hit = await ctx.evaluate(`(() => {
+      const all = Array.from(document.querySelectorAll('button'));
+      const one = all.find((b) => b.textContent.trim() === '答了一半');
+      if (!one) return { found: false, labels: all.map((b) => b.textContent.trim()).filter((t) => t.includes('答')) };
+      one.click();
+      return { found: true };
+    })()`);
+    check('展开参考内容之后找得到三档自评按钮', hit.found === true, JSON.stringify(hit));
+    await ctx.sleep(1100);
+    check('自评发出一笔写请求', host.posts.length === postsBefore + 1,
+      JSON.stringify(host.posts.slice(postsBefore).map((p) => ({ status: p.status, body: p.body && p.body.error }))));
+    const onDisk = readAttempts();
+    const entry = onDisk['题'][SUBJECTIVE] && onDisk['题'][SUBJECTIVE]['作答历史'].slice(-1)[0];
+    check('自评之后：历史 +1、条目带 作答、上次结果同步',
+      !!entry && entry['作答'] === ANSWER && onDisk['题'][SUBJECTIVE]['上次结果']['自评'] === '答了一半'
+      && onDisk['题'][SUBJECTIVE]['作答历史'].length === 1,
+      JSON.stringify(entry));
+    const answeredAfter = await ctx.evaluate(`(() => (document.querySelector('.smb-qsum .smb-meta') || {}).textContent || '')()`);
+    check('自评之后「已作答 N/M」才变成 2 / 2', /作答 2 \/ 2/.test(answeredAfter), answeredAfter);
+
+    // 刷新：文本、时间、自评都从磁盘读回来
+    await openLesson(ctx);
+    const reloaded = await ctx.evaluate(`(() => {
+      const ta = document.querySelector('[data-proto="subjective-answer"]');
+      const meta = document.querySelector('[data-proto="answer-time"]');
+      return { value: ta ? ta.value : null, meta: meta ? meta.textContent.trim() : null,
+        answered: (document.querySelector('.smb-qsum .smb-meta') || {}).textContent || '' };
+    })()`);
+    check('刷新之后草稿文本还在（来自 payload 的 草稿）', reloaded.value === ANSWER, JSON.stringify(reloaded));
+    check('刷新之后还看得见上次作答时间', /上次作答：\d{2}-\d{2} \d{2}:\d{2}/.test(reloaded.meta || ''), String(reloaded.meta));
+    check('刷新之后作答计数仍是 2 / 2', /作答 2 \/ 2/.test(reloaded.answered), reloaded.answered);
+
+    // 带进答疑：题目卡片上的按钮 → 右栏切到问答 + 引用 chip 预填（发送由学生自己按）
+    await ctx.evaluate(`document.querySelector('[data-proto="ask-with-answer"]').click()`);
+    await ctx.sleep(500);
+    const asked = await ctx.evaluate(`(() => {
+      const tab = document.querySelector('[data-proto="tab-ask"]');
+      const chip = document.querySelector('[data-proto="qa-quote"]');
+      return {
+        selected: tab ? tab.getAttribute('aria-selected') : null,
+        chip: chip ? chip.textContent.trim() : null,
+      };
+    })()`);
+    check('点「带进答疑」后右栏切到问答', asked.selected === 'true', JSON.stringify(asked));
+    check('草稿区出现「题干 + 我的作答」的引用 chip（预填，不替学生发送）',
+      !!asked.chip && /我的作答/.test(asked.chip), String(asked.chip));
+    await ctx.evaluate(`(() => { const b = document.querySelector('[data-proto="qa-quote-toggle"]'); if (b) b.click(); })()`);
+    await ctx.sleep(200);
+    const full = await ctx.evaluate(`(() => (document.querySelector('[data-proto="qa-quote-full"]') || {}).textContent || '')()`);
+    check('chip 展开是完整引用（题干 + 作答原文）',
+      full.includes('先解析名字') && full.includes('我的作答：'), full.slice(0, 80));
+
+    // 粘贴超长文本：写入侧截断到 8192 再落盘，不 500、不丢整段
+    await ctx.evaluate(`document.querySelector('[data-proto="tab-quiz"]').click()`);
+    await ctx.sleep(300);
+    const postsBeforeLong = host.posts.length;
+    await ctx.evaluate(`(() => {
+      const ta = document.querySelector('[data-proto="subjective-answer"]');
+      ta.value = 'a'.repeat(9000);
+      ta.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await ctx.sleep(1400);
+    const longPost = host.posts.slice(postsBeforeLong)[0];
+    const longEntry = readAttempts()['草稿'][SUBJECTIVE];
+    check('超长文本的草稿写入成功（不是 500）', !!longPost && longPost.status === 200 && longPost.body && longPost.body.ok === true,
+      JSON.stringify(longPost && { status: longPost.status, body: longPost.body && longPost.body.error }));
+    check('落盘前按 8192 字符截断（不拒绝、不丢整段）',
+      !!longEntry && longEntry['文本'].length === 8192, JSON.stringify(longEntry && longEntry['文本'].length));
+    const longValue = await ctx.evaluate(`(document.querySelector('[data-proto="subjective-answer"]') || {}).value || ''`);
+    check('输入框里也是截断后的那一段（受控值没有回退）', longValue.length === 8192, String(longValue.length));
+
+    return { draft: onDisk['草稿'][SUBJECTIVE]['文本'], history: onDisk['题'][SUBJECTIVE]['作答历史'].length, chip: asked.chip };
+  });
+
+  /* 3b. #213 双标签页竞态：A 正在写（防抖未触发），B 写了同一题并触发本页重读——A 的字不能被吞 */
+  await session.scene('attempts-subjective-race', async (ctx) => {
+    const MINE = 'A 正在写的这一版，还没到防抖时间。';
+    const THEIRS = 'B 在另一个标签页里写下的版本。';
+    const SUBJECTIVE = ANCHOR + '#1';
+    await openLesson(ctx);
+    await ctx.evaluate(`(() => {
+      const ta = document.querySelector('[data-proto="subjective-answer"]');
+      ta.value = ${JSON.stringify('A 正在写的这一版，还没到防抖时间。')};
+      ta.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    // B 立即写盘（A 的 900ms 防抖还在路上），拿到的是 A 打字前的版本
+    const raceVersion = attemptsVersion({ workspace, subject: 'demo', node: NODE_ID });
+    const b = writeAttempts({
+      workspace, subject: 'demo', node: NODE_ID,
+      questions: { [SUBJECTIVE]: { 草稿: { 文本: 'B 在另一个标签页里写下的版本。' } } },
+      operationId: 'race-b-' + Date.now(), expectedVersion: raceVersion,
+    });
+    if (!b.ok) throw new Error('B 的写入没成功：' + JSON.stringify(b));
+    const pushed = host.push({ kind: 'changed' });
+    check('竞态夹具：B 写盘成功并推了一条变更', b.ok === true && pushed >= 1, JSON.stringify({ pushed }));
+    await ctx.sleep(400);   // 重读已回来、A 的防抖还没到点
+    const mid = await ctx.evaluate(`(document.querySelector('[data-proto="subjective-answer"]') || {}).value || ''`);
+    check('B 的重读没有覆盖 A 正在写的字（dirty 栅栏）', mid === MINE, JSON.stringify({ mid, theirs: THEIRS }));
+    await ctx.sleep(1400);  // A 的防抖落盘（可能先 409 再带新版本重来一次）
+    const onDisk = readAttempts();
+    check('A 的字最终落到盘上（B 的草稿没赢）',
+      onDisk['草稿'] && onDisk['草稿'][SUBJECTIVE] && onDisk['草稿'][SUBJECTIVE]['文本'] === MINE,
+      JSON.stringify(onDisk['草稿'] && onDisk['草稿'][SUBJECTIVE]));
+    const postsAfter = host.posts.slice(-2).map((p) => p.status);
+    check('A 的写入最终 200；若先撞上 409，也是带新版本重来（不是静默丢）',
+      postsAfter.includes(200) && postsAfter.every((s) => s === 200 || s === 409), JSON.stringify(postsAfter));
+    return { mid, finalText: onDisk['草稿'][SUBJECTIVE]['文本'], statuses: postsAfter };
+  });
+
+  /* 4. 另一个写入者改过之后再作答：拒绝 → 重读 → 重来一次 → 如实说 */
   await session.scene('attempts-conflict', async (ctx) => {
     await openLesson(ctx);
     const stale = readLibrary({ workspace }).subjects[0].nodes[0].attempts.version;
@@ -334,7 +504,7 @@ try {
     return { statuses: fresh.map((p) => p.status), notes: seen.notes };
   });
 
-  /* 4. 一道坏题（题干缺字段）：一块占位，面板与其它题照常（#174 验收） */
+  /* 5. 一道坏题（题干缺字段）：一块占位，面板与其它题照常（#174 验收） */
   await session.scene('attempts-missing-stem', async (ctx) => {
     const quizFile = path.join(subjectDir, 'lessons', `0001-${NODE_ID}.quiz.json`);
     // 题库里把题干写成了 `stem`（模型重出题时最常见的坏形状）：作为第三题塞进去。
@@ -365,7 +535,7 @@ try {
     return { questions: seen.questions, missing: seen.missing, options: seen.options };
   });
 
-  /* 5. 一道会崩的题（`opts` 写成字符串）：只有它那一格变成兜底，其余照常（#174 ②） */
+  /* 6. 一道会崩的题（`opts` 写成字符串）：只有它那一格变成兜底，其余照常（#174 ②） */
   await session.scene('attempts-boundary', async (ctx) => {
     const quizFile = path.join(subjectDir, 'lessons', `0001-${NODE_ID}.quiz.json`);
     const items = JSON.parse(fs.readFileSync(quizFile, 'utf8'))[ANCHOR];

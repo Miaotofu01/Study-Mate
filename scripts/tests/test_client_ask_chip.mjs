@@ -32,7 +32,7 @@ const {
   AskPanel,
   QUOTE_TRIGGER, QUOTE_SOURCE_NAME, QUOTE_REF_KIND,
   encodeQuoteRef, decodeQuoteRef, quoteForModel, quoteForClipboard, shortQuote, quoteSource,
-  referenceInsertFor, quoteReferenceSource, quoteSlots,
+  referenceInsertFor, quoteReferenceSource, quoteSlots, answerQuoteFor,
   inputFacadeFor, ourOccurrence, putQuoteInDraft, dropQuoteFromDraft,
   detectLengthOf, detectOffsetOfClipboardOffset, chipDetectSpan,
 } = internals;
@@ -156,6 +156,19 @@ test('#106 serialize：进消息的那段文字 = 原文 + 来源锚点（缺哪
   assert.equal(quoteForModel(encodeQuoteRef(loose)), `【引用】${loose.anchor.lesson}\n${TEXT}`);
   // 连课都没有：只剩引用标记 + 原文，别留空的分隔符
   assert.equal(quoteForModel(encodeQuoteRef({ text: TEXT })), `【引用】${TEXT}`);
+});
+
+test('#213 带进答疑：题干 + 我的作答也能走同一条 codec（不新增来源、不另造 serializer）', async () => {
+  const quote = answerQuoteFor({ q: '为什么调用栈会爆？' }, '开放题', '没有基线条件，递归一直压栈。', 'demo/0001-fn.call.md');
+  const ref = encodeQuoteRef(quote);
+  const back = decodeQuoteRef(ref);
+  assert.equal(back.text, quote.text);
+  assert.equal(back.anchor.lesson, 'demo/0001-fn.call.md');
+  assert.equal(quoteForModel(ref), '【引用】demo/0001-fn.call.md\n为什么调用栈会爆？\n我的作答：没有基线条件，递归一直压栈。');
+  // 真正提交时宿主调用的就是这份在册 codec；它不认识的 ref 会整次发送失败
+  assert.equal(await quoteReferenceSource().codec.serialize(ref), quoteForModel(ref));
+  // 预测验证用「我的预测」，回顾时对得上号（#213 A5.5）
+  assert.match(quoteForModel(encodeQuoteRef(answerQuoteFor({ q: '先预测输出' }, '预测验证', '4', 'l.md'))), /我的预测：4$/);
 });
 
 test('#106 clipboardText：可读短形态（换行压平、超长截断），草稿里的占位就是它', () => {
