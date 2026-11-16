@@ -234,7 +234,19 @@ export function change_state(workspace, expectedRevision, change) {
     committed = true;
     return updated;
   } finally {
-    if (temporary !== null) fs.rmSync(temporary, { force: true });
+    if (temporary !== null) {
+      // 不能用 `fs.rmSync(temporary, { force: true })`：Node 24 + Windows 在**路径含中文**
+      // 时连非递归删单个文件都静默不删（返回成功、文件还在），工作区名一中文，
+      // 写失败后 `.learning/` 里就会留下半份 `.interaction-*.tmp`。删文件走 unlinkSync。
+      try {
+        fs.unlinkSync(temporary);
+      } catch (error) {
+        // 临时文件删不掉不是保存失败的一部分；但别让异常盖掉真正的失败原因。
+        if (error.code !== 'ENOENT') {
+          process.stderr.write(`interaction state: could not remove temporary file ${temporary}: ${error.message}\n`);
+        }
+      }
+    }
     try {
       fs.unlinkSync(lock);
     } catch (error) {

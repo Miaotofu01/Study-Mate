@@ -163,7 +163,9 @@ export function createTaskStore(options: { home?: string; dir?: string } = {}): 
       const file = fileOf(id);
       const removed: string[] = [];
       if (fs.existsSync(file)) {
-        fs.rmSync(file, { force: true });
+        // 同 service 的 rmArtifact：`fs.rmSync` 在中文路径上静默不删，
+        // 会把「已经清掉」报出去、记录却还在盘上。删文件用 unlinkSync。
+        fs.unlinkSync(file);
         removed.push(file);
       }
       return removed;
