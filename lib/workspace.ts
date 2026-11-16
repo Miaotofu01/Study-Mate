@@ -55,8 +55,48 @@ function stringField(file: string, key: string): string {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
 }
 
+/**
+ * 原生 config（`Config.workspace`，volatile）优先于安装器写的 YAML。
+ *
+ * 为什么是模块级的「来源」而不是给每个调用点加参数：读工作区的调用点有几十处
+ *（阅读端路由、原生工具、监听、导出…），让它们各自认识「原生 config」等于把同一份
+ * 优先级判断抄几十遍。这里只留一处，`bin/dsh-plugin.ts` 在 apply 时接上 volatile 引用。
+ * 引用为空 / 抛错时**静默退回** YAML——那是安装器与 standalone 安装唯一的事实。
+ */
+let workspaceOverride: (() => string) | null = null;
+
+/**
+ * 接上原生 config 的 workspace 来源；传 null 拆除。返回**拆除函数**：
+ * 它只清自己接上的那一份——同一进程里两个实例先后接过这个引用时，先走的那次
+ * 卸载不该把后接的那份抹掉（模块级单例，所以「谁接的谁拆」只能靠闭包比身份）。
+ */
+export function setWorkspaceOverride(source: (() => string) | null): () => void {
+  const next = typeof source === 'function' ? source : null;
+  workspaceOverride = next;
+  return () => {
+    if (workspaceOverride === next) workspaceOverride = null;
+  };
+}
+
 export function resolveWorkspace(file: string = configFile()): string {
+  try {
+    const value = workspaceOverride?.();
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  } catch {
+    // 原生 config 读不到（服务未就绪 / 卸载中）→ 退回安装器配置
+  }
   return stringField(file, 'workspace');
+}
+
+/** 当前生效的工作区来自哪里：插件配置 / 安装器配置 / 都没有。 */
+export function resolveWorkspaceSource(file: string = configFile()): 'plugin-config' | 'installer-config' | '' {
+  try {
+    const value = workspaceOverride?.();
+    if (typeof value === 'string' && value.trim()) return 'plugin-config';
+  } catch {
+    // 同 resolveWorkspace
+  }
+  return stringField(file, 'workspace') ? 'installer-config' : '';
 }
 
 /** 引擎项目根（.learning 之外的那些源码）也在配置里，暂时只有诊断用得上。 */
