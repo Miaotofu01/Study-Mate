@@ -1,6 +1,8 @@
 import fs from 'node:fs';
+import { removeTreeSync } from '../lib/fs-remove.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { moveIntoPlace } from './fs-swap.mjs';
 import { adaptOpenAiSkill } from './openai-skill-compat.mjs';
 import { getOpenAiSkillUi } from './openai-skill-ui.mjs';
 import { writeDocsPayload } from './docs-payload.mjs';
@@ -104,17 +106,17 @@ export function buildOpenAiPlugin({ output = path.resolve('dist') } = {}) {
       for (const [fresh, destination] of [[plugin, target], [zipFile, archive]]) {
         const backup = path.join(staging, `backup-${replacements.length}`);
         const existed = fs.existsSync(destination);
-        if (existed) fs.renameSync(destination, backup);
+        if (existed) moveIntoPlace(destination, backup);
         const change = { destination, backup, existed, installed: false };
         replacements.push(change);
-        fs.renameSync(fresh, destination);
+        moveIntoPlace(fresh, destination);
         change.installed = true;
       }
     } catch (error) {
       try {
         for (const change of replacements.reverse()) {
-          if (change.installed) fs.rmSync(change.destination, { recursive: true, force: true });
-          if (change.existed) fs.renameSync(change.backup, change.destination);
+          if (change.installed) removeTreeSync(change.destination);
+          if (change.existed) moveIntoPlace(change.backup, change.destination);
         }
       } catch (rollbackError) {
         preserveStaging = true;
@@ -124,6 +126,6 @@ export function buildOpenAiPlugin({ output = path.resolve('dist') } = {}) {
     }
     return { plugin: target, archive, version: packageInfo.version };
   } finally {
-    if (!preserveStaging) fs.rmSync(staging, { recursive: true, force: true });
+    if (!preserveStaging) removeTreeSync(staging);
   }
 }

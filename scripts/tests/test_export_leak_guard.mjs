@@ -10,6 +10,13 @@
 
    还有一条**假阳性防线**：`data.js` 的载荷是 JSON，里面出现 `require(` 是课件正文
    （讲 Node 的那一课、代码块里的示例），不该判失败——守卫只扫载荷之前那段导出器写的代码。
+
+   另有一条**多科目导出树**的防线（P2）：导出目录里可以再套一份完整导出（科目单独导过一次，
+   落在 `<科目>/` 子目录里），角色识别必须认**任意深度**的同名产物——`<科目>/studymate-client.js`
+   还是 client、`<科目>/vendor/**` 还是 vendor、`<科目>/export.json` 还是 manifest、`<科目>/data.js`
+   还是 data；子目录里的真页面（`index.html` / `host.js` / `boot.js`）仍按 page 全规则扫，泄漏照报。
+   二进制产物（PDF / 图片 / 字体 / 压缩包）不进文本扫描：它们不是导出器写的文本产物，读成 utf8
+   再扫原文只会假阳性。
    ───────────────────────────────────────────────────────────────────────── */
 
 import test from 'node:test';
@@ -53,6 +60,91 @@ test('真产物扫下来是干净的，而且哈希核对通过', async () => {
   assert.equal(result.ok, true, `不该有问题：${JSON.stringify(result.violations)} ${result.problems.join('；')}`);
   assert.ok(result.files.includes('index.html'));
   assert.ok(result.checked >= 8, `扫到的文本产物太少（${result.checked}）`);
+});
+
+/* ── 多科目导出树（P2）：科目子目录里是一份完整导出，产物角色要看任意深度 ───────── */
+
+/** 把一份导出的全部产物原样拷进导出目录下的子目录——「科目单独导过一次」的形状。 */
+function nestExport(out, products, target) {
+  for (const rel of products) {
+    const to = path.join(out, target, rel);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(path.join(out, rel), to);
+  }
+}
+
+test('科目子目录导出：任意深度的同名产物按角色识别，整棵导出树扫下来干净', async (t) => {
+  const result = await exportGuardRun({ dir: tempDir(t, 'studymate-export-nested-') });
+  // 真实样本（本机多科目导出目录）：根是一份完整导出，每个科目子目录里还各有一份；
+  // 子目录可以不止一层（归档里的旧导出），角色一样只能按「文件名 + 路径段」判。
+  const nested = ['computer-networks', '归档/operating-systems'];
+  for (const target of nested) nestExport(result.out, result.files, target);
+
+  const { files, manifest } = readExportDir(result.out);
+  const report = checkExport(files, manifest, { machinePaths: [result.out] });
+  assert.deepEqual(report.violations, [],
+    `科目子目录里的产物被当成页面扫了：${JSON.stringify(report.violations, null, 2)}`);
+  assert.deepEqual(report.manifestProblems, [], `根导出的清单核对不该受影响：${report.manifestProblems.join('；')}`);
+
+  // 正面对照：不是「整棵树都没扫」，而是每个产物落到了它该在的角色上。
+  const roleAt = (rel) => files.find((file) => file.path === rel)?.role;
+  for (const target of nested) {
+    assert.equal(roleAt(`${target}/studymate-client.js`), 'client', `${target} 里的阅读端本体要按 client 判`);
+    assert.equal(roleAt(`${target}/data.js`), 'data', `${target} 里的数据要按 data 判`);
+    assert.equal(roleAt(`${target}/export.json`), 'manifest', `${target} 里的清单要按 manifest 判`);
+    assert.equal(roleAt(`${target}/vendor/react.production.js`), 'vendor', `${target} 里的第三方构建要按 vendor 判`);
+    assert.equal(roleAt(`${target}/assets/demo/assets/img/pool/dot.png`), 'asset', `${target} 里的配图要按 asset 判`);
+    // 子目录里的这些是真页面：角色不变，真泄漏必须照报（下一条测试反证）
+    assert.equal(roleAt(`${target}/index.html`), 'page', `${target} 里的入口仍是页面`);
+    assert.equal(roleAt(`${target}/host.js`), 'page', `${target} 里的宿主脚本仍是页面`);
+    assert.equal(roleAt(`${target}/boot.js`), 'page', `${target} 里的引导脚本仍是页面`);
+  }
+  // 根目录的角色没被「任意深度」带偏
+  assert.equal(roleAt('index.html'), 'page');
+  assert.equal(roleAt('host.js'), 'page');
+  assert.equal(roleAt('boot.js'), 'page');
+  assert.equal(roleAt('studymate-client.js'), 'client');
+  assert.equal(roleAt('data.js'), 'data');
+  assert.equal(roleAt('export.json'), 'manifest');
+  assert.equal(roleAt('vendor/react.production.js'), 'vendor');
+});
+
+test('科目子目录里同名但不是产物的文件：不许按 client / data / vendor 误判', async (t) => {
+  const result = await exportGuardRun({ dir: tempDir(t, 'studymate-export-lookalike-') });
+  const target = 'computer-networks';
+  // 学生自己放进导出目录的材料：与产物同名，但同目录没有 export.json（不是一份导出）。
+  const lookalikes = [
+    `${target}/lessons/data.js`,
+    `${target}/vendor/README.txt`,
+  ];
+  fs.mkdirSync(path.join(result.out, target, 'lessons'), { recursive: true });
+  fs.mkdirSync(path.join(result.out, target, 'vendor'), { recursive: true });
+  fs.writeFileSync(path.join(result.out, lookalikes[0]), 'var x = 1;\n');
+  fs.writeFileSync(path.join(result.out, lookalikes[1]), '第三方说明\n');
+
+  const { files, manifest } = readExportDir(result.out);
+  const roleAt = (rel) => files.find((file) => file.path === rel)?.role;
+  assert.equal(roleAt(lookalikes[0]), 'page', '同名但没有 export.json 的 data.js 仍是页面，不按 data 扫');
+  assert.equal(roleAt(lookalikes[1]), 'page', 'vendor 下的说明文件不是第三方构建，不套包装壳核对');
+  const report = checkExport(files, manifest, { machinePaths: [result.out] });
+  assert.deepEqual(report.violations, [],
+    `同名非产物被按产物判了：${JSON.stringify(report.violations, null, 2)}`);
+});
+
+test('反证：科目子目录里的真页面注入 Node 依赖，仍必须报 cjs-require', async (t) => {
+  const result = await exportGuardRun({ dir: tempDir(t, 'studymate-export-nested-inject-') });
+  const target = 'computer-networks';
+  nestExport(result.out, result.files, target);
+  const { files, manifest } = readExportDir(result.out);
+  const injected = files.map((file) => (file.path === `${target}/index.html`
+    ? { ...file, text: `${file.text}\n<script>var leak = require('node:fs');</script>\n` }
+    : file));
+  const report = checkExport(injected, manifest);
+  const hit = report.violations.find((violation) => violation.path === `${target}/index.html`
+    && violation.rule === 'cjs-require');
+  assert.ok(hit, `子目录页面里的 require( 必须照报：${JSON.stringify(report.violations)}`);
+  assert.ok(report.violations.some((violation) => violation.path === `${target}/index.html`
+    && violation.rule === 'node-specifier'), 'node: 说明符也要报');
 });
 
 test('反证：注入一个 Node 专用依赖，构建期守卫必须失败', async () => {
@@ -136,4 +228,41 @@ test('机器路径不许进产物（导出是能拷走、能分享的东西）',
 
 test('asset 是二进制，不进规则扫描', () => {
   assert.deepEqual(scanLeaks([{ path: 'assets/demo/a.png', role: 'asset' }]), []);
+});
+
+test('二进制产物（PDF / 图片 / 字体 / 压缩包）不进文本扫描', (t) => {
+  // 真实多科目导出目录里放着学生/外部工具给的 PDF（样张），它不是导出器的文本产物。
+  // 这里塞进「机器路径 + require 调用」两样最容易被误报的东西：只要还被读成文本，就必红。
+  const machinePath = '/home/某人/学习资料';
+  const body = Buffer.from(`%PDF-1.7\n% ${machinePath}\nvar leak = require('node:fs');\n`);
+  const dir = tempDir(t, 'studymate-export-binary-');
+  const binaries = [
+    'Agent工程-全32课-正文版.pdf',
+    'computer-networks/计算机网络-全18课-正文版.pdf',
+    '配图.png',
+    '字体.woff2',
+    '资料包.zip',
+  ];
+  for (const rel of binaries) {
+    const full = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, body);
+  }
+  // 兜底对照：同样内容写成 .txt 就是文本，照 page 扫必须报（证明「不扫」只针对二进制）
+  fs.writeFileSync(path.join(dir, '说明.txt'), body);
+
+  const { files } = readExportDir(dir);
+  const byPath = new Map(files.map((file) => [file.path, file]));
+  for (const rel of binaries) {
+    assert.equal(byPath.get(rel).role, 'asset', `${rel} 要按 asset 判（二进制不读成文本）`);
+    assert.equal(byPath.get(rel).text, undefined, `${rel} 不该被读成 utf8 文本`);
+  }
+  assert.equal(byPath.get('说明.txt').role, 'page', '文本文件仍按页面扫');
+  assert.deepEqual(scanLeaks(files.filter((file) => binaries.includes(file.path)), { machinePaths: [machinePath] }), [],
+    '二进制里的机器路径与 require( 是内容数据，不该按原文判泄漏');
+
+  // 正面对照：这份内容如果真被当文本扫，三条判据都会命中——上面那条「干净」不是空转。
+  const asPage = scanLeaks([{ path: binaries[0], role: 'page', text: fs.readFileSync(path.join(dir, binaries[0]), 'utf8') }],
+    { machinePaths: [machinePath] });
+  assert.deepEqual(asPage.map((violation) => violation.rule).sort(), ['cjs-require', 'machine-path', 'node-specifier']);
 });

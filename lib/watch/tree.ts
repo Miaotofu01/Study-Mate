@@ -77,6 +77,18 @@ export const WATCH_DEBOUNCE_MS = 150;
 const SKIPPED = new Set(['node_modules', '.git']);
 
 /**
+ * 这个目录还在不在。Windows 上「已删路径仍被回调」是常态，所以观察回调里每次都要问一句：
+ * 读不动（ENOENT / EPERM）就当作没了，宁可摘掉观察者——`sync()` 会在下一次变更时补回来。
+ */
+function isDirectory(directory: string): boolean {
+  try {
+    return fs.statSync(directory).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 收集要观察的目录（含 root 自己）。
  * 读不动某一层就跳过那一层——**不抛异常**：读盘失败不该让监听整体失效。
  * 返回 `null` 表示连 root 都读不了（调用方保留现有集合，别把观察者全摘了）。
@@ -154,12 +166,30 @@ export async function startTreeWatch(options: TreeWatchOptions): Promise<TreeWat
   const problem = (message: string): void => { onProblem?.(message); };
 
   const add = async (directory: string): Promise<void> => {
+    // 目录被删 / 被改名之后，Windows 后端（`ReadDirectoryChangesW`）会对着已经消失的路径
+    // 反复回调——实测每秒上万次、单核打满、进程再也退不出去（Linux 的 inotify 只发一次
+    // `IN_DELETE_SELF`，所以这条只在 Windows 上炸）。所以每次回调先看一眼目录还在不在，
+    // 不在就**当场摘掉观察者**：不能让一条空转的句柄把宿主的事件循环拴住。
+    let closer: CloseDirectory | null = null;
+    let dropped = false;
+    const drop = (): void => {
+      if (dropped) return;
+      dropped = true;
+      const close = closer;
+      closer = null;
+      if (!close) return;
+      if (watched.get(directory) === close) watched.delete(directory);
+      void close();
+    };
+    const onEvent = (error?: Error): void => {
+      if (error) problem(`监听 ${directory} 时报错：${error.message}`);
+      if (closed || !isDirectory(directory)) { drop(); return; }
+      touch(directory);
+    };
     try {
-      const close = await observe(directory, (error) => {
-        if (error) problem(`监听 ${directory} 时报错：${error.message}`);
-        touch(directory);
-      });
-      if (closed) { await close(); return; }
+      const close = await observe(directory, onEvent);
+      if (closed || dropped) { await close(); return; }
+      closer = close;
       watched.set(directory, close);
     } catch (error) {
       // 单个目录观察不起来（权限、已被删、后端不支持）→ 只记一句，不影响别的目录

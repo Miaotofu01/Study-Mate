@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { moveIntoPlace } from './fs-swap.mjs';
+import { removeTreeSync } from '../lib/fs-remove.mjs';
 import { adaptSkill } from './skill-compat.mjs';
 import { buildOpenAiPlugin } from './openai-plugin.mjs';
 import { buildAntigravityPlugin } from './antigravity-plugin.mjs';
@@ -25,6 +27,7 @@ Codex / ChatGPT Work：下载并导入最新插件 ZIP：
 https://github.com/Miaotofu01/Study-Mate/releases/latest/download/studymate-openai.zip
 
 用法：studymate [install] [--workspace <目录>] [--profile <名称>] [--mode standalone|native] [--dsh <dsh 路径>]
+      studymate migrate [--workspace <目录>] [--dry-run] [--json]（旧工作区共享记忆 MEMORY.md → MEMORY.yaml）
       studymate export [--workspace <目录>] [--out <目录>] [--subject <slug>] [--json] [--quiet]
       studymate build-plugin [--output <目录>]（开发者构建）
       studymate build-antigravity [--output <目录>] [--install]（Antigravity 插件构建）
@@ -45,7 +48,9 @@ export 把学习工作区导成能离线打开的自包含页面：Antigravity /
 DSH 侧按需（学生说“导出一份能离线看的”才跑）。落点默认 <工作区>/export/，不需要 DSH；
 它要一份 React（npm i -g react react-dom，或设 STUDYMATE_REACT_DIR 指过去）。
 build-plugin 供开发者导出 Codex / ChatGPT Work 技能插件目录及 ZIP（默认 ./dist）。
-导出只需要 Node.js，不需要 DSH，也不会更改客户端配置。`;
+导出只需要 Node.js，不需要 DSH，也不会更改客户端配置。
+migrate 把旧工作区（2.0.x）的共享记忆 .learning/MEMORY.md 一次性迁成 .learning/MEMORY.yaml：
+已有新文件时不覆盖、旧文件改名成 MEMORY.md.bak、可重复跑；加 --dry-run 先看转换结果再落盘。`;
 
 function run(command, args, extra = {}) {
   return spawnSync(command, args, { encoding: 'utf8', timeout: 15000, windowsHide: true, ...extra });
@@ -455,17 +460,17 @@ export function installPayload({ workspaceArg, profile, version, desktop = false
     for (const [staged, target] of targets) {
       const backup = path.join(staging, `backup-${replacements.length}`);
       const existed = fs.existsSync(target);
-      if (existed) fs.renameSync(target, backup);
+      if (existed) moveIntoPlace(target, backup);
       const change = { target, backup, existed, installed: false };
       replacements.push(change);
-      fs.renameSync(staged, target);
+      moveIntoPlace(staged, target);
       change.installed = true;
     }
   } catch (error) {
     try {
       for (const change of replacements.reverse()) {
-        if (change.installed) fs.rmSync(change.target, { recursive: true, force: true });
-        if (change.existed) fs.renameSync(change.backup, change.target);
+        if (change.installed) removeTreeSync(change.target);
+        if (change.existed) moveIntoPlace(change.backup, change.target);
       }
     } catch (rollbackError) {
       preserveStaging = true;
@@ -473,7 +478,7 @@ export function installPayload({ workspaceArg, profile, version, desktop = false
     }
     throw error;
   } finally {
-    if (!preserveStaging) fs.rmSync(staging, { recursive: true, force: true });
+    if (!preserveStaging) removeTreeSync(staging);
   }
   // `engine` 报的是**这次的引擎实际落在哪**（原生加载 = 包自身），调用方照这个值提示用户
   return { registration, engine: payload, preset, configFile, workspace: config.workspace, profile };
@@ -515,10 +520,46 @@ export function parseExportArgs(args) {
   return options;
 }
 
+/** `studymate migrate` 的用法行：参数解析与 `--help` 都印这一句，别写两份。 */
+const MIGRATE_USAGE = '用法：studymate migrate [--workspace <目录>] [--dry-run] [--json]';
+
+/**
+ * `studymate migrate` 的参数：把旧工作区的共享记忆迁成新格式（实现与四条承诺在
+ * `lib/memory-migrate.ts`，这里只解析）。`--dry-run` 先看产物不落盘。
+ */
+export function parseMigrateArgs(args) {
+  const options = {};
+  for (let i = 0; i < args.length; i++) {
+    const flag = args[i];
+    // 子命令的 `--help` 也是正常用法：印用法、退 0，别报「不支持的参数」。
+    if (flag === '--help' || flag === '-h') { options.help = true; continue; }
+    if (flag === '--dry-run') { options.dryRun = true; continue; }
+    if (flag === '--json') { options.json = true; continue; }
+    const value = args[i + 1];
+    if (flag !== '--workspace' || !value || value.startsWith('--')) {
+      throw new Error(`不支持的参数：${args.join(' ')}\n${MIGRATE_USAGE}`);
+    }
+    i += 1;
+    options.workspace = value;
+  }
+  return options;
+}
+
 export async function main(args = process.argv.slice(2)) {
   try {
     if (args.length === 1 && ['--help', '-h'].includes(args[0])) console.log(help);
     else if (args.length === 1 && ['--version', '-v'].includes(args[0])) console.log(metadata.version);
+    else if (args[0] === 'migrate') {
+      const options = parseMigrateArgs(args.slice(1));
+      if (options.help === true) {
+        console.log(MIGRATE_USAGE);
+        process.exitCode = 0;
+      } else {
+        // 动态 import：`install` / 构建不该被记忆迁移那一套拖进来（与 export 同一条纪律）。
+        const { migrateCommand } = await import('../lib/memory-migrate.ts');
+        process.exitCode = migrateCommand(options);
+      }
+    }
     else if (args[0] === 'export') {
       const options = parseExportArgs(args.slice(1));
       // 动态 import：其余子命令（安装 / 构建）不该被导出域那套东西拖进来，

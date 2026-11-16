@@ -74,8 +74,30 @@ const SUBJECT_MEMORY_YAML = [
 
 const SUBJECT_MEMORY_FRAGMENTS = ['科目记忆', '演示环境', '/tmp/lab-probe'];
 
-/** `onlyOld`：只在旧名（`MEMORY.md`）那份文件里写同样的正文——#189 起注入的文本**只**来自
-    `MEMORY.yaml`，旧名就是一份普通文件，读侧不兜它、也没有兼容分支。
+/** 旧格式（2.0.x 前，`##` 分节 + bullet）的共享记忆：内容与 `MEMORY_YAML` 同一份画像。
+    2.0.4 审计后读侧补了旧格式兜底（只有在 `MEMORY.yaml` 缺席时才读它），见 `lib/memory-file.ts`。 */
+const LEGACY_MEMORY_MD = [
+  '## 我是谁',
+  '- 各领域当前水平：网络入门',
+  '',
+  '## 教学偏好',
+  '- 有效的讲法：先给结论再给为什么。',
+  '',
+  '## 积累',
+  '- fish 脾气：这台机器上 fish 不吃双横线。',
+  '',
+].join('\n');
+
+/** 旧格式兜底读出来的注入文本：转换后键与内容原样，形状与新格式的投影一致。 */
+const LEGACY_MEMORY_INJECTED = [
+  '我是谁:',
+  '  各领域当前水平: 网络入门',
+  '',
+  '教学偏好:',
+  '  有效的讲法: 先给结论再给为什么。',
+].join('\n');
+
+/** `onlyOld`：只写改名前的那份文件——2.0.4 起走**旧格式兜底**，注入的仍是画像三节。
     `memory`：换一份记忆文本（例如「只有 `积累`」那种没有画像内容的文件）。
     `subjectMemory`：换一份科目记忆的文本（`null` = 这份工作区里没有科目记忆）。 */
 function makeWorkspace({ withMemory = true, onlyOld = false, memory = MEMORY_YAML, subjectMemory = SUBJECT_MEMORY_YAML } = {}) {
@@ -84,7 +106,7 @@ function makeWorkspace({ withMemory = true, onlyOld = false, memory = MEMORY_YAM
   const workspace = path.join(root, 'ws');
   fs.mkdirSync(path.join(workspace, '.learning'), { recursive: true });
   if (withMemory) fs.writeFileSync(path.join(workspace, '.learning', 'MEMORY.yaml'), memory);
-  if (onlyOld) fs.writeFileSync(path.join(workspace, '.learning', 'MEMORY.md'), memory);
+  if (onlyOld) fs.writeFileSync(path.join(workspace, '.learning', 'MEMORY.md'), LEGACY_MEMORY_MD);
   if (subjectMemory !== null) {
     const subjectDir = path.join(workspace, '.learning', 'subjects', 'demo');
     fs.mkdirSync(subjectDir, { recursive: true });
@@ -306,14 +328,20 @@ test('#191 建会话：科目记忆一个字都不进注入（盘上那份带内
   }
 });
 
-test('#189 建会话：只有旧名那份文件时也不注入——读侧不兜旧名，不留兼容分支', async () => {
+test('2.0.4 迁移期 建会话：只有旧名那份文件时走旧格式兜底，注入的仍是画像三节', async () => {
   const { workspace } = makeWorkspace({ withMemory: false, onlyOld: true });
   const host = fakeHost();
   const view = await openAskSession(depsFor(workspace, host), { subject: '网络' });
 
-  assert.equal(view.ok, true, '旧名不认不等于建不成会话');
-  assert.equal(view.memoryInjected, false, '旧名就是一份普通文件：它的正文一个字都不该进上下文');
-  assert.equal(host.messages.length, 0);
+  assert.equal(view.ok, true, '旧格式兜底读得到，不等于建不成会话');
+  assert.equal(view.memoryInjected, true, '旧格式的画像三节要注入（2.0.4 审计后补的兜底）');
+  assert.equal(host.messages.length, 1, '开张仍只注入一条');
+  // 兜底读旧格式后，投影与新格式逐字同一份（`积累` 照样一个字节都不进）
+  assert.deepEqual(host.messages[0].content, [{ type: 'text', text: LEGACY_MEMORY_INJECTED }]);
+  for (const fragment of ['积累', 'fish 脾气', '不吃双横线']) {
+    assert.equal(host.messages[0].content[0].text.includes(fragment), false,
+      `注入文本里出现了「${fragment}」：${host.messages[0].content[0].text}`);
+  }
   assert.equal(host.calls.create.length, 1);
 });
 
@@ -485,7 +513,9 @@ let routeWorkspace = '';
 
 before(() => {
   routeWorkspace = makeWorkspace().workspace;
-  fs.writeFileSync(path.join(DSH_HOME, 'studymate-config.yaml'), `workspace: "${routeWorkspace}"\n`);
+  // YAML 的双引号标量里反斜杠是转义符：Windows 路径直接插值会被读坏（`\U` 之类），
+  // 用 JSON.stringify 生成合法的双引号标量（JSON 的字符串转义是 YAML 双引号的子集）。
+  fs.writeFileSync(path.join(DSH_HOME, 'studymate-config.yaml'), `workspace: ${JSON.stringify(routeWorkspace)}\n`);
   process.env.DSH_HOME = DSH_HOME;
 });
 

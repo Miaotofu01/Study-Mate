@@ -9,6 +9,7 @@
      BlockSequenceStart 444、FlowSequenceStart 28、FlowMappingStart 2。
      块标量 |、> 与锚点 &、别名 *、标签 !、多文档 --- 一个都没有；
      6407 个标量里跨行的 0 个；行尾注释 0 处（87 处全是整行注释）。
+     （这份采样只覆盖学习文件。DSH 的 cordis 配置里**有**跨行的双引号标量，见下面的可选构造。）
 
    所以这里只实现这个子集，别的构造一律**当场报错**并指出文件、行号与原文。宁可炸，
    也不要静默解析错——解析错的后果是学生界面上出现错的课件内容，比报错难查得多。
@@ -27,6 +28,8 @@
    折到下一行（`description: …; suited` + 缩进一行的 `to complex …`），这不是非法 YAML。
    插件在启动时要读它做冲突检查；读不了就整条跳过，于是「学习模式」会从模式选择器里消失。
    所以多行 plain 标量也做成**显式开启**的能力（`plainScalarContinuation`）。
+   跨行的**引号**标量同理（`quotedScalarContinuation`）：宿主任何一次保存配置都会用 `yaml` 库
+   默认的 80 列重排整份文件，长的双引号字符串（如 `textZh: "…"`）就被折成两行。
 
    这几类构造还会**交叉**：DSH 设置页的 graph-memory 三项写成 `!!js >-`（标签 + 块标量），
    所以「带标签的块标量」也按同一条路读——先剥标签认出块头，正文读完再按 `tags` 的口径取值，
@@ -55,6 +58,11 @@ export interface YamlParseOptions {
    * 学习文件仍按默认关闭：那边宁可炸，也不要静默把两行折成一个值。
    */
   plainScalarContinuation?: boolean;
+  /**
+   * 允许跨行的引号标量（按 YAML 的折行规则拼成一个值）。DSH 宿主写盘用 `yaml` 库默认的
+   * `lineWidth: 80`，长的双引号字符串会被折到下一行；省略＝见到跨行引号报错。
+   */
+  quotedScalarContinuation?: boolean;
   /** 允许**一对**文档标记（开头的 `---`、结尾的 `...`）；省略＝见到就报错（一个文件只解析一个文档）。 */
   documentMarkers?: boolean;
 }
@@ -64,6 +72,7 @@ let active: YamlParseOptions = {};
 function tagsMode(): YamlTags | undefined { return active.tags; }
 function blockScalarsEnabled(): boolean { return active.blockScalars === true; }
 function plainScalarContinuationEnabled(): boolean { return active.plainScalarContinuation === true; }
+function quotedScalarContinuationEnabled(): boolean { return active.quotedScalarContinuation === true; }
 
 /** 这一次解析的**原始行**（含空行与整行注释，行尾的 \r 已归一）。块标量要按原文取，
     而下面的行索引刻意丢掉了空行与注释行，所以这里单独留一份。 */
@@ -312,37 +321,88 @@ const ESCAPES: Record<string, string> = {
   N: '\x85', _: '\xa0', L: '\u2028', P: '\u2029',
 };
 
-function readQuoted(text: string, start: number, line: SourceLine, file: string): { value: string; next: number } {
+/** 引号标量读到的值，外加闭合引号所在那一行（跨行时不是起始行）：`next` 是这一行 `text` 里的下标。 */
+interface QuotedScalar {
+  value: string;
+  next: number;
+  text: string;
+  line: SourcePosition;
+}
+
+/**
+ * 读一个引号标量。`multiline` 只有块上下文的值才传（键与流式集合里不允许跨行），而且要开了
+ * `quotedScalarContinuation`；这时行尾还没闭合就按 YAML 的折行规则接着读**原始行**：
+ *   · 行尾空白与下一行的行首空白都去掉；单个换行折成一个空格，每个空行折成一个 `\n`；
+ *   · 双引号里行尾的 `\` 转义掉这个换行（不补空格，中间的空行照样各算一个 `\n`）；
+ *   · 单引号里 `''` 仍是一个引号。
+ * 读到文档末尾还没闭合才报错。
+ */
+function readQuoted(text: string, start: number, line: SourceLine, file: string, multiline = false): QuotedScalar {
   const quote = text[start];
   let i = start + 1;
   let out = '';
+  // out 里最后一个「不是原文空白」的字符之后的位置：折行时要去掉的行尾空白从这里开始
+  let keep = 0;
+  let cur: SourcePosition = line;
+  // 双引号里这一行以 `\` 结尾：换行被转义掉，不补空格、也不去行尾空白
+  let escapedBreak = false;
   for (;;) {
     if (i >= text.length) {
-      // 跨行引号标量要按 YAML 的折行规则拼接；实测 6407 个标量里一个都没有，
-      // 与其猜，不如报错让人看见。
-      fail(file, line, start + 1, line.raw, `引号没有闭合（本解析器不支持跨行的引号标量）`);
+      if (!multiline || !quotedScalarContinuationEnabled()) {
+        fail(file, line, start + 1, line.raw, `引号没有闭合（本解析器不支持跨行的引号标量）`);
+      }
+      if (!escapedBreak) out = out.slice(0, keep);
+      // 往下找第一行非空行；中间的空行各折成一个换行
+      let blanks = 0;
+      let index = cur.line; // cur.line 是 1 起：下一行的 0 起下标就是它
+      for (; index < sourceLines.length; index++) {
+        if (sourceLines[index].trim() !== '') break;
+        blanks++;
+      }
+      if (index >= sourceLines.length) {
+        fail(file, line, start + 1, line.raw, '引号没有闭合：一直读到文档末尾也没有找到闭合的引号');
+      }
+      if (blanks > 0) out += '\n'.repeat(blanks);
+      else if (!escapedBreak) out += ' ';
+      keep = out.length;
+      escapedBreak = false;
+      cur = { line: index + 1, raw: sourceLines[index] };
+      text = cur.raw;
+      i = 0;
+      while (i < text.length && (text[i] === ' ' || text[i] === '\t')) i++;
+      continue;
     }
     const ch = text[i];
     if (quote === "'") {
       if (ch === "'") {
         if (text[i + 1] === "'") {
           out += "'";
+          keep = out.length;
           i += 2;
           continue;
         }
-        return { value: out, next: i + 1 };
+        return { value: out, next: i + 1, text, line: cur };
       }
       out += ch;
+      if (ch !== ' ' && ch !== '\t') keep = out.length;
       i++;
       continue;
     }
-    if (ch === '"') return { value: out, next: i + 1 };
+    if (ch === '"') return { value: out, next: i + 1, text, line: cur };
     if (ch === '\\') {
       // 显式写成 string | undefined：越界时 text[i + 1] 就是 undefined，下面的分支靠它兜住
       const esc: string | undefined = text[i + 1];
-      if (esc === undefined) fail(file, line, i + 1, line.raw, '双引号标量以反斜杠结尾');
+      if (esc === undefined) {
+        if (multiline && quotedScalarContinuationEnabled()) {
+          escapedBreak = true;
+          i++;
+          continue;
+        }
+        fail(file, cur, i + 1, cur.raw, '双引号标量以反斜杠结尾');
+      }
       if (Object.prototype.hasOwnProperty.call(ESCAPES, esc)) {
         out += ESCAPES[esc];
+        keep = out.length;
         i += 2;
         continue;
       }
@@ -350,20 +410,17 @@ function readQuoted(text: string, start: number, line: SourceLine, file: string)
         const width = esc === 'x' ? 2 : esc === 'u' ? 4 : 8;
         const hex = text.slice(i + 2, i + 2 + width);
         if (hex.length !== width || !/^[0-9a-fA-F]+$/.test(hex)) {
-          fail(file, line, i + 1, line.raw, `转义 \\${esc} 后面需要 ${width} 位十六进制`);
+          fail(file, cur, i + 1, cur.raw, `转义 \\${esc} 后面需要 ${width} 位十六进制`);
         }
         out += String.fromCodePoint(parseInt(hex, 16));
+        keep = out.length;
         i += 2 + width;
         continue;
       }
-      if (esc === '\n') {
-        // YAML 的续行转义：\ 加换行等于把这个标量接下去。本解析器按行处理，走不到这里。
-        i += 2;
-        continue;
-      }
-      fail(file, line, i + 1, line.raw, `不认识的转义 \\${esc}`);
+      fail(file, cur, i + 1, cur.raw, `不认识的转义 \\${esc}`);
     }
     out += ch;
+    if (ch !== ' ' && ch !== '\t') keep = out.length;
     i++;
   }
 }
@@ -424,55 +481,78 @@ function blockScalarHeader(text: string): { header: string; tagged: boolean } | 
  * 读一个块标量。行号取自 header 那一行，往后按**原始行**走——空行属于块内容，
  * 而上面那份行索引刻意不留空行。
  *
- * 折行规则按 YAML 的常见情形实现：`|` 原样保留换行；`>` 把非空行之间的单个换行折成空格，
- * 空行折成一个换行（更深的缩进行原样保留）。chomping：`-` 去掉结尾换行、默认留一个、`+` 全留。
+ * 规则照 PyYAML 的 scan_block_scalar 实现（测试里的期望值都是 PyYAML 6.0.1 跑出来的）：
+ *   · `|` 原样保留换行；
+ *   · `>` 只在「两个普通行之间没有空行」时把换行折成一个空格，隔了几个空行就输出几个换行；
+ *   · 缩进比块缩进更深的行（more-indented）旁边的换行一律**不折**，多出来的前导空格
+ *     属于正文——`a: >` + `  x` + `   y` 在 PyYAML 里是 "x\n y\n"，折成空格会静默少一层缩进（#224）。
+ *   · chomping 放到**收完所有行之后**统一做：`+`(keep) 的语义是保留尾部空行，以前在收集
+ *     阶段就把尾随空行 pop 掉，`|+` / `>+` 于是永远少换行（#224）。
  */
 function readBlockScalar(header: SourceLine, headerText: string, parentIndent: number): { value: string; next: number } {
   const indicator = headerText[0] ?? '';
   const chomp = headerText.includes('-') ? 'strip' : headerText.includes('+') ? 'keep' : 'clip';
+  // split('\n') 的最后一个元素是「文末换行之后的位置」，不是一行：最后一行到底有没有行尾换行，
+  // 决定 clip/keep 要不要补那个换行，所以得单独记。
+  const lastRaw = sourceLines.length - 1;
   const explicit = /\d/.exec(headerText);
-  const start = header.line; // 1 起：下一行的下标就是它
-  const pieces: Array<{ indent: number; content: string }> = [];
-  let index = start;
   let blockIndent: number | undefined = explicit ? parentIndent + Number(explicit[0]) : undefined;
+  // 自动探测缩进时块至少要比父节点深一格；块头后面那些只有空格的行也参与探测
+  // （PyYAML 的 max_indent），不跟着算会让自动缩进跟 PyYAML 分叉。
+  let probe = parentIndent + 1;
+  const texts: string[] = [];
+  const moreIndented: boolean[] = [];
+  const blanksBefore: number[] = [];
+  let pendingBlanks = 0;
+  let terminated = false;
+  let index = header.line; // 1 起：下一行的下标就是它
   for (; index < sourceLines.length; index++) {
     const raw = sourceLines[index];
-    if (raw.trim() === '') {
-      pieces.push({ indent: -1, content: '' });
-      continue;
-    }
+    const spaced = raw.trim() === '';
+    // 文末没换行的空白尾巴算不上一行空行，PyYAML 也一样当它不存在
+    if (spaced && index === lastRaw) break;
     let indent = 0;
     while (indent < raw.length && raw[indent] === ' ') indent++;
     if (blockIndent === undefined) {
-      if (indent <= parentIndent) break; // 块是空的：下一行不属于它
+      if (spaced) {
+        if (indent > probe) probe = indent;
+        pendingBlanks++;
+        continue;
+      }
+      if (indent < probe) break; // 缩进没比父节点深：这个块是空的
       blockIndent = indent;
     }
-    if (indent < blockIndent) break;
-    pieces.push({ indent, content: raw.slice(blockIndent) });
+    // 只有空格、且没比块缩进更深的行是空行；更深的就是「一行空格」正文
+    if (spaced && indent <= blockIndent) { pendingBlanks++; continue; }
+    if (!spaced && indent < blockIndent) break;
+    texts.push(raw.slice(blockIndent));
+    moreIndented.push(indent > blockIndent);
+    blanksBefore.push(pendingBlanks);
+    pendingBlanks = 0;
+    terminated = index < lastRaw;
   }
-  // 结尾的空行不算内容（YAML 的 chomping 只按最后一个非空行判断）
-  while (pieces.length && pieces[pieces.length - 1].indent === -1) pieces.pop();
-  let text: string;
-  if (indicator === '|') {
-    text = pieces.map(piece => piece.content).join('\n');
-  } else {
-    let folded = '';
-    let previousBlank = false;
-    for (const piece of pieces) {
-      if (piece.indent === -1) { folded += '\n'; previousBlank = true; continue; }
-      if (folded !== '' && !previousBlank) folded += ' ';
-      folded += piece.content;
-      previousBlank = false;
+  let value = texts.length === 0 ? '' : '\n'.repeat(blanksBefore[0]) + texts[0];
+  for (let k = 1; k < texts.length; k++) {
+    const gap = blanksBefore[k];
+    if (indicator === '|' || moreIndented[k - 1] || moreIndented[k]) {
+      value += '\n'.repeat(gap + 1) + texts[k];
+    } else if (gap > 0) {
+      value += '\n'.repeat(gap) + texts[k];
+    } else {
+      value += ` ${texts[k]}`;
     }
-    text = folded;
   }
-  if (text !== '') {
-    if (chomp === 'clip') text = `${text.replace(/\n+$/, '')}\n`;
-    else if (chomp === 'strip') text = text.replace(/\n+$/, '');
+  // chomping：strip 全去掉、clip 留一个（文末没换行就一个也不补）、keep 原样留。
+  if (texts.length === 0) {
+    if (chomp === 'keep') value = '\n'.repeat(pendingBlanks);
+  } else if (chomp === 'keep') {
+    value += (terminated ? '\n' : '') + '\n'.repeat(pendingBlanks);
+  } else if (chomp === 'clip' && terminated) {
+    value += '\n';
   }
   // `next` 交回去的是**下一行的行号**（1 起）。`index` 是 `sourceLines` 的 0 起下标，
   // 差一位就会把块的末行当成块外的结构再解析一遍。
-  return { value: text, next: index + 1 };
+  return { value, next: index + 1 };
 }
 
 function skipFlowSpace(text: string, i: number): number {
@@ -563,11 +643,13 @@ function parseFlowCollection(text: string, start: number, line: SourceLine, file
 
 /** 解析一个值：流式集合、引号标量，或到行尾为止的 plain 标量。`asText` 保留 plain 原文
     （标签下的标量取字符串，不做隐式类型判定——PyYAML 的 construct_scalar 就是这个口径）。 */
-function parseInlineValue(text: string, line: SourceLine, column: number, file: string, asText = false): unknown {
+function parseInlineValue(
+  text: string, line: SourceLine, column: number, file: string, asText = false, end?: { line: number },
+): unknown {
   const tag = splitTag(text);
   if (tag) {
     if (tag.rest === '') fail(file, line, column, line.raw, '!!js 标签后面没有值');
-    const inner = parseInlineValue(tag.rest, line, column + (text.length - tag.rest.length), file, true);
+    const inner = parseInlineValue(tag.rest, line, column + (text.length - tag.rest.length), file, true, end);
     if (inner !== null && typeof inner === 'object') fail(file, line, column, line.raw, '不支持给集合加 !!js 标签');
     return applyTag(String(inner));
   }
@@ -579,9 +661,11 @@ function parseInlineValue(text: string, line: SourceLine, column: number, file: 
     return flow.value;
   }
   if (ch === '"' || ch === "'") {
-    const quoted = readQuoted(text, 0, line, file);
-    const rest = pyStrip(stripComment(text.slice(quoted.next)));
-    if (rest !== '') fail(file, line, quoted.next + 1, line.raw, `引号标量后面还有多余内容：${rest}`);
+    // 只有块上下文的调用方（传了 end）才接得住跨行：它们要按 end.line 跳过被吃掉的行
+    const quoted = readQuoted(text, 0, line, file, end !== undefined);
+    const rest = pyStrip(stripComment(quoted.text.slice(quoted.next)));
+    if (rest !== '') fail(file, quoted.line, quoted.next + 1, quoted.line.raw, `引号标量后面还有多余内容：${rest}`);
+    if (end) end.line = quoted.line.line;
     return quoted.value;
   }
   assertNodeStart(text, line, column, file);
@@ -595,7 +679,7 @@ function parseInlineValue(text: string, line: SourceLine, column: number, file: 
 
 /**
  * 这个值后面还能不能续写 plain 标量。拆掉 `!!js` 标签后再看：流式集合与引号标量
- * 有自己的行规则（本解析器不支持跨行），只有 plain 标量能吃掉下一行。
+ * 有自己的行规则（引号标量的跨行见 readQuoted），只有 plain 标量按这里的规则吃掉下一行。
  */
 function isPlainScalarStart(text: string): boolean {
   const tag = splitTag(text);
@@ -670,6 +754,14 @@ function firstLineAtOrAfter(lines: SourceLine[], from: number, lineNo: number): 
   return i;
 }
 
+/** 块上下文里一个写在行内的值：跨行的引号标量会吃掉后面几行，`next` 跳过它们。 */
+function readInlineValue(lines: SourceLine[], i: number, text: string, column: number, file: string): { value: unknown; next: number } {
+  const line = lines[i];
+  const end = { line: line.line };
+  const value = parseInlineValue(text, line, column, file, false, end);
+  return { value, next: firstLineAtOrAfter(lines, i + 1, end.line + 1) };
+}
+
 function parseMapping(lines: SourceLine[], start: number, indent: number, file: string): [Record<string, unknown>, number] {
   const obj: Record<string, unknown> = {};
   let i = start;
@@ -706,8 +798,9 @@ function parseMapping(lines: SourceLine[], start: number, indent: number, file: 
         setKey(obj, key, folded.value);
         i = folded.next;
       } else {
-        setKey(obj, key, parseInlineValue(rest, line, line.indent + colon + 2, file));
-        i++;
+        const inline = readInlineValue(lines, i, rest, line.indent + colon + 2, file);
+        setKey(obj, key, inline.value);
+        i = inline.next;
       }
     }
   }
@@ -761,8 +854,9 @@ function parseSequence(lines: SourceLine[], start: number, indent: number, file:
       arr.push(folded.value);
       i = folded.next;
     } else {
-      arr.push(parseInlineValue(value, line, column + 1, file));
-      i++;
+      const inline = readInlineValue(lines, i, value, column + 1, file);
+      arr.push(inline.value);
+      i = inline.next;
     }
   }
   return [arr, i];
@@ -795,7 +889,7 @@ function parseChild(lines: SourceLine[], i: number, parentIndent: number, file: 
     // 打开后续行才可能是「孩子就是一个标量续行」，例如 `key:\n  第一行\n  第二行`。
     if (findKeyColon(line.content) < 0 && plainScalarContinuationEnabled()) {
       if (isPlainScalarStart(text)) return readPlainValue(lines, line, i, parentIndent, text, file);
-      return { value: parseInlineValue(text, line, line.indent + 1, file), next: i + 1 };
+      return readInlineValue(lines, i, text, line.indent + 1, file);
     }
     const [value, next] = parseMapping(lines, i, line.indent, file);
     return { value, next };

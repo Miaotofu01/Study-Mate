@@ -2,7 +2,7 @@
    ────────────────────────────────────────────────────────────────────────
    这一层的承诺是「**枚举过什么就支持什么，没枚举的一律报出来**」。所以两件事都要钉：
 
-     1. 九份真 schema 里出现的关键字，必须**全部**落在枚举表里（读盘枚举，不手抄）——
+     1. 十份真 schema 里出现的关键字，必须**全部**落在枚举表里（读盘枚举，不手抄）——
         以后谁往 schema 里加一个 `oneOf`，这里当场红，而不是静默放行；
      2. 每个已支持的关键字都有正向与反向用例，反向用例断言的是**逐条**问题。
 
@@ -50,10 +50,10 @@ function messagesOf(value, schema) {
 
 /* ── 一、枚举表与真 schema 对齐 ───────────────────────────────────────── */
 
-test('九份 schema 用到的关键字全部在枚举表里（新增关键字会当场红）', () => {
+test('十份 schema 用到的关键字全部在枚举表里（新增关键字会当场红）', () => {
   const declared = new Set([...ANNOTATION_KEYWORDS, ...ASSERTION_KEYWORDS]);
   const files = fs.readdirSync(SCHEMA_DIR).filter((name) => name.endsWith('.schema.json')).sort();
-  assert.equal(files.length, 9, `schemas/ 下应当有九份 schema，实际 ${JSON.stringify(files)}`);
+  assert.equal(files.length, 10, `schemas/ 下应当有十份 schema，实际 ${JSON.stringify(files)}`);
   const seen = new Set();
   for (const name of files) {
     for (const keyword of keywordsOf(readSchema(name))) {
@@ -67,7 +67,7 @@ test('九份 schema 用到的关键字全部在枚举表里（新增关键字会
   }
   // 反向：枚举表里声明的断言关键字，得真有 schema 在用（不然就是没人验过的死代码）
   for (const keyword of ASSERTION_KEYWORDS) {
-    assert.ok(seen.has(keyword), `ASSERTION_KEYWORDS 里的 ${keyword} 在九份 schema 里一次都没出现`);
+    assert.ok(seen.has(keyword), `ASSERTION_KEYWORDS 里的 ${keyword} 在十份 schema 里一次都没出现`);
   }
   assert.deepEqual([...seen].filter((keyword) => !declared.has(keyword)), []);
 });
@@ -241,9 +241,9 @@ test('pointerOf 转义 ~ 与 /', () => {
   assert.equal(pointerOf(['a/b', 'c~d']), '/a~1b/c~0d');
 });
 
-/* ── 四、拿九份真 schema 做一次回归 ────────────────────────────────────── */
+/* ── 四、拿十份真 schema 做一次回归 ────────────────────────────────────── */
 
-test('真 schema 对好数据零问题、对坏数据逐条报（九份都跑一遍）', () => {
+test('真 schema 对好数据零问题、对坏数据逐条报（十份都跑一遍）', () => {
   const samples = {
     'curriculum.schema.json': [
       { nodes: [{ id: 'a', title: 'A', kind: '概念', objective: 'o', prerequisites: [], status: '未开始' }], edges: [] },
@@ -285,6 +285,26 @@ test('真 schema 对好数据零问题、对坏数据逐条报（九份都跑一
         题: { '锚点#0': { id: '锚点#0', 作答历史: [{ 时: '2026-09-24T21:05:00+08:00', 选: 1, 对: true }], 上次结果: { 时: '2026-09-24T21:05:00+08:00', 选: 1, 对: true } } },
       },
       { 节点: 'a', 课件: '0001-a.md', 题: {} },
+    ],
+    'annotations.schema.json': [
+      {
+        节点: 'a', 课件: '0001-a.md', 最后写入: '2026-09-24T21:05:00+08:00',
+        标: {
+          'a-1': {
+            id: 'a-1', note: '', ranges: [{ line: 3, kind: 'para', hash: 'h-1', start: 2, end: 6 }],
+            created: '2026-09-24T21:05:00+08:00', modified: '2026-09-24T21:05:00+08:00',
+          },
+        },
+      },
+      {
+        节点: 'a', 课件: '0001-a.md',
+        标: {
+          'a-1': {
+            id: 'a-1', note: '', ranges: [{ line: 0, kind: 'para', hash: 'h-1', start: 0, end: -1, extra: true }],
+            created: '', modified: '',
+          },
+        },
+      },
     ],
     'misconceptions.schema.json': [
       [{ topic: '掩码', source: '问答面板', evidence: '提问原文', status: '未处理', at: '2026-09-24' }],

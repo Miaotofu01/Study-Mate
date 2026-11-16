@@ -26,6 +26,8 @@ import { fileURLToPath } from 'node:url';
 
 import { installPreset } from '../../lib/preset.ts';
 import { parseYaml } from '../../lib/yaml.ts';
+import { COPY_ALL } from './fixtures/copy.mjs';
+import { removeFile, removeTree } from './fixtures/fs-rm.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PLUGIN = '@deepseek-ai/dsh-agent-preset';
@@ -33,10 +35,11 @@ const BEGIN = '# BEGIN STUDYMATE LEARNING PRESET';
 const BUNDLE = '@yunmiao/studymate';
 
 /** 解析一份补丁文件。`!!js` 与 CordisLoader 同口径：读成它的标量原文。
-    生产代码（`PATCH_PARSE_OPTIONS`）还开了多行 plain 标量：DSH 设置页会把长文本折行。 */
+    生产代码（`PATCH_PARSE_OPTIONS`）还开了多行 plain / 引号标量：DSH 设置页与宿主写盘都会把长文本折行。 */
 function parsed(file) {
   return parseYaml(fs.readFileSync(file, 'utf8'), {
     file, tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
+    quotedScalarContinuation: true,
   });
 }
 
@@ -55,13 +58,15 @@ function rows(data) {
 /** 在临时 HOME 里摆一份可安装的预设目录（真预设的副本：学习 + 答疑）。 */
 function fixture(t) {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-preset-'));
-  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  // 临时 HOME 里有一层中文目录（`dsh O'Brien 中文/`）：递归 rmSync 在非 ASCII 上会崩，
+  // 清理走 fs-rm.mjs 的安全写法。
+  t.after(() => removeTree(temporary));
   const home = path.join(temporary, "dsh O'Brien 中文");
   const staged = path.join(home, 'staged-learning');
   const stagedQa = path.join(home, 'staged-qa');
   fs.mkdirSync(home, { recursive: true });
-  fs.cpSync(path.join(ROOT, 'preset', 'learning'), staged, { recursive: true });
-  fs.cpSync(path.join(ROOT, 'preset', 'qa'), stagedQa, { recursive: true });
+  fs.cpSync(path.join(ROOT, 'preset', 'learning'), staged, COPY_ALL);
+  fs.cpSync(path.join(ROOT, 'preset', 'qa'), stagedQa, COPY_ALL);
   const patch = path.join(home, 'profiles', 'web', 'cordis.patch.yml');
   fs.mkdirSync(path.dirname(patch), { recursive: true });
   return { temporary, home, staged, stagedQa, target: path.join(home, '.agent-presets', 'learning'), patch };
@@ -281,6 +286,28 @@ test('profile 补丁里的多行 plain 标量不挡注册（DSH 0.2.1 设置页�
   assert.ok(rows.some((row) => row.insert?.[0]?.config?.id === 'learning'));
 });
 
+test('profile 补丁里的跨行双引号标量不挡注册（宿主按 80 列重排写盘的真实形态）', (t) => {
+  const f = fixture(t);
+  // 宿主用 yaml 库默认的 lineWidth 80 写盘：长的双引号字符串被折到下一行，仍是合法 YAML。
+  fs.writeFileSync(f.patch, [
+    '- id: some-plugin',
+    '  config:',
+    '    hover:',
+    '      textZh: "Nov 4–15: Receive a daily free allowance. Subscribers enjoy higher',
+    '        quotas."',
+    '',
+  ].join('\n'), 'utf8');
+  const bundled = invoke(f, { version: null, bundle: true });
+  assert.equal(bundled.mode, 'bundle');
+  assert.equal(bundled.config.id, 'learning');
+  const declared = invoke(f);
+  assert.equal(declared.mode, 'declarative');
+  const rows = parsed(f.patch);
+  assert.equal(rows[0].config.hover.textZh,
+    'Nov 4–15: Receive a daily free allowance. Subscribers enjoy higher quotas.');
+  assert.ok(rows.some((row) => row.insert?.[0]?.config?.id === 'learning'));
+});
+
 test('bundle 启动拒绝隐式迁移，且不写任何文件', (t) => {
   const f = fixture(t);
   fs.writeFileSync(f.patch, '# retained\n[]\n', 'utf8');
@@ -493,7 +520,10 @@ test('坏的 bundle 清单或坏补丁失败且不写盘', (t) => {
     assert.equal(fs.readFileSync(f.patch, 'utf8'), '[]\n');
     assert.deepEqual(fs.readFileSync(path.join(f.staged, 'agent.cordis.yml')), before);
   }
-  fs.rmSync(manifest);
+  // `f.home` 里带中文（`dsh O'Brien 中文/`）：Node 24 的 rmSync 在这个路径上删文件会
+  // **静默不删**，于是下一个用例读到的还是上一轮那份 `bundles: [null]`，报出来的是
+  // 「必须是包名列表」而不是「补丁缺标记」——换成 unlinkSync 才有「清单已删」这个前提。
+  removeFile(manifest);
   fs.writeFileSync(f.patch, `${BEGIN}\n- id: incomplete\n`, 'utf8');
   assert.throws(() => invoke(f, { bundle: true }), /标记/);
 });
@@ -504,7 +534,7 @@ test('符号链接一律不覆盖（预设或补丁）', { skip: process.platfor
   fs.writeFileSync(path.join(f.home, 'real.patch.yml'), '[]\n', 'utf8');
   fs.symlinkSync(path.join(f.home, 'real.patch.yml'), link);
   assert.throws(() => invoke(f, { patchOutput: link }), /符号链接/);
-  fs.rmSync(link);
+  removeFile(link);
   const presetLink = path.join(f.home, 'linked-preset');
   fs.mkdirSync(presetLink);
   fs.symlinkSync(path.join(f.staged, 'agent.cordis.yml'), path.join(presetLink, 'agent.cordis.yml'));

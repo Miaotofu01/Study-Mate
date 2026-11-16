@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
@@ -24,11 +25,87 @@ export async function loadCore(relative) {
   return import(pathToFileURL(path.join(ROOT, relative)).href);
 }
 
+/* ── effect 作用域：一次测试的 cleanup 在删临时目录之前拆掉 ─────────────
+   夹具不给 `ctx.effect` 的 cleanup 兜底的话，`lib/watch` 的 `registerWatch` 挂上来的
+   `fs.watch` 会一直留到测试结束；随后 `tempDir` 删掉被它盯着的目录，Windows 上会陷入
+   rename 事件风暴（`persistent:false` 也不管用），事件循环永不为空，整个 `node --test`
+   的子进程不退出——症状就是 npm test 永远跑不完、也没有 footer。所以每次 `tempDir` 开一份
+   作用域，之后注册的 effect 记在它名下，删目录前按 LIFO 全拆；拆不掉的不吞，聚合后把该
+   test 判红。 */
+
+const DISPOSED_MESSAGE = 'effect 已过拆卸时机：这份临时目录已经清理过了';
+
+class EffectScope {
+  #cleanups = [];
+  #disposed = false;
+
+  /** 拆卸开始之后就不许再登记：迟到的 effect 得在调用 fn 之前被拒，不然资源已经造出来了。 */
+  get disposed() {
+    return this.#disposed;
+  }
+
+  add(cleanup) {
+    if (this.#disposed) throw new Error(DISPOSED_MESSAGE);
+    this.#cleanups.push(cleanup);
+  }
+
+  /** @returns {Promise<unknown[]>} 拆卸失败的错误（不抛：由调用方聚合后一次抛出）。 */
+  async dispose() {
+    if (this.#disposed) return [];
+    this.#disposed = true;
+    const errors = [];
+    while (this.#cleanups.length > 0) {
+      const cleanup = this.#cleanups.pop();
+      try {
+        await cleanup();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    return errors;
+  }
+}
+
+/** 当前测试的 effect 作用域（`tempDir` 里 `enterWith`，同一条异步链上的 `fakeContext` 看得见）。 */
+const effectScopes = new AsyncLocalStorage();
+
+/** 一次测试可能建多个临时目录（多个 HOME），按 test 记账，谁先拆都把同一条 test 的全拆掉。 */
+const scopesByTest = new WeakMap();
+
+function scopesFor(t) {
+  let scopes = scopesByTest.get(t);
+  if (!scopes) {
+    scopes = [];
+    scopesByTest.set(t, scopes);
+  }
+  return scopes;
+}
+
+async function disposeScopes(t) {
+  const errors = [];
+  for (const scope of (scopesByTest.get(t) ?? []).slice().reverse()) {
+    errors.push(...await scope.dispose());
+  }
+  if (errors.length > 0) {
+    throw new AggregateError(errors, `${errors.length} 个 effect 拆卸失败`);
+  }
+}
+
 /* ── 临时 HOME：工具按 `resolveWorkspace()` 读 DSH_HOME/studymate-config.yaml ── */
 
 export function tempDir(t, prefix) {
   const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), prefix));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const scope = new EffectScope();
+  scopesFor(t).push(scope);
+  effectScopes.enterWith(scope);
+  t.after(async () => {
+    try {
+      // 先拆 effect（registerWatch 的 cleanup 会关掉 fs.watch），再删目录。
+      await disposeScopes(t);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
   return dir;
 }
 
@@ -166,6 +243,9 @@ export function fakeContext(options = {}) {
   const definitions = new Map();
   const effects = [];
   const disposed = [];
+  // 归属在创建 ctx 时就钉住：同一条测试里可能又开第二个临时目录（`enterWith` 换掉
+  // 当前 store），但这份 ctx 的 effect 仍属于创建它的那份作用域，不能跟着 store 跑。
+  const ownerScope = effectScopes.getStore();
   const ctx = {
     tools: {
       register: (definition) => {
@@ -177,7 +257,17 @@ export function fakeContext(options = {}) {
     },
     effect: (fn, label) => {
       effects.push(label ?? '');
-      return fn();
+      // 优先用创建 ctx 时钉住的作用域；没有临时目录时再退回去看当前的 store
+      // （`fakeContext()` 可能先于 `useHome`/`tempDir` 被调用）。
+      const scope = ownerScope ?? effectScopes.getStore();
+      // 作用域已经拆完还来登记：必须在调用 fn 之前拒。先让 fn 造出资源、再在
+      // add 里抛，那份资源就没人拆了——迟到 effect 的清理安全靠这个顺序。
+      if (scope?.disposed) throw new Error(DISPOSED_MESSAGE);
+      const cleanup = fn();
+      // 有临时目录（`useHome`/`tempDir`）就把 cleanup 记到那条 test 名下，
+      // 删目录前统一拆；没有就当这个组合不归夹具管（与真宿主一致：由注册方自己拆）。
+      if (typeof cleanup === 'function') scope?.add(cleanup);
+      return cleanup;
     },
     get: (name) => (name === 'llm' ? options.llm : undefined),
   };

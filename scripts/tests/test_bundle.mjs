@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { parseYaml } from '../../lib/yaml.ts';
-import { validatePack } from '../release/release.mjs';
+import { packEntry, validatePack } from '../release/release.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const plugin = pathToFileURL(path.join(root, 'bin/dsh-plugin.ts')).href;
@@ -295,8 +295,10 @@ test('packed npm package loads CLI and both plugins inside node_modules', t => {
   const packed = passed(npm(['pack', '--ignore-scripts', '--offline', '--json', '--pack-destination', packs], root));
   // 这份就是发布件：Release 的发放白名单（validatePack）必须认它。#155 之前门禁里没人问过
   // 这一句——README.en.md 不在 files 里、npm 却一定会打进去，于是门禁全绿、发布卡死。
-  validatePack(JSON.parse(packed.stdout)[0]);
-  const archive = path.join(packs, JSON.parse(packed.stdout)[0].filename);
+  // 取哪一项交给 packEntry：npm 12 起 `pack --json` 是对象而不是数组（#250）。
+  const pack = packEntry(packed.stdout);
+  validatePack(pack);
+  const archive = path.join(packs, pack.filename);
   passed(npm(['install', archive, '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false'], consumer));
   const installed = path.join(consumer, 'node_modules', '@yunmiao', 'studymate');
   // 同样的道理：schemastery 由宿主提供，消费者目录里补一份（真实 profile 里它在宿主那一层）。

@@ -23,7 +23,8 @@
 
    夹具（临时 HOME/工作区、假 ctx）在 `scripts/tests/fixtures/tools.mjs`；数据现造、跑完即弃
    （ADR-0009：仓库里不存样例数据）。跑命令这类测试**不依赖网络、不依赖仓库外的路径**，
-   只用 `process.execPath` 与工作区里的临时脚本。 */
+   只用 Node 解释器（`process.execPath`；路径有空白时退回 PATH 上的 `node`，
+   没有则统一用正斜杠）与工作区里的临时脚本。 */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,6 +34,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { assertOutput, execute, fakeContext, useHome, writeSubject } from './fixtures/tools.mjs';
+import { COPY_ALL } from './fixtures/copy.mjs';
+import { removeFile, removeTree } from './fixtures/fs-rm.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const lab = await import('../../lib/lab/index.ts');
@@ -41,7 +44,12 @@ const tools = await import('../../lib/tools/index.ts');
 const rules = await import('../../lib/core/rules.ts');
 void ROOT;
 
-const NODE = process.execPath;
+// 命令文法按空白切词，引号与反斜杠都在拒绝字符里（lib/lab/contract.ts）。所以
+// `process.execPath` 不能原样进「证据」：Windows 安装路径既有空格又有反斜杠，整条命令
+// 会先被文法层拒掉。路径里有空白就退回 PATH 上的 `node`（不保证与 execPath 是同一
+// 安装，但 npm test 的 PATH 上通常有）；没有空白则统一换成正斜杠绝对路径，
+// Linux/macOS 原样不动。
+const NODE = /\s/.test(process.execPath) ? 'node' : process.execPath.replaceAll('\\', '/');
 
 /* ── 夹具：一个科目 + 一次实验 + 一道交付物题 ──────────────────────────── */
 
@@ -394,8 +402,10 @@ test('`~` 不展开：拒绝解释它（不解释就不会指错地方）', asyn
 test('反证：没有题库 / 题型不对 / 证据为空 / 题号不存在 —— 四种都拒', async (t) => {
   const ctx = labContext();
   // 没有题库文件（夹具默认会给一份，这里删掉那份——「没有题库」是这一组的第一个反证）
+  // 用 removeFile 而不是 fs.rmSync：工作区在 `学习资料/` 这种非 ASCII 目录下，Node 24 的
+  // rmSync 会**静默不删**（返回成功，文件还在），这一组反证就变成了「题库还在，命令照跑」。
   const noPool = writeLabSubject(t);
-  fs.rmSync(noPool.quiz, { force: true });
+  removeFile(noPool.quiz);
   let out = await execute(ctx, 'studymate_lab_run', { subject: 'demo', node: 'var', question: '什么是变量#0' });
   assert.equal(out.状态, '拒了');
   assert.match(out.拒.为什么, /题库/);
@@ -670,11 +680,11 @@ function adoptSkeleton(dir, node = 'var') {
   const runDir = path.join(labDir, `0001-${node}`);
   fs.mkdirSync(runDir, { recursive: true });
   for (const entry of fs.readdirSync(SKELETON_EXAMPLE)) {
-    fs.cpSync(path.join(SKELETON_EXAMPLE, entry), path.join(runDir, entry), { recursive: true });
+    fs.cpSync(path.join(SKELETON_EXAMPLE, entry), path.join(runDir, entry), COPY_ALL);
   }
   fs.mkdirSync(path.join(labDir, 'solutions'), { recursive: true });
   fs.cpSync(path.join(SKELETON, 'solutions', '0000-示例'), path.join(labDir, 'solutions', `0001-${node}`),
-    { recursive: true });
+    COPY_ALL);
   fs.copyFileSync(path.join(SKELETON, 'README.md'), path.join(labDir, 'README.md'));
   return runDir;
 }
@@ -721,9 +731,9 @@ test('反证：盘上有骨架也不算命令来源——「证据」空着照�
 
 test('骨架自检：在干净目录里把干净态与作答态各跑一遍，退出码原样转述', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-lab-skeleton-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  t.after(() => removeTree(directory));
   const copied = path.join(directory, 'lab');
-  fs.cpSync(SKELETON, copied, { recursive: true });
+  fs.cpSync(SKELETON, copied, COPY_ALL);
 
   const result = spawnSync('sh', ['自检.sh'], { cwd: copied, encoding: 'utf8', windowsHide: true });
   assert.equal(result.error, undefined, result.error?.message);
@@ -818,11 +828,13 @@ test('两个运行入口都在、都只调 check.sh：干净态与作答态各�
 
 test('反证：没有任务目录的 lab —— 两个入口都非零退出，且印出卡在哪一步', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-lab-notask-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  t.after(() => removeTree(directory));
   const copied = path.join(directory, 'lab');
-  fs.cpSync(SKELETON, copied, { recursive: true });
+  fs.cpSync(SKELETON, copied, COPY_ALL);
   // 「没有任务目录」= 骨架里那个示例任务目录搬走（`solutions/` 留着——它本来就不算任务目录）
-  fs.rmSync(path.join(copied, '0000-示例'), { recursive: true, force: true });
+  // `0000-示例` 本身就是非 ASCII：Node 24 的 rmSync 在这里要么崩、要么静默不删，两种都让
+  // 这条反证失去意义（目录还在 → 脚本当然找得到 → 断言「任务目录不在」必然红）。
+  removeTree(path.join(copied, '0000-示例'));
 
   for (const entry of ['干净态.sh', '作答态.sh']) {
     const result = spawnSync('sh', [entry], { cwd: copied, encoding: 'utf8', windowsHide: true });
@@ -840,9 +852,9 @@ test('反证：没有任务目录的 lab —— 两个入口都非零退出，�
 
 test('对照：任务目录在的时候两个入口照旧（失败路径的判据不是「一律非零」）', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-lab-ok-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  t.after(() => removeTree(directory));
   const copied = path.join(directory, 'lab');
-  fs.cpSync(SKELETON, copied, { recursive: true });
+  fs.cpSync(SKELETON, copied, COPY_ALL);
 
   const answered = spawnSync('sh', ['作答态.sh'], { cwd: copied, encoding: 'utf8', windowsHide: true });
   assert.equal(answered.status, 0, `作答态应当归零：\n${answered.stdout}\n${answered.stderr}`);

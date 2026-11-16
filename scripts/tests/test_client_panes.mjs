@@ -43,6 +43,12 @@ function loadPure() {
   const react = {
     createElement: () => null,
     Fragment: Symbol('react.fragment'),
+    // #174 ② 的渲染边界要 `extends React.Component`：只为「工厂能物化」给个最小基类
+    Component: class Component {
+      constructor(props) { this.props = props; this.state = this.state || {}; }
+
+      setState(patch) { this.state = Object.assign({}, this.state, patch || {}); }
+    },
     useState: () => [undefined, () => {}],
     useEffect: () => {},
     useMemo: () => undefined,

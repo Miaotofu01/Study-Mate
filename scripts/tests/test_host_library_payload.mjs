@@ -11,6 +11,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { readLibrary, buildLibrary } from '../../lib/library.ts';
+import { removeFile } from './fixtures/fs-rm.mjs';
 
 /* ── 临时工作区：跑完即弃 ─────────────────────────────────────────────── */
 
@@ -114,6 +115,20 @@ const MEMORY_YAML = [
 /** `memory_md` 的期望值**手写**：画像三节里**有内容**的那一节，原样（投影只有这一节）。 */
 const MEMORY_PROJECTION = ['我是谁:', '  现有技能: [终端]'].join('\n');
 
+/** 旧格式（2.0.x 前）的共享记忆：`##` 分节 + bullet。2.0.4 审计后读侧补了兜底——
+    新文件缺席、只有它时按旧格式读，载荷里的投影与读新格式同一份（见 `lib/memory-file.ts`）。 */
+const LEGACY_MEMORY_MD = [
+  '## 我是谁',
+  '- 现有技能：终端',
+  '',
+  '## 积累',
+  '- fish 脾气：这台机器上 fish 不吃双横线。',
+  '',
+].join('\n');
+
+/** 旧格式读出来的投影：转换保留「键 + 一句话」，形状与新格式的投影一致。 */
+const LEGACY_MEMORY_PROJECTION = ['我是谁:', '  现有技能: 终端'].join('\n');
+
 /** #191 科目记忆：只对这门课成立的做法与事实（科目目录下那份 `MEMORY.yaml`）。用词在共享
     记忆里一次都不出现——否定断言不会因为共用词而假阳性。 */
 const SUBJECT_MEMORY_YAML = [
@@ -159,6 +174,21 @@ test('readLibrary 的顶层就那六个键，含义各自钉住', () => {
   // today 取各科目 updated_at 的字典序最大者的前 10 位
   assert.equal(payload.today, '2026-05-06');
   assert.equal(payload.subjects.length, 1);
+});
+
+test('2.0.4 迁移期 载荷：只有旧名那份文件时按旧格式读，投影照旧、`积累` 照旧不进载荷', () => {
+  const { workspace } = oneSubjectWorkspace();
+  // 把新文件换回旧格式：模拟 2.0.x 用户升级前的盘面（审计里的真实形态）
+  removeFile(path.join(workspace, '.learning', 'MEMORY.yaml'));
+  fs.writeFileSync(path.join(workspace, '.learning', 'MEMORY.md'), LEGACY_MEMORY_MD);
+
+  const payload = readLibrary({ workspace });
+
+  assert.equal(payload.memory_md, LEGACY_MEMORY_PROJECTION, '旧格式的画像节要按同一份投影进载荷');
+  for (const fragment of ['积累', 'fish 脾气', '不吃双横线']) {
+    assert.equal(payload.memory_md.includes(fragment), false,
+      `载荷里出现了「${fragment}」：${payload.memory_md}`);
+  }
 });
 
 test('#191 载荷：科目记忆一个字都不进 payload（盘上那份带内容的科目记忆是活的）', () => {
@@ -220,7 +250,7 @@ test('科目与节点的键名是页面依赖的契约，逐个钉住', () => {
 
   const [node] = subject.nodes;
   assert.deepEqual(Object.keys(node).sort(), [
-    'anchors', 'attempts', 'concepts', 'id', 'kind', 'lab', 'lesson', 'lesson_md', 'level',
+    'anchors', 'annotations', 'attempts', 'concepts', 'id', 'kind', 'lab', 'lesson', 'lesson_md', 'level',
     'notes', 'number', 'objective', 'orphan_keys', 'orphans', 'pitfalls', 'pool', 'practice',
     'prerequisites', 'problem', 'question_kinds', 'raw_status', 'realworld', 'resources', 'tier',
     'title',
@@ -534,6 +564,33 @@ test('大纲与题库的坏数据当场抛错，不静默降级成空值', () =>
     ].join('\n'),
   }));
   assert.throws(() => readLibrary({ workspace: badEdge.workspace }), /缺少 from\/to/);
+});
+
+test('#291 misconceptions.yaml 顶层写成映射时当场说清形状，不再一路带到 .forEach', () => {
+  const badShape = makeWorkspace(subjectTree('math-analysis-1', {
+    ...minimalSubject(),
+    'misconceptions.yaml': 'items: []\n',
+  }));
+  // 以前这里盲 cast 成数组，错被推迟到读取端的 `.forEach`，报错只说
+  // 「misconceptionRaw.forEach is not a function」——看不出是哪个文件、该改成什么
+  assert.throws(
+    () => readLibrary({ workspace: badShape.workspace }),
+    /misconceptions\.yaml 顶层必须是 YAML 列表，这里读到的是映射（顶层键：items）/,
+  );
+  assert.throws(() => readLibrary({ workspace: badShape.workspace }), /没有记录时写 \[\]/);
+
+  // 开隔离时点名那一门，错误原样带出来
+  const payload = readLibrary({ workspace: badShape.workspace, isolateBrokenSubjects: true });
+  assert.deepEqual(payload.subjects, []);
+  assert.deepEqual(payload.unreadable.map((item) => item.dir), ['math-analysis-1']);
+  assert.match(payload.unreadable[0].error, /顶层必须是 YAML 列表/);
+
+  // 空文件 / 只有注释不是坏形状：与「缺失」同义，给空清单
+  const commentary = makeWorkspace(subjectTree('demo', {
+    ...minimalSubject(),
+    'misconceptions.yaml': '# 还没有记录\n',
+  }));
+  assert.deepEqual(readLibrary({ workspace: commentary.workspace }).subjects[0].misconceptions, []);
 });
 
 test('缺失的可选文件一律给空值，不让整份 payload 崩掉', () => {

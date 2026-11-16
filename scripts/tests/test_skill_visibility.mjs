@@ -13,7 +13,8 @@
    所以**出方向**的判据只有一条：这两个位置里没有 StudyMate 的技能。
 
    三部分：
-     一、出方向——工作目录在本仓库里时，宿主默认的那两条项目根扫描路径上什么都没有；
+     一、出方向——工作目录在本仓库里时，宿主默认的那两条项目根扫描路径上没有 **StudyMate**
+         技能；别的技能（例如用户自己的 grill 系列）住在那儿不算泄漏；
      二、入方向——学习预设显式声明技能目录，且那份声明落在包内（宿主默认不扫的位置）；
    三、工具与面板——**工具**的注册面自 #138 起在「学习模式」预设作用域里（预设载荷自己那条
           `@yunmiao/studymate/learning-preset` 行），profile 根上一个都不留，所以别的预设的
@@ -21,12 +22,15 @@
           （宿主没有「按预设注册面板」的接口）——那一半偏离留着，结论与去向写在
           `docs/规范/工程约束.md` §二「技能与工具的可见边界」。 */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 
+import { COPY_ALL } from './fixtures/copy.mjs';
+import { removeTree } from './fixtures/fs-rm.mjs';
 import { parseYaml } from '../../lib/yaml.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -53,25 +57,177 @@ function skillNames(directory = SKILLS) {
     .filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
 }
 
+/** 内容签名按换行归一化：改目录名复制出来的 SKILL.md 与原件逐字相同，hash 必须撞上。 */
+function contentHash(text) {
+  return createHash('sha256').update(text.replace(/\r\n?/g, '\n').trim()).digest('hex');
+}
+
+/** 只读 frontmatter 的 name 一行，不解析、不执行正文里的任何内容。 */
+function declaredName(text) {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!frontmatter) return '';
+  const line = /^name\s*:\s*(.*?)\s*$/m.exec(frontmatter[1]);
+  return line ? line[1].replace(/\s+#.*$/, '').replace(/^(['"])([\s\S]*)\1$/, '$2').trim() : '';
+}
+
+/** 从 12 份源技能现场取判据：规范名、frontmatter name、正文 hash。 */
+const CANONICAL = new Map(skillNames().map(name => {
+  const file = path.join(SKILLS, name, 'SKILL.md');
+  const text = fs.readFileSync(file, 'utf8');
+  return [name, { name, declared: declaredName(text) || name, hash: contentHash(text) }];
+}));
+
+const HASH_OWNER = new Map([...CANONICAL.values()].map(item => [item.hash, item.name]));
+const NAME_OWNER = new Map([...CANONICAL.values()].map(item => [item.declared, item.name]));
+
+/** 路径是否落在另一个目录内（含相等）。realpath 用来识破指向技能源的 junction / symlink。 */
+function inside(child, parent) {
+  const relative = path.relative(fs.realpathSync(parent), fs.realpathSync(child));
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function statOrNull(target) {
+  try { return fs.statSync(target); } catch { return null; }
+}
+
+/**
+ * 宿主只扫根的一层：目录取 `<目录>/SKILL.md`，散装技能取根下的 `*.md`。
+ * 因此这里也只按这两条形态找候选，不把更深层、宿主根本看不见的副本算成泄漏。
+ */
+function skillCandidates(root) {
+  let entries;
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch (error) {
+    if (error && error.code === 'ENOENT') return [];
+    throw error;
+  }
+  const candidates = [];
+  for (const entry of entries) {
+    const full = path.join(root, entry.name);
+    const type = statOrNull(full);
+    if (!type) continue;
+    if (type.isDirectory() && statOrNull(path.join(full, 'SKILL.md'))?.isFile()) {
+      candidates.push({ path: path.join(full, 'SKILL.md'), label: entry.name });
+    } else if (type.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+      candidates.push({ path: full, label: entry.name.replace(/\.md$/i, '') });
+    }
+  }
+  return candidates;
+}
+
+/**
+ * 默认根里**属于 StudyMate** 的候选。判据不靠「目录存在」：无关的用户技能不算泄漏；
+ * 同名、改名后的逐字副本、仍声明源技能 name 的副本、以及链到技能源的副本都算。
+ * 只把路径与原因返回给断言，不打印也不把技能正文带进日志。
+ */
+function studyMateLeaksIn(root) {
+  if (!fs.existsSync(root)) return [];
+  const sourceRoot = path.join(ROOT, 'preset', 'skills');
+  const leaks = [];
+  for (const candidate of skillCandidates(root)) {
+    const reasons = [];
+    if (CANONICAL.has(candidate.label)) reasons.push(`名字与源技能 ${candidate.label} 相同`);
+    let text;
+    try { text = fs.readFileSync(candidate.path, 'utf8'); } catch { continue; }
+    let linkInside = false;
+    try { linkInside = inside(candidate.path, sourceRoot); } catch { /* 坏链接按不存在处理 */ }
+    if (linkInside) reasons.push('realpath 落在技能源内');
+    const hashOwner = HASH_OWNER.get(contentHash(text));
+    if (hashOwner) reasons.push(`内容签名与源技能 ${hashOwner} 相同`);
+    const declared = declaredName(text);
+    const declaredOwner = NAME_OWNER.get(declared);
+    if (declaredOwner) reasons.push(`frontmatter name=${declared} 指向源技能 ${declaredOwner}`);
+    if (reasons.length) leaks.push({ path: candidate.path, reasons });
+  }
+  return leaks;
+}
+
 test('工作目录在本仓库里时，宿主默认的项目根扫描扫不到任何 StudyMate 技能', () => {
   // 「cwd 在仓库里」不是假设：门禁（checks.mjs）与 npm test 都从仓库根跑，
   // 套件也照 cwd 走一遍宿主那条规则，而不是假定自己在哪。
   const projectRoot = projectRootOf(process.cwd());
   assert.equal(fs.realpathSync(projectRoot), fs.realpathSync(ROOT),
     '这条套件的判据要在「工作目录落在本仓库里」的前提下成立');
-  for (const relative of SCANNED_FROM_PROJECT_ROOT) {
-    const scanned = path.join(projectRoot, relative);
-    assert.equal(fs.existsSync(scanned), false,
-      `${relative} 是宿主默认会扫的位置，技能不许住在这里（当前工作目录 ${process.cwd()}）`);
-  }
-  // 再说一遍「扫的是目录，不是名字」：那两条路径各自下面的技能名一个都不许在。
-  // 只看那两条路径本身（不笼统断言 `.dsh` 不存在）——构建产物落在 `.dsh/` 下不构成泄漏，
-  // 宿主扫的是 `<项目根>/.dsh/skills` 这一个位置。
-  for (const relative of SCANNED_FROM_PROJECT_ROOT) {
-    for (const name of skillNames()) {
-      assert.equal(fs.existsSync(path.join(projectRoot, relative, name)), false);
+  // 默认根里可以住**别的**技能（例如用户自己的 grill 系列）；只禁止 StudyMate 的东西。
+  // 判据覆盖：同名目录、改目录名后的逐字副本、散装 .md 副本、frontmatter 仍用源技能 name 的副本、
+  // 以及目录/文件链到技能源的副本。空目录与无关技能都返回空。
+  const leaks = SCANNED_FROM_PROJECT_ROOT.flatMap(relative =>
+    studyMateLeaksIn(path.join(projectRoot, relative)).map(leak => ({
+      ...leak, relative: path.relative(projectRoot, leak.path).split(path.sep).join('/'),
+    })));
+  assert.deepEqual(leaks, [],
+    `宿主默认会扫的位置里出现了 StudyMate 技能：${leaks.map(leak => `${leak.relative}（${leak.reasons.join('；')}）`).join('、')}`);
+});
+
+/**
+ * 反证（先红后绿的那一半）：造临时项目，不看用户自己的 `.dsh`。
+ * 无关技能 / 空目录必须绿；真的 StudyMate 技能无论换目录名、散装、仍用源 name、还是链接过去，都必须红。
+ */
+test('反证：默认根里的无关技能不误报，StudyMate 副本换名字/散装/同名/链接都必红', t => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-visibility-scan-'));
+  let junction = '';
+  t.after(() => {
+    // 先拆链再删树：Windows 上不能指望 recursive rm 一定只删 reparse point 而不跟进去。
+    if (junction) {
+      try { fs.unlinkSync(junction); }
+      catch (error) { if (!error || error.code !== 'ENOENT') throw error; }
     }
-  }
+    // 拆链失败就报红并留住临时树，不继续递归删除可能仍连接到技能源的目录。
+    // removeTree 逐层 readdir + unlink + rmdir，遇到链接先摘链接——`项目/` 是非 ASCII，
+    // Node 24 的 rmSync 在这里会直接崩（0xC0000409，整份文件一条断言都跑不出来）。
+    removeTree(base);
+  });
+  const project = path.join(base, '项目');
+  for (const relative of SCANNED_FROM_PROJECT_ROOT) fs.mkdirSync(path.join(project, relative), { recursive: true });
+  fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+
+  const write = (relative, text) => {
+    const file = path.join(project, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+    return file;
+  };
+
+  // ① 空目录与无关技能：不是 StudyMate 的，不算泄漏。
+  write('.dsh/skills/grill-me/SKILL.md', '---\nname: grill-me\ndescription: 与本项目无关的用户技能。\n---\n\n# 示例\n');
+  assert.deepEqual(SCANNED_FROM_PROJECT_ROOT.flatMap(relative => studyMateLeaksIn(path.join(project, relative))), []);
+
+  // ② 换目录名的逐字副本：名字看不出来，内容签名必须撞上。
+  const renamed = write('.dsh/skills/完全无关的目录/SKILL.md',
+    fs.readFileSync(path.join(SKILLS, 'lesson-design', 'SKILL.md'), 'utf8'));
+  let leaks = studyMateLeaksIn(path.join(project, '.dsh/skills'));
+  assert.equal(leaks.length, 1);
+  assert.match(leaks[0].reasons.join('；'), /内容签名与源技能 lesson-design 相同/);
+  // 这条目录名本身是非 ASCII（`完全无关的目录`）：崩点就在这里，见 fs-rm.mjs 的注释。
+  removeTree(path.dirname(renamed));
+
+  // ③ 散装 .md（宿主 skill-filesystem 把根下一层的 *.md 也当技能）：同样按内容抓。
+  write('.agents/skills/散装笔记.md', fs.readFileSync(path.join(SKILLS, 'local-qa', 'SKILL.md'), 'utf8'));
+  leaks = studyMateLeaksIn(path.join(project, '.agents/skills'));
+  assert.equal(leaks.length, 1);
+  assert.match(leaks[0].reasons.join('；'), /内容签名与源技能 local-qa 相同/);
+
+  // ④ 同名/改过正文的副本：名字本身就是源技能名，必须红（不能靠 hash 才抓）。
+  write('.dsh/skills/learning-system/SKILL.md', '---\nname: learning-system\ndescription: 同名但正文被改过。\n---\n\n# 副本\n');
+  leaks = studyMateLeaksIn(path.join(project, '.dsh/skills'));
+  assert.equal(leaks.length, 1);
+  assert.match(leaks[0].reasons.join('；'), /名字与源技能 learning-system 相同/);
+
+  // ⑤ 只改目录名、但 frontmatter 仍声明源技能 name：metadata 判据必须兜住。
+  write('.dsh/skills/换了个名字/SKILL.md', '---\nname: evidence-check\ndescription: 正文不同，但名字没改。\n---\n\n# 副本\n');
+  leaks = studyMateLeaksIn(path.join(project, '.dsh/skills'));
+  assert.equal(leaks.length, 2, JSON.stringify(leaks.map(leak => leak.reasons)));
+  assert.ok(leaks.some(leak => /frontmatter name=evidence-check/.test(leak.reasons.join('；'))));
+
+  // ⑥ 目录链到技能源：realpath 必须识破（Windows 用 junction，Linux/macOS 用目录 symlink）。
+  const link = path.join(project, '.dsh/skills', '看起来普通');
+  fs.symlinkSync(path.join(SKILLS, 'record-keeping'), link, process.platform === 'win32' ? 'junction' : 'dir');
+  junction = link;
+  leaks = studyMateLeaksIn(path.join(project, '.dsh/skills'));
+  assert.ok(leaks.some(leak => /realpath 落在技能源内/.test(leak.reasons.join('；'))), JSON.stringify(leaks.map(leak => leak.reasons)));
+
+  // ⑦ 整条判据照 cwd 走一遍：临时项目根就是宿主 findProjectRoot 找到的那个含 .git 的祖先。
+  assert.equal(path.resolve(projectRootOf(project)), path.resolve(project));
+  assert.ok(SCANNED_FROM_PROJECT_ROOT.flatMap(relative => studyMateLeaksIn(path.join(project, relative))).length > 0);
 });
 
 test('两条预设各自显式声明技能目录，且每条只声明一处', () => {
@@ -126,9 +282,9 @@ test('预设里少了技能目录占位符就装不上（搬家没把这条守�
   // 把「包」缩成 bin/ + package.json + 一份被动过手脚的预设：`installPayload` 的 source
   // 由脚本自身位置推出来，所以拷出去就能喂给它一份缺占位符的预设——不动仓库里的真件。
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-placeholder-'));
-  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  t.after(() => removeTree(base));
   const packageDir = path.join(base, '包');
-  fs.cpSync(path.join(ROOT, 'bin'), path.join(packageDir, 'bin'), { recursive: true });
+  fs.cpSync(path.join(ROOT, 'bin'), path.join(packageDir, 'bin'), COPY_ALL);
   fs.symlinkSync(path.join(ROOT, 'lib'), path.join(packageDir, 'lib'),
     process.platform === 'win32' ? 'junction' : 'dir');
   fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(packageDir, 'package.json'));
@@ -191,7 +347,7 @@ test('工具的注册面在「学习模式」预设里，profile 根上一个都
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
-    fs.rmSync(temporary, { recursive: true, force: true });
+    removeTree(temporary);
   }
 
   // ① profile 根上不再注册任何 StudyMate 工具——污染就出在这一步
