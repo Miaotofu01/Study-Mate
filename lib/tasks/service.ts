@@ -408,7 +408,9 @@ export function createTaskService(options: TaskServiceOptions = {}): TaskService
     if (!fs.existsSync(path)) return;
     // 只删普通文件：产物是文件；递归删除要格外小心，不是文件就报出来让人自己看
     if (!fs.statSync(path).isFile()) throw new Error('产物不是普通文件，不敢删');
-    fs.rmSync(path, { force: true });
+    // 不能用 `fs.rmSync`：中文路径上它静默不删（Node 24 + Windows），删完文件还在，
+    // 调用方却已经按「删掉了」往下走。删普通文件走 unlinkSync。
+    fs.unlinkSync(path);
   }
 
   function nextStep(record: TaskRecord): string {

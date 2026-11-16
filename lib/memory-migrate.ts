@@ -26,6 +26,7 @@ import {
 } from './core/memory.ts';
 import { legacyMemoryNotice } from './memory-file.ts';
 import { parseYaml } from './yaml.ts';
+import { removeTreeSync } from './fs-remove.mjs';
 import { resolveWorkspace } from './workspace.ts';
 
 export type MemoryMigrateStatus = 'migrated' | 'dry-run' | 'already-new' | 'no-legacy' | 'refused';
@@ -124,14 +125,16 @@ export function migrateMemoryWorkspace(options: { workspace: string; dryRun?: bo
   try {
     fs.renameSync(temp, newFile);
   } catch (error) {
-    fs.rmSync(temp, { force: true });
+    removeTreeSync(temp);
     throw new Error(`写不了 ${newFile}：${(error as Error).message}（原文件未动）`);
   }
   const backup = backupTarget(legacyFile);
   try {
     fs.renameSync(legacyFile, backup);
   } catch (error) {
-    fs.rmSync(newFile, { force: true });
+    // 撤回新文件。`fs.rmSync` 在中文路径上会静默不删（Node 24 + Windows），
+    // 那样「已撤回」就成了一句空话：旧文件还在、新文件也还在。
+    removeTreeSync(newFile);
     throw new Error(`旧文件改名备份失败，已撤回新文件（原文件未动）：${(error as Error).message}`);
   }
   return {
