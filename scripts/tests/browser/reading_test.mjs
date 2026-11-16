@@ -349,6 +349,11 @@ try {
         transition: getComputedStyle(document.querySelector('.smb-searchbtn') || root).transitionDuration,
       };
     })()`;
+    // 宿主的默认偏好不是常量：验证机 CUPC 的桌面会话下 Edge 默认报
+    // `prefers-reduced-motion: reduce`，`auto` 于是拿 70ms；普通桌面才是 140ms。
+    // 所以先显式模拟 no-preference，再断「auto 取 full 的时长」；reduce 那一支在下面单独模拟。
+    await session.emulate({ reducedMotion: 'no-preference' });
+    await ctx.sleep(150);
     const seen = { auto: await ctx.evaluate(read) };
     for (const level of ['full', 'reduced', 'off']) {
       await ctx.evaluate(`(() => {
