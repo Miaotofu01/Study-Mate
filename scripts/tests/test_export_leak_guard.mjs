@@ -109,6 +109,28 @@ test('科目子目录导出：任意深度的同名产物按角色识别，整�
   assert.equal(roleAt('vendor/react.production.js'), 'vendor');
 });
 
+test('科目子目录里同名但不是产物的文件：不许按 client / data / vendor 误判', async (t) => {
+  const result = await exportGuardRun({ dir: tempDir(t, 'studymate-export-lookalike-') });
+  const target = 'computer-networks';
+  // 学生自己放进导出目录的材料：与产物同名，但同目录没有 export.json（不是一份导出）。
+  const lookalikes = [
+    `${target}/lessons/data.js`,
+    `${target}/vendor/README.txt`,
+  ];
+  fs.mkdirSync(path.join(result.out, target, 'lessons'), { recursive: true });
+  fs.mkdirSync(path.join(result.out, target, 'vendor'), { recursive: true });
+  fs.writeFileSync(path.join(result.out, lookalikes[0]), 'var x = 1;\n');
+  fs.writeFileSync(path.join(result.out, lookalikes[1]), '第三方说明\n');
+
+  const { files, manifest } = readExportDir(result.out);
+  const roleAt = (rel) => files.find((file) => file.path === rel)?.role;
+  assert.equal(roleAt(lookalikes[0]), 'page', '同名但没有 export.json 的 data.js 仍是页面，不按 data 扫');
+  assert.equal(roleAt(lookalikes[1]), 'page', 'vendor 下的说明文件不是第三方构建，不套包装壳核对');
+  const report = checkExport(files, manifest, { machinePaths: [result.out] });
+  assert.deepEqual(report.violations, [],
+    `同名非产物被按产物判了：${JSON.stringify(report.violations, null, 2)}`);
+});
+
 test('反证：科目子目录里的真页面注入 Node 依赖，仍必须报 cjs-require', async (t) => {
   const result = await exportGuardRun({ dir: tempDir(t, 'studymate-export-nested-inject-') });
   const target = 'computer-networks';
