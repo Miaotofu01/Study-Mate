@@ -30,6 +30,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 import { COPY_ALL } from './fixtures/copy.mjs';
+import { removeTree } from './fixtures/fs-rm.mjs';
 import { parseYaml } from '../../lib/yaml.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -171,7 +172,9 @@ test('反证：默认根里的无关技能不误报，StudyMate 副本换名字/
       catch (error) { if (!error || error.code !== 'ENOENT') throw error; }
     }
     // 拆链失败就报红并留住临时树，不继续递归删除可能仍连接到技能源的目录。
-    fs.rmSync(base, { recursive: true, force: true });
+    // removeTree 逐层 readdir + unlink + rmdir，遇到链接先摘链接——`项目/` 是非 ASCII，
+    // Node 24 的 rmSync 在这里会直接崩（0xC0000409，整份文件一条断言都跑不出来）。
+    removeTree(base);
   });
   const project = path.join(base, '项目');
   for (const relative of SCANNED_FROM_PROJECT_ROOT) fs.mkdirSync(path.join(project, relative), { recursive: true });
@@ -194,7 +197,8 @@ test('反证：默认根里的无关技能不误报，StudyMate 副本换名字/
   let leaks = studyMateLeaksIn(path.join(project, '.dsh/skills'));
   assert.equal(leaks.length, 1);
   assert.match(leaks[0].reasons.join('；'), /内容签名与源技能 lesson-design 相同/);
-  fs.rmSync(path.dirname(renamed), { recursive: true, force: true });
+  // 这条目录名本身是非 ASCII（`完全无关的目录`）：崩点就在这里，见 fs-rm.mjs 的注释。
+  removeTree(path.dirname(renamed));
 
   // ③ 散装 .md（宿主 skill-filesystem 把根下一层的 *.md 也当技能）：同样按内容抓。
   write('.agents/skills/散装笔记.md', fs.readFileSync(path.join(SKILLS, 'local-qa', 'SKILL.md'), 'utf8'));
@@ -278,7 +282,7 @@ test('预设里少了技能目录占位符就装不上（搬家没把这条守�
   // 把「包」缩成 bin/ + package.json + 一份被动过手脚的预设：`installPayload` 的 source
   // 由脚本自身位置推出来，所以拷出去就能喂给它一份缺占位符的预设——不动仓库里的真件。
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'studymate-placeholder-'));
-  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  t.after(() => removeTree(base));
   const packageDir = path.join(base, '包');
   fs.cpSync(path.join(ROOT, 'bin'), path.join(packageDir, 'bin'), COPY_ALL);
   fs.symlinkSync(path.join(ROOT, 'lib'), path.join(packageDir, 'lib'),
@@ -343,7 +347,7 @@ test('工具的注册面在「学习模式」预设里，profile 根上一个都
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
-    fs.rmSync(temporary, { recursive: true, force: true });
+    removeTree(temporary);
   }
 
   // ① profile 根上不再注册任何 StudyMate 工具——污染就出在这一步

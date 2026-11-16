@@ -362,6 +362,66 @@ test('React 解析：显式根命中；一个候选都没有时给一句能照�
   assert.ok(candidates.some((candidate) => candidate.source === '包自己的 node_modules'));
 });
 
+/**
+ * 一份**扁平**布局的假 React 根：npm / pnpm 的默认（public-hoist）把依赖提到顶层
+ * node_modules，`react-dom/node_modules/` 通常根本不存在。解析器要是手拼嵌套路径，
+ * 这种树会被整体判成「缺件」——而真实机器上大都是这种树。
+ */
+function flatReactRoot(dir, version = '0.0.0-fixture') {
+  const root = path.join(dir, 'flat-react');
+  const write = (relative, text = 'module.exports = {};\n') => {
+    const full = path.join(root, relative);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, text);
+  };
+  for (const name of ['react', 'react-dom', 'scheduler']) {
+    write(`node_modules/${name}/package.json`, `${JSON.stringify({ name, version, main: 'index.js' }, null, 2)}\n`);
+    write(`node_modules/${name}/index.js`);
+  }
+  write('node_modules/react/cjs/react.production.js');
+  write('node_modules/react-dom/cjs/react-dom.production.js');
+  write('node_modules/react-dom/cjs/react-dom-client.production.js');
+  write('node_modules/scheduler/cjs/scheduler.production.js');
+  return root;
+}
+
+test('React 解析：扁平安装（scheduler 提升到顶层）也要命中', (t) => {
+  // 真机上 npm 装出来的就是这种树：react / react-dom / scheduler 全在顶层，没有
+  // react-dom/node_modules。夹具那份是嵌套布局，两种都得认，否则导出在真机上必报缺件。
+  const root = tempDir(t, 'studymate-export-flat-');
+  const flat = flatReactRoot(root);
+  const react = resolveReact({ env: { STUDYMATE_REACT_DIR: flat }, probeGlobal: false, roots: [] });
+  assert.equal(react.version, '0.0.0-fixture');
+  assert.equal(react.scheduler, path.join(flat, 'node_modules', 'scheduler', 'cjs', 'scheduler.production.js'),
+    'scheduler 要落在顶层那一份上');
+  assert.ok(!fs.existsSync(path.join(flat, 'node_modules', 'react-dom', 'node_modules')),
+    '扁平布局里本来就没有嵌套 scheduler，命中不能靠它');
+});
+
+test('React 解析：扁平布局里四个构建缺一个都还是缺件，不许蒙混命中', (t) => {
+  const builds = [
+    'node_modules/react/cjs/react.production.js',
+    'node_modules/react-dom/cjs/react-dom.production.js',
+    'node_modules/react-dom/cjs/react-dom-client.production.js',
+    'node_modules/scheduler/cjs/scheduler.production.js',
+  ];
+  for (const build of builds) {
+    const root = tempDir(t, 'studymate-export-gap-');
+    const flat = flatReactRoot(root);
+    fs.rmSync(path.join(flat, build));
+    // DSH_HOME 隔离到空目录：这台机器 ~/.dsh 里真装着 react，不隔离就测不到缺件这条路径。
+    const emptyHome = path.join(root, '空 home');
+    fs.mkdirSync(emptyHome, { recursive: true });
+    assert.throws(
+      () => resolveReact({ env: { STUDYMATE_REACT_DIR: flat, DSH_HOME: emptyHome }, probeGlobal: false, roots: [] }),
+      (error) => {
+        assert.ok(error instanceof ReactMissingError, `少 ${build} 时必须是 ReactMissingError`);
+        return true;
+      },
+    );
+  }
+});
+
 test('计划与落盘分开：planExport 不写盘，产物角色分得清', async (t) => {
   const { workspace, react } = fixture(t);
   const plan = planExport({ workspace, react });
