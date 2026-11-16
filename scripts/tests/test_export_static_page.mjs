@@ -28,6 +28,7 @@ import { readExportDir, checkExport } from '../../lib/export/guard.ts';
 import { assetProductPath, indexHtml, splitVendor } from '../../lib/export/page.ts';
 import { KATEX_VERSION, MATH_JS, katexDistDir } from '../../lib/math.ts';
 import { tempDir } from './fixtures/tools.mjs';
+import { removeFile } from './fixtures/fs-rm.mjs';
 import { writeExportWorkspace, addSecondSubject, fakeReactRoot, lessonMarkdown, poolJson } from './fixtures/export_workspace.mjs';
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -408,7 +409,9 @@ test('React 解析：扁平布局里四个构建缺一个都还是缺件，不�
   for (const build of builds) {
     const root = tempDir(t, 'studymate-export-gap-');
     const flat = flatReactRoot(root);
-    fs.rmSync(path.join(flat, build));
+    // 单文件删除走 fixtures/fs-rm：`fs.rmSync(文件)` 在非 ASCII 路径上返回成功、文件还在，
+    // 这条用例就会变成「缺件根本没造出来」的假通过。
+    removeFile(path.join(flat, build));
     // DSH_HOME 隔离到空目录：这台机器 ~/.dsh 里真装着 react，不隔离就测不到缺件这条路径。
     const emptyHome = path.join(root, '空 home');
     fs.mkdirSync(emptyHome, { recursive: true });
