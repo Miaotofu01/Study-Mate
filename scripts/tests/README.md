@@ -63,6 +63,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_notes_imports.mjs`、`test_notes_media.mjs` | 副本与引用身份、只读句柄重读/撤权、文件上限、静态 HTML/SVG/图片禁脚本与外网及像素/复杂度拒绝；测试字节现造现弃 |
 | `test_notes_editor_gutter.mjs` | 旧源码编辑器的行号位宽与连续选区纯契约；新共享正文的局部语法与格式命令由下列套件验收 |
 | `test_notes_inline_editor.mjs`、`test_notes_markdown_formatting.mjs` | Markdown 格式范围与真实标记、转义/代码隔离、原稿与编辑器坐标、混合换行保真、灰色/代码调色板；格式命令的局部事务、边界与安全链接 |
+| [test_notes_store_recovery.mjs](test_notes_store_recovery.mjs) | 真实进程在初始化 marker 发布前崩溃后的恢复、锁内孤儿临时文件清理、坏格式机读码与路径隐私、目录同步故障及升级备份保留、250 篇/48 MiB 边界、中文数据根与双进程同版本 CAS；只用临时数据域，默认 Node 门禁可达 |
 | `test_notes_native_contract.mjs` | 显式会话引用的坐标/去重/取消/资源世代与权限失效栅栏、宿主槽位注册；临时 bundle 在系统临时目录创建并清理，不连接真实 DSH/模型 |
 | `test_notes_curriculum.mjs`、`test_client_learning_notes.mjs` | 完整来源身份、关联换节点不搬原件、多科目默认本与相机/分区字段往返、两面共享状态和学习左右栏接线；纯阅读端导出不出现死笔记入口 |
 | `test_openai_plugin.mjs` | ZIP 用**独立读取器**解开后不依赖源码或 DSH 即可跑交互断点（read → update → answer）、没有 0 字节文件也没有 Python 文件；构建可重复，失败时保留已有产物 |
