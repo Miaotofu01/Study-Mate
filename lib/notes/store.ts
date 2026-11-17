@@ -852,7 +852,12 @@ function loadResourceRaw(root: string, id: string): ResourceRaw | null {
   const stat = fs.statSync(file);
   const cap = kind === 'md' ? MAX_NOTE_BYTES : MAX_JSON_RESOURCE_BYTES;
   if (!stat.isFile() || stat.size > cap) {
-    throw Object.assign(new Error(`资源「${id}」的文件不是普通文件或超过 ${cap} 字节读取上限。`), { code: 'file-shape-unknown' });
+    throw Object.assign(new Error(`资源「${id}」的文件不是普通文件或超过 ${cap} 字节读取上限。`), {
+      code: 'file-shape-unknown',
+      // 单文件读取上限的超限文件也必须计入 48 MiB「实际文件总量」预算；
+      // 否则 skip 会把一个超限大文件当成 0 字节，整库预算被绕过。
+      byteLength: stat.size,
+    });
   }
   return { bytes: fs.readFileSync(file), kind };
 }
@@ -964,6 +969,14 @@ export function readNotesStore({ home, onCorrupt }: { home: string; onCorrupt?: 
         // 只有显式 skip 才把「单个资源文件的形状问题」降级；EACCES/symlink/路径问题
         // 没有 file-shape-unknown 码，仍然整库失败。
         if (skipCorrupt && (error as { code?: string }).code === 'file-shape-unknown') {
+          // 单文件超限时没有 bytes 可累加，但它的实际文件大小仍占整库预算。
+          const byteLength = (error as { byteLength?: unknown }).byteLength;
+          if (typeof byteLength === 'number' && byteLength > 0) {
+            totalBytes += byteLength;
+            if (totalBytes > MAX_TOTAL_RESOURCE_BYTES) {
+              throw shapeError('笔记资源实际文件总量超过 48 MiB 上限。');
+            }
+          }
           skipped.push({ id: item.id, kind: item.kind, bytes: null });
           continue;
         }

@@ -1132,3 +1132,29 @@ test('#304 onCorrupt=skip 遇坏 layout 仍整库失败，不把 layout 当空',
   assert.equal(skipped.status, 503);
   assert.equal(skipped.code, 'file-shape-unknown');
 });
+
+test('#304 onCorrupt=skip 也把单文件超限的字节计入 48 MiB 实际总量', () => {
+  const home = makeHome();
+  assert.equal(writeNotesResource({ home, resource: noteResource('good'), expectedVersion: null }).ok, true);
+  const resources = path.join(notesRoot(home), 'resources');
+  // 稀疏文件即可：stat.size 计入预算，读取上限会在 readFile 之前拒绝。
+  const oversize = 6 * 1024 * 1024 + 1;
+  for (let i = 0; i < 9; i += 1) {
+    const file = path.join(resources, `r-oversize-${i}.json`);
+    fs.writeFileSync(file, '');
+    fs.truncateSync(file, oversize);
+  }
+  const skipped = readNotesStore({ home, onCorrupt: 'skip' });
+  assert.equal(skipped.ok, false, '9 个超限文件合计超过 48 MiB 时不能再 skip');
+  assert.equal(skipped.status, 503);
+  assert.equal(skipped.code, 'file-shape-unknown');
+  assert.match(skipped.message, /48 MiB/);
+
+  // 单个超限文件（总量未越界）仍按坏资源降级，预算不应把 skip 整体禁掉。
+  for (let i = 1; i < 9; i += 1) fs.rmSync(path.join(resources, `r-oversize-${i}.json`));
+  const one = readNotesStore({ home, onCorrupt: 'skip' });
+  assert.equal(one.ok, true, JSON.stringify(one));
+  assert.deepEqual(Object.keys(one.value.resources), ['good']);
+  assert.equal(one.value.corrupt.length, 1);
+  assert.equal(one.value.corrupt[0].id, 'oversize-0');
+});

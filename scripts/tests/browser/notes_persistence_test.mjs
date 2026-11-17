@@ -515,16 +515,22 @@ try {
     await banner.waitFor({ timeout: 15000 });
     assert.equal(await banner.count(), 1);
     assert.match(await banner.first().innerText(), /笔记本「学习与理解」中的资源「坏笔记」的文件已损坏，未载入。/);
-    // 好笔记仍可打开编辑；坏卡不会进画布。
+    // 坏卡不应进画布，好卡仍应在画布；随后好笔记仍可打开编辑。
+    assert.equal(await notes(page).locator('.react-flow__node[data-id="node-bad"]').count(), 0, '坏资源不应生成画布节点');
+    assert.equal(await notes(page).locator('.react-flow__node[data-id="node-good"]').count(), 1, '好资源应保留画布节点');
     await notes(page).locator('.tree-file', { hasText: '好笔记' }).click();
     await inlineEditor(page).waitFor({ state: 'visible', timeout: 12000 });
     assert.equal(await notes(page).getByRole('button', { name: '新建笔记', exact: true }).isDisabled(), false);
 
     // 修好文件再进入：严格 GET 成功，skip 不再出现，横幅消失，坏资源重新出现。
+    const beforeRepair = fixture.requests.length;
     externalMarkdown(fixture, 'bad-note', '# 已修好\n\n现在可以载入。\n');
     await reload();
     await notes(page).locator('.tree-file', { hasText: '坏笔记' }).waitFor({ timeout: 15000 });
     assert.equal(await notes(page).locator('.persistence-corrupt').count(), 0);
+    const repairReads = fixture.requests.slice(beforeRepair).filter(r => r.method === 'GET');
+    assert.ok(repairReads.length > 0, '修好后应重新读取');
+    assert.equal(repairReads.some(r => r.url?.includes('onCorrupt=skip')), false, '修好后不应再带 onCorrupt=skip');
   });
 
 } finally {
