@@ -176,6 +176,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 | --- | --- |
 | `browser/notes_brand_test.mjs` | 正式组合客户端的品牌双向切换：同一个学习面板、名称与自有图标互换、学习导航保留、笔记场景保活、隐藏面不接焦点和快捷键；独立 Edge + 隔离宿主夹具，不使用真实会话 |
 | `browser/notes_persistence_test.mjs` | 真客户端 + 临时 HOME 的保存、刷新、冲突、失败和格式1只读→取消/确认升级→逐字节备份；不碰个人笔记库 |
+| `browser/notes_lazy_chunk_test.mjs` | #302 懒分块（ADR-0019）：学习首屏零分块请求且课件页照常、首次打开笔记恰一次请求、往返保活不重拉不重挂、503 失败有明确错误态可重试、旧宿主没有 `require.async` 时学习面照常且笔记明确失败不静默回退；网络断言走真 HTTP 记录 |
 | `browser/notes_performance_test.mjs` | #303 笔记性能与隐藏面：拖动/折叠连续改布局时正文仍落盘但不再重序列化/散列资源；隐藏超过一个轮询周期不发外部 GET、重显立刻补读；隐藏的共享笔记仍能在学习页新建/编辑；零控制台/页面/外网错误 |
 | `browser/notes_curriculum_test.mjs` | 十项节点笔记场景：空节点、显式默认本、原稿共享、关联拖动、未来默认、软删除恢复、节点树/课程引用卡、只读课件跳转、笔记本画布隔离与相机；学习左右笔记亮→暗→亮、渲染/局部灰色标记/链接框的实测 AA，光标、弹窗和主题切换不改写原稿 |
 | `browser/notes_live_editor_test.mjs` | 实际共享 NoteEditor 与单格式栏：选区保持、格式局部事务、真实灰色字符、原始坐标/混合换行、链接冻结与失效拒绝、只读/超限修复、StrictMode/受控输入法和快捷键；用临时页面和隔离 Edge |

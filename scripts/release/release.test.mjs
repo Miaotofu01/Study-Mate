@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { addChangelog, bumpVersion, mergedPullRequests, notesFromChangelog, registryVersion,
   releaseNotes, releasePlan, validatePack, verifyPublished, verifyPublishOrder, publishWaitSeconds,
-  publicationPending, waitForPublished, CLIENT_ENTRY, CLIENT_NOTICES,
+  publicationPending, waitForPublished, CLIENT_ENTRY, CLIENT_CHUNK, CLIENT_NOTICES,
   buildReleasePlugin, ensureGithubRelease, ensureReleaseAsset, withInstallationNotes } from './release.mjs';
 
 const repository = 'Miaotofu01/Study-Mate';
@@ -163,7 +163,7 @@ test('npm publication waiting tolerates delayed registry visibility and reports 
 });
 
 // 正式包里的客户端产物：exports["./client"] → dist/client.js，旁边是它的第三方许可全文。
-const tarballFiles = ['package.json', 'README.md', 'cordis.patch.yml', CLIENT_ENTRY, CLIENT_NOTICES,
+const tarballFiles = ['package.json', 'README.md', 'cordis.patch.yml', CLIENT_ENTRY, CLIENT_CHUNK, CLIENT_NOTICES,
   'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs',
   'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'bin/openai-interaction.mjs', 'bin/openai-skill-ui.mjs',
   'locale/en.json', 'locale/zh.json', 'docs/images/icon.png',
@@ -193,8 +193,8 @@ test('every package.json files pattern passes the tarball allowlist', () => {
   const paths = new Set(tarballPack().files.map(file => file.path));
   for (const pattern of patterns) paths.add(sample(pattern));
   validatePack({ ...tarballPack(), files: [...paths].map(path => ({ path })) });
-  // 客户端入口与许可全文必须在 files 里（少了它们，tarball 缺文件只在发布时才被发现）。
-  for (const file of [CLIENT_ENTRY, CLIENT_NOTICES]) {
+  // 客户端入口、懒分块与许可全文必须在 files 里（少了它们，tarball 缺文件只在发布时才被发现）。
+  for (const file of [CLIENT_ENTRY, CLIENT_CHUNK, CLIENT_NOTICES]) {
     assert.ok(patterns.includes(file), `package.json files 漏了 ${file}`);
   }
 });
@@ -227,18 +227,20 @@ test('tarball inspection rejects personal workspace, credentials and incomplete 
 test('the client bundle and its notices ship, and nothing else under dist/ does', () => {
   const pack = tarballPack();
   validatePack(pack);
-  for (const file of [CLIENT_ENTRY, CLIENT_NOTICES]) {
+  for (const file of [CLIENT_ENTRY, CLIENT_CHUNK, CLIENT_NOTICES]) {
     assert.throws(() => validatePack({ ...pack, files: pack.files.filter(entry => entry.path !== file) }),
       error => error.message === `npm tarball is missing ${file}.`);
   }
-  // 名字接近但不是那两个名字的一律发不出去：`dist/client.js.map` 被整名匹配挡住
+  // 名字接近但不是那三个名字的一律发不出去：`dist/client.js.map` 被整名匹配挡住
   // （`$` 不吃 `.map`）。这几条也是白名单写法本身的反证：
   //   · `dist/client.min.js`、`dist/probe/client.js` —— 「前缀通配」写法；
   //   · `dist/client.txt`、`dist/client-notices.js` —— 把两个名字写成一个可选式
-  //     `dist/client(?:-notices)?\.(?:js|txt)` 时意外放行的组合，白名单必须是两条完整路径。
+  //     `dist/client(?:-notices)?\.(?:js|txt)` 时意外放行的组合，白名单必须是完整路径；
+  //   · `dist/notes.js`、`dist/client.notes.js.map`、`dist/entry.cjs` —— 懒分块的同款反证。
   for (const path of ['dist/client-build-report.json', 'dist/notes-preview/index.html',
     'dist/notes-preview/assets/notes.js', 'dist/notes.cjs', 'dist/notes.css', 'dist/client.min.js',
-    'dist/client.js.map', 'dist/probe/client.js', 'dist/client.txt', 'dist/client-notices.js']) {
+    'dist/client.js.map', 'dist/probe/client.js', 'dist/client.txt', 'dist/client-notices.js',
+    'dist/notes.js', 'dist/client.notes.js.map', 'dist/entry.cjs']) {
     const expected = `Unexpected or private file in npm tarball: ${path}.`;
     assert.throws(() => validatePack({ ...pack, files: [...pack.files, { path }] }),
       { message: expected }, `dist 白名单放行了 ${path}`);
@@ -277,9 +279,12 @@ test('the real npm pack call always builds the client first: build, then pack --
   for (const output of ['client.js', 'client-notices.txt']) {
     assert.ok(client.includes(`path.join(destination, '${output}')`), `build-client.mjs 不再产出 ${output}`);
   }
+  // 分块文件名经由 CHUNK_FILE 常量写出：常量与写出两处都钉住，防止改名或漏写。
+  assert.ok(client.includes("const CHUNK_FILE = 'client.notes.js';"), 'build-client.mjs 丢了分块文件名常量');
+  assert.ok(client.includes('path.join(destination, CHUNK_FILE)'), 'build-client.mjs 不再写出分块产物');
   const packageInfo = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
   assert.equal(packageInfo.exports['./client'], './dist/client.js');
-  for (const file of [CLIENT_ENTRY, CLIENT_NOTICES]) assert.ok(packageInfo.files.includes(file), `files 漏了 ${file}`);
+  for (const file of [CLIENT_ENTRY, CLIENT_CHUNK, CLIENT_NOTICES]) assert.ok(packageInfo.files.includes(file), `files 漏了 ${file}`);
   // 构建期工具必须是 devDependencies：发布 job 装 --include=dev，而 Host 运行时依赖保持为空。
   assert.equal(packageInfo.dependencies, undefined);
   for (const tool of ['esbuild', 'postcss', 'postcss-selector-parser']) {
@@ -315,12 +320,12 @@ test('the release workflow installs devDependencies, and prepare builds inside i
   const guard = prepareBody.indexOf('packPackage(); // Refuse an incomplete or private tarball before creating refs.');
   assert.ok(guard > 0, 'prepare 必须在创建 ref 之前试打包');
   assert.ok(commit > guard && tag > guard && push > guard, '构建/试打包必须发生在版本 commit、tag 与 push 之前');
-  // validatePack 必须显式点名这两个文件：通配会让 dist 下别的产物一起放行。
+  // validatePack 必须显式点名这三个文件：通配会让 dist 下别的产物一起放行。
   assert.doesNotMatch(source, /dist\\\/\.\*|dist\\\/\*\*/s);
-  // 两个名字只能写成两条完整路径：可选式会把 client.txt / client-notices.js 也放行。
-  assert.ok(source.includes(String.raw`|dist\/client\.js|dist\/client-notices\.txt|`),
-    '白名单必须是两条完整路径的显式 alternation');
-  assert.doesNotMatch(source, /\/client\(\?:-notices\)\?/, '白名单不能把两个名字写成一个可选式');
+  // 三个名字只能写成三条完整路径：可选式会把 client.txt / client-notices.js / entry.cjs 也放行。
+  assert.ok(source.includes(String.raw`|dist\/client\.js|dist\/client\.notes\.js|dist\/client-notices\.txt|`),
+    '白名单必须是三条完整路径的显式 alternation');
+  assert.doesNotMatch(source, /client\(\?:[-.]/, '白名单不能把几个名字写成一个可选式');
 });
 
 function assetFixture() {
