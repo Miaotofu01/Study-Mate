@@ -268,10 +268,14 @@ async function main() {
         const css = getComputedStyle(node);
         return [css.backgroundColor, css.borderTopWidth, css.borderRadius, css.boxShadow];
       }));
-    assert.deepEqual(flat, [
-      ['rgba(0, 0, 0, 0)', '0px', '0px', 'none'],
-      ['rgba(0, 0, 0, 0)', '0px', '0px', 'none'],
+    // #312 A5：编辑面不再透宿主，.note-editor 自己承担加深一档的面（亮暗均深）；
+    // 但仍然不另套卡片——圆角边框与阴影的旧契约保持不变，正文编辑器本体依旧透明。
+    assert.deepEqual(flat.map(([, border, radius, shadow]) => [border, radius, shadow]), [
+      ['0px', '0px', 'none'],
+      ['0px', '0px', 'none'],
     ], '外层与正文内部都不另套卡片、圆角边框或阴影');
+    assert.notEqual(flat[0][0], 'rgba(0, 0, 0, 0)', 'A5：编辑面外层有自己的加深面，不再透宿主背景');
+    assert.equal(flat[1][0], 'rgba(0, 0, 0, 0)', '正文编辑器本体保持透明，面由外层承担');
     await source.click();
     await page.keyboard.insertText('即时写入的正文。');
     await waitFor(() => noteByTitle(fixture.read(), '课程甲.md')?.markdown.includes('即时写入的正文。'), '内联编辑写入同一份原稿');

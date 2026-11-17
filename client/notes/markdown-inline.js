@@ -272,7 +272,7 @@ export function collectInlineSpans(tree, text = '') {
   const spans = [];
   if (!tree || typeof tree.iterate !== 'function') return spans;
 
-  const pushSpan = (kind, node, delimiters, content, block) => {
+  const pushSpan = (kind, node, delimiters, content, block, extra) => {
     spans.push({
       kind,
       from: node.from,
@@ -280,6 +280,7 @@ export function collectInlineSpans(tree, text = '') {
       content,
       delimiters: delimiters.filter((range) => range.to > range.from),
       block: Boolean(block),
+      ...(extra || {}),
     });
   };
 
@@ -292,7 +293,9 @@ export function collectInlineSpans(tree, text = '') {
         const prefix = lastMark ? expandSpace(lastMark, source) : null;
         const delimiters = prefix ? [prefix] : [];
         const from = prefix ? prefix.to : (lastMark ? lastMark.to : node.from);
-        pushSpan('heading', node, delimiters, { from, to: node.to }, true);
+        // ATXHeading1..6 / SetextHeading1..2：层级进 span，编辑器按层级上字号梯度。
+        const level = Number((/(?:ATXHeading|SetextHeading)([1-6])$/.exec(node.name) || [])[1] || 0);
+        pushSpan('heading', node, delimiters, { from, to: node.to }, true, level ? { level } : undefined);
         return;
       }
       const kind = FORMAT_KINDS[node.name];
@@ -352,6 +355,17 @@ function expandSpace(range, source) {
 }
 
 /**
+ * 围栏行信息串里的语言名（首 token，去掉尾部反引号）；没有信息串就返回空串。
+ * 编辑器休息态的语言角标与测试共用这一份判据。
+ */
+export function fenceLanguage(lineText) {
+  const match = /^\s*(`{3,}|~{3,})\s*(.*?)\s*$/.exec(String(lineText ?? ''));
+  const info = match ? match[2] : '';
+  if (!info) return '';
+  return info.split(/\s+/)[0].replace(/`+$/, '');
+}
+
+/**
  * 选区是否「碰」到这个格式区间。
  * 空光标把左右端点都算进来：光标停在开分隔符之前（可编辑左边界）或收分隔符之后时，
  * 分隔符必须显形，否则 DOM 光标会落到隐藏文本的另一侧，敲字就插错位置。
@@ -384,7 +398,9 @@ export function collectDecorationRanges(tree, ranges = [], text = '') {
     const active = selectionTouchesSpan(span, ranges);
     const contentClass = SPAN_CLASS[span.kind];
     if (span.content && contentClass) {
-      marks.push({ from: span.content.from, to: span.content.to, classes: contentClass });
+      // 标题带层级：正文类之外追加 md-heading-N，字号梯度由模块 CSS 负责。
+      const classes = span.level ? `${contentClass} md-heading-${span.level}` : contentClass;
+      marks.push({ from: span.content.from, to: span.content.to, classes });
     }
     for (const delimiter of span.delimiters) {
       marks.push({

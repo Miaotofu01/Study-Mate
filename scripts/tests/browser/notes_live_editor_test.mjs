@@ -80,6 +80,19 @@ function skip(reason) {
   process.exit(EXIT_SKIP);
 }
 
+// 相对亮度（#312 A5 面加深断言用）：支持 rgb()/color()（srgb 0-1 通道）两种 computed 形态。
+function lumOf(value) {
+  const numbers = (value.match(/[\d.]+/g) || []).map(Number);
+  const channels = value.startsWith('color(')
+    ? numbers.slice(0, 3).map((channel) => channel * 255)
+    : numbers.slice(0, 3);
+  const [r, g, b] = channels.map((channel) => {
+    const s = channel / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
 function loadPlaywright() {
   const entry = requireFromRoot.resolve('playwright');
   return import(pathToFileURL(entry).href);
@@ -118,6 +131,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { EditorView } from '@codemirror/view';
 import NoteEditor from './client/notes/NoteEditor.jsx';
+// 真实应用的预览样式来自 preview.jsx import 的 styles.css；夹具不走那个入口，
+// 必须显式引入，只读预览的标题/引用/语言角标规则才与真实 bundle 一致。
+import './client/notes/styles.css';
 import { canonicalOffsetMap, rawOffsetMap } from './client/notes/markdown-inline.js';
 
 const INITIAL = ${JSON.stringify(INITIAL)};
@@ -576,7 +592,29 @@ async function main() {
     await waitForMarkdown(page, INITIAL);
     check('再次点击同一格式取消粗体', (await markdown(page)) === INITIAL);
 
+    // ── #312 A4：光标在粗体内部再点粗体 —— 真浏览器路径复现，必须解包不嵌套 ──
+    await setMarkdown(page, 'plain **加粗段** tail');
+    const innerAt = (await markdown(page)).indexOf('加粗段') + 1;
+    await setRawSelection(page, innerAt, innerAt);
+    await clickControl(page, '粗体');
+    await waitForMarkdown(page, 'plain 加粗段 tail');
+    const a4Unwrapped = await markdown(page);
+    check('A4 光标在粗体内部再点粗体解包且不嵌套',
+      a4Unwrapped === 'plain 加粗段 tail' && !a4Unwrapped.includes('**'),
+      JSON.stringify(a4Unwrapped));
+
+    await setMarkdown(page, '**外部 *内部* 尾**');
+    const nestedAt = (await markdown(page)).indexOf('内部') + 1;
+    await setRawSelection(page, nestedAt, nestedAt);
+    await clickControl(page, '粗体');
+    await waitForMarkdown(page, '外部 *内部* 尾');
+    const a4Nested = await markdown(page);
+    check('A4 光标在内层格式里点粗体只解包外层粗体',
+      a4Nested === '外部 *内部* 尾' && !a4Nested.includes('****'),
+      JSON.stringify(a4Nested));
+
     const listIndex = INITIAL.indexOf('列表项');
+    await setMarkdown(page, INITIAL); // A4 复现后恢复原状，后续折叠光标测试依赖原文档坐标
     await setRawSelection(page, listIndex + '列表项'.length, listIndex + '列表项'.length);
     await clickControl(page, '斜体');
     await waitForMarkdown(page, INITIAL.replace('列表项', '列表项**'));
@@ -591,6 +629,15 @@ async function main() {
     await chooseHeading(page, 1);
     await waitForMarkdown(page, '# 标题行\n\n正文行');
     check('标题选择 H1 写入一个 #', (await markdown(page)) === '# 标题行\n\n正文行');
+
+    // ── #312 A2：编辑态标题带层级梯度类（md-heading-N）──
+    const headingProbe = await page.evaluate(() => {
+      const node = document.querySelector('.markdown-inline-editor .md-heading');
+      return node ? { classes: node.className, size: getComputedStyle(node).fontSize } : null;
+    });
+    check('A2 编辑态标题带 md-heading-1 梯度类且字号放大',
+      !!headingProbe && /md-heading-1/.test(headingProbe.classes) && parseFloat(headingProbe.size) > 13,
+      JSON.stringify(headingProbe));
     await chooseHeading(page, 6);
     await waitForMarkdown(page, '###### 标题行\n\n正文行');
     check('标题选择 H6 切换为六个 #', (await markdown(page)) === '###### 标题行\n\n正文行');
@@ -905,6 +952,57 @@ async function main() {
     await page.keyboard.type('X');
     await waitForPaint(page);
     check('只读下键盘不能改父级正文', (await markdown(page)) === readonlyBefore);
+
+    // ── #312 A3/A2 只读预览：语言角标、无语言不标、引用块左边条 ───────────────
+    // 只读态没有 CM 编辑器，waitForMarkdown 的 __docLength 等不到 —— 直接等预览渲染。
+    const readonlyA3Markdown = '```python\nprint(1)\n```\n\n```\n无语言\n```\n\n> 引用段';
+    await page.evaluate((value) => window.__setMarkdown(value), readonlyA3Markdown);
+    await page.waitForFunction((value) => window.__resource?.markdown === value, readonlyA3Markdown, { timeout: 15000 });
+    await page.waitForFunction(
+      () => document.querySelector('.note-editor__preview')?.innerText.includes('无语言'),
+      null,
+      { timeout: 15000 },
+    );
+    await waitForPaint(page);
+    const readonlyA3 = await page.evaluate(() => {
+      const pres = [...document.querySelectorAll('.note-editor__preview pre')];
+      return {
+        marked: pres.map((pre) => ({
+          lang: pre.getAttribute('data-md-lang') || '',
+          after: getComputedStyle(pre, '::after').content,
+        })),
+        quote: (() => {
+          const quote = document.querySelector('.note-editor__preview blockquote');
+          return quote ? getComputedStyle(quote).borderLeftWidth : '';
+        })(),
+      };
+    });
+    check('A3 只读预览带语言代码块显示语言角标，无语言不标',
+      readonlyA3.marked.length === 2
+      && readonlyA3.marked[0].lang === 'python' && readonlyA3.marked[0].after.includes('python')
+      && readonlyA3.marked[1].lang === '' && (readonlyA3.marked[1].after === 'none' || readonlyA3.marked[1].after === 'normal'),
+      JSON.stringify(readonlyA3));
+    check('A2 只读预览引用块有左边条', readonlyA3.quote === '3px', JSON.stringify(readonlyA3.quote));
+
+    // ── #312 A5 只读渲染面：只读态也盖加深面，亮暗两主题都断言 ─────────────────
+    const readonlyFaceOf = () => page.evaluate(() => {
+      const face = getComputedStyle(document.querySelector('.note-editor.is-readonly')).backgroundColor;
+      const host = getComputedStyle(document.querySelector('.studymate-notes')).backgroundColor;
+      const preview = getComputedStyle(document.querySelector('.note-editor__preview')).backgroundColor;
+      return { face, host, preview };
+    });
+    const readonlyFaceLight = await readonlyFaceOf();
+    check('A5 只读渲染面亮色比宿主面深一档',
+      lumOf(readonlyFaceLight.face) < lumOf(readonlyFaceLight.host) && lumOf(readonlyFaceLight.host) - lumOf(readonlyFaceLight.face) < 0.12,
+      JSON.stringify(readonlyFaceLight));
+    await page.evaluate(() => window.__setTheme('dark'));
+    await waitForPaint(page);
+    const readonlyFaceDark = await readonlyFaceOf();
+    check('A5 只读渲染面暗色比旧宿主面 #1e2423 更深',
+      lumOf(readonlyFaceDark.face) < lumOf('rgb(30, 36, 35)'),
+      JSON.stringify(readonlyFaceDark));
+    await page.evaluate(() => window.__setTheme('light'));
+    await waitForPaint(page);
     await page.evaluate(() => window.__setReadOnly(false));
     await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 10000 });
     await waitForPaint(page);
@@ -977,6 +1075,7 @@ async function main() {
       img: document.querySelectorAll('.cm-content img').length,
       imgSrcs: [...document.querySelectorAll('.cm-content img')].map((node) => node.getAttribute('src') || ''),
       codeBody: document.querySelectorAll('.md-code-body').length,
+      codeLang: document.querySelector('.md-code-lang')?.textContent || '',
       scripts: document.querySelectorAll('.cm-content script').length,
       pwned: window.__pwned,
       text: document.querySelector('.cm-content')?.innerText || '',
@@ -989,6 +1088,65 @@ async function main() {
       && !rich.imgSrcs.some((src) => /example\.com\/(pic|raw)\.png/.test(src)),
       JSON.stringify(rich.imgSrcs));
     check('代码围栏正文保留并可高亮', rich.codeBody >= 1);
+    // ── #312 A3 编辑态：休息态开围栏行显示语言角标，点角标显形围栏源码 ──
+    check('A3 编辑态开围栏行显示语言角标 js', rich.codeLang === 'js', JSON.stringify(rich.codeLang));
+    await page.locator('.md-code-lang').click();
+    await waitForPaint(page);
+    const chipReveal = await page.evaluate(() => ({
+      chips: document.querySelectorAll('.md-code-lang').length,
+      fenceSource: [...document.querySelectorAll('.markdown-inline-editor .md-syntax:not(.md-syntax-hidden)')]
+        .map((node) => node.textContent).join(''),
+    }));
+    check('A3 点语言角标后显形围栏源码',
+      chipReveal.chips === 0 && chipReveal.fenceSource.includes('```'),
+      JSON.stringify(chipReveal));
+
+    // ── A3 可访问性：button 语义 + 键盘可操作（Enter），不写父级、焦点回编辑器 ──
+    await setMarkdown(page, RICH);
+    await setRawSelection(page, 0, 0);
+    await waitForPaint(page);
+    const chipA11y = await page.evaluate(() => {
+      const chip = document.querySelector('.md-code-lang');
+      if (!chip) return { chip: false };
+      chip.focus();
+      return {
+        chip: true,
+        focused: document.activeElement === chip,
+        role: chip.getAttribute('role'),
+        tabIndex: chip.tabIndex,
+        label: chip.getAttribute('aria-label') || '',
+      };
+    });
+    check('A3 语言角标有 button 语义且可编程聚焦（不进 Tab 序）',
+      chipA11y.chip && chipA11y.focused && chipA11y.role === 'button' && chipA11y.tabIndex === -1
+      && chipA11y.label.includes('js'),
+      JSON.stringify(chipA11y));
+    await page.keyboard.press('Enter');
+    await waitForPaint(page);
+    const kbReveal = await page.evaluate(() => ({
+      fenceVisible: Boolean(document.querySelector('.markdown-inline-editor .md-code-fence')),
+      chips: document.querySelectorAll('.md-code-lang').length,
+      focusInEditor: Boolean(document.activeElement?.closest('.cm-editor')),
+    }));
+    check('A3 键盘 Enter 显形围栏、焦点回到编辑器',
+      kbReveal.fenceVisible && kbReveal.chips === 0 && kbReveal.focusInEditor,
+      JSON.stringify(kbReveal));
+    await setMarkdown(page, RICH);
+    await setRawSelection(page, 0, 0);
+    await waitForPaint(page);
+    const srClick = await page.evaluate(() => {
+      const chip = document.querySelector('.md-code-lang');
+      if (!chip) return { chip: false };
+      chip.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0, cancelable: true }));
+      return {
+        chip: true,
+        fenceVisible: Boolean(document.querySelector('.markdown-inline-editor .md-code-fence')),
+        focusInEditor: Boolean(document.activeElement?.closest('.cm-editor')),
+      };
+    });
+    check('A3 读屏激活（detail=0 click）显形围栏且焦点回编辑器',
+      srClick.chip && srClick.fenceVisible && srClick.focusInEditor,
+      JSON.stringify(srClick));
     check('原始 HTML 不执行 script、不建远端 img',
       rich.scripts === 0
       && rich.pwned === undefined
@@ -1008,7 +1166,8 @@ async function main() {
       && (await markdown(page)).startsWith('xhttps://example.com/typing')
       && (await page.locator('.cm-content a').count()) === 0);
 
-    await setMarkdown(page, '**粗体** 与 `代码`');
+    // 文档带一个休息态围栏：chip 在亮暗两主题下都要过 AA（#312 A3 可访问性）。
+    await setMarkdown(page, '**粗体** 与 `代码`\n\n```js\nconst x = 1;\n```');
     const themeBold = (await markdown(page)).indexOf('粗体');
     await setRawSelection(page, themeBold, themeBold + 2);
     await page.setViewportSize({ width: 335, height: 760 });
@@ -1070,6 +1229,55 @@ async function main() {
     check('浅色灰色分隔符与代码达到 AA',
       light.markerRatio >= 4.5 && light.codeRatio >= 4.5,
       JSON.stringify(light));
+    // ── #312 A1/A5：下拉弹层 color-scheme、实底色与 AA，编辑面比宿主面深一档（亮色）──
+    const faceOf = () => page.evaluate(() => {
+      const rgb = (value) => {
+        const numbers = (value.match(/[\d.]+/g) || []).map(Number);
+        if (value.startsWith('color(')) return numbers.slice(0, 3).map((channel) => channel * 255);
+        return numbers.slice(0, 3);
+      };
+      const lum = (value) => {
+        const [r, g, b] = rgb(value).map((channel) => {
+          const s = channel / 255;
+          return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const ratio = (fg, bg) => {
+        const a = lum(fg);
+        const b = lum(bg);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      };
+      const select = document.querySelector('.md-format-toolbar__select');
+      const option = select?.querySelector('option');
+      const chip = document.querySelector('.md-code-lang');
+      const alpha = (value) => (value.startsWith('rgba') ? Number((value.match(/[\d.]+/g) || [])[3] || 1) : 1);
+      return {
+        scheme: getComputedStyle(select).colorScheme,
+        selectBg: getComputedStyle(select).backgroundColor,
+        optionColor: option ? getComputedStyle(option).color : '',
+        optionBg: option ? getComputedStyle(option).backgroundColor : '',
+        optionRatio: option ? ratio(getComputedStyle(option).color, getComputedStyle(option).backgroundColor) : 0,
+        selectAlpha: alpha(getComputedStyle(select).backgroundColor),
+        chipRatio: chip ? ratio(getComputedStyle(chip).color, getComputedStyle(chip).backgroundColor) : 0,
+        chipColor: chip ? getComputedStyle(chip).color : '',
+        chipBg: chip ? getComputedStyle(chip).backgroundColor : '',
+        face: getComputedStyle(document.querySelector('.note-editor')).backgroundColor,
+        host: getComputedStyle(document.querySelector('.studymate-notes')).backgroundColor,
+      };
+    });
+    const faceLight = await faceOf();
+    check('A1 亮色下拉弹层 color-scheme 是 light', faceLight.scheme === 'light', JSON.stringify(faceLight));
+    check('A1 亮色下拉收起态有明确实底色', faceLight.selectAlpha > 0.9, JSON.stringify(faceLight));
+    check('A1 亮色下拉 option 实底且对比 >= AA',
+      faceLight.optionRatio >= 4.5 && faceLight.optionBg !== 'rgba(0, 0, 0, 0)',
+      JSON.stringify(faceLight));
+    check('A3 亮色语言角标对比 >= AA',
+      faceLight.chipRatio >= 4.5 && faceLight.chipBg !== 'rgba(0, 0, 0, 0)',
+      JSON.stringify(faceLight));
+    check('A5 亮色编辑面比宿主面深一档',
+      lumOf(faceLight.face) < lumOf(faceLight.host) && lumOf(faceLight.host) - lumOf(faceLight.face) < 0.12,
+      JSON.stringify(faceLight));
     await page.evaluate(() => window.__setTheme('dark'));
     await waitForPaint(page);
     const dark = await measureTheme('dark');
@@ -1079,6 +1287,17 @@ async function main() {
     check('深色灰色分隔符与代码达到 AA',
       dark.markerRatio >= 4.5 && dark.codeRatio >= 4.5,
       JSON.stringify(dark));
+    const faceDark = await faceOf();
+    check('A1 暗色下拉弹层 color-scheme 是 dark', faceDark.scheme === 'dark', JSON.stringify(faceDark));
+    check('A1 暗色下拉收起态有明确实底色且 option 实底对比 >= AA',
+      faceDark.selectAlpha > 0.9 && faceDark.optionRatio >= 4.5 && faceDark.optionBg !== 'rgba(0, 0, 0, 0)',
+      JSON.stringify(faceDark));
+    check('A3 暗色语言角标对比 >= AA',
+      faceDark.chipRatio >= 4.5 && faceDark.chipBg !== 'rgba(0, 0, 0, 0)',
+      JSON.stringify(faceDark));
+    check('A5 暗色编辑面比旧宿主面 #1e2423 更深',
+      lumOf(faceDark.face) < lumOf('rgb(30, 36, 35)'),
+      JSON.stringify(faceDark));
     await page.evaluate(() => window.__setTheme('light'));
     await waitForPaint(page);
 

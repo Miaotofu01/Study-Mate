@@ -296,6 +296,7 @@ async function main() {
         imageSrcCount: document.querySelectorAll('.cm-content img:not(.cm-widgetBuffer)').length,
         fenceVisible: Boolean(document.querySelector('.md-code-fence')),
         fenceOffLines: document.querySelectorAll('.md-code-fence-off').length,
+        codeLang: document.querySelector('.md-code-lang')?.textContent || '',
         contentText: document.querySelector('.cm-content')?.innerText || '',
         tokKeyword: document.querySelectorAll('.tok-keyword').length,
         strong: document.querySelectorAll('.md-strong').length,
@@ -312,9 +313,10 @@ async function main() {
         JSON.stringify(rendered.tableText.slice(0, 40)));
       check('非活动公式仍渲染 KaTeX', rendered.katex >= 2, `katex=${rendered.katex}`);
       check('非活动图片只留本地占位，不建 img/src', rendered.image && rendered.imageSrcCount === 0);
-      check('非活动代码围栏隐藏，代码正文与高亮类保留',
-        !rendered.fenceVisible && rendered.fenceOffLines === 2 && !rendered.contentText.includes('```') && rendered.tokKeyword > 0,
-        `fenceOff=${rendered.fenceOffLines} tok=${rendered.tokKeyword}`);
+      check('非活动代码围栏：开围栏行显示语言角标、闭围栏仍隐藏，代码正文与高亮类保留',
+        !rendered.fenceVisible && rendered.fenceOffLines === 1 && rendered.codeLang === 'js'
+        && !rendered.contentText.includes('```') && rendered.tokKeyword > 0,
+        `fenceOff=${rendered.fenceOffLines} lang=${rendered.codeLang} tok=${rendered.tokKeyword}`);
       check('强调/加粗使用语义类', rendered.strong >= 2 && rendered.emphasis === 0);
       check('表格单元格安全渲染 bold/italic/code，不露原始标记',
         rendered.tableStrong > 0 && rendered.tableEm > 0 && rendered.tableCode > 0

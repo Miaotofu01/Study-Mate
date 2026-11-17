@@ -5,6 +5,7 @@ import { makeDemo, card, textCard, edge } from './fixtures.js';
 import { BoardContext } from './BoardContext.js';
 import { nodeTypes, edgeTypes } from './CanvasNodes.jsx';
 import ResourceTree, { initialFolders, initialParent } from './ResourceTree.jsx';
+import { folderDeleteBlockReason, canRenameResource, validateFolderName, validateFileTitle } from './resource-tree-model.js';
 import MediaRenderer from './MediaRenderer.jsx';
 import ImportControls from './ImportControls.jsx';
 import { IMPORT_FILE_ACCEPT, IMPORT_PICKER_TYPES, captureFileDrop, readImportedEntry, resolveFileReference, isFileReference, copyResource, originDescription, gridAppearance } from './imports.js';
@@ -83,7 +84,9 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   const flow = useReactFlow();
   const [themeOverride, setThemeOverride] = useState(null);
   const [systemTheme, setSystemTheme] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-  const theme = hostTheme || themeOverride || systemTheme;
+  // 默认跟宿主（独立网页跟系统）；顶栏的显式切换是本页会话内的覆盖，优先级最高，
+  // 刷新后回到跟随宿主。规范：docs/规范/阅读端呈现.md §九「亮暗与对比度照 §四」。
+  const theme = themeOverride || hostTheme || systemTheme;
   useEffect(() => { const query = window.matchMedia('(prefers-color-scheme: dark)'); const change = () => setSystemTheme(query.matches ? 'dark' : 'light'); query.addEventListener('change', change); return () => query.removeEventListener('change', change); }, []);
   useEffect(() => { if (hostTheme) return; document.documentElement.dataset.theme = theme; document.documentElement.style.colorScheme = theme; }, [theme, hostTheme]);
   const initial = useRef(null); if (!initial.current) initial.current = persistence ? { resources: {}, nodes: [], edges: [] } : fresh();
@@ -180,6 +183,53 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
     if (!notesPersistence.markEdit()) return false;
     storeResources({ ...resourcesRef.current, [id]: { ...original, ...patch } }); return true;
   };
+  // ---- 资源树目录/文件操作（树侧菜单是第一道；这里用 ref 最新数据再验一遍同一判据）----
+  // 判据统一取自 resource-tree-model.js（folderDeleteBlockReason / canRenameResource / 校验函数），
+  // 防「菜单打开期间数据变化」的竞态：外部轮询回灌、在途保存落地、另一面板改动——
+  // 一律以 foldersRef/resourcesRef/sceneRef 里的当前值为准，不信菜单打开时的快照。
+  const hasCanvasContent = useCallback((folderId) => {
+    const legacyNotebookId = foldersRef.current.find(folder => folder.kind === 'notebook')?.id;
+    // 阻断口径（主代理拍板）：scene 里只要还有任何归属本笔记本的节点就不可删——
+    // 包括内容被扔进废纸篓的节点，以及旧数据无 notebookId、按 legacy 实际归属的节点。
+    // 删除不许留下无归属/归属漂移的节点；资源口径（含废纸篓）另在 folderIsEmpty 里拦。
+    return sceneRef.current.nodes.some(node => (node.data.notebookId || legacyNotebookId) === folderId);
+  }, []);
+  const renameFolder = useCallback((folderId, name) => {
+    const folder = foldersRef.current.find(item => item.id === folderId);
+    if (!folder || folder.name === name || !validateFolderName(name).ok) return;
+    if (!notesPersistence.markEdit()) return;
+    storeFolders(foldersRef.current.map(item => item.id === folderId ? { ...item, name } : item));
+  }, [notesPersistence.markEdit]);
+  const deleteFolder = useCallback((folderId) => {
+    const folder = foldersRef.current.find(item => item.id === folderId);
+    if (!folder) return;
+    const block = folderDeleteBlockReason(foldersRef.current, resourcesRef.current, folder, hasCanvasContent(folderId));
+    if (block) { announce(block); return; }
+    // 最后一本笔记本不可删：删光后 legacyNotebook 变 undefined，无显式 notebookId 的
+    // 节点会失去归属、新建节点也不再盖 notebookId（App.jsx 的 nodeScope/changeScene）。
+    if (folder.kind === 'notebook' && foldersRef.current.filter(item => item.kind === 'notebook').length <= 1) {
+      announce('至少保留一个笔记本；请先新建另一本笔记本再删除。');
+      return;
+    }
+    if (!notesPersistence.markEdit()) return;
+    const next = foldersRef.current.filter(item => item.id !== folderId);
+    storeFolders(next);
+    // 选中回退：删的是当前选中目录时退到父目录，再退唯一根/首项；树侧高亮 pick 跟随 selectedFolder。
+    setSelectedFolder(previous => next.some(item => item.id === previous) ? previous
+      : next.find(item => item.id === folder.parent)?.id || next.find(item => item.parent === null)?.id || next[0]?.id || 'library');
+    // 删的是活动笔记本时把相机切到回退笔记本的视口：否则 layout.json 顶层全局 viewport
+    // 仍停在已删本的位置，下次刷新会恢复到一个陌生空画布。
+    if (folderId === activeNotebook) {
+      const fallback = next.find(item => item.kind === 'notebook');
+      void flow.setViewport(fallback?.viewport || { x: 0, y: 0, zoom: 1 }, { duration: 0 });
+    }
+  }, [notesPersistence.markEdit, hasCanvasContent, announce, activeNotebook, flow]);
+  const renameResource = useCallback((resourceId, title) => {
+    const resource = resourcesRef.current[resourceId];
+    if (!canRenameResource(resource) || !validateFileTitle(title).ok) return;
+    if (!notesPersistence.markEdit()) return;
+    storeResources({ ...resourcesRef.current, [resourceId]: { ...resource, title } });
+  }, [notesPersistence.markEdit]);
   const bindNotebook = (id, scope) => {
     const ref = normalizeCourseRef(scope, { subjectOnly: true });
     const book = foldersRef.current.find(folder => folder.id === id && folder.kind === 'notebook');
@@ -454,17 +504,22 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   const applyDropMode = async (importMode) => {
     const pending = pendingImport; setPendingImport(null); setModal(null);
     if (!pending) return;
+    // App 级写入门禁：拖放导入与菜单/文件选择一视同仁。引用分支的 placeResource 与
+    // 文件分支的 importEntries 各自经 canEdit/markEdit 门禁；副本分支在下面显式再验。
+    if (!notesPersistence.canEdit) { announce('笔记数据未就绪或只读，导入被拒绝'); return; }
     if (pending.kind === 'files') { await importEntries(pending.entries, importMode, pending.position); return; }
-    const source = resources[pending.id];
+    const source = resourcesRef.current[pending.id];
     if (!source) return;
     if (importMode === 'reference') { placeResource(source.id, pending.position); announce('已引用同一原件；已有节点时直接定位'); return; }
-    if (Object.keys(resources).length >= 250 || sceneRef.current.nodes.length >= 120) { announce('资源或节点数量已达上限'); return; }
+    if (Object.keys(resourcesRef.current).length >= 250 || sceneRef.current.nodes.length >= 120) { announce('资源或节点数量已达上限'); return; }
     try {
       const original = await resolveFileReference(source), id = uid('resource');
+      // 异步拷贝完成前权限/数据可能已变（载入失败、外部回灌、冲突重载）：写前以 ref 重验
+      if (resourcesRef.current?.[pending.id] !== source || !notesPersistence.markEdit()) { announce('数据已变化或进入只读，副本未创建'); return; }
       const copied = copyResource(original, id, selectedFolder || source.parent || 'references');
-      const total = Object.values(resources).reduce((sum, item) => sum + (item.bytes || 0), 0);
+      const total = Object.values(resourcesRef.current).reduce((sum, item) => sum + (item.bytes || 0), 0);
       if (total + (copied.bytes || 0) > 32 * 1024 * 1024) throw new Error('复制后超过本页 32 MiB 总量限制');
-      setResources((previous) => ({ ...previous, [id]: copied }));
+      storeResources({ ...resourcesRef.current, [id]: copied });
       const node = nodeForResource(uid('node'), copied, pending.position.x - 150, pending.position.y - 120, 310, 260);
       checkpoint(); changeScene((previous) => ({ ...previous, nodes: [...previous.nodes, node] })); setCurrentId(id); setRightOpen(true);
       announce('已创建独立副本，后续修改不影响原件；网页或课程只复制已存内容，不抓取来源');
@@ -484,11 +539,15 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
       <div className="view-switch" aria-label="主视图"><button className={view === 'canvas' ? 'is-active' : ''} aria-pressed={view === 'canvas'} onClick={() => { setView('canvas'); setEditingNode(null); }}><LayoutDashboard size={13} />画布</button><button className={view === 'document' ? 'is-active' : ''} aria-pressed={view === 'document'} onClick={() => openDocument(current?.id)}><FileText size={13} />文档</button></div>
       <span className="topbar-spacer" />{notesPersistence.isNative && <div className="persistence-actions">
         {Object.values(notesPersistence.saveStatus).some(state => state.state === SaveState.ERROR) && <button className="button ghost" onClick={notesPersistence.retryAll}>重试保存</button>}
-        {Object.values(notesPersistence.saveStatus).some(state => state.dirty) && <><button className="button ghost" onClick={() => { const blob = new Blob([JSON.stringify(notesPersistence.exportDrafts(), null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'studymate-notes-draft.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }}>导出本地草稿</button><button className="button ghost" onClick={() => notesPersistence.reloadStore({ confirmDiscard: true })}>放弃本地，重新载入</button></>}
+        {/* 草稿恢复按钮只在真实失败态出现（ERROR/CONFLICT 稳定存在直到解决）；
+            普通 dirty（在途保存/未落盘草稿）不再让这两个按钮闪现——那条路只由
+            PersistenceBadge 如实显示。恢复路径仍完整：失败可导出/重试/重载，冲突另有
+            482 行的冲突条与「保留本地并重试」。 */}
+        {Object.values(notesPersistence.saveStatus).some(state => state.state === SaveState.ERROR || state.state === SaveState.CONFLICT) && <><button className="button ghost" onClick={() => { const blob = new Blob([JSON.stringify(notesPersistence.exportDrafts(), null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'studymate-notes-draft.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }}>导出本地草稿</button><button className="button ghost" onClick={() => notesPersistence.reloadStore({ confirmDiscard: true })}>放弃本地，重新载入</button></>}
       </div>}{notesPersistence.isNative
         ? <PersistenceBadge status={notesPersistence.saveStatus} loadState={notesPersistence.loadState} />
         : <span className="prototype-badge">开发中 · 刷新重置</span>}
-      {!hostTheme && <button className="icon-button theme-switch" aria-label={theme === 'dark' ? '切换浅色模式' : '切换暗色模式'} title={theme === 'dark' ? '当前：暗色模式' : '当前：浅色模式'} onClick={() => setThemeOverride(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>}
+      <button className="icon-button theme-switch" aria-label={theme === 'dark' ? '切换浅色模式' : '切换暗色模式'} title={theme === 'dark' ? '当前：暗色模式（覆盖仅本页，刷新后跟宿主）' : '当前：浅色模式（覆盖仅本页，刷新后跟宿主）'} onClick={() => setThemeOverride(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>
       <button className="icon-button" aria-label="操作说明" title="操作说明" onClick={() => setModal('help')}><HelpCircle size={17} /></button>{!notesPersistence.isNative && <button className="icon-button" aria-label="恢复示例" title="恢复示例" onClick={() => setModal('reset')}><RotateCcw size={16} /></button>}
       <button className="icon-button topbar-panel-toggle" aria-label={rightOpen ? '收起右侧栏' : '展开右侧栏'} title={rightOpen ? '收起右侧栏' : '展开右侧栏'} aria-expanded={rightOpen} aria-controls="right-panel" onClick={() => setRightOpen((value) => !value)}>{rightOpen ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>
     </header>
@@ -496,8 +555,8 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
       <aside className={'side-panel left-panel' + (!leftOpen ? ' is-collapsed' : '')} style={{ width: leftOpen ? leftWidth : 0 }} inert={!leftOpen ? true : undefined} aria-hidden={!leftOpen}>
         <div className="panel-inner"><div className="panel-header"><span className="panel-title">文件</span><div className="panel-actions"><ImportControls onChooseMode={beginImport} getPortalHost={getPortalHost} /><button className="icon-button" aria-label="新建文件夹" title="新建文件夹" disabled={!notesPersistence.canEdit} onClick={() => { setFolderName(''); setModal('folder'); }}><FolderPlus size={16} /></button><button className="icon-button" aria-label="新建笔记" title="新建笔记" disabled={!notesPersistence.canEdit} onClick={addNote}><Plus size={18} /></button><button className="icon-button" aria-label="收起文件侧栏" title="收起文件侧栏" onClick={() => setLeftOpen(false)}><PanelLeftClose size={17} /></button></div></div>
           <div className="tree-tools"><input className="tree-search" aria-label="搜索文件" placeholder="搜索" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
-          <div className="view-switch" aria-label="笔记目录视图"><button aria-pressed={treeMode === 'files'} onClick={() => setTreeMode('files')}>资源视图</button><button aria-pressed={treeMode === 'nodes'} onClick={() => setTreeMode('nodes')}>节点视图</button><button aria-label="新建笔记本" disabled={!notesPersistence.canEdit} onClick={() => { setFolderName(''); setModal('notebook'); }}>＋笔记本</button></div>
-          {treeMode === 'nodes' ? <NodeNotebookTree bridge={shared} library={courseLibrary} search={search} onCanvas={switchNotebook} onSelect={() => { setRightOpen(true); }} /> : <ResourceTree folders={folders} resources={resources} search={search} selectedId={current?.id} selectedFolder={selectedFolder} onFolderSelect={setSelectedFolder} onSelect={view === 'document' ? openDocument : selectResource} onOpenDocument={openDocument} onCanvas={switchNotebook} />}
+          <div className="view-switch" aria-label="笔记目录视图"><button className={treeMode === 'files' ? 'is-active' : ''} aria-pressed={treeMode === 'files'} onClick={() => setTreeMode('files')}>资源视图</button><button className={treeMode === 'nodes' ? 'is-active' : ''} aria-pressed={treeMode === 'nodes'} onClick={() => setTreeMode('nodes')}>节点视图</button><button aria-label="新建笔记本" disabled={!notesPersistence.canEdit} onClick={() => { setFolderName(''); setModal('notebook'); }}>＋笔记本</button></div>
+          {treeMode === 'nodes' ? <NodeNotebookTree bridge={shared} library={courseLibrary} search={search} onCanvas={switchNotebook} onSelect={() => { setRightOpen(true); }} /> : <ResourceTree folders={folders} resources={resources} search={search} selectedId={current?.id} selectedFolder={selectedFolder} onFolderSelect={setSelectedFolder} onSelect={view === 'document' ? openDocument : selectResource} onOpenDocument={openDocument} onCanvas={switchNotebook} canEdit={notesPersistence.canEdit} onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameResource={renameResource} hasCanvasContent={hasCanvasContent} />}
 
         </div>{leftOpen && <ResizeBar side="left" value={leftWidth} onChange={setLeftWidth} onResizing={setResizing} />}
       </aside>

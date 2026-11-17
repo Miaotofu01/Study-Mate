@@ -8,7 +8,7 @@
   --mt-text: var(--text, var(--ink, #29333d));
   --mt-muted: var(--muted, #5c6874);
   --mt-border: var(--border, var(--line, #d9dfe5));
-  --mt-surface: var(--surface, var(--smb-bg, var(--code, #ffffff)));
+  --mt-surface: var(--ne-surface, var(--surface, var(--smb-bg, var(--code, #ffffff))));
   --mt-active: var(--accent-soft, #eaf0f5);
   --mt-focus: var(--accent, var(--teal, #205f91));
 
@@ -50,11 +50,28 @@
   padding: 0 2px;
   border: 1px solid transparent;
   border-radius: 4px;
-  background: transparent;
+  /* #312 A1：收起态与弹层都给明确实底色（--mt-surface 已随编辑面加深），
+     否则暗色宿主里原生 select 收起态透出深底、文字却是浅色，对比不达标。 */
+  background: var(--mt-surface);
   color: var(--mt-text);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
+  /* 原生下拉弹层不吃本文件的变量：亮色显式钉在 light，
+     暗色由 .note-editor[data-theme="dark"] 切到 dark，弹层 option 才会用深底浅字。 */
+  color-scheme: light;
+}
+
+/* option 弹层显式实底：Windows 上 color-scheme 只给系统默认底，这里钉死
+   面色与文字色（--mt-surface/--mt-text 继承自工具条，暗色自动取深面色），
+   保证收起态与展开态一致且对比 >= AA。 */
+.md-format-toolbar__select option {
+  background: var(--mt-surface);
+  color: var(--mt-text);
+}
+
+:is(.note-editor, .markdown-live-editor)[data-theme="dark"] .md-format-toolbar__select {
+  color-scheme: dark;
 }
 
 .md-format-toolbar__select:hover {

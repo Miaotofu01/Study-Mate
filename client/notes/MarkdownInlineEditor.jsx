@@ -24,6 +24,7 @@ import {
   collectMathSpans,
   dominantEol,
   editorChangesForRaw,
+  fenceLanguage,
   normalizeLineEndings,
   parseGfmTable,
   parseImageSyntax,
@@ -190,6 +191,53 @@ class TaskWidget extends WidgetType {
       view.focus();
     });
     return wrapper;
+  }
+}
+
+/* 围栏语言角标：休息态把「```python」整行收起后语言就不见了，
+   这里用只读 chip 顶替开围栏行；点它把光标放回围栏，源码就地显形。 */
+class CodeLangWidget extends WidgetType {
+  constructor(lang, from) {
+    super();
+    this.lang = lang;
+    this.from = from;
+  }
+
+  eq(other) {
+    return other instanceof CodeLangWidget && other.lang === this.lang && other.from === this.from;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+
+  toDOM(view) {
+    const chip = document.createElement('span');
+    chip.className = 'md-code-lang';
+    chip.textContent = this.lang;
+    chip.contentEditable = 'false';
+    // 可访问性：行为上是按钮，给真实 button 语义与键盘路径。
+    // tabIndex=-1 是刻意的：编辑器 keymap 带 indentWithTab（MarkdownInlineEditor.jsx:707），
+    // 编辑态 Tab 必须留给缩进；键盘用户走两条等效路径——方向键落到围栏行边界时
+    // 围栏自动显形（selectionTouchesSpan 含端点契约），读屏浏览态可直接激活本按钮。
+    // tabIndex=-1 保证 chip 不会插进编辑器的 Tab 序、不抢编辑器焦点流。
+    chip.setAttribute('role', 'button');
+    chip.setAttribute('aria-label', `代码语言 ${this.lang}`);
+    chip.tabIndex = -1;
+    const reveal = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      view.dispatch({ selection: { anchor: this.from }, scrollIntoView: true });
+      view.focus();
+    };
+    chip.addEventListener('mousedown', reveal);
+    // 读屏/程序化激活产生的 click 没有 detail（detail===0）；真实鼠标点击已由
+    // mousedown 处理，按 detail 区分避免同一次点击派发两次选区。
+    chip.addEventListener('click', (event) => { if (event.detail === 0) reveal(event); });
+    chip.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') reveal(event);
+    });
+    return chip;
   }
 }
 
@@ -386,14 +434,20 @@ function buildDecorations(state) {
   }
 
   // 围栏：休息态把围栏行收起（空替换），代码正文仍等宽高亮；选区进来才显形灰色围栏。
+  // 开围栏行带语言信息时收起成语言角标 chip，点它把围栏显形。
   for (const span of spans) {
     if (span.kind !== 'fenced-code' || selectionTouchesSpan(span, ranges)) continue;
     const first = state.doc.lineAt(span.from);
     const last = state.doc.lineAt(span.to);
-    for (const line of first.number === last.number ? [first] : [first, last]) {
+    const lines = first.number === last.number ? [first] : [first, last];
+    for (const line of lines) {
       if (line.to <= line.from || overlapsReplaced(line.from, line.to)) continue;
+      const isOpenFence = line.number === first.number && first.number !== last.number;
+      const lang = isOpenFence ? fenceLanguage(line.text) : '';
       replaced.push({ from: line.from, to: line.to });
-      out.push(Decoration.replace({}).range(line.from, line.to));
+      out.push(lang
+        ? Decoration.replace({ widget: new CodeLangWidget(lang, line.from), block: true }).range(line.from, line.to)
+        : Decoration.replace({}).range(line.from, line.to));
     }
   }
 

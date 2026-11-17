@@ -15,12 +15,16 @@
   --accent-soft: var(--smb-raise, #eaf0f5);
   --accent: var(--smb-text-link, #205f91);
   --teal: var(--smb-text-link, #205f91);
+  /* #312 A5：笔记编辑/渲染面比宿主面深一档，宿主自身背景不变。
+     亮色从侧栏面 --smb-bg 往深混 6%；暗色钉深一档。编辑与只读渲染两态都盖这个面。 */
+  --ne-surface: var(--smb-bg, #f7f8fa);
+  --ne-surface: color-mix(in srgb, var(--smb-bg, #f7f8fa) 94%, #0d1210);
   display: flex;
   min-width: 0;
   min-height: 0;
   flex-direction: column;
   color: var(--text);
-  background: transparent;
+  background: var(--ne-surface);
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -37,6 +41,7 @@
   --accent-soft: var(--smb-raise, #303e4c);
   --accent: var(--smb-text-link, #9ecdf3);
   --teal: var(--smb-text-link, #9ecdf3);
+  --ne-surface: #1a201f;
 }
 .note-editor > [role="toolbar"] {
   position: sticky;
@@ -44,6 +49,28 @@
   z-index: 2;
   flex: 0 0 auto;
 }
+.note-editor__actions {
+  display: flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  margin: 4px 0;
+}
+.note-editor__export {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.note-editor__export:hover { text-decoration: underline; }
+.note-editor__export:focus-visible { outline: 2px solid var(--accent); }
 .note-editor .markdown-inline-editor,
 .note-editor .markdown-inline-editor:focus-within {
   min-width: 0;

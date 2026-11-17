@@ -14,6 +14,9 @@
   --md-inline-code-bg: #eef1ef;
   --md-inline-code-bg: color-mix(in srgb, var(--code, var(--border, #e2e8e4)) 72%, var(--surface, #fff));
   --md-selection-bg: var(--accent-soft, #e8f2ef);
+  /* 编辑面比宿主面深一档：优先取 .note-editor 里的 --ne-surface（live-editor.css 已加深），
+     独立使用时回退宿主 --surface。 */
+  --md-editor-surface: var(--ne-surface, var(--surface, #fff));
 
   /* 代码高亮只给类名（classHighlighter），颜色在这里按亮暗各给一套。
      浅色取值对白底均 >= 4.5:1；深色沿用课程端已验证的一套。 */
@@ -34,7 +37,7 @@
   overflow: hidden;
   border: 1px solid var(--border, #dbe3de);
   border-radius: 8px;
-  background: var(--surface, #fff);
+  background: var(--md-editor-surface, var(--surface, #fff));
   color: var(--text, var(--ink, #293431));
 }
 
@@ -104,7 +107,7 @@
 }
 
 .markdown-inline-editor .cm-panels {
-  background: var(--surface, #fff);
+  background: var(--md-editor-surface, var(--surface, #fff));
   color: var(--text, var(--ink, #293431));
 }
 
@@ -155,9 +158,18 @@
   font-family: var(--md-inline-mono);
 }
 
+/* 标题层级梯度：层级类 md-heading-1..6 由 markdown-inline.js 按节点名给出，
+   只动字号与行高，不改粗体本身，编辑态与预览态同一套梯度。 */
 .markdown-inline-editor .md-heading {
   font-weight: 700;
 }
+
+.markdown-inline-editor .md-heading-1 { font-size: 1.38em; line-height: 1.4; }
+.markdown-inline-editor .md-heading-2 { font-size: 1.24em; line-height: 1.4; }
+.markdown-inline-editor .md-heading-3 { font-size: 1.12em; line-height: 1.4; }
+.markdown-inline-editor .md-heading-4 { font-size: 1.02em; line-height: 1.45; }
+.markdown-inline-editor .md-heading-5 { font-size: 0.95em; line-height: 1.5; }
+.markdown-inline-editor .md-heading-6 { font-size: 0.9em; line-height: 1.5; }
 
 .markdown-inline-editor .md-list,
 .markdown-inline-editor .md-quote {
@@ -171,7 +183,8 @@
   font-family: var(--md-inline-mono);
 }
 
-/* 围栏行休息态被空替换收起，只留一条很薄的空白行，避免整段 ``` 常驻。 */
+/* 围栏行休息态被空替换收起，只留一条很薄的空白行，避免整段 ``` 常驻。
+   开围栏带语言信息时由 CodeLangWidget 顶替成语言角标 chip。 */
 .markdown-inline-editor .md-code-fence-off {
   line-height: 0.55;
 }
@@ -181,14 +194,29 @@
   font-family: var(--md-inline-mono);
 }
 
+.markdown-inline-editor .md-code-lang {
+  display: inline-block;
+  padding: 0 7px;
+  border: 1px solid var(--border, #dbe3de);
+  border-radius: 999px;
+  color: var(--md-syntax-color);
+  background: var(--md-inline-code-bg);
+  font-family: var(--md-inline-mono);
+  font-size: 10px;
+  line-height: 1.8;
+  letter-spacing: .04em;
+  user-select: none;
+  cursor: pointer;
+}
+
 .markdown-inline-editor .md-line-table {
   font-family: var(--md-inline-mono);
   font-size: 0.96em;
 }
 
 .markdown-inline-editor .md-line-quote {
-  border-left: 2px solid var(--border, #dbe3de);
-  padding-left: 8px;
+  border-left: 3px solid var(--border, #dbe3de);
+  padding-left: 9px;
 }
 
 /* ── 非活动公式：KaTeX 渲染；点到它就把光标放回源码，源码就地显形 ─────────── */
@@ -209,7 +237,7 @@
   padding: 8px 8px;
   border: 1px solid var(--border, #dbe3de);
   border-radius: 6px;
-  background: var(--surface, #fff);
+  background: var(--md-editor-surface, var(--surface, #fff));
 }
 
 .markdown-inline-editor .md-math-source {
@@ -226,7 +254,7 @@
   overflow-x: auto;
   border: 1px solid var(--border, #dbe3de);
   border-radius: 6px;
-  background: var(--surface, #fff);
+  background: var(--md-editor-surface, var(--surface, #fff));
 }
 
 .markdown-inline-editor .md-table {
@@ -375,7 +403,7 @@
   margin: 0;
   padding: 6px 12px;
   border-top: 1px solid var(--border, #dbe3de);
-  background: var(--surface, #fff);
+  background: var(--md-editor-surface, var(--surface, #fff));
   color: var(--text, var(--ink, #293431));
   font-size: 12px;
   line-height: 1.5;

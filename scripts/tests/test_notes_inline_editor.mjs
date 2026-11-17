@@ -29,6 +29,7 @@ import {
   dominantEol,
   editorChangesForRaw,
   editorOffsetForRaw,
+  fenceLanguage,
   formatDelimiters,
   normalizeLineEndings,
   parseGfmTable,
@@ -509,4 +510,61 @@ test('测试样例与线上样例一致：plain **bold** plain **other**', () =>
     { from: 8, to: 12 },
     { from: 23, to: 28 },
   ]);
+});
+
+/* ── #312 A2/A3/A5：标题层级、围栏语言角标与面背景的纯函数/静态契约 ────────── */
+
+test('A2 标题层级：span 携带 level，正文类追加 md-heading-N', () => {
+  const text = '# 一\n\n## 二\n\n###### 六\n\n正文';
+  const headings = byKind(spansOf(text), 'heading');
+  assert.deepEqual(headings.map((span) => span.level), [1, 2, 6]);
+  const classes = marksOf(text).map((mark) => mark.classes);
+  assert.ok(classes.includes('md-heading md-heading-1'), JSON.stringify(classes));
+  assert.ok(classes.includes('md-heading md-heading-2'), JSON.stringify(classes));
+  assert.ok(classes.includes('md-heading md-heading-6'), JSON.stringify(classes));
+  assert.ok(!classes.some((value) => value.includes('md-heading-0')), JSON.stringify(classes));
+});
+
+test('A3 围栏语言：fenceLanguage 取信息串首 token，无信息串为空', () => {
+  assert.equal(fenceLanguage('```js'), 'js');
+  assert.equal(fenceLanguage('```python title=x'), 'python');
+  assert.equal(fenceLanguage('~~~ts'), 'ts');
+  assert.equal(fenceLanguage('```'), '');
+  assert.equal(fenceLanguage('``````'), '');
+  assert.equal(fenceLanguage('  ```C#'), 'C#');
+  assert.equal(fenceLanguage('正文 ``` 不是围栏'), '');
+});
+
+test('A3 编辑态接线：CodeLangWidget 用 fenceLanguage 顶替开围栏行，CSS 有角标样式', () => {
+  const component = readSource('MarkdownInlineEditor.jsx');
+  assert.match(component, /new CodeLangWidget/);
+  assert.match(component, /fenceLanguage\(/, '语言名必须来自与测试共用的一份判据');
+  assert.match(component, /setAttribute\('role', 'button'\)/, 'chip 行为上是按钮，必须有 button 语义');
+  assert.match(component, /chip\.tabIndex = -1;/, '不进编辑器 Tab 序（Tab 留给 indentWithTab 缩进）');
+  assert.match(component, /event\.detail === 0/, '读屏激活的 detail=0 click 必须生效');
+  assert.match(component, /event\.key === 'Enter' \|\| event\.key === ' '/, 'Enter/Space 键盘可操作');
+  const css = readSource('inline-editor.css');
+  assert.match(css, /\.markdown-inline-editor \.md-code-lang/);
+});
+
+test('A1/A5 CSS 静态契约：下拉 color-scheme、编辑面比宿主面深一档', () => {
+  const toolbar = readSource('markdown-toolbar.css');
+  assert.match(toolbar, /color-scheme: light/);
+  assert.match(toolbar, /\[data-theme="dark"\] \.md-format-toolbar__select \{[\s\S]*?color-scheme: dark/, '暗色必须切到 dark 弹层');
+  assert.match(toolbar, /\.md-format-toolbar__select \{[\s\S]*?background: var\(--mt-surface\);/, '收起态必须有明确实底色');
+  assert.match(toolbar, /\.md-format-toolbar__select option \{[\s\S]*?background: var\(--mt-surface\);[\s\S]*?color: var\(--mt-text\);/, 'option 弹层必须实底且钉文字色');
+
+  const noteEditor = readSource('note-editor.css');
+  assert.match(noteEditor, /--ne-surface: color-mix\(in srgb, var\(--smb-bg/);
+  assert.match(noteEditor, /\.note-editor\[data-theme="dark"\] \{[\s\S]*?--ne-surface: #1a201f/);
+  // A5：编辑与只读渲染两态都盖加深面——background 直接落在 .note-editor 上，无 :not(.is-readonly) 豁免。
+  assert.match(noteEditor, /background: var\(--ne-surface\);/);
+  assert.doesNotMatch(noteEditor, /\.note-editor:not\(\.is-readonly\)/, '只读渲染面不再豁免');
+  // 正文编辑器本体保持透明：面由 .note-editor 承担。
+  assert.match(noteEditor, /\.note-editor \.markdown-inline-editor[\s\S]*?background: transparent;/);
+
+  const inline = readSource('inline-editor.css');
+  assert.match(inline, /--md-editor-surface: var\(--ne-surface, var\(--surface, #fff\)\);/);
+  // 注：live-editor.css/MarkdownLiveEditor 是死代码，#303（f7135f6）会删除它们；
+  // A1/A5 的有效落点只在 note-editor.css 与 inline-editor.css，这里刻意不耦合 live-editor.css。
 });
