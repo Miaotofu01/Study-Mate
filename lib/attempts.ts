@@ -394,6 +394,8 @@ function draftTime(draft: AttemptDraft | undefined): number {
 /**
  * 草稿键只增不回收→写侧到上限时按 `时` 保留最新 200 条。
  * `keepIds` 是**本次写入**的题：即使它的时间戳比谁都旧，也不能刚写进去就被自己驱逐。
+ * 驱逐**只删键、不重排**：留下的键保持原文件里的先后，一次驱逐不会让整段草稿重新排序
+ * （否则写一条新草稿就能把 200 条的 diff 全翻一遍）。
  */
 export function pruneDrafts(
   drafts: Record<string, AttemptDraft>,
@@ -402,16 +404,19 @@ export function pruneDrafts(
   const ids = Object.keys(drafts);
   if (ids.length <= DRAFT_MAX) return drafts;
   const keep = new Set(keepIds.filter((id) => Object.prototype.hasOwnProperty.call(drafts, id)));
+  // 先定「留谁」：本次写入的必留，其余按 `时` 从新到旧补满上限
+  const survivor = new Set(keep);
   const rest = ids
-    .filter((id) => !keep.has(id))
+    .filter((id) => !survivor.has(id))
     .sort((a, b) => draftTime(drafts[b]) - draftTime(drafts[a]) || a.localeCompare(b));
+  for (const id of rest) {
+    if (survivor.size >= DRAFT_MAX) break;
+    survivor.add(id);
+  }
+  // 再按原键序重建：顺序与输入逐字一致，只有被驱逐的键消失
   const out: Record<string, AttemptDraft> = {};
   for (const id of ids) {
-    if (keep.has(id)) out[id] = drafts[id];
-  }
-  for (const id of rest) {
-    if (Object.keys(out).length >= DRAFT_MAX) break;
-    out[id] = drafts[id];
+    if (survivor.has(id)) out[id] = drafts[id];
   }
   return out;
 }
@@ -426,9 +431,10 @@ function toEntry(raw: AttemptInput, at: string): AttemptEntry {
   };
   if (typeof raw.自评 === 'string' && raw.自评.trim() !== '') entry.自评 = raw.自评.trim();
   if (typeof raw.错因 === 'string' && raw.错因.trim() !== '') entry.错因 = raw.错因.trim();
-  if (typeof raw.预测 === 'string' && raw.预测.trim() !== '') entry.预测 = capText(raw.预测.trim());
-  // 作答文本是学生原样写的东西：不 trim（缩进/换行有意义），只按上限截断
-  if (typeof raw.作答 === 'string' && raw.作答 !== '') entry.作答 = capText(raw.作答);
+  // `预测` 与 `作答` 都是学生自己写的正文：**原样落盘**（缩进/换行/首尾空格有意义），只按上限截断；
+  // 空判据统一按 trim 后的值——只含空白的文本不算写过，两边都不占键。
+  if (typeof raw.预测 === 'string' && raw.预测.trim() !== '') entry.预测 = capText(raw.预测);
+  if (typeof raw.作答 === 'string' && raw.作答.trim() !== '') entry.作答 = capText(raw.作答);
   // `跑` 原样收（对象才收）：它是**事实**，这一层不改写它——改写就等于二次加工真实输出
   if (typeof raw.跑 === 'object' && raw.跑 !== null && !Array.isArray(raw.跑)) entry.跑 = raw.跑;
   return entry;
