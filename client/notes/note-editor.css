@@ -97,3 +97,21 @@
 .document-scroll.is-inline > .note-editor .markdown-inline-editor { min-height: 0; }
 .document-scroll.is-inline > .note-editor .cm-editor { height: 100%; }
 .document-scroll.is-inline > .note-editor .cm-scroller { overflow: auto; }
+
+/* 恢复未保存草稿的提示：与错误/状态行同一版式，链接按钮与导出按钮同观感。 */
+.note-editor__status {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--smb-text-3, #5c6874);
+}
+.note-editor__link {
+  border: 0;
+  background: none;
+  padding: 0 0 0 6px;
+  font: inherit;
+  color: var(--smb-text-link, #205f91);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.note-editor__link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

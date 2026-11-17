@@ -482,6 +482,80 @@ try {
     assert.equal(fs.readFileSync(store.markerPath).equals(upgradedMarker), true, '重复 reload 重写了 marker');
   });
 
+  // #4：上限按钮必须在 markEdit 前被拒绝，不能再留下持久假脏。
+  await scenario('节点达上限拒绝不写脏：无离开提示、外部更新可见', async ({ fixture, page }) => {
+    const nodes = Array.from({ length: 120 }, (_, i) => ({
+      id: 'cap-node-' + String(i).padStart(3, '0'), type: 'text',
+      position: { x: (i % 12) * 40, y: Math.floor(i / 12) * 30 },
+      style: { width: 40, height: 30 }, data: { text: '' },
+    }));
+    const layout = { folders: structuredClone(DEMO_FOLDERS), nodes, edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+    const written = writeNotesLayout({ home: fixture.home, layout, expectedVersion: null });
+    assert.equal(written.ok, true, JSON.stringify(written));
+    const capResource = { id: 'cap-note', type: 'note', title: 'CAP笔记.md', markdown: '# CAP-BASE\n' };
+    const resourceWritten = writeNotesResource({ home: fixture.home, resource: { ...capResource, parent: 'notes' }, expectedVersion: null });
+    assert.equal(resourceWritten.ok, true, JSON.stringify(resourceWritten));
+
+    await enterNotes(page, fixture.origin); await ready(page); await saved(page);
+    assert.equal(await notes(page).getByRole('button', { name: '添加纯内容节点', exact: true }).isDisabled(), false);
+
+    const dirty = () => page.evaluate(() => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(await dirty(), false, '基线就已经假脏');
+    await notes(page).getByRole('button', { name: '添加纯内容节点', exact: true }).click();
+    await notes(page).locator('.toast').filter({ hasText: '此体验版最多放置 120 个节点' }).waitFor({ timeout: 5000 });
+    assert.equal(await dirty(), false, '节点达上限被拒后仍留下假脏（beforeunload 被拦截）');
+    assert.equal(fixture.read().layout.nodes.length, 120, '上限被拒却改写了布局');
+    assert.equal(Object.keys(fixture.read().resources).length, 1, '上限被拒却新增了资源');
+
+    // 清洁状态下外部修改应被 focus 触发的轮询带入内存；假脏时 checkExternal 会被 isDirty 短路。
+    await notes(page).locator('.tree-file-open').first().click();
+    await inlineEditor(page).waitFor({ state: 'visible', timeout: 12000 });
+    const postsBeforePoll = fixture.requests.filter(r => r.method === 'POST').length;
+    externalMarkdown(fixture, capResource.id, '# CAP-EXTERNAL-CANARY\n\n上限按钮拒绝后仍应看见外部更新。\n');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await until(async () => (await inlineEditor(page).innerText()).includes('CAP-EXTERNAL-CANARY'), '外部更新没有进入内存，拒绝后可能仍假脏');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await delay(500);
+    assert.equal(fixture.requests.filter(r => r.method === 'POST').length, postsBeforePoll, '外部版本检测覆盖了原文');
+  });
+
+  await scenario('资源达上限拒绝不写脏：无离开提示、外部更新可见', async ({ fixture, page }) => {
+    for (let i = 0; i < 250; i++) {
+      const id = 'cap-res-' + String(i).padStart(3, '0');
+      const written = writeNotesResource({
+        home: fixture.home,
+        resource: { id, type: 'note', title: `CAP ${i}.md`, markdown: `# CAP ${i}\n`, parent: 'notes' },
+        expectedVersion: null,
+      });
+      assert.equal(written.ok, true, `seed 第 ${i} 篇失败：${JSON.stringify(written)}`);
+    }
+    await enterNotes(page, fixture.origin); await ready(page); await saved(page);
+    assert.equal(await notes(page).getByRole('button', { name: '新建笔记', exact: true }).isDisabled(), false);
+
+    const dirty = () => page.evaluate(() => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(await dirty(), false, '基线就已经假脏');
+    await notes(page).getByRole('button', { name: '新建笔记', exact: true }).click();
+    await notes(page).locator('.toast').filter({ hasText: '此体验版最多保留 250 个资源' }).waitFor({ timeout: 5000 });
+    assert.equal(await dirty(), false, '资源达上限被拒后仍留下假脏（beforeunload 被拦截）');
+    assert.equal(Object.keys(fixture.read().resources).length, 250, '上限被拒却新增了资源');
+
+    await notes(page).locator('.tree-file-open').first().click();
+    await inlineEditor(page).waitFor({ state: 'visible', timeout: 12000 });
+    const postsBeforePoll = fixture.requests.filter(r => r.method === 'POST').length;
+    externalMarkdown(fixture, 'cap-res-000', '# CAP-RESOURCE-EXTERNAL-CANARY\n\n资源上限拒绝后仍应看见外部更新。\n');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await until(async () => (await inlineEditor(page).innerText()).includes('CAP-RESOURCE-EXTERNAL-CANARY'), '外部更新没有进入内存，拒绝后可能仍假脏');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await delay(500);
+    assert.equal(fixture.requests.filter(r => r.method === 'POST').length, postsBeforePoll, '外部版本检测覆盖了原文');
+  });
+
   await scenario('旧v1无layout库升级前不初始化：只读、0 POST、无layout、无锁', async ({ fixture, page }) => {
     const store = makeV1Store(fixture, { withLayout: false });
     await enterNotes(page, fixture.origin);

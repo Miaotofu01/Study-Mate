@@ -31,7 +31,7 @@ Git 装在其他位置时，用实际安装目录替换上面的路径。Node �
 | `npm run test:antigravity` | Antigravity 插件 ZIP、原生 agents、导出保护与重复构建 |
 | `npm run test:release` | 版本、changelog、重试和发布保护 |
 | `npm run test:static` | 技能调用面与提示词规则归属、词表与发布元数据、文档悬空引用、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
-| `npm run test:notes:browser` | 构建共享网页并运行十一套独立 Edge 回归：画布与占位会话、品牌切换、临时数据域持久化、笔记性能（拖动不重序列化正文、隐藏面不轮询、共享笔记仍可编辑）、侧栏资源树菜单与删除保护、资源树接线、亮暗主题、学习节点联动、共享格式栏与局部编辑、底层编辑器、隐藏面草稿保护。验证刷新和冲突保护、只读升级、真实灰色标记、原稿坐标和输入法、亮暗对比度、媒体边界及无操作零保存；不连接真实 DSH 或模型，前置见「浏览器套件与手动工具」 |
+| `npm run test:notes:browser` | 构建共享网页并运行十二套独立 Edge 回归：画布与占位会话、品牌切换、临时数据域持久化、笔记性能（拖动不重序列化正文、隐藏面不轮询、共享笔记仍可编辑）、侧栏资源树菜单与删除保护、资源树接线、亮暗主题、学习节点联动、共享格式栏与局部编辑、底层编辑器、隐藏面草稿保护、导航卸载前后的 pending/error 状态。验证刷新和冲突保护、只读升级、真实灰色标记、原稿坐标和输入法、亮暗对比度、媒体边界及无操作零保存；不连接真实 DSH 或模型，前置见「浏览器套件与手动工具」 |
 | `npm run test:browser` | 阅读端与无界笔记的真实浏览器渲染测试（阅读端本体、阅读位置、作答落盘、监听推送、跑一次、导出产物、公式排版、四路由 × 三档视口、课件页正文与页头、问答会话与引用、课件页标注），浏览器二进制自动探测 |
 | `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录；native 安装下还验九个原生工具的注册、body 可调用（走真 dispatch）与越权抛，以及 #70 的引擎路径：`root` 指向已安装的包、`~/.dsh/studymate/engine/` 不再出现 |
 | `npm run test:dsh-contract` | **宿主契约守门**：拿真宿主自己的 schema 校验器（`dsh-tools` 的 `assertSupportedJsonSchema`）扫注册点上全部工具的 `parameters` 与 `output.schema`，并核对参考调用 `createWebhookSession` 的字段清单没漂，并逐行解析预设里的模块（宿主删掉的子路径必须带停用条件，`#244`）；附一条反证（已知不合规的 schema 必须报错）。同一个 `STUDYMATE_DSH_PACKAGE`，没设就跳过。指针与纪律在 [工程约束](../规范/工程约束.md) §三「宿主契约」 |
@@ -184,6 +184,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 | `browser/notes_theme_test.mjs` | #312 笔记面亮暗主题：对比度与切换回归 |
 | `browser/notes_persistence_hidden_draft_test.mjs` | #312 隐藏面草稿保护（依赖 #303 的重显立即核对语义）：隐藏期在途/失败/409 冲突草稿重显不丢、之后可明确恢复；隐藏零轮询、清洁重显立即核对且零写 |
 | `browser/notes_curriculum_test.mjs` | 十项节点笔记场景：空节点、显式默认本、原稿共享、关联拖动、未来默认、软删除恢复、节点树/课程引用卡、只读课件跳转、笔记本画布隔离与相机；学习左右笔记亮→暗→亮、渲染/局部灰色标记/链接框的实测 AA，光标、弹窗和主题切换不改写原稿 |
+| `browser/notes_draft_navigation_test.mjs` | 真实 dist 组合客户端的导航卸载回归：保存请求在途（pending）与保存失败（error）时继续输入，切到另一个文件后输入仍留在原文件、不串数据、不被误标为未保存草稿；没有未确认草稿时不误拦 beforeunload。未确认草稿的恢复与冲突锁定在组件层 `notes_live_editor_test.mjs` 覆盖 |
 | `browser/notes_live_editor_test.mjs` | 实际共享 NoteEditor 与单格式栏：选区保持、格式局部事务、真实灰色字符、原始坐标/混合换行、链接冻结与失效拒绝、只读/超限修复、StrictMode/受控输入法和快捷键；用临时页面和隔离 Edge |
 | `browser/notes_inline_editor_test.mjs` | 底层局部编辑器：真实分隔符显隐/直接编辑、原始字节与撤销、外部更新/空正文/输入法、GFM 表格/任务标记/公式/代码/图片占位、安全与亮暗对比度 |
 | `browser/attempts_test.mjs` | 作答落盘（#72）：把阅读端打进一个说 HTTP 的迷你宿主，真落盘到工作区文件 |

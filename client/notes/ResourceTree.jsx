@@ -128,6 +128,8 @@ export default function ResourceTree({
   };
 
   const renameHintFor = (resource) => {
+    // 已移入废纸篓的资源在树里不显示；这里只是兜底（菜单开着时被外部标 trashed 的那一帧）。
+    if (resource?.trashed) return '已移入废纸篓，暂不支持重命名。';
     if (!canRenameResource(resource)) return '引用文件的名称跟随来源，暂不支持重命名。';
     return onRenameResource ? '' : '当前环境未接入重命名。';
   };
@@ -143,12 +145,28 @@ export default function ResourceTree({
     </button>;
   };
 
+  // 目标消失或转只读时收起菜单/行内编辑。不能放在 render 里做（渲染期 setState 是
+  // 生命周期问题，且目标消失前的那一帧仍会把过期数据画到屏幕上）。
+  const menuMissing = useCallback((state) => {
+    if (!state) return false;
+    if (state.kind === 'folder') return !folders.some((item) => item.id === state.id);
+    const resource = resources[state.id];
+    return !resource || Boolean(resource.trashed);
+  }, [folders, resources]);
+  useEffect(() => { if (menuMissing(menu)) setMenu(null); }, [menu, menuMissing]);
+  useEffect(() => {
+    if (renaming && menuMissing(renaming)) setRenaming(null);
+  }, [renaming, menuMissing]);
+  // 异步进入只读门禁（外部轮询失败 / reloadStore）时，已打开的菜单会 portal 到 .app-shell
+  // 末尾并叠在 .persistence-gate 之上（同为 z-index 80，DOM 顺序在后），穿透 inert 仍可点。
+  useEffect(() => { if (!canEdit) { setMenu(null); setRenaming(null); } }, [canEdit]);
+
   const renderMenu = () => {
-    if (!menu) return null;
+    if (!menu || !canEdit) return null;
     const { kind, id } = menu;
     if (kind === 'folder') {
       const folder = folders.find((item) => item.id === id);
-      if (!folder) { closeMenu(); return null; }
+      if (!folder) return null;
       const name = folder.name;
       const deleteHint = deleteHintFor(folder);
       const canRename = Boolean(onRenameFolder), canDelete = Boolean(onDeleteFolder) && !deleteHint;
@@ -165,7 +183,9 @@ export default function ResourceTree({
       </div>;
     }
     const resource = resources[id];
-    if (!resource) { closeMenu(); return null; }
+    // 与 menuMissing 同口径的双保险：废纸篓里的资源在树里不显示，菜单也不该画出来
+    // （effect 会在下一帧收掉，但这一帧不该把过期目标画到屏幕上）。
+    if (!resource || resource.trashed) return null;
     const name = resource.title || '未命名.md';
     const renameHint = renameHintFor(resource);
     const canRename = !renameHint;

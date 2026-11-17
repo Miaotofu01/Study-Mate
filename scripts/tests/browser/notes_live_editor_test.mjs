@@ -8,6 +8,9 @@
    - 原始坐标跨 CRLF/混合换行，undo/redo，链接弹窗冻结选区与文档变化的拒绝；
    - 空文档、外部 props/回声、快速换 resource ID、CDP IME；
    - 只读预览链接、128 Ki 上限与超限修复；
+   - 只读切换的草稿保护（agy #3）：父级静默拒绝 / onChange 抛错后留下的未保存草稿，
+     在只读预览与导出里都保留并标注「尚未保存」；只读期间真外部更新不静默覆盖未确认
+     草稿而是明确告知；回编辑态与切换资源不残留旧草稿；
    - 公式/GFM 表格/图片/代码/原始 HTML 不产生远端请求；
    - 335px 窄栏单行工具条与亮暗 AA。
 
@@ -159,6 +162,27 @@ window.__opened = [];
 window.__ready = false;
 window.open = (url) => { window.__opened.push(url); return null; };
 
+// #3 只读切换草稿保护：父级对 onChange 的三种反应。
+// accept = 正常回传 props；reject = 静默丢弃（App.updateResource 里 markEdit() 返回 false 时
+// 就是这样：不抛错、不更新资源）；throw = 抛错（NoteEditor 记 SAVE_ERROR 并保留 draft）。
+window.__changeMode = 'accept';
+// 「载入文件版本」的二次确认走浏览器原生 confirm，由 Playwright 的 dialog 事件驱动；
+// 不在这里打桩——打桩会掩盖「原生方法摘出来调用 → Illegal invocation」这类问题。
+// 导出走 Blob + <a download>：拦下 createObjectURL 读回正文，锚点点击不真下载。
+window.__blobTexts = [];
+window.__exports = [];
+const realCreateObjectURL = URL.createObjectURL.bind(URL);
+URL.createObjectURL = (blob) => {
+  blob.text().then((text) => window.__blobTexts.push(text));
+  return realCreateObjectURL(blob);
+};
+URL.revokeObjectURL = () => {};
+const realAnchorClick = HTMLAnchorElement.prototype.click;
+HTMLAnchorElement.prototype.click = function click() {
+  if (this.download) { window.__exports.push({ name: this.download, href: this.href }); return; }
+  return realAnchorClick.call(this);
+};
+
 function findView() {
   const dom = document.querySelector('.markdown-inline-editor .cm-editor');
   if (!dom) return null;
@@ -183,6 +207,7 @@ function Harness() {
   const initialResource = { id: 'note-alpha', title: '三角笔记.md', markdown: INITIAL };
   const [resource, setResourceState] = useState(initialResource);
   const [readOnly, setReadOnly] = useState(false);
+  const [twin, setTwin] = useState(false);
   const [theme, setTheme] = useState('light');
   const resourceRef = useRef(initialResource);
   resourceRef.current = resource;
@@ -199,6 +224,8 @@ function Harness() {
   window.__setResource = applyResource;
   window.__setMarkdown = (markdown) => applyResource({ markdown });
   window.__setReadOnly = setReadOnly;
+  // 同一资源同时挂在两处（无界笔记 + 学习节点笔记）的真实形态：第二个干净实例。
+  window.__setTwin = setTwin;
   window.__setTheme = setTheme;
   window.__resetChanges = () => { window.__changes.length = 0; };
   window.__rawSelection = rawSelection;
@@ -207,6 +234,13 @@ function Harness() {
     return view ? view.state.doc.length : -1;
   };
   window.__focusEditor = () => { const view = findView(); if (view) view.focus(); };
+  // 第二个实例（同一资源的另一处挂载）：用来构造「同 id 两份草稿」。
+  const twinView = () => {
+    const doms = [...document.querySelectorAll('.markdown-inline-editor .cm-editor')];
+    return doms[1] ? EditorView.findFromDOM(doms[1]) : null;
+  };
+  window.__focusTwin = () => { const view = twinView(); if (view) { view.focus(); view.dispatch({ selection: { anchor: view.state.doc.length } }); } };
+  window.__twinLength = () => { const view = twinView(); return view ? view.state.doc.length : -1; };
   window.__setRawSelection = (from, to = from) => {
     const view = findView();
     if (!view) return false;
@@ -235,6 +269,8 @@ function Harness() {
           onChange={(markdown) => {
             window.__changes.push(markdown);
             window.__lastChange = markdown;
+            if (window.__changeMode === 'throw') throw new Error('模拟保存失败');
+            if (window.__changeMode === 'reject') return;
             const next = { ...resourceRef.current, markdown };
             resourceRef.current = next;
             window.__resource = next;
@@ -242,6 +278,10 @@ function Harness() {
           }}
         />
       </div>
+      {/* 第二个实例：同一资源同时挂在另一处（学习节点笔记）。它始终「干净」。 */}
+      {twin && <div className="fixture-twin" data-testid="fixture-twin">
+        <NoteEditor key={'twin-' + resource.id} resource={resource} readOnly={readOnly} theme={theme} label="镜像正文" onChange={(markdown) => { window.__twinChange = markdown; }} />
+      </div>}
     </div>
   );
 }
@@ -1300,6 +1340,785 @@ async function main() {
       JSON.stringify(faceDark));
     await page.evaluate(() => window.__setTheme('light'));
     await waitForPaint(page);
+
+    // ── 10. #3 只读切换的草稿保护：预览与导出都不回退旧正文 ────────────────────
+    // 切只读可能紧跟在一次 onChange 之后。父级静默拒绝（markEdit() 返回 false）或抛错时
+    // resource.markdown 仍是旧值，draft 才是用户眼前的正文；只读分支必须读 draft。
+    const previewText = () => page.evaluate(() => document.querySelector('.note-editor__preview')?.innerText || '');
+    const exportContent = async () => {
+      const before = await page.evaluate(() => window.__blobTexts.length);
+      await page.click('.note-editor__export');
+      await page.waitForFunction((count) => window.__blobTexts.length > count, before, { timeout: 15000 });
+      const blobTexts = await page.evaluate(() => window.__blobTexts.slice());
+      return { text: blobTexts.at(-1) || '', names: await page.evaluate(() => window.__exports.map((item) => item.name)) };
+    };
+
+    // ① 父级静默拒绝（App.updateResource 里 markEdit() 返回 false 的等价行为）。
+    await page.evaluate(() => window.__setReadOnly(false));
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await setMarkdown(page, '拒绝基线正文');
+    await page.evaluate(() => { window.__changeMode = 'reject'; window.__changes.length = 0; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('拒绝草稿甲');
+    await waitForPaint(page);
+    const rejectedDraft = await page.evaluate(() => ({
+      propMarkdown: window.__resource.markdown,
+      lastChange: window.__lastChange || '',
+      docLength: window.__docLength(),
+    }));
+    check('① 前置：父级没收到正文（prop 仍是基线），编辑器里已有草稿',
+      rejectedDraft.propMarkdown === '拒绝基线正文' && rejectedDraft.lastChange.includes('拒绝草稿甲'),
+      JSON.stringify(rejectedDraft));
+    await page.evaluate(() => window.__setReadOnly(true));
+    await page.waitForSelector('.note-editor.is-readonly', { timeout: 15000 });
+    await waitForPaint(page);
+    const rejectPreview = await previewText();
+    check('① 切只读后预览显示草稿，不退回旧正文',
+      rejectPreview.includes('拒绝草稿甲'), JSON.stringify(rejectPreview.slice(0, 120)));
+    const rejectExport = await exportContent();
+    check('① 切只读后导出的是草稿，不是旧正文',
+      rejectExport.text.includes('拒绝草稿甲') && rejectExport.names.at(-1) === '三角笔记.md',
+      JSON.stringify({ text: rejectExport.text.slice(0, 120), names: rejectExport.names }));
+
+    // ② onChange 抛错：NoteEditor 记 SAVE_ERROR 并保留 draft；切只读后同样要看得见、导得出。
+    // 上一条留下了未确认草稿：按 ADR-0018，编辑态收到外部正文只能锁定而不是静默覆盖，
+    // 所以这里换一份资源（重挂载拿到干净草稿）再测 onChange 抛错，避免把锁定混进来。
+    await page.evaluate(() => {
+      window.__changeMode = 'accept';
+      window.__setReadOnly(false);
+      window.__setMarkdown('抛错基线正文');
+    });
+    await page.evaluate(() => window.__setResource({ id: 'note-throw', title: '抛错笔记.md', markdown: '抛错基线正文' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-throw', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'throw'; window.__changes.length = 0; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('抛错草稿乙');
+    await page.waitForSelector('.note-editor__error', { timeout: 15000 });
+    const thrown = await page.evaluate(() => ({
+      propMarkdown: window.__resource.markdown,
+      error: document.querySelector('.note-editor__error')?.textContent || '',
+      lastChange: window.__lastChange || '',
+    }));
+    check('② 前置：抛错后父级正文未变，界面报「草稿仍在」',
+      thrown.propMarkdown === '抛错基线正文' && thrown.error.includes('草稿仍在') && thrown.lastChange.includes('抛错草稿乙'),
+      JSON.stringify(thrown));
+    await page.evaluate(() => window.__setReadOnly(true));
+    await page.waitForSelector('.note-editor.is-readonly', { timeout: 15000 });
+    await waitForPaint(page);
+    const throwPreview = await previewText();
+    check('② 抛错后切只读：预览仍显示草稿', throwPreview.includes('抛错草稿乙'), JSON.stringify(throwPreview.slice(0, 120)));
+    const throwExport = await exportContent();
+    check('② 抛错后切只读：导出仍显示草稿', throwExport.text.includes('抛错草稿乙'), JSON.stringify(throwExport.text.slice(0, 120)));
+
+    // ③ 只读期间真外部更新：不能静默覆盖未确认的草稿——保留草稿并明确告知。
+    await page.evaluate(() => window.__setMarkdown('外部更新丙'));
+    await page.waitForFunction(
+      () => (document.querySelector('.note-editor.is-readonly')?.innerText || '').includes('文件已在外部更新'),
+      null,
+      { timeout: 15000 },
+    );
+    await waitForPaint(page);
+    const externalState = await page.evaluate(() => ({
+      preview: document.querySelector('.note-editor__preview')?.innerText || '',
+      texts: [...document.querySelectorAll('.note-editor.is-readonly .note-editor__error')].map((node) => ({ role: node.getAttribute('role'), text: node.textContent })),
+      prop: window.__resource.markdown,
+    }));
+    check('③ 只读期间外部更新：不覆盖未保存草稿（预览仍是草稿）',
+      externalState.preview.includes('抛错草稿乙') && !externalState.preview.includes('外部更新丙'),
+      JSON.stringify(externalState.preview.slice(0, 160)));
+    check('③ 只读期间外部更新：用 alert 明确告知文件已变，且状态行仍标「尚未保存」',
+      externalState.texts.some((item) => item.role === 'alert' && item.text.includes('文件已在外部更新'))
+      && externalState.texts.some((item) => item.role === 'status' && item.text.includes('尚未保存')),
+      JSON.stringify(externalState.texts));
+    check('③ 只读期间外部更新：父级正文确实已是新版本（不是我们没收到）',
+      externalState.prop === '外部更新丙', JSON.stringify(externalState.prop));
+    const externalExport = await exportContent();
+    check('③ 只读期间外部更新：导出的是用户草稿，不是静默换成外部正文',
+      externalExport.text.includes('抛错草稿乙') && !externalExport.text.includes('外部更新丙'),
+      JSON.stringify(externalExport.text.slice(0, 160)));
+
+    // ④ 恢复可编辑但冲突未解：编辑必须被暂停——否则用户下一笔会以「旧草稿 + 新字符」
+    // 整体写回，把外部新版静默覆盖掉。
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setReadOnly(false); });
+    await page.waitForTimeout(200);
+    await waitForPaint(page);
+    const lockedState = await page.evaluate(() => ({
+      editors: document.querySelectorAll('.markdown-inline-editor .cm-editor').length,
+      conflict: document.querySelector('.note-editor')?.getAttribute('data-conflict'),
+      alerts: [...document.querySelectorAll('.note-editor [role="alert"]')].map((node) => node.textContent),
+      preview: document.querySelector('.note-editor__preview')?.innerText || '',
+      prop: window.__resource.markdown,
+    }));
+    check('④ 冲突未解时恢复可编辑：编辑器不出现（编辑暂停）',
+      lockedState.editors === 0 && lockedState.conflict === '1' && lockedState.preview.includes('抛错草稿乙'),
+      JSON.stringify({ editors: lockedState.editors, conflict: lockedState.conflict, preview: lockedState.preview.slice(0, 80) }));
+    check('④ 冲突告警明确写了「编辑已暂停」', lockedState.alerts.some((text) => text.includes('编辑已暂停')), JSON.stringify(lockedState.alerts));
+    await page.evaluate(() => { window.__changes.length = 0; });
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('己');
+    await page.waitForTimeout(200);
+    const afterTyping = await page.evaluate(() => ({ prop: window.__resource.markdown, changes: window.__changes.slice() }));
+    check('④ 冲突期间输入不产生任何写入（外部新版没被旧草稿覆盖）',
+      afterTyping.changes.length === 0 && afterTyping.prop === '外部更新丙',
+      JSON.stringify({ prop: afterTyping.prop, changes: afterTyping.changes.length }));
+    const lockedExport = await exportContent();
+    check('④ 冲突期间仍可导出自己的草稿', lockedExport.text.includes('抛错草稿乙'), JSON.stringify(lockedExport.text.slice(0, 120)));
+
+    // ⑤ 冲突锁定期间（此时 readOnly 已变回 false）再来一次外部更新：
+    // 保护必须继续生效——不能因为 readOnly 变 false 就清掉告警、用外部正文覆盖未保存草稿。
+    await page.evaluate(() => window.__setMarkdown('第二次外部更新庚'));
+    await page.waitForTimeout(250);
+    await waitForPaint(page);
+    const secondExternal = await page.evaluate(() => ({
+      editors: document.querySelectorAll('.markdown-inline-editor .cm-editor').length,
+      conflict: document.querySelector('.note-editor')?.getAttribute('data-conflict'),
+      preview: document.querySelector('.note-editor__preview')?.innerText || '',
+      prop: window.__resource.markdown,
+      loadButton: Boolean(document.querySelector('[aria-label="载入文件版本"]')),
+    }));
+    check('⑤ 第二次外部更新：仍然锁定（编辑器不出现）且冲突标记仍在',
+      secondExternal.editors === 0 && secondExternal.conflict === '1' && secondExternal.loadButton,
+      JSON.stringify({ editors: secondExternal.editors, conflict: secondExternal.conflict, loadButton: secondExternal.loadButton }));
+    check('⑤ 第二次外部更新：未保存草稿仍在预览里，没被新外部正文覆盖',
+      secondExternal.preview.includes('抛错草稿乙') && !secondExternal.preview.includes('第二次外部更新庚'),
+      JSON.stringify(secondExternal.preview.slice(0, 160)));
+    check('⑤ 第二次外部更新：父级正文是第二次的版本（说明变化确实到达了组件）',
+      secondExternal.prop === '第二次外部更新庚', JSON.stringify(secondExternal.prop));
+
+    // ⑥ 用户显式确认「载入文件版本」：取消不生效，确认后显示文件版本并恢复编辑。
+    const dialogs = [];
+    const dialogOnce = (accept) => page.once('dialog', async (dialog) => {
+      dialogs.push({ type: dialog.type(), message: dialog.message() });
+      if (accept) await dialog.accept(); else await dialog.dismiss();
+    });
+    dialogOnce(false);
+    await page.click('[aria-label="载入文件版本"]');
+    await page.waitForTimeout(200);
+    check('⑥ 真实 confirm 取消：冲突状态、草稿、编辑锁定都不变',
+      dialogs.length === 1 && dialogs[0].type === 'confirm'
+      && (await page.evaluate(() => document.querySelector('.note-editor')?.getAttribute('data-conflict'))) === '1'
+      && (await page.evaluate(() => document.querySelector('.note-editor__preview')?.innerText || '')).includes('抛错草稿乙'),
+      JSON.stringify(dialogs));
+    dialogOnce(true);
+    await page.click('[aria-label="载入文件版本"]');
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const loaded = await page.evaluate(() => ({
+      conflict: document.querySelector('.note-editor')?.getAttribute('data-conflict'),
+      docLength: window.__docLength(),
+      prop: window.__resource.markdown,
+      preview: document.querySelector('.note-editor__preview')?.innerText || '',
+    }));
+    check('⑥ 载入文件版本：载入的是最新版本（第二次外部更新），本地草稿不再出现',
+      !loaded.conflict && loaded.prop === '第二次外部更新庚'
+      && loaded.docLength === '第二次外部更新庚'.length,
+      JSON.stringify(loaded));
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('己');
+    await page.waitForFunction(() => (window.__resource.markdown || '').includes('己'), null, { timeout: 15000 });
+    const afterResolve = await page.evaluate(() => window.__resource.markdown);
+    check('⑥ 解冲突后再输入：写回的是最新外部版本 + 新字符，旧草稿没有被带入',
+      afterResolve === '第二次外部更新庚己' && !afterResolve.includes('抛错草稿乙'), JSON.stringify(afterResolve));
+
+    // ⑦ 已保存后切只读：不再有「尚未保存」状态行，导出等于已保存正文。
+    await page.evaluate(() => window.__setReadOnly(true));
+    await page.waitForSelector('.note-editor.is-readonly', { timeout: 15000 });
+    await waitForPaint(page);
+    const savedReadonly = await page.evaluate(() => ({
+      preview: document.querySelector('.note-editor__preview')?.innerText || '',
+      statuses: [...document.querySelectorAll('.note-editor.is-readonly [role="status"]')].map((node) => node.textContent),
+      alerts: [...document.querySelectorAll('.note-editor.is-readonly [role="alert"]')].map((node) => node.textContent),
+      prop: window.__resource.markdown,
+    }));
+    check('⑦ 已保存草稿切只读：无「尚未保存」状态行、无冲突告警',
+      savedReadonly.statuses.length === 0 && savedReadonly.alerts.length === 0
+      && savedReadonly.preview.includes('己'),
+      JSON.stringify(savedReadonly));
+
+    // ⑧ 切换资源（key 变化）：只读预览立即改成新资源的正文，不残留上一份草稿。
+    await page.evaluate(() => window.__setResource({ id: 'note-beta', title: '第二份.md', markdown: '另一份正文丁' }));
+    await page.waitForFunction(
+      () => (document.querySelector('.note-editor__preview')?.innerText || '').includes('另一份正文丁'),
+      null,
+      { timeout: 15000 },
+    );
+    await waitForPaint(page);
+    const switchedState = await page.evaluate(() => ({
+      preview: document.querySelector('.note-editor__preview')?.innerText || '',
+      statuses: [...document.querySelectorAll('.note-editor.is-readonly [role="status"]')].map((node) => node.textContent),
+    }));
+    check('⑧ 切换资源：只读预览是新资源正文，不带旧草稿',
+      switchedState.preview.includes('另一份正文丁') && !switchedState.preview.includes('戊'),
+      JSON.stringify(switchedState.preview.slice(0, 160)));
+    check('⑧ 切换资源：新资源没有未确认草稿，不显示「尚未保存」', switchedState.statuses.length === 0, JSON.stringify(switchedState.statuses));
+    const switchedExport = await exportContent();
+    check('⑧ 切换资源：导出文件名与正文都跟着新资源',
+      switchedExport.names.at(-1) === '第二份.md' && switchedExport.text.includes('另一份正文丁'),
+      JSON.stringify({ names: switchedExport.names, text: switchedExport.text.slice(0, 160) }));
+
+    // ⑨ 编辑态（非只读）脏草稿遇到真正的外部更新：锁定而不是静默覆盖（ADR-0018）。
+    await page.evaluate(() => {
+      window.__setReadOnly(false);
+      window.__setResource({ id: 'note-edit', title: '编辑态.md', markdown: '编辑态起点' });
+      window.__changes.length = 0;
+    });
+    await page.waitForFunction(() => window.__resource?.id === 'note-edit', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('辛');
+    await page.waitForFunction(
+      () => (window.__lastChange || '').includes('辛') && window.__resource.markdown === '编辑态起点',
+      null,
+      { timeout: 15000 },
+    );
+    await page.waitForTimeout(150);
+    const typedEdit = await page.evaluate(() => ({
+      prop: window.__resource.markdown,
+      conflict: document.querySelector('.note-editor')?.getAttribute('data-conflict'),
+      editors: document.querySelectorAll('.cm-editor').length,
+    }));
+    check('⑨ 编辑态：父级拒收的未确认草稿仍在编辑器里（前置）',
+      !typedEdit.conflict && typedEdit.editors === 1 && typedEdit.prop === '编辑态起点',
+      JSON.stringify(typedEdit));
+
+    await page.evaluate(() => window.__setMarkdown('外部真新版壬'));
+    await page.waitForFunction(() => window.__resource?.markdown === '外部真新版壬', null, { timeout: 15000 });
+    await page.waitForTimeout(150);
+    const lockEdit = await page.evaluate(() => ({
+      conflict: document.querySelector('.note-editor')?.getAttribute('data-conflict'),
+      editors: document.querySelectorAll('.cm-editor').length,
+      preview: document.querySelector('.note-editor__preview')?.innerText || '',
+      alerts: [...document.querySelectorAll('.note-editor [role="alert"]')].map((node) => node.textContent),
+      prop: window.__resource.markdown,
+    }));
+    check('⑨ 编辑态脏草稿 + 真外部更新：锁定编辑、保留草稿、不写回',
+      lockEdit.conflict === '1' && lockEdit.editors === 0 && lockEdit.preview.includes('辛')
+      && lockEdit.prop === '外部真新版壬' && lockEdit.alerts.join('').includes('外部更新'),
+      JSON.stringify(lockEdit));
+
+    // ⑪ 已有冲突不能被延迟到达的回声自动清除。
+    await page.evaluate(() => window.__setMarkdown('编辑态起点辛'));
+    await page.waitForTimeout(250);
+    const lateEcho = await page.evaluate(() => ({
+      conflict: document.querySelector('.note-editor')?.getAttribute('data-conflict'),
+      editors: document.querySelectorAll('.cm-editor').length,
+      preview: document.querySelector('.note-editor__preview')?.innerText || '',
+    }));
+    check('⑪ 冲突期间迟到的回声不清除冲突、不恢复编辑、不覆盖草稿',
+      lateEcho.conflict === '1' && lateEcho.editors === 0 && lateEcho.preview.includes('辛'),
+      JSON.stringify(lateEcho));
+
+    const editExport = await exportContent();
+    check('⑨ 锁定期间仍可导出本地草稿（不含外部新版）',
+      editExport.text.includes('辛') && !editExport.text.includes('外部真新版壬'),
+      JSON.stringify(editExport.text.slice(0, 120)));
+
+    await page.evaluate(() => { window.__changeMode = 'accept'; });
+    page.once('dialog', async (dialog) => { await dialog.accept(); });
+    await page.click('[aria-label="载入文件版本"]');
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const afterLoadEdit = await page.evaluate(() => ({
+      conflict: document.querySelector('.note-editor')?.getAttribute('data-conflict'),
+      prop: window.__resource.markdown,
+      docLength: window.__docLength(),
+      changes: window.__changes.slice(-3),
+    }));
+    // ⑪ 把文件写成了「编辑态起点辛」，所以载入的应当是文件当前版本。
+    check('⑨ 载入文件版本后编辑态恢复，正文是文件当前版本',
+      !afterLoadEdit.conflict && afterLoadEdit.prop === '编辑态起点辛'
+      && afterLoadEdit.docLength === '编辑态起点辛'.length,
+      JSON.stringify(afterLoadEdit));
+
+    // ⑩ 未确认草稿 + 迟到的旧回声（正文无法证明来源）：允许误锁，绝不覆盖。
+    await page.evaluate(() => {
+      window.__setReadOnly(false);
+      window.__setResource({ id: 'note-echo', title: '回声.md', markdown: '回声起点' });
+      window.__changes.length = 0;
+      window.__changeMode = 'reject';
+    });
+    await page.waitForFunction(() => window.__resource?.id === 'note-echo', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('甲乙');
+    await page.waitForFunction(
+      () => (window.__lastChange || '').endsWith('甲乙') && window.__resource.markdown === '回声起点',
+      null,
+      { timeout: 15000 },
+    );
+    await page.waitForTimeout(120);
+    await page.evaluate(() => window.__setMarkdown('回声起点甲'));
+    await page.waitForTimeout(300);
+    const oldEchoState = await page.evaluate(() => ({
+      conflict: document.querySelector('.note-editor')?.getAttribute('data-conflict'),
+      editors: document.querySelectorAll('.cm-editor').length,
+      docLength: window.__docLength(),
+      preview: document.querySelector('.note-editor__preview')?.innerText || '',
+      prop: window.__resource.markdown,
+      changes: window.__changes.length,
+      alerts: [...document.querySelectorAll('.note-editor [role="alert"]')].map((node) => node.textContent).join(' / '),
+    }));
+    check('⑩ 未确认草稿遇到迟到的旧回声：锁定并保留草稿，不被旧值覆盖',
+      oldEchoState.conflict === '1' && oldEchoState.editors === 0
+      && oldEchoState.preview.trim() === '回声起点甲乙'
+      && oldEchoState.prop === '回声起点甲'
+      && oldEchoState.alerts.includes('外部更新'),
+      JSON.stringify(oldEchoState));
+    // 收尾：回到可编辑并载入文件版本，避免把锁定态留给后面的断言。
+    await page.evaluate(() => { window.__changeMode = 'accept'; });
+    page.once('dialog', async (dialog) => { await dialog.accept(); });
+    await page.click('[aria-label="载入文件版本"]');
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+
+    // ⑫ 导航卸载（切资源 = 用户点别的文件）：未确认草稿不能静默消失。
+    await page.evaluate(() => {
+      window.__changeMode = 'accept';
+      window.__setReadOnly(false);
+      window.__setResource({ id: 'note-nav', title: '导航.md', markdown: '导航起点' });
+      window.__changes.length = 0;
+    });
+    await page.waitForFunction(() => window.__resource?.id === 'note-nav', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('未保存段');
+    await page.waitForFunction(
+      () => (window.__lastChange || '').endsWith('未保存段') && window.__resource.markdown === '导航起点',
+      null,
+      { timeout: 15000 },
+    );
+    const beforeLeave = await page.evaluate(() => ({
+      prop: window.__resource.markdown,
+      docLength: window.__docLength(),
+    }));
+    check('⑫ 前置：离开前父级没收到正文，编辑器里是未确认草稿',
+      beforeLeave.prop === '导航起点' && beforeLeave.docLength === '导航起点未保存段'.length,
+      JSON.stringify(beforeLeave));
+
+    // 用户点了另一个文件（卸载），再点回来（重新挂载）。
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-nav-other', title: '另一份.md', markdown: '另一份正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-nav-other', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    const otherDoc = await page.evaluate(() => ({ docLength: window.__docLength(), text: document.querySelector('.cm-content')?.textContent || '' }));
+    check('⑫ 切到另一份文件：不带入上一个文件的草稿',
+      otherDoc.docLength === '另一份正文'.length && !otherDoc.text.includes('未保存段'),
+      JSON.stringify(otherDoc));
+
+    await page.evaluate(() => window.__setResource({ id: 'note-nav', title: '导航.md', markdown: '导航起点' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-nav', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const backAgain = await page.evaluate(() => ({
+      docLength: window.__docLength(),
+      status: [...document.querySelectorAll('.note-editor__status')].map((node) => node.textContent).join(' / '),
+      prop: window.__resource.markdown,
+    }));
+    check('⑫ 回到原文件：未保存草稿被恢复出来并标明未保存',
+      backAgain.docLength === '导航起点未保存段'.length
+      && backAgain.status.includes('已恢复上次离开这个文件时的未保存草稿')
+      && backAgain.prop === '导航起点',
+      JSON.stringify(backAgain));
+
+    // 用户明确放弃恢复内容。
+    await page.click('button:has-text("放弃本地草稿，载入文件版本")');
+    await page.waitForTimeout(150);
+    const afterDiscard = await page.evaluate(() => ({
+      docLength: window.__docLength(),
+      status: document.querySelectorAll('.note-editor__status').length,
+      prop: window.__resource.markdown,
+    }));
+    check('⑫ 点「放弃本地草稿」：回到文件版本且不再显示恢复提示',
+      afterDiscard.docLength === '导航起点'.length && afterDiscard.status === 0
+      && afterDiscard.prop === '导航起点',
+      JSON.stringify(afterDiscard));
+
+    // ⑬ 离开期间文件被外部改过：恢复草稿时必须按冲突锁定，不许盖掉新版本。
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('再一段');
+    await page.waitForFunction(
+      () => (window.__lastChange || '').endsWith('再一段') && window.__resource.markdown === '导航起点',
+      null,
+      { timeout: 15000 },
+    );
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-nav-other2', title: '第三份.md', markdown: '第三份正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-nav-other2', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-nav', title: '导航.md', markdown: '导航起点外部新版' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-nav', null, { timeout: 15000 });
+    await page.waitForSelector('.note-editor[data-conflict="1"]', { timeout: 15000 });
+    await waitForPaint(page);
+    const conflictBack = await page.evaluate(() => ({
+      conflict: document.querySelector('.note-editor')?.getAttribute('data-conflict'),
+      editors: document.querySelectorAll('.cm-editor').length,
+      preview: document.querySelector('.note-editor__preview')?.innerText || '',
+      prop: window.__resource.markdown,
+    }));
+    check('⑬ 离开期间文件被外部改过：恢复的草稿按冲突锁定，文件新版本未被覆盖',
+      conflictBack.conflict === '1' && conflictBack.editors === 0
+      && conflictBack.preview.includes('再一段')
+      && conflictBack.prop === '导航起点外部新版',
+      JSON.stringify(conflictBack));
+
+    // ⑭ 双实例：同一资源同时挂在无界笔记与学习节点两处，干净实例不得清掉另一实例的草稿。
+    await page.evaluate(() => {
+      window.__setTwin(false);
+      window.__changeMode = 'accept';
+      window.__setReadOnly(false);
+      window.__setResource({ id: 'note-twin', title: '双实例.md', markdown: '双实例起点' });
+    });
+    await page.waitForFunction(() => window.__resource?.id === 'note-twin', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('甲');
+    await page.waitForFunction(
+      () => (window.__lastChange || '').endsWith('甲') && window.__resource.markdown === '双实例起点',
+      null,
+      { timeout: 15000 },
+    );
+    // 另一个实例挂上来：它自己是干净的（草稿 === 正文），不得顺手把上面那份草稿清掉。
+    await page.evaluate(() => window.__setTwin(true));
+    await page.waitForSelector('[data-testid="fixture-twin"] .cm-editor', { timeout: 15000 });
+    await page.waitForTimeout(200);
+    await page.evaluate(() => window.__setTwin(false));
+    await page.waitForTimeout(100);
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-twin-other', title: '别的.md', markdown: '别的正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-twin-other', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-twin', title: '双实例.md', markdown: '双实例起点' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-twin', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const twinBack = await page.evaluate(() => ({
+      docLength: window.__docLength(),
+      status: [...document.querySelectorAll('.note-editor__status')].map((node) => node.textContent).join(' / '),
+    }));
+    check('⑭ 同一资源的另一个干净实例不会清掉本实例的未确认草稿',
+      twinBack.docLength === '双实例起点甲'.length && twinBack.status.includes('已恢复'),
+      JSON.stringify(twinBack));
+
+    // ⑮ 全局卸载拦截：编辑器已经卸载，草稿只剩在内存里，关闭页面仍要能被拦。
+    await page.evaluate(() => {
+      window.__changeMode = 'accept';
+      window.__setResource({ id: 'note-bye', title: '离开.md', markdown: '离开起点' });
+    });
+    await page.waitForFunction(() => window.__resource?.id === 'note-bye', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('走');
+    await page.waitForFunction(
+      () => (window.__lastChange || '').endsWith('走') && window.__resource.markdown === '离开起点',
+      null,
+      { timeout: 15000 },
+    );
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-bye-other', title: '别处.md', markdown: '别处正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-bye-other', null, { timeout: 15000 });
+    const guarded = await page.evaluate(() => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    check('⑮ 编辑器卸载后，未确认草稿仍被 beforeunload 拦截', guarded === true, String(guarded));
+
+    // ⑯ 恢复出来的草稿属于旧 owner：点「放弃」之后必须真的消失，不能下次 remount 复活。
+    await page.evaluate(() => {
+      window.__setTwin(false);
+      window.__changeMode = 'accept';
+      window.__setReadOnly(false);
+      window.__setResource({ id: 'note-rev', title: '复活.md', markdown: '复活起点' });
+    });
+    await page.waitForFunction(() => window.__resource?.id === 'note-rev', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('甲');
+    await page.waitForFunction(() => (window.__lastChange || '').endsWith('甲') && window.__resource.markdown === '复活起点', null, { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-rev-gap', title: '间隙.md', markdown: '间隙正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-rev-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-rev', title: '复活.md', markdown: '复活起点' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-rev', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const revived = await page.evaluate(() => ({ docLength: window.__docLength(), status: [...document.querySelectorAll('.note-editor__status')].map((n) => n.textContent).join(' / ') }));
+    check('⑯ 切走再切回恢复出未确认草稿', revived.docLength === '复活起点甲'.length && revived.status.includes('已恢复'), JSON.stringify(revived));
+    await page.locator('.note-editor__link', { hasText: '放弃本地草稿' }).first().click();
+    await page.waitForFunction((len) => window.__docLength?.() === len, '复活起点'.length, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-rev-gap', title: '间隙.md', markdown: '间隙正文' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-rev-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-rev', title: '复活.md', markdown: '复活起点' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-rev', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const noRevive = await page.evaluate(() => ({ docLength: window.__docLength(), status: [...document.querySelectorAll('.note-editor__status')].map((n) => n.textContent).join(' / ') }));
+    check('⑯ 放弃的旧草稿不会在下次挂载时复活', noRevive.docLength === '复活起点'.length && !noRevive.status.includes('已恢复'), JSON.stringify(noRevive));
+
+    // ⑰ 冲突恢复出来 → 确认载入文件版本 → 再切回不能还是锁定态或旧草稿。
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-conf', title: '冲突.md', markdown: '冲突起点' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-conf', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('甲');
+    await page.waitForFunction(() => (window.__lastChange || '').endsWith('甲') && window.__resource.markdown === '冲突起点', null, { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-conf-gap', title: '间隙.md', markdown: '间隙正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-conf-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-conf', title: '冲突.md', markdown: '冲突起点外部' }));
+    await page.evaluate(() => window.__setResource({ id: 'note-conf', title: '冲突.md', markdown: '冲突起点外部' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-conf', null, { timeout: 15000 });
+    await page.waitForSelector('[data-conflict="1"]', { timeout: 15000 });
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: '载入文件版本', exact: true }).click();
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.waitForFunction((len) => window.__docLength?.() === len, '冲突起点外部'.length, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-conf-gap', title: '间隙.md', markdown: '间隙正文' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-conf-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-conf', title: '冲突.md', markdown: '冲突起点外部' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-conf', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const conflictCleared = await page.evaluate(() => ({
+      docLength: window.__docLength(),
+      conflict: document.querySelectorAll('[data-conflict="1"]').length,
+      status: [...document.querySelectorAll('.note-editor__status')].map((n) => n.textContent).join(' / '),
+    }));
+    check('⑰ 冲突经确认载入后，切回来不再锁定也不再复活旧草稿',
+      conflictCleared.conflict === 0 && conflictCleared.docLength === '冲突起点外部'.length && !conflictCleared.status.includes('已恢复'),
+      JSON.stringify(conflictCleared));
+
+    // ⑱ 同一资源同时挂在两处、各自留下不同草稿：恢复最新一份，更早那份可从界面导出。
+    await page.evaluate(() => { window.__setTwin(false); window.__changeMode = 'accept'; window.__setResource({ id: 'note-two', title: '两份.md', markdown: '两份起点' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-two', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('甲');
+    await page.waitForFunction(() => (window.__lastChange || '').endsWith('甲') && window.__resource.markdown === '两份起点', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setTwin(true));
+    await page.waitForSelector('[data-testid="fixture-twin"] .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => window.__focusTwin());
+    await page.keyboard.type('乙');
+    await page.waitForFunction(() => (window.__twinChange || '').endsWith('乙'), null, { timeout: 15000 });
+    await page.evaluate(() => window.__setTwin(false));
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-two-gap', title: '间隙.md', markdown: '间隙正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-two-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-two', title: '两份.md', markdown: '两份起点' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-two', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const twoDrafts = await page.evaluate(() => ({ docLength: window.__docLength(), status: [...document.querySelectorAll('.note-editor__status')].map((n) => n.textContent).join(' / ') }));
+    check('⑱ 同 id 两份草稿：恢复最新一份并列出更早那份',
+      twoDrafts.docLength === '两份起点乙'.length && twoDrafts.status.includes('还有 1 份更早的未保存草稿'),
+      JSON.stringify(twoDrafts));
+    await page.evaluate(() => { window.__blobTexts.length = 0; });
+    await page.locator('.note-editor__link', { hasText: '导出更早的草稿' }).first().click();
+    await page.waitForFunction(
+      () => (window.__blobTexts || []).some((text) => text.includes('更早的未保存草稿') && text.includes('两份起点甲')),
+      null,
+      { timeout: 15000 },
+    );
+    check('⑱ 更早的那份草稿能从界面导出', true);
+    await page.locator('.note-editor__link', { hasText: '丢弃这些旧草稿' }).first().click();
+    await page.waitForFunction(() => ![...document.querySelectorAll('.note-editor__status')].some((n) => n.textContent.includes('还有 1 份')), null, { timeout: 15000 });
+    check('⑱ 旧草稿只由用户显式丢弃', true);
+
+    // ⑲ 冲突锁定中反复卸载/回切，且每次回切前文件又被外部改过：仍然锁定、草稿不丢、不覆盖。
+    await page.evaluate(() => { window.__setTwin(false); window.__changeMode = 'accept'; window.__setReadOnly(false); window.__setResource({ id: 'note-lock', title: '锁定.md', markdown: '锁定起点' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-lock', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('甲');
+    await page.waitForFunction(() => (window.__lastChange || '').endsWith('甲') && window.__resource.markdown === '锁定起点', null, { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-lock-gap', title: '间隙.md', markdown: '间隙正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-lock-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-lock', title: '锁定.md', markdown: '锁定外部一' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-lock', null, { timeout: 15000 });
+    await page.waitForSelector('[data-conflict="1"]', { timeout: 15000 });
+    const lockCycles = [];
+    for (const next of ['锁定外部二', '锁定外部三']) {
+      await page.evaluate(() => window.__setResource({ id: 'note-lock-gap', title: '间隙.md', markdown: '间隙正文' }));
+      await page.waitForFunction(() => window.__resource?.id === 'note-lock-gap', null, { timeout: 15000 });
+      await page.evaluate(nextMarkdown => window.__setResource({ id: 'note-lock', title: '锁定.md', markdown: nextMarkdown }), next);
+      await page.waitForFunction(() => window.__resource?.id === 'note-lock', null, { timeout: 15000 });
+      await page.waitForSelector('[data-conflict="1"]', { timeout: 15000 });
+      await waitForPaint(page);
+      lockCycles.push(await page.evaluate(() => ({
+        conflict: document.querySelectorAll('[data-conflict="1"]').length,
+        preview: document.querySelector('.note-editor__preview')?.textContent || '',
+        editors: document.querySelectorAll('.markdown-inline-editor').length,
+        markdown: window.__resource.markdown,
+      })));
+    }
+    check('⑲ 冲突锁定中反复卸载/回切 + 期间重复外部更新：仍锁定、草稿保留、不覆盖',
+      lockCycles.every(item => item.conflict === 1 && item.editors === 0 && item.preview.includes('甲')),
+      JSON.stringify(lockCycles));
+    check('⑲ 每次回切显示的都是最新文件版本', lockCycles[1]?.markdown === '锁定外部三', JSON.stringify(lockCycles.map(item => item.markdown)));
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: '载入文件版本', exact: true }).click();
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.waitForFunction((len) => window.__docLength?.() === len, '锁定外部三'.length, { timeout: 15000 });
+    check('⑲ 解冲突后载入的是最后一次外部版本', true);
+
+    // ⑳ 点「丢弃这些旧草稿」后立即卸载再回来：旧草稿不能复活。
+    await page.evaluate(() => { window.__setTwin(false); window.__changeMode = 'accept'; window.__setResource({ id: 'note-drop', title: '丢弃.md', markdown: '丢弃起点' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-drop', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('甲');
+    await page.waitForFunction(() => (window.__lastChange || '').endsWith('甲') && window.__resource.markdown === '丢弃起点', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setTwin(true));
+    await page.waitForSelector('[data-testid="fixture-twin"] .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => window.__focusTwin());
+    await page.keyboard.type('乙');
+    await page.waitForFunction(() => (window.__twinChange || '').endsWith('乙'), null, { timeout: 15000 });
+    await page.evaluate(() => window.__setTwin(false));
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-drop-gap', title: '间隙.md', markdown: '间隙正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-drop-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-drop', title: '丢弃.md', markdown: '丢弃起点' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-drop', null, { timeout: 15000 });
+    await page.waitForSelector('.note-editor__link', { timeout: 15000 });
+    await page.locator('.note-editor__link', { hasText: '丢弃这些旧草稿' }).first().click();
+    await page.waitForFunction(() => ![...document.querySelectorAll('.note-editor__status')].some((n) => n.textContent.includes('更早的未保存草稿')), null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-drop-gap', title: '间隙.md', markdown: '间隙正文' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-drop-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-drop', title: '丢弃.md', markdown: '丢弃起点' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-drop', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const droppedRevived = await page.evaluate(() => ({
+      notice: [...document.querySelectorAll('.note-editor__status')].map((n) => n.textContent).join(' / '),
+      docLength: window.__docLength(),
+    }));
+    check('⑳ 丢弃旧草稿后立刻卸载再回来，旧草稿不复活',
+      !droppedRevived.notice.includes('更早的未保存草稿') && droppedRevived.docLength === '丢弃起点乙'.length,
+      JSON.stringify(droppedRevived));
+
+    // ㉑ 认领时把多层 older 摊平：三份不同草稿都要在，不能只留最新两份。
+    await page.evaluate(() => { window.__setTwin(false); window.__changeMode = 'accept'; window.__setResource({ id: 'note-nest', title: '嵌套.md', markdown: '嵌套起点' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-nest', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('A');
+    await page.waitForFunction(() => (window.__lastChange || '').endsWith('A'), null, { timeout: 15000 });
+    await page.evaluate(() => window.__setTwin(true));
+    await page.waitForSelector('[data-testid="fixture-twin"] .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => window.__focusTwin());
+    await page.keyboard.type('B');
+    await page.waitForFunction(() => (window.__twinChange || '').endsWith('B'), null, { timeout: 15000 });
+    await page.evaluate(() => window.__setTwin(false));
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-nest-gap', title: '间隙.md', markdown: '间隙正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-nest-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-nest', title: '嵌套.md', markdown: '嵌套起点' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-nest', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    // 现在草稿是「嵌套起点B」，older 里是「嵌套起点A」。继续造第三份：再挂 twin 写 D。
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('C');
+    await page.waitForFunction(() => (window.__lastChange || '').endsWith('C'), null, { timeout: 15000 });
+    await page.evaluate(() => window.__setTwin(true));
+    await page.waitForSelector('[data-testid="fixture-twin"] .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => window.__focusTwin());
+    await page.keyboard.type('D');
+    await page.waitForFunction(() => (window.__twinChange || '').endsWith('D'), null, { timeout: 15000 });
+    await page.evaluate(() => window.__setTwin(false));
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-nest-gap', title: '间隙.md', markdown: '间隙正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-nest-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-nest', title: '嵌套.md', markdown: '嵌套起点' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-nest', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const nested = await page.evaluate(() => ({
+      docLength: window.__docLength(),
+      status: [...document.querySelectorAll('.note-editor__status')].map((n) => n.textContent).join(' / '),
+    }));
+    check('㉑ 三层嵌套草稿：最新一份恢复、更早两份都留在提示里',
+      nested.status.includes('还有 2 份更早的未保存草稿'), JSON.stringify(nested));
+    await page.evaluate(() => { window.__blobTexts.length = 0; });
+    await page.locator('.note-editor__link', { hasText: '导出更早的草稿' }).first().click();
+    await page.waitForFunction(() => (window.__blobTexts || []).some((text) => text.includes('嵌套起点A') && text.includes('嵌套起点BC')), null, { timeout: 15000 });
+    check('㉑ 嵌套的更早草稿都还能导出', true);
+
+    // ㉒ 同一 commit 里两个同 id 实例一起挂上：后挂的不能把先挂的认领抢走、草稿不能丢。
+    await page.evaluate(() => { window.__setTwin(false); window.__changeMode = 'accept'; window.__setResource({ id: 'note-same', title: '同批.md', markdown: '同批起点' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-same', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('甲');
+    await page.waitForFunction(() => (window.__lastChange || '').endsWith('甲'), null, { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-same-gap', title: '间隙.md', markdown: '间隙正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-same-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setTwin(true));
+    await page.waitForSelector('[data-testid="fixture-twin"] .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-same', title: '同批.md', markdown: '同批起点' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-same', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const sameBatch = await page.evaluate(() => ({
+      editors: document.querySelectorAll('.note-editor').length,
+      statuses: [...document.querySelectorAll('.note-editor__status')].map((n) => n.textContent),
+      docLength: window.__docLength(),
+      twinLength: window.__twinLength(),
+    }));
+    check('㉒ 同批挂载两个实例：只有一个认领草稿，内容不丢',
+      sameBatch.editors === 2 && sameBatch.statuses.filter((text) => text.includes('已恢复')).length === 1
+      && sameBatch.docLength === '同批起点甲'.length && sameBatch.twinLength === '同批起点'.length,
+      JSON.stringify(sameBatch));
+
+    // ㉓ 最新一稿其实已被确认（等于正文），但更早的草稿仍在：older 不能被认领丢掉。
+    await page.evaluate(() => { window.__setTwin(false); window.__changeMode = 'accept'; window.__setResource({ id: 'note-equal', title: '等值.md', markdown: '等值起点' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-equal', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => { window.__changeMode = 'reject'; });
+    await page.evaluate(() => window.__focusEditor());
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('甲');
+    await page.waitForFunction(() => (window.__lastChange || '').endsWith('甲'), null, { timeout: 15000 });
+    await page.evaluate(() => window.__setTwin(true));
+    await page.waitForSelector('[data-testid="fixture-twin"] .cm-editor', { timeout: 15000 });
+    await page.evaluate(() => window.__focusTwin());
+    await page.keyboard.type('乙');
+    await page.waitForFunction(() => (window.__twinChange || '').endsWith('乙'), null, { timeout: 15000 });
+    await page.evaluate(() => window.__setTwin(false));
+    await page.evaluate(() => { window.__changeMode = 'accept'; window.__setResource({ id: 'note-equal-gap', title: '间隙.md', markdown: '间隙正文' }); });
+    await page.waitForFunction(() => window.__resource?.id === 'note-equal-gap', null, { timeout: 15000 });
+    await page.evaluate(() => window.__setResource({ id: 'note-equal', title: '等值.md', markdown: '等值起点乙' }));
+    await page.waitForFunction(() => window.__resource?.id === 'note-equal', null, { timeout: 15000 });
+    await page.waitForSelector('.markdown-inline-editor .cm-editor', { timeout: 15000 });
+    await waitForPaint(page);
+    const equalCase = await page.evaluate(() => ({
+      status: [...document.querySelectorAll('.note-editor__status')].map((n) => n.textContent).join(' / '),
+      docLength: window.__docLength(),
+    }));
+    check('㉓ 最新稿等于正文时，更早草稿仍被保留并可导出',
+      equalCase.status.includes('还有 1 份更早的未保存草稿') && !equalCase.status.includes('已恢复') && equalCase.docLength === '等值起点乙'.length,
+      JSON.stringify(equalCase));
+    await page.evaluate(() => { window.__blobTexts.length = 0; });
+    await page.locator('.note-editor__link', { hasText: '导出更早的草稿' }).first().click();
+    await page.waitForFunction(() => (window.__blobTexts || []).some((text) => text.includes('等值起点甲')), null, { timeout: 15000 });
+    check('㉓ 更早的草稿能导出', true);
 
     check('全程无 console/page 错误', errors.length === 0, errors.join(' / '));
     check('全程无远端请求（含被中止的）', requests.length === 0, requests.join(', '));

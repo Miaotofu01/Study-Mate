@@ -519,6 +519,9 @@ const groups = {
       // #312：隐藏面草稿保护——依赖 #303 的 becameVisible 立即核对语义，必须在
       // 该语义合入后运行（隐藏期在途/失败/冲突重显不丢草稿、清洁重显立即核对）。
       'browser/notes_persistence_hidden_draft_test.mjs',
+      // #312：导航卸载前后 pending/error 的真实可达状态——输入不串文件、不被误标草稿、
+      // 无未确认草稿时不误拦关闭页面。未确认草稿本身只在组件层 fixture 可构造。
+      'browser/notes_draft_navigation_test.mjs',
       'browser/reading_test.mjs',
       'browser/reading_position_test.mjs',
       'browser/attempts_test.mjs',

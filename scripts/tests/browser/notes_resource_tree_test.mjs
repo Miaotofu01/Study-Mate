@@ -114,6 +114,9 @@ function Harness() {
   window.__renameResource = (id, title) => { window.__events.push({ type: 'renameResource', id, title }); setResources((previous) => ({ ...previous, [id]: { ...previous[id], title } })); };
   window.__deleteFolder = (id) => { window.__events.push({ type: 'deleteFolder', id }); setFolders((previous) => previous.filter((folder) => folder.id !== id)); };
   window.__removeEmptyBook = () => setFolders((previous) => previous.filter((folder) => folder.id !== 'empty-book'));
+  // 目标在菜单打开期间消失/进废纸篓：外部状态变化的两种真实来源（轮询回灌、删除、回收站）。
+  window.__removeFolder = (id) => setFolders((previous) => previous.filter((folder) => folder.id !== id));
+  window.__trashResource = (id) => setResources((previous) => ({ ...previous, [id]: { ...previous[id], trashed: true } }));
   return <div className="app-shell v2 v3 v4" data-theme="light" style={{ position: 'relative', width: 900, height: 560, overflow: 'hidden', background: '#f6f7f9' }}>
     <ResourceTree
       folders={folders} resources={resources} search=""
@@ -383,6 +386,40 @@ async function main() {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(60);
     check('提交后树标签更新为新目录名', await page.locator('button[aria-label="子目录改名 文件夹"]').count() === 1);
+
+    /* 13. 异步只读门禁与目标消失：菜单/行内编辑必须收起（agy 报告 #1/#2） */
+    // #1 菜单 portal 到 .app-shell 末尾，与 .persistence-gate 同为 z-index 80、DOM 序在后，
+    // 所以只把更多按钮置 disabled 不够：已打开的菜单会浮在门禁遮罩上并穿透 inert 仍可点。
+    await openMenu(page, '我的资料');
+    check('#1 前置：菜单确实打开', (await page.locator('[role="menu"]').count()) === 1);
+    await page.evaluate(() => window.__setCanEdit(false));
+    await page.waitForTimeout(60);
+    check('#1 进入只读：已打开的菜单被收起（不叠在门禁遮罩上）', (await page.locator('[role="menu"]').count()) === 0);
+    // 行内重命名在只读切换时同样收起，不留可编辑但 inert 的残留态。
+    await page.evaluate(() => window.__setCanEdit(true));
+    await page.waitForTimeout(60);
+    await openMenu(page, '废纸目录');
+    await page.locator('[role="menu"][aria-label="废纸目录 的目录操作"]').getByRole('menuitem', { name: '重命名' }).click();
+    await page.locator('.tree-rename-input').waitFor({ state: 'visible' });
+    await page.evaluate(() => { window.__events.length = 0; });
+    await page.evaluate(() => window.__setCanEdit(false));
+    await page.waitForTimeout(60);
+    check('#1 进入只读：行内重命名收起且不误提交', (await page.locator('.tree-rename-input').count()) === 0 && (await events(page)).length === 0,
+      'renameInputs=' + (await page.locator('.tree-rename-input').count()) + ' events=' + JSON.stringify(await events(page)));
+    await page.evaluate(() => window.__setCanEdit(true));
+    await page.waitForTimeout(60);
+
+    // #2 目标在菜单打开期间消失（外部刷新移除目录 / 被移入废纸篓）时收起菜单；
+    // 判断放在 effect 里，渲染期不再 setState，也不会把过期目标画到屏幕上。
+    await openMenu(page, '子目录改名');
+    await page.evaluate(() => window.__removeFolder('child'));
+    await page.waitForTimeout(60);
+    check('#2 目录被外部移除：菜单收起且目标行消失', (await page.locator('[role="menu"]').count()) === 0 && (await page.locator('button[aria-label="子目录改名 文件夹"]').count()) === 0);
+    await openMenu(page, '向量空间.md');
+    check('#2 前置：文件菜单确实打开', (await page.locator('[role="menu"]').count()) === 1);
+    await page.evaluate(() => window.__trashResource('note-a'));
+    await page.waitForTimeout(60);
+    check('#2 文件被移入废纸篓：菜单收起（不再显示「引用文件」的误导说明）', (await page.locator('[role="menu"]').count()) === 0 && (await page.locator('button[aria-label="打开 向量空间.md"]').count()) === 0);
 
     /* 11. 干净的控制台与网络 */
     check('无控制台错误 / 页面异常 / 失败请求', problems.length === 0, problems.join(' | '));

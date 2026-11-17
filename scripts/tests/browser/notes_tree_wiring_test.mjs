@@ -325,6 +325,49 @@ try {
       assert.ok(fixture.read().layout.folders.some(f => f.id === 'book'), '最后一本笔记本被删除了');
     });
 
+    await guarded('删除活动笔记本：等待保存→刷新后恢复回退本视口，其他数据保留', async () => {
+      // 接续上一场景（folders=[library, book]）：外部写库给新建的「第二本」一个
+      // 独特视口，删掉活动的「学习与理解」→ App 把相机切到回退本；删除自身的
+      // layout 提交必须已快照新相机（effect 在 setViewport(duration:0) 同步生效后
+      // 才读 getViewport），刷新后不得落回已删本的相机。
+      await notes(page).getByRole('button', { name: '新建笔记本', exact: true }).click();
+      await page.getByRole('dialog').getByRole('textbox', { name: '笔记本名称' }).fill('第二本');
+      await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click();
+      await until(() => fixture.read().layout.folders.some(f => f.name === '第二本' && f.kind === 'notebook'), '第二本没有落盘');
+      await saved(page);
+      const before = fixture.read();
+      const resourceCount = Object.keys(before.resources).length;
+      const second = before.layout.folders.find(f => f.name === '第二本');
+      const write = writeNotesLayout({ home: fixture.home, layout: { ...before.layout, folders: before.layout.folders.map(f => f.id === second.id ? { ...f, viewport: { x: 777, y: 555, zoom: 0.8 } } : f) }, expectedVersion: before.layoutVersion });
+      assert.ok(write.ok, '第二本视口写入失败: ' + (write.ok ? '' : write.message));
+      await enterNotes(page, fixture.origin);
+      await ready(page);
+      await openMenu(page, '学习与理解');
+      const deleteItem = page.locator('[role="menu"][aria-label="学习与理解 的目录操作"]').getByRole('menuitem', { name: '删除' });
+      assert.equal(await deleteItem.getAttribute('aria-disabled'), null, '两本笔记本时删活动的这本应该可用');
+      page.once('dialog', dialog => dialog.accept());
+      await deleteItem.click();
+      await until(() => !fixture.read().layout.folders.some(f => f.id === 'book'), '活动笔记本没有删除落盘');
+      await saved(page);
+      await delay(300); // 给删除提交与任何后续布局写留出完成时间
+      const after = fixture.read();
+      assert.deepEqual(after.layout.folders.map(f => f.id).sort(), ['library', second.id].sort(), '删除后目录集合不对');
+      assert.equal(Object.keys(after.resources).length, resourceCount, '资源不应被删除波及');
+      // 刷新：恢复的全局 viewport 必须是回退本（第二本）写入的相机，不是已删本的
+      await enterNotes(page, fixture.origin);
+      await ready(page);
+      const matrix = await page.evaluate(() => document.querySelector('.studymate-notes .react-flow__viewport')?.style.transform || '');
+      // react-flow 写的是 translate(777px, 555px) scale(0.8)（或 matrix(a,b,c,d,e,f)）
+      let zoom = NaN, tx = NaN, ty = NaN;
+      const t = matrix.match(/translate\(([-\d.e]+)(px)?,\s*([-\d.e]+)(px)?\)\s*scale\(([-\d.e]+)\)/);
+      const mx = matrix.match(/matrix\(([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+)\)/);
+      if (t) { tx = Number(t[1]); ty = Number(t[3]); zoom = Number(t[5]); }
+      else if (mx) { tx = Number(mx[5]); ty = Number(mx[6]); zoom = Number(mx[4]); }
+      else assert.fail('读不到画布视口 transform: ' + matrix);
+      assert.ok(Math.abs(zoom - 0.8) < 0.01, `刷新后 zoom 不是回退本的 0.8（实际 ${zoom}）`);
+      assert.ok(Math.abs(tx - 777) < 1 && Math.abs(ty - 555) < 1, `刷新后平移不是回退本的 (777,555)（实际 (${tx},${ty})）`);
+    });
+
     await guarded('正常 dirty 不闪草稿按钮；保存失败与冲突的恢复入口保留', async () => {
       const ghostBtn = name => notes(page).getByRole('button', { name, exact: true });
       const id = await createNote(page, fixture, '# DRAFT-NOTE\n');

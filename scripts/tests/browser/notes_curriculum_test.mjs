@@ -452,10 +452,15 @@ async function main() {
     await headingA.dragTo(stage);
     const courseCard = page.locator('[data-proto="notes-surface"] .course-reference-card');
     await courseCard.waitFor({ state: 'visible', timeout: 20000 });
+    // React Flow 新建节点在测量期给节点写 inline visibility:hidden（页头按钮继承，
+    // getByRole 按可访问树过滤会漏掉）；等按钮真正可访问后再断言，保留数量与语义检查。
+    await waitFor(async () => await courseCard.getByRole('button', { name: '跳转' }).count() === 1,
+      '课程卡跳转按钮进入可访问树（React Flow 测量瞬态结束）');
+    const jumpButton = courseCard.getByRole('button', { name: '跳转' });
     assert.equal(await courseCard.count(), 1, '画布上出现一张课程卡');
     assert.match(await courseCard.locator('h3').textContent(), /课程甲/, '课程卡标题来自来源节点');
     assert.equal(await courseCard.locator('.card-body').count(), 0, '课程卡不带笔记正文');
-    assert.equal(await courseCard.getByRole('button', { name: '跳转' }).count(), 1, '课程卡只有显式跳转');
+    assert.equal(await jumpButton.count(), 1, '课程卡只有显式跳转');
     const courseResource = await waitFor(() => {
       const value = fixture.read();
       return Object.values(value.resources).find(resource => resource.type === 'course' && resource.courseRef?.node === 'course-a') || null;
