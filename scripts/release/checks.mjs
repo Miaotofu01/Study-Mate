@@ -318,6 +318,7 @@ const groups = {
       'scripts/tests/test_notes_store_recovery.mjs',
       'scripts/tests/test_notes_route.mjs',
       'scripts/tests/test_notes_persistence.mjs',
+      'scripts/tests/test_notes_serialization_cache.mjs',
       'scripts/tests/test_notes_curriculum.mjs',
       // #270 编辑交互后续：真实局部 Markdown 标记与原稿坐标格式命令。
       'scripts/tests/test_notes_inline_editor.mjs',

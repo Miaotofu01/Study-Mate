@@ -5,6 +5,7 @@ import {
   serializeResource, serializeLayout, fingerprintOf, SaveState,
 } from './persistence.js';
 import { readMediaFile } from './media.js';
+import { createResourceSerializer } from './resource-serialization-cache.js';
 export { SaveState };
 
 const DEFAULT_CAMERA = Object.freeze({ x: 0, y: 0, zoom: 1 });
@@ -30,6 +31,11 @@ export default function useNotesPersistence({
   const dirtyRef = useRef(false);
   const validationErrors = useRef({});
   const loaded = useRef(null);
+  // 序列化缓存只挂在资源对象身份上：同一对象重复出现（尤其是 scene 每帧变化）直接复用 DTO。
+  // 它是派生物，load/applyBase 会整表作废；dispose 时清空。资源对象身份变化（新建/导入/
+  // 编辑/undo）自然重新序列化。绝不原地改缓存对象，绝不靠按 id 的最后写入胜出来猜版本。
+  const serializer = useRef(createResourceSerializer({ serialize: serializeResource, fingerprint: fingerprintOf }));
+  const lastResourcesRef = useRef(resources);
   const polling = useRef(false);
   const renderPending = useRef(false);
   const restoredViewportRef = useRef(false);
@@ -88,8 +94,12 @@ export default function useNotesPersistence({
     const controller = controllerRef.current;
     if (!controller) return;
     const previous = loaded.current;
+    // 基线指纹必须与本次实际资源字节一致。load/applyBase 是外部版本的唯一入口，
+    // 这里强制重算并整表换缓存，旧引用即使还在 React state 里也不会命中陈旧 DTO。
+    serializer.current.invalidate();
     for (const [id, resource] of Object.entries(snapshot.resources)) {
-      controller.loadBase(id, snapshot.resourceVersions[id], serializeResource(resource));
+      const entry = serializer.current.entryOf(resource);
+      controller.loadBase(id, snapshot.resourceVersions[id], entry.dto);
     }
     controller.loadBase('__layout__', snapshot.layoutVersion, serializeLayout(snapshot.layout));
     // 先记录与安全 runtime 一致的指纹，清理/恢复本身不自动回写原 JSON。
@@ -164,6 +174,7 @@ export default function useNotesPersistence({
     return () => {
       mountedRef.current = false;
       ++generation.current;
+      serializer.current.invalidate();
       unsubscribe(); controller.dispose();
       if (controllerRef.current === controller) controllerRef.current = null;
     };
@@ -180,10 +191,11 @@ export default function useNotesPersistence({
     if (!isNative || stateRef.current !== 'ready') return;
     const id = resource.id;
     try {
-      const dto = serializeResource(resource);
+      const entry = serializer.current.entryOf(resource);
       delete validationErrors.current[id];
-      controllerRef.current?.saveResource(dto);
+      controllerRef.current?.saveResource(entry.dto);
     } catch (error) {
+      serializer.current.forget(resource);
       validationErrors.current[id] = { state: SaveState.ERROR, error, dirty: true, draft: resource };
     }
     updateStatus();
@@ -206,9 +218,15 @@ export default function useNotesPersistence({
   }, [isNative, updateStatus]);
 
   // 统一捕获全部资源/树/场景修改：新建、导入、副本、undo/delete/collapse 不依赖某个按钮的补丁。
+  // 画布拖动/平移每帧只换 scene/folders；资源对象身份不变时绝不重新 serializeResource/fingerprint。
+  // 资源对象真的变了时，本 effect 仍按「资源+布局」处理一次。
   useEffect(() => {
     if (!isNative || loadState !== 'ready' || !loaded.current) return;
-    for (const resource of Object.values(resources)) submitResource(resource);
+    const resourcesChanged = resources !== lastResourcesRef.current;
+    lastResourcesRef.current = resources;
+    if (resourcesChanged) {
+      for (const resource of Object.values(resources)) submitResource(resource);
+    }
     submitLayout();
     renderPending.current = false;
     updateStatus();
@@ -223,15 +241,16 @@ export default function useNotesPersistence({
 
   const checkExternal = useCallback(async () => {
     const controller = controllerRef.current;
-    if (!isNative || !active || stateRef.current !== 'ready' || !controller || controller.isDirty()
+    if (!isNative || !runtime.current.active || stateRef.current !== 'ready' || !controller || controller.isDirty()
       || Object.keys(validationErrors.current).length || polling.current) return;
     polling.current = true;
     const revision = editRevision.current, token = generation.current;
+    const wasActive = runtime.current.active;
     try {
       const raw = await persistence.loadStore();
       const snapshot = await prepare(raw, loaded.current);
-      // GET/媒体解码期间的输入也必须守住，不能只在请求前检查 dirty。
-      if (!mountedRef.current || !runtime.current.active || token !== generation.current || revision !== editRevision.current
+      // GET/媒体解码期间的输入也必须守住：新草稿、面被隐藏、卸载、代际变化都不许 applyBase。
+      if (!mountedRef.current || !runtime.current.active || !wasActive || token !== generation.current || revision !== editRevision.current
         || renderPending.current || controller.isDirty() || Object.keys(validationErrors.current).length) return;
       if (loaded.current && snapshot.storeId !== loaded.current.storeId) throw new Error('笔记数据域身份改变，请确认后重新载入。');
       if (snapshot.missingLayout) throw new Error('已载入的数据域缺失 layout.json，不自动覆盖；请检查文件后重试。');
@@ -243,10 +262,16 @@ export default function useNotesPersistence({
       if (!mountedRef.current || token !== generation.current || revision !== editRevision.current || controller.isDirty()) return;
       transition('error', error);
     } finally { polling.current = false; }
-  }, [isNative, active, persistence, prepare, applyBase, transition]);
+  }, [isNative, persistence, prepare, applyBase, transition]);
 
+  const previousActive = useRef(active);
   useEffect(() => {
-    if (!isNative || !active || loadState !== 'ready') return undefined;
+    const becameVisible = active && !previousActive.current;
+    previousActive.current = active;
+    if (!isNative || loadState !== 'ready' || !active) return undefined;
+    // interval 与 focus/visibility 只在当前面可见时装；隐藏面既不发 GET，也不可能因浏览器
+    // focus/visibility 事件补发。回到笔记面先补一次全量读，再重新起表。
+    if (becameVisible) void checkExternal();
     const timer = setInterval(() => { void checkExternal(); }, 7000);
     const focus = () => { void checkExternal(); };
     const visible = () => { if (document.visibilityState === 'visible') void checkExternal(); };
