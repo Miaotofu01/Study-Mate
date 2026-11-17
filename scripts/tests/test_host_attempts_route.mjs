@@ -511,4 +511,18 @@ test('#213 自评快照：作答/预测进历史与上次结果；超长文本�
   const refreshed = readLibrary({ workspace }).subjects[0].nodes[0];
   assert.equal(Array.from(refreshed.attempts.questions[OPEN]['上次结果']['作答']).length, 8192,
     '刷新后仍读得回截断后的文本');
+
+  // 预测与作答走同一个 8192 口径：服务端不再只 trim 了。
+  const prediction = '😀'.repeat(9000);
+  const predicted = await post(route, {
+    subject: SUBJECT,
+    node: NODE,
+    questions: { [OPEN]: { 预测: prediction } },
+    operationId: op('snapshot-prediction'),
+    expectedVersion: receipt.version,
+  });
+  assert.equal(predicted.status, 200, '超长预测不拒绝');
+  const predictedReceipt = await predicted.json();
+  assert.equal(Array.from(predictedReceipt.attempts['题'][OPEN]['上次结果']['预测']).length, 8192,
+    '预测历史条目按码点截到上限');
 });

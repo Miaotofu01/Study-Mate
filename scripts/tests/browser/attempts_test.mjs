@@ -52,6 +52,7 @@ const TEMPS = [];
 const NODE_ID = 'fn.call';           // 节点 id 的写法与 curriculum.schema.json 一致（ASCII）
 const ANCHOR = '函数的调用';
 const QUESTION = ANCHOR + '#0';
+const CONFLICT_HISTORY_TEXT = '更早提交的版本。';
 
 function makeWorkspace() {
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'sm-attempts-'));
@@ -476,7 +477,7 @@ try {
     // 「另一个写入者」：模型重出题那侧直接用数据层写同一份文件（不走阅读端那条路）
     const other = writeAttempts({
       workspace, subject: 'demo', node: NODE_ID,
-      questions: { [ANCHOR + '#1']: { 选: null, 对: true, 自评: '答对了' } },
+      questions: { [ANCHOR + '#1']: { 选: null, 对: true, 自评: '答对了', 作答: CONFLICT_HISTORY_TEXT } },
       expectedVersion: stale, operationId: 'qa-other-writer-' + Date.now(),
     });
     check('另一个写入者写成了（它换了版本号）', other.ok === true && other.version !== stale, JSON.stringify(other).slice(0, 200));
@@ -574,13 +575,14 @@ try {
     return { questions: seen.questions, boundaries: seen.boundaries };
   });
 
-  /* 7. #213 清空草稿：落墓碑，但读侧当没有——刷新后输入框为空，「上次作答」回到历史快照时刻 */
+  /* 7. #213 清空草稿：历史里已有作答文本时，读侧仍把空草稿当「显式清空」——刷新后输入框为空，
+        「上次作答」回到历史快照时刻 */
   await session.scene('attempts-subjective-cleared', async (ctx) => {
     const SUBJECTIVE = ANCHOR + '#1';
     const before = readAttempts();
     const snapshot = before['题'][SUBJECTIVE]['上次结果'];
-    check('清空前的历史快照没有作答文本（回落的判据就是它）',
-      snapshot && !('作答' in snapshot), JSON.stringify(snapshot));
+    check('清空前历史快照里已有作答文本（这正是不能回落的判据）',
+      snapshot && snapshot['作答'] === CONFLICT_HISTORY_TEXT, JSON.stringify(snapshot));
 
     await openLesson(ctx);
     await ctx.evaluate(`(() => {
@@ -616,15 +618,16 @@ try {
         value: ta ? ta.value : null,
         at: at ? at.textContent.trim() : '',
         meta: document.querySelector('.smb-answer-meta') ? document.querySelector('.smb-answer-meta').textContent.trim() : '',
+        qsum: document.querySelector('.smb-qsum .smb-meta') ? document.querySelector('.smb-qsum .smb-meta').textContent.trim() : '',
       };
     })()`);
     const at = new Date(snapshot['时']);
     const pad = (n) => (n < 10 ? '0' + n : String(n));
     const expected = pad(at.getMonth() + 1) + '-' + pad(at.getDate()) + ' ' + pad(at.getHours()) + ':' + pad(at.getMinutes());
-    check('刷新后输入框为空（墓碑被读侧当成没有草稿）', seen.value === '', JSON.stringify(seen));
+    check('刷新后输入框为空（历史有作答文本，也不回填）', seen.value === '', JSON.stringify(seen));
     check('上次作答仍是历史快照的时刻，不是清空那一刻',
       seen.at === '上次作答：' + expected, JSON.stringify({ seen: seen.at, expected }));
-    check('计数也回到「还没写」', /还没写/.test(seen.meta), JSON.stringify(seen.meta));
+    check('清空草稿不清历史：总计数仍是 2 / N', /^作答 2 \/ \d+$/.test(seen.qsum), JSON.stringify(seen.qsum));
     return { value: seen.value, at: seen.at, tombstone };
   });
 } catch (error) {

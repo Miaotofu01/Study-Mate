@@ -426,7 +426,7 @@ function toEntry(raw: AttemptInput, at: string): AttemptEntry {
   };
   if (typeof raw.自评 === 'string' && raw.自评.trim() !== '') entry.自评 = raw.自评.trim();
   if (typeof raw.错因 === 'string' && raw.错因.trim() !== '') entry.错因 = raw.错因.trim();
-  if (typeof raw.预测 === 'string' && raw.预测.trim() !== '') entry.预测 = raw.预测.trim();
+  if (typeof raw.预测 === 'string' && raw.预测.trim() !== '') entry.预测 = capText(raw.预测.trim());
   // 作答文本是学生原样写的东西：不 trim（缩进/换行有意义），只按上限截断
   if (typeof raw.作答 === 'string' && raw.作答 !== '') entry.作答 = capText(raw.作答);
   // `跑` 原样收（对象才收）：它是**事实**，这一层不改写它——改写就等于二次加工真实输出

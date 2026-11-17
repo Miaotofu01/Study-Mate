@@ -529,7 +529,15 @@ test('#213：8192 按码点判定——5000 个 emoji（UTF-16 长度 10000）�
   assert.equal(Array.from(I.capAnswerText('😀'.repeat(8193))).length, 8192, '8193 个码点截到 8192');
 });
 
-test('#213：空草稿是墓碑——读侧当没有，值与时刻都回落到历史快照', () => {
+test('#213：已写字数按码点计数，不按 UTF-16 码元', () => {
+  const body = I.SubjectiveBody({
+    item: { q: '先写一段', answer: '参考' }, kind: '开放题', open: false, setOpen: () => {},
+    self: null, onSelf: () => {}, lab: null, value: '😀'.repeat(5000),
+  });
+  assert.match(viewText(body), /已写 5000 字/, '5000 个 emoji 不能被显示成 10000 字');
+});
+
+test('#213：空草稿是墓碑——清空就是空，时刻仍回落到历史快照', () => {
   const payload = {
     id: NODE,
     attempts: {
@@ -538,11 +546,12 @@ test('#213：空草稿是墓碑——读侧当没有，值与时刻都回落到�
     },
   };
   const drafts = I.draftsFromPayload(payload);
-  assert.equal(drafts.size, 0, '空文本不进 Map（墓碑不是一段文本）');
+  assert.equal(drafts.size, 1, '空文本仍留下墓碑条目（区分「清空」与「没有草稿」）');
+  assert.equal(drafts.get(KEY1).text, '', '墓碑的文本是空串，不是历史文本');
   assert.equal(
-    I.draftsFromPayload({ id: NODE, attempts: { drafts: { '每层各管一段#1': { 文本: '   ', 时: '' } } } }).size,
-    0,
-    '只含空白也当没有',
+    I.draftsFromPayload({ id: NODE, attempts: { drafts: { '每层各管一段#1': { 文本: '   ', 时: '' } } } }).get(KEY1).text,
+    '',
+    '只含空白也按空串收',
   );
 
   const previous = new Map([[KEY1, {
@@ -557,8 +566,16 @@ test('#213：空草稿是墓碑——读侧当没有，值与时刻都回落到�
   // SubjectiveBody 是函数组件元素，findByProp 不展开；按它拿到的 lastAt 找到这一层再看 value。
   const body = findByProp(rendered, 'lastAt', '2026-09-24T13:05:00')[0];
   assert.ok(body, 'Question 把快照时刻传给了输入框');
-  assert.equal(body.props.value, '上次写下的快照', '空草稿不把输入框清空：回落到历史快照');
-  assert.match(viewText(rendered), /上次作答：09-24 13:05/, '时刻也取快照的，不是清空那一刻（14:00）');
+  assert.equal(body.props.value, '', '清空后输入框为空，即使历史里有作答文本');
+  assert.match(viewText(rendered), /上次作答：09-24 13:05/, '时刻仍取快照的，不是清空那一刻（14:00）');
+
+  const fallback = I.Question({
+    item: { q: '为什么？', answer: '参考' }, index: 1, node: { id: NODE }, subject: { slug: 'demo' },
+    stateKey: KEY1, chosen: null, self: null, attempts: previous, drafts: new Map(),
+    record: () => {}, onChoose: () => {}, onSelf: () => {},
+  });
+  const fallbackBody = findByProp(fallback, 'lastAt', '2026-09-24T13:05:00')[0];
+  assert.equal(fallbackBody.props.value, '上次写下的快照', '根本没有草稿条目时才回落到历史快照');
 });
 
 test('#213 竞态：草稿 409 重发同一份 patch，回执不吞本地 dirty 字，下一笔带本地文本', async () => {
