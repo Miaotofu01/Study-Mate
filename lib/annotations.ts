@@ -1,7 +1,7 @@
 /* ─────────────────────────────────────────────────────────────────────────
    StudyMate · Host 半数据层 —— 课件页标注的读取与写入
 
-   `annotations/<NNNN>-<节点id>.json` 与课件**一一对应**（ADR-0015）：学生在课件页
+   `annotations/<NNNN>-<节点id>.json` 与课件**一一对应**（ADR-0021）：学生在课件页
    划选正文留下的高亮与注释（一条 = 若干段划选 + 一句注释）写在这里，**绝不写回
    `.md` / `.quiz.json`**——课件是模型写的、下次重写会整段覆盖；题库的锚点对账也依赖
    逐字内容（ADR-0007 的同一份理由，对课件正文一样成立）。
@@ -21,7 +21,7 @@
    **台账实例独立**（`LEDGER` 是这一份模块自己的）：三个数据域的指纹算法与回执类型都
    不同，共用一个 Map 会互相挤掉（`LEDGER_MAX` 是共享的），幂等会在最需要它时失效。
 
-   **块切分只由客户端说了算**（ADR-0015 的 Consequences 第一条）：一条标注定位的是
+   **块切分只由客户端说了算**（ADR-0021 的 Consequences 第一条）：一条标注定位的是
    「行号 + 块类型 + 块文本指纹 + 块内码位区间」，而 `parseBlocks` 住在阅读端、
    与 `lib/core/format.ts` 是两份独立实现（客户端更宽松）。所以这一层**不解析课件**：
    写入时不重新切块、读回时也不重新切块，只做字节存储 + 版本栅栏。代价是 Host 无法
@@ -34,7 +34,7 @@
    写入表达——删除是「这次数组里没有它」，清空是空数组（**文件仍写出**：`标: {}`，让
    「学生删光了」与「从来没标过」在盘上分得开，版本栅栏也照旧）。
 
-   **派生记录**（ADR-0015 与 ADR-0007 同一口径）：删掉标注不损失任何学习内容；一份写坏的
+   **派生记录**（ADR-0021 与 ADR-0007 同一口径）：删掉标注不损失任何学习内容；一份写坏的
    标注文件不该让整份 payload 崩掉、更不该拦住学生看课件——读侧坏了不抛，当「没有标注」。
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -305,7 +305,7 @@ function loadAnnotations(subjectDir: string, node: string, number: string, lesso
 /**
  * 读一个节点的标注。文件不在、科目/节点不合法、JSON 坏了、形状不对——一律返回 `null`。
  *
- * **坏了也不抛**：标注是**派生记录**（ADR-0015 与 ADR-0007 同一口径），一份写坏的标注
+ * **坏了也不抛**：标注是**派生记录**（ADR-0021 与 ADR-0007 同一口径），一份写坏的标注
  * 文件不该让整份 payload 崩掉、更不该拦住学生看课件。读不到就当没标注过。
  */
 export function readAnnotations({ workspace, subject, node }:
@@ -530,7 +530,7 @@ export function writeAnnotations({ workspace, subject, node, annotations, expect
   return response;
 }
 
-/** 拒绝并**重读**：把当前标注与版本号一起带回去（ADR-0015 沿用 ADR-0007 的「拒绝并重读」，不引入文件锁）。 */
+/** 拒绝并**重读**：把当前标注与版本号一起带回去（ADR-0021 沿用 ADR-0007 的「拒绝并重读」，不引入文件锁）。 */
 function conflict(error: string, message: string, subjectDir: string, node: string, number: string, lessonName: string): AnnotationsRefusal {
   const current = loadAnnotations(subjectDir, node, number, lessonName);
   const base: AnnotationsRefusal = refusal(409, error, message);
