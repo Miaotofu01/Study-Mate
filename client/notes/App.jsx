@@ -134,7 +134,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
     resources, setResources,
     scene, setScene,
     folders, setFolders,
-    active: active || Boolean(workspaceBridge),
+    active,
     flow,
     initialFolders,
     announce,
