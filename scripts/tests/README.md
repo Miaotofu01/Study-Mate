@@ -31,7 +31,7 @@ Git 装在其他位置时，用实际安装目录替换上面的路径。Node �
 | `npm run test:antigravity` | Antigravity 插件 ZIP、原生 agents、导出保护与重复构建 |
 | `npm run test:release` | 版本、changelog、重试和发布保护 |
 | `npm run test:static` | 技能调用面与提示词规则归属、词表与发布元数据、文档悬空引用、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
-| `npm run test:notes:browser` | 构建共享网页并运行六套独立 Edge 回归：画布与占位会话、品牌切换、临时数据域持久化、学习节点联动、共享格式栏与局部编辑、底层编辑器。验证刷新和冲突保护、只读升级、真实灰色标记、原稿坐标和输入法、亮暗对比度、媒体边界及无操作零保存；不连接真实 DSH 或模型，前置见「浏览器套件与手动工具」 |
+| `npm run test:notes:browser` | 构建共享网页并运行七套独立 Edge 回归：画布与占位会话、品牌切换、临时数据域持久化、笔记性能（拖动不重序列化正文、隐藏面不轮询、共享笔记仍可编辑）、学习节点联动、共享格式栏与局部编辑、底层编辑器。验证刷新和冲突保护、只读升级、真实灰色标记、原稿坐标和输入法、亮暗对比度、媒体边界及无操作零保存；不连接真实 DSH 或模型，前置见「浏览器套件与手动工具」 |
 | `npm run test:browser` | 阅读端与无界笔记的真实浏览器渲染测试（阅读端本体、阅读位置、作答落盘、监听推送、跑一次、导出产物、公式排版、四路由 × 三档视口、课件页正文与页头、问答会话与引用、课件页标注），浏览器二进制自动探测 |
 | `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录；native 安装下还验九个原生工具的注册、body 可调用（走真 dispatch）与越权抛，以及 #70 的引擎路径：`root` 指向已安装的包、`~/.dsh/studymate/engine/` 不再出现 |
 | `npm run test:dsh-contract` | **宿主契约守门**：拿真宿主自己的 schema 校验器（`dsh-tools` 的 `assertSupportedJsonSchema`）扫注册点上全部工具的 `parameters` 与 `output.schema`，并核对参考调用 `createWebhookSession` 的字段清单没漂，并逐行解析预设里的模块（宿主删掉的子路径必须带停用条件，`#244`）；附一条反证（已知不合规的 schema 必须报错）。同一个 `STUDYMATE_DSH_PACKAGE`，没设就跳过。指针与纪律在 [工程约束](../规范/工程约束.md) §三「宿主契约」 |
@@ -65,6 +65,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_notes_inline_editor.mjs`、`test_notes_markdown_formatting.mjs` | Markdown 格式范围与真实标记、转义/代码隔离、原稿与编辑器坐标、混合换行保真、灰色/代码调色板；格式命令的局部事务、边界与安全链接 |
 | [test_notes_store_recovery.mjs](test_notes_store_recovery.mjs) | 真实进程在初始化 marker 发布前崩溃后的恢复、锁内孤儿临时文件清理、坏格式机读码与路径隐私、目录同步故障及升级备份保留、250 篇/48 MiB 边界、中文数据根与双进程同版本 CAS；只用临时数据域，默认 Node 门禁可达 |
 | `test_notes_native_contract.mjs` | 显式会话引用的坐标/去重/取消/资源世代与权限失效栅栏、宿主槽位注册；临时 bundle 在系统临时目录创建并清理，不连接真实 DSH/模型 |
+| `test_notes_serialization_cache.mjs` | #303 资源序列化缓存行为：同一资源对象连续 250 次提交只序列化/指纹一次，新对象身份（编辑/新建/导入/undo）重算且不原地改旧 DTO，`invalidate()`（load/applyBase/dispose）与序列化失败后的 `forget()` 语义；`--expose-gc` 时再验旧对象不强持 |
 | `test_notes_curriculum.mjs`、`test_client_learning_notes.mjs` | 完整来源身份、关联换节点不搬原件、多科目默认本与相机/分区字段往返、两面共享状态和学习左右栏接线；纯阅读端导出不出现死笔记入口 |
 | `test_openai_plugin.mjs` | ZIP 用**独立读取器**解开后不依赖源码或 DSH 即可跑交互断点（read → update → answer）、没有 0 字节文件也没有 Python 文件；构建可重复，失败时保留已有产物 |
 | `test_preset_install.mjs` | 预设注册（`lib/preset.ts`，原 Python 安装助手的**行为移植**）：版本边界各自独立、补丁形态保留与幂等（注释、`!!js`、CRLF、流式列表）、暂存与 `--patch-output`、手动声明/越界 profile/坏清单/符号链接一律在写盘之前失败、`--bundle` 给 DSH 的 config 形状 |
@@ -175,6 +176,7 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 | --- | --- |
 | `browser/notes_brand_test.mjs` | 正式组合客户端的品牌双向切换：同一个学习面板、名称与自有图标互换、学习导航保留、笔记场景保活、隐藏面不接焦点和快捷键；独立 Edge + 隔离宿主夹具，不使用真实会话 |
 | `browser/notes_persistence_test.mjs` | 真客户端 + 临时 HOME 的保存、刷新、冲突、失败和格式1只读→取消/确认升级→逐字节备份；不碰个人笔记库 |
+| `browser/notes_performance_test.mjs` | #303 笔记性能与隐藏面：拖动/折叠连续改布局时正文仍落盘但不再重序列化/散列资源；隐藏超过一个轮询周期不发外部 GET、重显立刻补读；隐藏的共享笔记仍能在学习页新建/编辑；零控制台/页面/外网错误 |
 | `browser/notes_curriculum_test.mjs` | 十项节点笔记场景：空节点、显式默认本、原稿共享、关联拖动、未来默认、软删除恢复、节点树/课程引用卡、只读课件跳转、笔记本画布隔离与相机；学习左右笔记亮→暗→亮、渲染/局部灰色标记/链接框的实测 AA，光标、弹窗和主题切换不改写原稿 |
 | `browser/notes_live_editor_test.mjs` | 实际共享 NoteEditor 与单格式栏：选区保持、格式局部事务、真实灰色字符、原始坐标/混合换行、链接冻结与失效拒绝、只读/超限修复、StrictMode/受控输入法和快捷键；用临时页面和隔离 Edge |
 | `browser/notes_inline_editor_test.mjs` | 底层局部编辑器：真实分隔符显隐/直接编辑、原始字节与撤销、外部更新/空正文/输入法、GFM 表格/任务标记/公式/代码/图片占位、安全与亮暗对比度 |
