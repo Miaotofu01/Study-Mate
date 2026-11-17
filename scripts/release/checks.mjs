@@ -326,6 +326,9 @@ const groups = {
       // #312 三面共用 NoteEditor 的统一导出：标题 → 安全文件名（非法字符、Windows
       // 保留名、末尾点空格、长度）与原稿逐字导出、对象 URL 回收（纯函数，Node 里跑）。
       'scripts/tests/test_notes_note_export.mjs',
+      // #312 资源树纯逻辑层：单高亮互斥收敛、删除四层保护（根/回退目录/最后一本/
+      // 默认本/绑定本/非空计数）、名称与标题校验——模型与 UI 闸门共用同一函数。
+      'scripts/tests/test_notes_resource_tree.mjs',
       // #88 三栏几何：ADR-0011 的让位顺序（右栏先拿 / 左栏先让 / 中栏保底 420）与
       // 「并排装不下就把那一栏盖在正文上」的降级。同样是纯函数——「任何画布宽度下都
       // 有一栏打得开」是代数，浏览器里一条条试既慢又试不全。
@@ -505,6 +508,17 @@ const groups = {
       // #270：共享局部编辑与单格式栏的原稿保真、安全、IME 与受控生命期。
       'browser/notes_live_editor_test.mjs',
       'browser/notes_inline_editor_test.mjs',
+      // #303：拖动不重序列化正文、隐藏面暂停轮询（checks 侧此前漏登，此处补上）。
+      'browser/notes_performance_test.mjs',
+      // #312：资源树行级菜单、重命名、删除保护与单高亮（esbuild 临时页挂真组件）。
+      'browser/notes_resource_tree_test.mjs',
+      // #312：资源树与画布/App 的接线回归（集成 hunk 与视图切换）。
+      'browser/notes_tree_wiring_test.mjs',
+      // #312：笔记面亮暗主题对比度与切换回归。
+      'browser/notes_theme_test.mjs',
+      // #312：隐藏面草稿保护——依赖 #303 的 becameVisible 立即核对语义，必须在
+      // 该语义合入后运行（隐藏期在途/失败/冲突重显不丢草稿、清洁重显立即核对）。
+      'browser/notes_persistence_hidden_draft_test.mjs',
       'browser/reading_test.mjs',
       'browser/reading_position_test.mjs',
       'browser/attempts_test.mjs',

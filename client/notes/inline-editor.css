@@ -14,7 +14,7 @@
   --md-inline-code-bg: #eef1ef;
   --md-inline-code-bg: color-mix(in srgb, var(--code, var(--border, #e2e8e4)) 72%, var(--surface, #fff));
   --md-selection-bg: var(--accent-soft, #e8f2ef);
-  /* 编辑面比宿主面深一档：优先取 .note-editor 里的 --ne-surface（live-editor.css 已加深），
+  /* 编辑面比宿主面深一档：优先取 .note-editor 里的 --ne-surface（note-editor.css 已加深），
      独立使用时回退宿主 --surface。 */
   --md-editor-surface: var(--ne-surface, var(--surface, #fff));
 
