@@ -315,8 +315,10 @@ const groups = {
       'scripts/tests/test_notes_native_contract.mjs',
       // #268：独立笔记数据域、跨进程版本栅栏与原生自动保存（默认纯 Node，无浏览器前置）。
       'scripts/tests/test_notes_store.mjs',
+      'scripts/tests/test_notes_store_recovery.mjs',
       'scripts/tests/test_notes_route.mjs',
       'scripts/tests/test_notes_persistence.mjs',
+      'scripts/tests/test_notes_serialization_cache.mjs',
       'scripts/tests/test_notes_curriculum.mjs',
       // #270 编辑交互后续：真实局部 Markdown 标记与原稿坐标格式命令。
       'scripts/tests/test_notes_inline_editor.mjs',
@@ -494,6 +496,9 @@ const groups = {
       'browser/notes_brand_test.mjs',
       // #268：真实临时 notes HTTP/数据域；独立页仍纯内存，不接真实会话。
       'browser/notes_persistence_test.mjs',
+      // #302 / ADR-0019：懒分块——学习首屏零分块请求、首开恰一次、往返保活、失败重试、
+      // 旧宿主（无 require.async）学习面照常且笔记明确失败不静默回退。
+      'browser/notes_lazy_chunk_test.mjs',
       // #270：学习端节点笔记接线——空节点、默认本、左右同一原稿、拖动只改关联、
       // 软删除恢复、无界节点视图同分类、课程卡只读与精确跳回。真临时 HOME，不 seedDemo。
       'browser/notes_curriculum_test.mjs',

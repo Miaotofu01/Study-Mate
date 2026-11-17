@@ -170,11 +170,13 @@ function requireWorkflow() {
   if (!process.env.GH_TOKEN) throw new Error('Missing the workflow GitHub token.');
 }
 
-// 正式包的客户端入口（ADR-0015 §2）：package.json 的 exports["./client"] 指向 dist/client.js，
-// 由 `build:client` 产出；它旁边的 client-notices.txt 是那份 bundle 的第三方许可全文。
-// 两张表都对不上就会出事：白名单少了它们 → 每次发布卡在打包校验；**放成 `dist/**` 通配** →
+// 正式包的客户端入口（ADR-0015 §2、ADR-0019）：package.json 的 exports["./client"] 指向 dist/client.js，
+// 由 `build:client` 产出；它旁边的 client-notices.txt 是那份 bundle 的第三方许可全文；
+// client.notes.js 是入口按需拉的懒分块（笔记组件/编辑器/限域样式/私有字体），exports 不新增第二条子路径。
+// 三张表都对不上就会出事：白名单少了它们 → 每次发布卡在打包校验；**放成 `dist/**` 通配** →
 // 网页验收产物（dist/notes-preview/）、构建报告（dist/client-build-report.json）跟着发出去。
 export const CLIENT_ENTRY = 'dist/client.js';
+export const CLIENT_CHUNK = 'dist/client.notes.js';
 export const CLIENT_NOTICES = 'dist/client-notices.txt';
 
 /**
@@ -211,13 +213,13 @@ export function validatePack(pack) {
   // 根级的 README* / LICEN[CS]E* / COPYING* **不归 files 管**：npm 一定会把它们打进 tarball
   // （`files: ["lib"]` 的包照样进 README.en.md，npm 11 实测）。白名单认下这批——npm 塞进来、
   // 我们自己拦下，发布就卡在打包校验这步：#155（README.en.md，2026-10-10 的 Release）。
-  const allowed = /^(?:package\.json|cordis\.patch\.yml|CHANGELOG\.md|README(?:\.[^/]*)?|LICEN[CS]E(?:\.[^/]*)?|COPYING(?:\.[^/]*)?|locale\/[^/]+\.json|dist\/client\.js|dist\/client-notices\.txt|bin\/[^/]+\.(?:mjs|ts)|lib\/.+|openai\/studymate\/(?:\.codex-plugin\/plugin\.json|scripts\/[^/]+\.mjs|skills\/learning-system\/references\/[^/]+\.md)|antigravity\/studymate\/.+|preset\/(?:learning|qa|skills)\/.+|schemas\/[^/]+\.json|templates\/.+|docs\/(?:[^/]+\/)*[^/]+\.md|docs\/images\/.+)$/u;
+  const allowed = /^(?:package\.json|cordis\.patch\.yml|CHANGELOG\.md|README(?:\.[^/]*)?|LICEN[CS]E(?:\.[^/]*)?|COPYING(?:\.[^/]*)?|locale\/[^/]+\.json|dist\/client\.js|dist\/client\.notes\.js|dist\/client-notices\.txt|bin\/[^/]+\.(?:mjs|ts)|lib\/.+|openai\/studymate\/(?:\.codex-plugin\/plugin\.json|scripts\/[^/]+\.mjs|skills\/learning-system\/references\/[^/]+\.md)|antigravity\/studymate\/.+|preset\/(?:learning|qa|skills)\/.+|schemas\/[^/]+\.json|templates\/.+|docs\/(?:[^/]+\/)*[^/]+\.md|docs\/images\/.+)$/u;
   for (const file of files) {
     if (!allowed.test(file) || /(^|\/)(?:\.env(?:\..*)?|\.npmrc|\.git|node_modules|__pycache__|\.DS_Store|[^/]+\.pyc)(\/|$)/.test(file)) {
       throw new Error(`Unexpected or private file in npm tarball: ${file}.`);
     }
   }
-  for (const required of ['cordis.patch.yml', CLIENT_ENTRY, CLIENT_NOTICES, 'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs', 'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'lib/preset.ts', 'locale/en.json', 'locale/zh.json', 'docs/images/icon.png', 'openai/studymate/.codex-plugin/plugin.json', 'docs/使用/Codex与ChatGPT.md', 'preset/learning/agent.cordis.yml', 'preset/qa/agent.cordis.yml', 'preset/skills/learning-system/SKILL.md', 'antigravity/studymate/plugin.json']) {
+  for (const required of ['cordis.patch.yml', CLIENT_ENTRY, CLIENT_CHUNK, CLIENT_NOTICES, 'bin/dsh-plugin.ts', 'bin/studymate.mjs', 'bin/skill-compat.mjs', 'bin/openai-plugin.mjs', 'bin/openai-skill-compat.mjs', 'lib/preset.ts', 'locale/en.json', 'locale/zh.json', 'docs/images/icon.png', 'openai/studymate/.codex-plugin/plugin.json', 'docs/使用/Codex与ChatGPT.md', 'preset/learning/agent.cordis.yml', 'preset/qa/agent.cordis.yml', 'preset/skills/learning-system/SKILL.md', 'antigravity/studymate/plugin.json']) {
     if (!files.includes(required)) throw new Error(`npm tarball is missing ${required}.`);
   }
   for (const prefix of ['schemas/', 'templates/', 'docs/', 'locale/']) if (!files.some(file => file.startsWith(prefix))) throw new Error(`npm tarball is missing ${prefix}.`);

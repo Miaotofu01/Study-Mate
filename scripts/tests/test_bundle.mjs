@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { parseYaml } from '../../lib/yaml.ts';
 import { packEntry, validatePack } from '../release/release.mjs';
+import { COPY_ALL } from './fixtures/copy.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const plugin = pathToFileURL(path.join(root, 'bin/dsh-plugin.ts')).href;
@@ -27,7 +28,7 @@ function provideHostSchema(target) {
     const from = path.join(root, 'node_modules', ...name.split('/'));
     const to = path.join(target, 'node_modules', ...name.split('/'));
     fs.mkdirSync(path.dirname(to), { recursive: true });
-    fs.cpSync(from, to, { recursive: true });
+    fs.cpSync(from, to, COPY_ALL);
   }
 }
 
