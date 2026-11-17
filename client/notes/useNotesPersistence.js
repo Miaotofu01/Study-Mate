@@ -20,8 +20,10 @@ export default function useNotesPersistence({
   const [loadState, setLoadState] = useState(isNative ? 'loading' : 'ready');
   const [loadError, setLoadError] = useState(null);
   const [saveStatus, setSaveStatus] = useState({});
+  const [corrupt, setCorrupt] = useState([]);
   const [restoreRevision, setRestoreRevision] = useState(0);
   const controllerRef = useRef(null);
+  const corruptRef = useRef([]);
   const runtime = useRef(null);
   runtime.current = { resources, scene, folders, flow, initialFolders, active };
   const stateRef = useRef(loadState);
@@ -102,6 +104,8 @@ export default function useNotesPersistence({
       controller.loadBase(id, snapshot.resourceVersions[id], entry.dto);
     }
     controller.loadBase('__layout__', snapshot.layoutVersion, serializeLayout(snapshot.layout));
+    corruptRef.current = snapshot.corrupt || [];
+    setCorrupt(corruptRef.current);
     // 先记录与安全 runtime 一致的指纹，清理/恢复本身不自动回写原 JSON。
     loaded.current = {
       storeId: snapshot.storeId, resources: snapshot.resources, versions: snapshot.resourceVersions,
@@ -128,7 +132,7 @@ export default function useNotesPersistence({
     updateStatus();
   }, [setResources, setFolders, setScene, updateStatus]);
 
-  const load = useCallback(async ({ confirmDiscard = false } = {}) => {
+  const load = useCallback(async ({ confirmDiscard = false, skipCorrupt = false } = {}) => {
     const controller = controllerRef.current;
     if (!isNative || !controller || !mountedRef.current) return false;
     const dirty = controller.isDirty() || Object.keys(validationErrors.current).length > 0;
@@ -138,7 +142,15 @@ export default function useNotesPersistence({
     try {
       // 客户端 abort 不能回滚已经到达服务端的写入。先停止排队并等已发保存真正结束，再读。
       await controller.suspendAndWait();
-      const raw = await persistence.loadStore();
+      let raw;
+      try {
+        raw = await persistence.loadStore(skipCorrupt ? { skipCorrupt: true } : {});
+      } catch (error) {
+        // 普通 GET 遇坏资源时服务端 fail closed；自动重试一次显式降级，让用户至少能读到
+        // 其余笔记。只有 file-shape-unknown 才重试；权限/layout/身份问题仍然整页报错。
+        if (skipCorrupt || error?.code !== 'file-shape-unknown') throw error;
+        raw = await persistence.loadStore({ skipCorrupt: true });
+      }
       const snapshot = await prepare(raw, null);
       if (!mountedRef.current || token !== generation.current) return false;
       if (snapshot.missingLayout && !snapshot.requiresUpgrade) {
@@ -247,7 +259,7 @@ export default function useNotesPersistence({
     const revision = editRevision.current, token = generation.current;
     const wasActive = runtime.current.active;
     try {
-      const raw = await persistence.loadStore();
+      const raw = await persistence.loadStore(corruptRef.current.length ? { skipCorrupt: true } : {});
       const snapshot = await prepare(raw, loaded.current);
       // GET/媒体解码期间的输入也必须守住：新草稿、面被隐藏、卸载、代际变化都不许 applyBase。
       if (!mountedRef.current || !runtime.current.active || !wasActive || token !== generation.current || revision !== editRevision.current
@@ -335,6 +347,6 @@ export default function useNotesPersistence({
   return {
     isNative, canEdit: !isNative || loadState === 'ready', loadState, loadError, saveStatus, conflictKeys,
     markEdit, saveResource: submitResource, saveLayout: submitLayout, saveViewport,
-    resolveConflict, retryAll, reloadStore: load, exportDrafts, restoreRevision, restoredViewportRef, upgradeStore,
+    corrupt, resolveConflict, retryAll, reloadStore: load, exportDrafts, restoreRevision, restoredViewportRef, upgradeStore,
   };
 }

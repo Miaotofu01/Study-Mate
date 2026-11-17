@@ -411,6 +411,33 @@ export function hydrateLayout(dto) {
 // ---------------------------------------------------------------------------
 
 // 载入 GET 响应 → { resources: {id: memoryResource}, layout, resourceVersions, layoutVersion, storeId }
+function hydrateCorruptEntries(raw) {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw)) fail('载入响应的 corrupt 必须是数组。')
+  if (raw.length > LIMITS.maxResources) fail(`坏资源数量超过 ${LIMITS.maxResources} 上限。`)
+  return raw.map((item) => {
+    if (!isPlainObject(item)) fail('坏资源条目必须是对象。')
+    if (!isValidId(item.id)) fail(`坏资源 id 非法：${String(item.id)}`)
+    if (item.kind !== 'md' && item.kind !== 'json') fail(`坏资源「${item.id}」的 kind 非法。`)
+    if (typeof item.message !== 'string' || !item.message || [...item.message].length > LIMITS.maxMetaChars) {
+      fail(`坏资源「${item.id}」的 message 非法。`)
+    }
+    if (item.notebook !== null && typeof item.notebook !== 'string') fail(`坏资源「${item.id}」的 notebook 非法。`)
+    const entry = { id: item.id, kind: item.kind, notebook: item.notebook, message: item.message }
+    if (item.title !== undefined) {
+      if (typeof item.title !== 'string' || !item.title || [...item.title].length > LIMITS.maxMetaChars) {
+        fail(`坏资源「${item.id}」的 title 非法。`)
+      }
+      entry.title = item.title
+    }
+    if (item.associations !== undefined) {
+      try { entry.associations = normalizeAssociations(item.associations) }
+      catch (error) { fail(`坏资源「${item.id}」的课程关联非法：${error.message}`) }
+    }
+    return entry
+  })
+}
+
 export function hydrateStore(payload) {
   if (!isPlainObject(payload)) fail('载入响应必须是 JSON 对象。')
   if (payload.ok !== undefined && payload.ok !== true) fail('载入失败：宿主返回了错误响应。')
@@ -442,7 +469,8 @@ export function hydrateStore(payload) {
   const layoutVersion = payload.layoutVersion ?? null
   if (layoutVersion !== null && typeof layoutVersion !== 'string') fail('载入响应的 layoutVersion 非法。')
 
-  return { resources, layout, resourceVersions, layoutVersion, storeId: payload.storeId ?? null, schemaVersion: payload.schemaVersion, requiresUpgrade: payload.schemaVersion === 1 || payload.requiresUpgrade === true }
+  const corrupt = hydrateCorruptEntries(payload.corrupt)
+  return { resources, layout, resourceVersions, layoutVersion, storeId: payload.storeId ?? null, schemaVersion: payload.schemaVersion, requiresUpgrade: payload.schemaVersion === 1 || payload.requiresUpgrade === true, corrupt }
 }
 
 // ---------------------------------------------------------------------------

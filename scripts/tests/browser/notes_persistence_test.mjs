@@ -489,6 +489,44 @@ try {
     assertOriginalBytes(store);
     assert.equal(fs.existsSync(path.join(fixture.root, 'layout.json')), false, '只读阶段自动初始化了 layout');
   });
+  await scenario('#304 坏资源自动只读降级：逐条横幅、好资源可用，修好后横幅消失', async ({ fixture, page, reload, expectHttp }) => {
+    expectHttp(503);
+    const good = { id: 'good-note', type: 'note', title: '好笔记', parent: 'notes', owner: '我', markdown: '# 好\n\n可以编辑。\n' };
+    const bad = { id: 'bad-note', type: 'note', title: '坏笔记', parent: 'notes', owner: '我', markdown: '# 坏\n\n这段会坏。\n' };
+    assert.equal(writeNotesResource({ home: fixture.home, resource: good, expectedVersion: null }).ok, true);
+    assert.equal(writeNotesResource({ home: fixture.home, resource: bad, expectedVersion: null }).ok, true);
+    const layout = {
+      folders: structuredClone(DEMO_FOLDERS),
+      nodes: [
+        { id: 'node-good', type: 'knowledge', position: { x: 80, y: 70 }, style: { width: 420, height: 300 }, data: { contentId: 'good-note', notebookId: 'book' } },
+        { id: 'node-bad', type: 'knowledge', position: { x: 560, y: 70 }, style: { width: 420, height: 300 }, data: { contentId: 'bad-note', notebookId: 'book' } },
+      ],
+      edges: [], viewport: { x: 0, y: 0, zoom: 1 },
+    };
+    assert.equal(writeNotesLayout({ home: fixture.home, layout, expectedVersion: null }).ok, true);
+    // 头三行保留，正文追加非法 UTF-8：严格 GET 必须 503，客户端应自动重试 skip。
+    fs.appendFileSync(path.join(fixture.root, 'resources', 'r-bad-note.md'), Buffer.from([0xff, 0xfe]));
+
+    await enterNotes(page, fixture.origin);
+    await ready(page);
+    assert.ok(fixture.requests.some(r => r.status === 503), '第一次严格 GET 应 503');
+    assert.ok(fixture.requests.some(r => r.method === 'GET' && r.url?.includes('onCorrupt=skip')), '应自动重试 skip');
+    const banner = notes(page).locator('.persistence-corrupt');
+    await banner.waitFor({ timeout: 15000 });
+    assert.equal(await banner.count(), 1);
+    assert.match(await banner.first().innerText(), /笔记本「学习与理解」中的资源「坏笔记」的文件已损坏，未载入。/);
+    // 好笔记仍可打开编辑；坏卡不会进画布。
+    await notes(page).locator('.tree-file', { hasText: '好笔记' }).click();
+    await inlineEditor(page).waitFor({ state: 'visible', timeout: 12000 });
+    assert.equal(await notes(page).getByRole('button', { name: '新建笔记', exact: true }).isDisabled(), false);
+
+    // 修好文件再进入：严格 GET 成功，skip 不再出现，横幅消失，坏资源重新出现。
+    externalMarkdown(fixture, 'bad-note', '# 已修好\n\n现在可以载入。\n');
+    await reload();
+    await notes(page).locator('.tree-file', { hasText: '坏笔记' }).waitFor({ timeout: 15000 });
+    assert.equal(await notes(page).locator('.persistence-corrupt').count(), 0);
+  });
+
 } finally {
   await browser.close();
   fs.writeFileSync(path.join(OUT, 'persistence-browser-report.json'), JSON.stringify({ checks: results.length, failures: results.filter(r => !r.ok).length, results }, null, 2));

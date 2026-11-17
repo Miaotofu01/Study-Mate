@@ -55,6 +55,7 @@ import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
 import {
+  MAX_META_TEXT_CHARS,
   MAX_NOTE_BYTES,
   MAX_NOTE_CHARS,
   MAX_REQUEST_BYTES,
@@ -693,12 +694,120 @@ export interface NotesStoreSnapshot {
   resourceVersions: Record<string, string | null>;
   layout: Record<string, unknown> | null;
   layoutVersion: string | null;
+  /** 只在显式 `onCorrupt:'skip'` 的读取里出现；普通模式不带这个键。 */
+  corrupt?: NotesCorruptResource[];
+}
+
+/** 坏资源里能**只读**提取出来的课程关联；形状与上限沿用 contracts 的课程来源。 */
+export interface NotesCourseReference {
+  workspace: string;
+  subject: string;
+  node: string;
+  title?: string;
+}
+
+/**
+ * 显式降级读取时返回的坏资源清单。
+ *
+ * 只带「用户能看懂、且不泄露本机路径」的元信息：`title` / `associations` 尽力提取，
+ * 提取失败或超限就省略；`notebook` 只从 layout 的 node→notebook 映射里取名字，
+ * 映射不到就是 null；`message` 是固定通用文案，绝不含路径或原始异常。
+ */
+export interface NotesCorruptResource {
+  id: string;
+  kind: 'md' | 'json';
+  title?: string;
+  associations?: NotesCourseReference[];
+  notebook: string | null;
+  message: string;
 }
 
 /** 单个资源文件的原始字节（版本按它算，绝不 decode→re-encode）。 */
 interface ResourceRaw {
   bytes: Buffer;
   kind: 'md' | 'json';
+}
+
+/** 坏资源条目里的固定文案：不包含路径、原始异常或文件名。 */
+const CORRUPT_RESOURCE_MESSAGE = '资源文件已损坏，暂时无法载入。';
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 从坏资源原始字节里只读提取元信息。任何解码/解析失败都返回 null——不猜、不回写。
+ * `.md` 只读开头 3 行元信息头；`.json` 只接受 JSON 对象。
+ */
+function readCorruptMetadata(bytes: Buffer, kind: 'md' | 'json'): Record<string, unknown> | null {
+  try {
+    if (kind === 'md') {
+      // 只解码前三行：正文损坏（甚至不是合法 UTF-8）也不能妨碍元信息提取。
+      let end = 0;
+      for (let line = 0; line < 3; line += 1) {
+        const newline = bytes.indexOf(0x0a, end);
+        if (newline === -1) return null;
+        end = newline + 1;
+      }
+      const text = decodeUtf8Strict(bytes.subarray(0, end), '资源');
+      return parseNoteFile(text).meta;
+    }
+    const text = decodeUtf8Strict(bytes, '资源');
+    const parsed: unknown = JSON.parse(text);
+    return isPlainRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** layout 的 `node.data.contentId → node.data.notebookId → folder.name` 索引。 */
+function notebookNamesByContentId(layout: Record<string, unknown> | null): Map<string, string> {
+  const byContentId = new Map<string, string>();
+  if (!layout) return byContentId;
+  const folderNames = new Map<string, string>();
+  for (const folder of Array.isArray(layout.folders) ? layout.folders : []) {
+    if (!isPlainRecord(folder)) continue;
+    if (folder.kind !== 'notebook' || typeof folder.id !== 'string' || typeof folder.name !== 'string') continue;
+    folderNames.set(folder.id, folder.name);
+  }
+  for (const node of Array.isArray(layout.nodes) ? layout.nodes : []) {
+    if (!isPlainRecord(node) || !isPlainRecord(node.data)) continue;
+    const contentId = node.data.contentId;
+    const notebookId = node.data.notebookId;
+    if (typeof contentId !== 'string' || typeof notebookId !== 'string') continue;
+    const name = folderNames.get(notebookId);
+    if (name !== undefined) byContentId.set(contentId, name);
+  }
+  return byContentId;
+}
+
+function corruptResourceEntry(
+  id: string,
+  kind: 'md' | 'json',
+  bytes: Buffer | null,
+  notebook: string | null,
+): NotesCorruptResource {
+  const metadata = bytes ? readCorruptMetadata(bytes, kind) : null;
+  const entry: NotesCorruptResource = { id, kind, notebook, message: CORRUPT_RESOURCE_MESSAGE };
+  if (metadata) {
+    const title = metadata.title;
+    if (typeof title === 'string' && title.length > 0 && [...title].length <= MAX_META_TEXT_CHARS) {
+      entry.title = title;
+    }
+    if ('associations' in metadata) {
+      // 借 checkResource 校验课程关联：形状/长度/去重规则只维护在 contracts 一处。
+      const check = checkResource({
+        id: 'corrupt-probe',
+        type: 'note',
+        markdown: '',
+        associations: metadata.associations,
+      });
+      if (check.ok && Array.isArray(check.value.associations)) {
+        entry.associations = check.value.associations as NotesCourseReference[];
+      }
+    }
+  }
+  return entry;
 }
 
 /** 单个 JSON 资源文件的读取上限。
@@ -804,26 +913,29 @@ function parseLayoutStrict(bytes: Buffer): Record<string, unknown> {
  * 读侧**不创建任何东西**：根不存在就是空域；根存在但没有合法 marker、或任何资源/
  * 布局损坏 → 整个读取失败（fail closed），绝不把坏数据当成「空」让后续保存覆盖掉。
  */
-export function readNotesStore({ home }: { home: string }): NotesStoreResult<NotesStoreSnapshot> {
+export function readNotesStore({ home, onCorrupt }: { home: string; onCorrupt?: unknown }): NotesStoreResult<NotesStoreSnapshot> {
+  if (onCorrupt !== undefined && onCorrupt !== 'skip') {
+    return fail(400, 'body-invalid', 'onCorrupt 只接受 skip（缺省表示严格读取）。');
+  }
+  const skipCorrupt = onCorrupt === 'skip';
+  const emptySnapshot = (): NotesStoreSnapshot => ({
+    storeId: storeIdOf(notesRoot(home)), schemaVersion: CURRENT_FORMAT_VERSION, requiresUpgrade: false,
+    resources: {}, resourceVersions: {}, layout: null, layoutVersion: null,
+    ...(skipCorrupt ? { corrupt: [] } : {}),
+  });
   if (!isValidNotesHome(home)) {
     return fail(400, 'path-invalid', '数据根必须是绝对路径，不能是相对路径或空白——否则笔记会落到当前工作目录下。');
   }
   const root = notesRoot(home);
   if (!fs.existsSync(root)) {
     // 还没初始化：视作空数据域（**不建目录、不写格式标记**）。
-    return ok({
-      storeId: storeIdOf(root), schemaVersion: CURRENT_FORMAT_VERSION, requiresUpgrade: false,
-      resources: {}, resourceVersions: {}, layout: null, layoutVersion: null,
-    });
+    return ok(emptySnapshot());
   }
   try {
     assertSafePath(root, 'dir', root);
     const marker = readFormatMarker(root);
     if (marker.state === 'missing') {
-      if (rootIsPristine(root)) return ok({
-        storeId: storeIdOf(root), schemaVersion: CURRENT_FORMAT_VERSION, requiresUpgrade: false,
-        resources: {}, resourceVersions: {}, layout: null, layoutVersion: null,
-      });
+      if (rootIsPristine(root)) return ok(emptySnapshot());
       return fail(503, 'file-shape-unknown', '笔记数据域缺少 _format.json，无法确认格式，拒绝读取。');
     }
     if (marker.state === 'broken') {
@@ -833,6 +945,7 @@ export function readNotesStore({ home }: { home: string }): NotesStoreResult<Not
     const markerVersion: 1 | 2 = marker.version;
     const resources: Record<string, NotesResourceRecord> = {};
     const resourceVersions: Record<string, string | null> = {};
+    const skipped: { id: string; kind: 'md' | 'json'; bytes: Buffer | null }[] = [];
     const files = listResourceFiles(root);
     if (files.length > MAX_RESOURCES) {
       return fail(503, 'file-shape-unknown', `数据域资源数 ${files.length} 超过 ${MAX_RESOURCES} 篇上限，拒绝读取以免误清。`);
@@ -844,12 +957,33 @@ export function readNotesStore({ home }: { home: string }): NotesStoreResult<Not
         return fail(503, 'file-shape-unknown', `资源 ${item.id} 同时存在 .md 与 .json 两份物理文件，数据域已损坏。`);
       }
       seenIds.add(item.id);
-      const raw = loadResourceRaw(root, item.id);
+      let raw: ResourceRaw | null;
+      try {
+        raw = loadResourceRaw(root, item.id);
+      } catch (error) {
+        // 只有显式 skip 才把「单个资源文件的形状问题」降级；EACCES/symlink/路径问题
+        // 没有 file-shape-unknown 码，仍然整库失败。
+        if (skipCorrupt && (error as { code?: string }).code === 'file-shape-unknown') {
+          skipped.push({ id: item.id, kind: item.kind, bytes: null });
+          continue;
+        }
+        throw error;
+      }
       if (!raw) throw shapeError('读取期间资源被移除，请重新加载。');
       const bytes = raw.bytes;
       totalBytes += bytes.byteLength;
+      // 48 MiB 是整库读取预算，不能当成「某一个资源坏了」而跳过。
       if (totalBytes > MAX_TOTAL_RESOURCE_BYTES) throw shapeError('笔记资源实际文件总量超过 48 MiB 上限。');
-      const record = normalizeLoadedRecord(item.id, bytes, item.kind);
+      let record: NotesResourceRecord;
+      try {
+        record = normalizeLoadedRecord(item.id, bytes, item.kind);
+      } catch (error) {
+        if (skipCorrupt && (error as { code?: string }).code === 'file-shape-unknown') {
+          skipped.push({ id: item.id, kind: item.kind, bytes });
+          continue;
+        }
+        throw error;
+      }
       // 版本 = 原始字节的 SHA256（绝不 decode→re-encode）。
       resourceVersions[item.id] = sha256Of(bytes);
       resources[item.id] = record;
@@ -870,11 +1004,15 @@ export function readNotesStore({ home }: { home: string }): NotesStoreResult<Not
       // 否则前端会把 null 当首次库提交 defaults，把原坏 layout 覆盖掉。
       layout = parseLayoutStrict(bytes);
     }
+    const notebookNames = notebookNamesByContentId(layout);
     return ok({
       storeId: storeIdOf(root),
       schemaVersion: markerVersion,
       requiresUpgrade: markerVersion === LEGACY_FORMAT_VERSION,
       resources, resourceVersions, layout, layoutVersion,
+      ...(skipCorrupt ? {
+        corrupt: skipped.map(item => corruptResourceEntry(item.id, item.kind, item.bytes, notebookNames.get(item.id) ?? null)),
+      } : {}),
     });
   } catch (error) {
     return mapStoreError(error, true);
