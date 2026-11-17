@@ -1,0 +1,133 @@
+@charset "UTF-8";
+/* ═══════════════════════════════════════════════════════════════════════════
+   UI v5：侧栏开合动画的「自足」重写 + 折叠卡片 / 链接文本节点。
+
+   导入：ui-v4.css 之后（最后一份）。前缀固定 `.app-shell.v5`；.v5 由宿主加在根上，
+   与 v2/v3/v4 并列。不依赖任何 v4 类，变量只用本文件的 --v5-* 与主题色 --surface/--border。
+
+   为什么在真机里可能「完全不动」（按宿主契约静态推演，未做浏览器实测）：
+   ① 编译：native bridge 把每份样式表编译成 CSSModule，React commit 阶段按序 insertRule；
+      默认（无 specificity 选项）的插入落点在同序规则之后 → ui-v5 最后 import 即赢次序。
+      一旦改走 constructable/链接样式表，次序不再可靠 → 关键声明改为不靠次序取胜：
+      `.app-shell.v5 .left-panel.is-collapsed > .panel-inner` = (0,4,0)，
+      高于 v4/v3/v2 的 `.side-panel.is-collapsed .panel-inner` = (0,3,0)。
+   ② ui-v4 的 --v4-dur/--v4-ease/--v4-rail 只在 [data-theme="light"] 定义：首帧即暗色时
+      var() 无值 → transition 整条无效、左栏平移量无效（v5 实例不再定义 v4 变量）。
+      → v5 时长/曲线挂 `.app-shell.v5` 本身，与主题无关；每处时间函数再带具体兜底。
+   ③ v4 用 flex-basis:auto!important 抵消 v3 的 flex-basis:0!important，收起时布局宽度
+      改由容器决定，与宿主行内 width 脱节 → 同一样式表里同权重（两个 !important）、
+      只能靠次序，次序一变就回到 flex-basis:0。
+      → v5 回到宿主行内宽度驱动：flex 基准就是 width，不用 !important，不参与次序之争。
+   ④ 内层宽度锁在宿主写在 aside 上的数字（--v5-keep-width 由本文件按 --v2-*-width 定向），
+      外层裁切不改变内层排版；内容平移滑出，而不是被压得重排。
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. 动画原语：与主题无关 ───────────────────────────────────────── */
+.app-shell.v5 {
+  --v5-dur: 200ms;
+  --v5-rail-width: 32px;
+  --v5-ease: cubic-bezier(.2, .7, .3, 1);
+  /* 过渡时长倍率；减少动效时归零。不写 0s：过渡表里总有 time 项，不存在「无匹配属性」。 */
+  --v5-motion: 1;
+}
+.app-shell.v5 .side-panel {
+  position: relative; display: flex; flex: 0 0 auto; flex-direction: column;
+  min-width: 0; min-height: 0; overflow: hidden; background: var(--surface); visibility: visible;
+  /* width 与 visibility 分开计时：宽度先动，visibility 等宽度走完才切（否则收起瞬间就消失）。 */
+  transition-property: width, visibility;
+  transition-duration: calc(var(--v5-dur, 200ms) * var(--v5-motion)), 0s;
+  transition-delay: 0s, 0s;
+  transition-timing-function: var(--v5-ease, ease), linear;
+}
+.app-shell.v5 .side-panel > .panel-inner {
+  height: 100%; min-width: 0; flex: 0 0 auto; transform: translateX(0);
+  /* 宽度轴与位移轴同一曲线：宽度到 0 的同一瞬间内容恰好滑出栏位 → 是「滑出去」不是「被切掉」 */
+  transition-property: transform;
+  transition-duration: calc(var(--v5-dur, 200ms) * var(--v5-motion));
+  transition-timing-function: var(--v5-ease, ease);
+}
+/* 内层定宽：始终按「展开宽度」排版，外层裁切 → 内容滑出去而不是被压得重排。
+   宽度由 App 写在根上的 --v5-keep-* 提供（避开 attr() 的浏览器支持差异）。 */
+.app-shell.v5 .left-panel > .panel-inner { width: var(--v5-keep-left, 272px) !important; }
+.app-shell.v5 .right-panel > .panel-inner { width: var(--v5-keep-right, 344px) !important; }
+/* 收起：宽度 → 0（宿主行内已是 0，此处兜底且不必 !important：与 v3 同为 (0,2,0)，本文件在后）。 */
+.app-shell.v5 .side-panel.is-collapsed {
+  width: 0; border-width: 0; box-shadow: none; visibility: hidden;
+  transition-delay: 0s, calc(var(--v5-dur, 200ms) * var(--v5-motion));
+}
+.app-shell.v5 .left-panel.is-collapsed > .panel-inner { transform: translateX(-100%); }
+.app-shell.v5 .right-panel.is-collapsed > .panel-inner { transform: translateX(100%); }
+
+/* ── 2. 左栏窄轨：常驻挂载，0 ↔ 32px；收起后它就是恢复入口 ─────────── */
+.app-shell.v5 .panel-rail {
+  position: relative; z-index: 12; display: flex; width: var(--v5-rail-width); min-width: 0;
+  flex: 0 0 var(--v5-rail-width); align-items: flex-start; justify-content: center;
+  padding-top: 8px; overflow: hidden; visibility: visible;
+  transition-property: width, flex-basis, padding-top, visibility;
+  transition-duration: calc(var(--v5-dur, 200ms) * var(--v5-motion)), calc(var(--v5-dur, 200ms) * var(--v5-motion)), calc(var(--v5-dur, 200ms) * var(--v5-motion)), 0s;
+  transition-timing-function: var(--v5-ease, ease), var(--v5-ease, ease), var(--v5-ease, ease), linear;
+  transition-delay: 0s, 0s, 0s, 0s;
+}
+.app-shell.v5 .panel-rail.is-hidden {
+  width: 0; flex-basis: 0; padding-top: 0; visibility: hidden;
+  transition-delay: 0s, 0s, 0s, calc(var(--v5-dur, 200ms) * var(--v5-motion)); /* 左栏滑完才藏 */
+}
+.app-shell.v5 .panel-rail.is-hidden > * { pointer-events: none; }
+/* 满宽时窄轨不占位（theme-v3 ≥700px 与 v4 原本就用 display 切换）：布局让位，非开合动画 */
+@media (min-width: 700px) {
+  .app-shell.v5 .left-panel:not(.is-collapsed) + .panel-rail--left { display: none; }
+}
+
+/* ── 3. 拖宽闩锁 / 断点切换：失效，不参与动画 ──────────────────────── */
+.app-shell.v5[data-resizing="true"] :is(.side-panel, .panel-inner, .panel-rail),
+.app-shell.v5[data-breakpoint-changing="true"] :is(.side-panel, .panel-inner, .panel-rail) {
+  transition: none !important; visibility: visible;
+}
+
+/* ── 4. 浮层断点：≤1099 右栏浮层；≤699 左栏浮层，窄屏恢复入口留在顶栏 ── */
+@media (max-width: 1099px) {
+  .app-shell.v5 .right-panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 25; box-shadow: -8px 0 24px rgb(0 0 0 / 12%); }
+  .app-shell.v5 .right-panel.is-collapsed { box-shadow: none; }
+  .app-shell.v5 .panel-rail--right { position: absolute; top: 0; right: 0; bottom: 0; z-index: 26; }
+}
+@media (max-width: 699px) {
+  /* 覆盖 v4 的 min(320px, 100vw-…) 上限：按 app 容器而非视口，给恢复入口留位 */
+  .app-shell.v5 .left-panel { position: absolute; top: 0; bottom: 0; left: 0; z-index: 26; max-width: calc(100% - var(--v5-rail-width) - 8px); box-shadow: 8px 0 24px rgb(0 0 0 / 12%); }
+  .app-shell.v5 .left-panel.is-collapsed { box-shadow: none; }
+  .app-shell.v5 .panel-rail--left { position: absolute; top: 0; bottom: 0; left: 0; z-index: 27; padding-top: 6px; }
+}
+
+/* ── 5. 折叠卡片：48px，只留页头（行内调节手柄在卡片外，无需改节点尺寸） ── */
+.app-shell.v5 .knowledge-card.is-collapsed {
+  min-height: 48px; height: 48px;
+  transition: height var(--v5-dur, 200ms) var(--v5-ease, ease), box-shadow .15s ease, border-color .15s ease;
+}
+.app-shell.v5 .knowledge-card.is-collapsed > .card-drag-handle { height: 100%; min-height: 0; border-bottom: 0; }
+.app-shell.v5 .knowledge-card.is-collapsed > .card-body { display: none; }
+/* 内联用 flex + min-height 0：行内 height:100% 的卡片自然压到页头高度。
+   标签外框随卡片内容高度走；若行内写死的像素高度也要 48px，只能由宿主清掉（见交付说明）。 */
+.app-shell.v5 .react-flow__node:has(> .knowledge-card.is-collapsed) {
+  display: flex; flex-direction: column; min-height: 0;
+  overflow: hidden !important;      /* 旧正文、媒体外框一律裁掉，不留透明溢出 */
+  /* React Flow 会在节点上写行内 pointer-events:all；这里必须 !important 才压得住。
+     压掉外框后，只有真实可见的 48px 页头还能接收指针。 */
+  pointer-events: none !important;
+}
+/* 只有真实可见的 48px 页头还能抓取；事件仍冒泡给节点，所以拖动、点选照常。 */
+.app-shell.v5 .react-flow__node:has(> .knowledge-card.is-collapsed) > .knowledge-card > .card-drag-handle {
+  pointer-events: auto;
+}
+
+/* ── 6. 链接文本节点：无 .card-header，纯文本可点（不改通用 TextNode 样式） ── */
+.app-shell.v5 .text-node.is-resource-link { cursor: pointer; }
+.app-shell.v5 .text-node.is-resource-link .text-node-content { cursor: pointer; }
+.app-shell.v5 .text-node.is-resource-link :is(a[href]) { color: var(--accent, inherit); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.app-shell.v5 .text-node.is-resource-link .text-node-content :is(a, b, strong, span) { pointer-events: none; }
+.app-shell.v5 :is(.knowledge-card .card-drag-handle, .knowledge-card .card-body) :is(a[href]) {
+  text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere;
+}
+
+/* ── 7. 真减动效：关位移，直接换终态，不强行播动画 ─────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .app-shell.v5 { --v5-motion: 0; }
+}

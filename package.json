@@ -2,6 +2,7 @@
   "name": "@yunmiao/studymate",
   "version": "2.0.4",
   "description": "StudyMate learning skills and lesson engine for DeepSeek Harness, Google Antigravity, Codex and ChatGPT Work.",
+  "icon": "docs/images/icon.png",
   "type": "module",
   "bin": {
     "studymate": "bin/studymate.mjs"
@@ -10,7 +11,8 @@
     ".": "./bin/dsh-plugin.mjs",
     "./learning-preset": "./bin/learning-preset.mjs",
     "./qa-preset": "./bin/qa-preset.mjs",
-    "./client": "./lib/client.js",
+    "./client": "./dist/client.js",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "dsh": {
@@ -32,9 +34,12 @@
   },
   "files": [
     "cordis.patch.yml",
+    "dist/client.js",
+    "dist/client-notices.txt",
     "lib/**",
     "bin/*.mjs",
     "bin/*.ts",
+    "locale/*.json",
     "openai/studymate/.codex-plugin/plugin.json",
     "openai/studymate/scripts/*.mjs",
     "openai/studymate/skills/learning-system/references/*.md",
@@ -54,13 +59,19 @@
   "scripts": {
     "build:plugin": "node bin/studymate.mjs build-plugin",
     "build:antigravity": "node bin/studymate.mjs build-antigravity",
-    "test": "npm run test:types && npm run test:installer && npm run test:openai && npm run test:antigravity && node scripts/release/checks.mjs && npm run test:static",
+    "build:client": "node scripts/build-client.mjs",
+    "build:notes:preview": "vite build --config prototypes/unbounded-notes/vite.config.js",
+    "dev:notes": "vite --config prototypes/unbounded-notes/vite.config.js --host 127.0.0.1 --port 4178 --strictPort",
+    "preview:notes": "vite preview --config prototypes/unbounded-notes/vite.config.js --host 127.0.0.1 --port 4178 --strictPort",
+    "test:notes:browser": "npm run build:notes:preview && node scripts/tests/browser/notes_test.mjs && node scripts/tests/browser/notes_brand_test.mjs && node scripts/tests/browser/notes_persistence_test.mjs && node scripts/tests/browser/notes_curriculum_test.mjs && node scripts/tests/browser/notes_live_editor_test.mjs && node scripts/tests/browser/notes_inline_editor_test.mjs",
+    "prepack": "npm run build:client",
+    "test": "npm run build:client && npm run test:types && npm run test:installer && npm run test:openai && npm run test:antigravity && node scripts/release/checks.mjs && npm run test:static",
     "test:types": "node scripts/release/typecheck.mjs",
     "test:openai": "node --test scripts/tests/test_openai_plugin.mjs",
     "test:antigravity": "node --test scripts/tests/test_antigravity_plugin.mjs",
     "test:installer": "node --test scripts/tests/test_installer.mjs scripts/tests/test_bundle.mjs scripts/tests/test_pack_json.mjs",
     "test:static": "node scripts/release/checks.mjs --static",
-    "test:browser": "node scripts/release/checks.mjs --browser",
+    "test:browser": "npm run build:notes:preview && node scripts/release/checks.mjs --browser",
     "guard:export": "node scripts/release/export_guard.mjs",
     "test:release": "node --test scripts/release/release.test.mjs",
     "test:dsh": "node --test scripts/tests/test_dsh_runtime.mjs",
@@ -94,8 +105,47 @@
     "registry": "https://registry.npmjs.org/",
     "access": "public"
   },
+  "overrides": {
+    "katex": "$katex"
+  },
   "devDependencies": {
+    "@deepseek-ai/schemastery": "~3.19.0",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-css": "6.3.1",
+    "@codemirror/lang-html": "6.4.12",
+    "@codemirror/lang-javascript": "6.2.5",
+    "@codemirror/lang-json": "6.0.2",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/lang-python": "6.2.1",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "@lezer/highlight": "1.2.5",
+    "@milkdown/crepe": "7.23.0",
     "@types/node": "^24.19.1",
-    "typescript": "^7.0.2"
+    "@xyflow/react": "12.12.1",
+    "esbuild": "0.28.2",
+    "katex": "0.19.1",
+    "lucide-react": "1.72.0",
+    "playwright": "1.58.0",
+    "postcss": "8.5.32",
+    "postcss-selector-parser": "7.2.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-markdown": "10.1.0",
+    "rehype-highlight": "7.0.2",
+    "rehype-katex": "7.0.1",
+    "remark-gfm": "4.0.1",
+    "remark-math": "6.0.0",
+    "typescript": "^7.0.2",
+    "vite": "8.3.8"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "~3.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
   }
 }

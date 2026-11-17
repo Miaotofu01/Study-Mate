@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>静态页面示例：检索练习</title>
+<style>
+  :root { color-scheme: light dark; --ink: #22302c; --muted: #5e6f69; --line: #d9e2de; --paper: #fbfcfa; --accent: #1c7164; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e8eeeb; --muted: #a8b6b1; --line: #3a4742; --paper: #191d1c; --accent: #7cc0ae; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px; background: var(--paper); color: var(--ink); font: 15px/1.7 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 8px; letter-spacing: -.01em; }
+  p.lead { color: var(--muted); margin: 0 0 24px; }
+  section { border-top: 1px solid var(--line); padding: 20px 0; }
+  h2 { font-size: 17px; margin: 0 0 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  ol { padding-left: 20px; }
+  figure { margin: 18px 0 0; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  figcaption { color: var(--muted); font-size: 13px; }
+  code { background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 1px 5px; border-radius: 4px; }
+  .note { border-left: 3px solid var(--accent); padding: 2px 0 2px 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>检索练习：先想，再看</h1>
+  <p class="lead">这是一个安全的静态页面示例：只有 HTML、CSS 和内联 SVG，没有脚本、没有外部资源。</p>
+
+  <section>
+    <h2>为什么不是再读一遍</h2>
+    <table>
+      <thead><tr><th>做法</th><th>得到什么</th></tr></thead>
+      <tbody>
+        <tr><td>再读一遍</td><td>熟悉感</td></tr>
+        <tr><td>合上材料回忆</td><td>暴露缺口</td></tr>
+        <tr><td>用自己的话重讲</td><td>真正组织起线索</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>一次练习的顺序</h2>
+    <ol>
+      <li>合上材料，用三句话写下记得的内容。</li>
+      <li>回到材料，用另一种颜色补上遗漏。</li>
+      <li>把遗漏处改成一个问题，留到下次先答。</li>
+    </ol>
+    <p class="note">判断标准不是“看着眼熟”，而是<code>能否不看材料讲清楚</code>。</p>
+    <figure>
+      <svg width="168" height="96" viewBox="0 0 168 96" role="img" aria-label="从感觉到理解的示意图">
+        <rect x="1" y="1" width="166" height="94" rx="10" fill="none" stroke="currentColor" stroke-opacity=".25"></rect>
+        <circle cx="42" cy="48" r="20" fill="currentColor" fill-opacity=".14" stroke="currentColor" stroke-opacity=".5"></circle>
+        <circle cx="126" cy="48" r="20" fill="currentColor" fill-opacity=".14" stroke="currentColor" stroke-opacity=".5"></circle>
+        <path d="M64 48 H104" stroke="currentColor" stroke-opacity=".55" stroke-width="2" stroke-dasharray="5 4"></path>
+        <path d="M98 42 L106 48 L98 54" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="2"></path>
+        <text x="42" y="53" font-size="13" text-anchor="middle" fill="currentColor">熟悉</text>
+        <text x="126" y="53" font-size="13" text-anchor="middle" fill="currentColor">理解</text>
+      </svg>
+      <figcaption>把“熟悉”变成“能解释”，需要一次主动提取。</figcaption>
+    </figure>
+  </section>
+</main>
+</body>
+</html>
