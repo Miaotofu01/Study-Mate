@@ -119,7 +119,6 @@ const DOMAIN_RULES = {
 const FRONTEND_PACKAGES = new Set([
   'react', 'react-dom',
   '@xyflow/react',
-  '@milkdown/crepe',
   '@codemirror/state', '@codemirror/view', '@codemirror/commands', '@codemirror/language',
   '@codemirror/lang-css', '@codemirror/lang-html', '@codemirror/lang-javascript',
   '@codemirror/lang-json', '@codemirror/lang-markdown', '@codemirror/lang-python',
