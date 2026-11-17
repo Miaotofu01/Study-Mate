@@ -186,8 +186,8 @@ export async function handleNotes(request: Request, home: string): Promise<Respo
     }
     return routeError(400, 'body-invalid', 'operation 只支持 resource / layout / upgrade。');
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return routeError(500, 'internal', message);
+    console.warn('StudyMate：笔记路由发生未预期错误。', error);
+    return routeError(500, 'internal', '笔记请求未能完成，请保留本地草稿并稍后重试。');
   }
 }
 

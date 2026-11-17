@@ -28,8 +28,8 @@
    明确报错，不猜元信息——猜错比报错难查。
 
    几条硬口径（都是踩过的坑，别回退）：
-     · **读不创建**：GET 不建目录、不写格式标记；已存在但缺 `_format.json` 的目录一律
-       拒绝认领（否则会把用户/别的程序放的目录静默变成笔记数据域）。
+     · **读不创建**：GET 不建目录、不写格式标记；缺 marker 时只认空域、确切锁产物与
+       本程序保留名的普通单链接 temp。其它陌生内容拒绝认领，清理只能在 OS 写锁内进行。
      · **坏即闭锁**：marker/layout/资源任一损坏或不认识 → 整个读取失败，绝不把损坏的
        layout 当成 `null` 让前端随后用空布局覆盖回去。
      · **版本按原始字节**：SHA256 一律对**文件原始 bytes** 计算，绝不 decode→re-encode
@@ -45,7 +45,8 @@
    `finally` 里 COMMIT/ROLLBACK/close，进程崩溃时 OS 自动放掉 SQLite 锁。
 
    原子发布：同目录随机 temp 文件 `open('wx')` → `writeFileSync` → `fsync` → `close` →
-   **核对目标期望版本** → `rename`。失败时旧目标保留、temp 被清理。
+   **核对目标期望版本** → `rename` → 目录 fsync（Windows 不支持时明确降级）。
+   rename 前失败保留旧目标、清 temp；rename 后同步失败则目标可能已更新，必须重新读取。
    ───────────────────────────────────────────────────────────────────────── */
 
 import fs from 'node:fs';
@@ -141,12 +142,16 @@ const RESOURCE_FILE_RE = /^r-([a-z0-9-]{1,96})\.(md|json)$/;
 
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
 
+function shapeError(message: string): Error {
+  return Object.assign(new Error(message), { code: 'file-shape-unknown' });
+}
+
 /** 严格 UTF-8 解码：非法字节序列直接报错，绝不静默变 U+FFFD。 */
 function decodeUtf8Strict(buffer: Buffer, what = '文件'): string {
   try {
     return UTF8_DECODER.decode(buffer);
   } catch {
-    throw new Error(`${what} 不是合法的 UTF-8 文本，拒绝静默替换字符。`);
+    throw shapeError(`${what} 不是合法的 UTF-8 文本，拒绝静默替换字符。`);
   }
 }
 
@@ -185,7 +190,7 @@ function assertSafePath(target: string, mode: 'dir' | 'file' | 'any', root: stri
       stat = fs.lstatSync(node);
     } catch (error) {
       // 允许「还不存在」的最终一级（写入前的 temp 文件），其余必须存在。
-      if (node === current && mode !== 'dir') continue;
+      if (node === current && mode !== 'dir' && (error as NodeJS.ErrnoException).code === 'ENOENT') continue;
       throw Object.assign(new Error(`路径不存在或不可访问：${path.basename(node)}`), { code: 'path-invalid', cause: error });
     }
     if (stat.isSymbolicLink()) {
@@ -219,8 +224,9 @@ function assertSafeOptionalFile(target: string, what: string): void {
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(target);
-  } catch {
-    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
   }
   if (stat.isSymbolicLink()) {
     throw Object.assign(new Error(`${what} 是符号链接，拒绝使用。`), { code: 'path-invalid' });
@@ -256,7 +262,7 @@ function readFormatMarker(root: string): MarkerState {
   const formatFile = path.join(root, FORMAT_FILE);
   if (!fs.existsSync(formatFile)) return { state: 'missing' };
   assertSafePath(formatFile, 'file', root);
-  const raw = fs.readFileSync(formatFile, 'utf8');
+  const raw = decodeUtf8Strict(fs.readFileSync(formatFile), '_format.json');
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -279,24 +285,42 @@ function readFormatMarker(root: string): MarkerState {
  * 根目录是否「除了空的 resources/ 与锁文件之外什么都没有」。
  * 用于判断「这是不是一份还没初始化的数据域」。
  */
+// 与 atomicWrite 的生成器严格同名；不是任意 .tmp-*，也不跟随目录/链接。
+const TEMP_FILE_RE = /^\.tmp-[0-9a-f]{16}$/;
+function isOwnedTemp(dir: string, name: string): boolean {
+  if (!TEMP_FILE_RE.test(name)) return false;
+  const stat = fs.lstatSync(path.join(dir, name));
+  return stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1;
+}
+
 function rootIsPristine(root: string): boolean {
   for (const entry of fs.readdirSync(root)) {
-    if (isLockArtifact(entry)) continue;
+    if (isLockArtifact(entry)) {
+      assertSafeOptionalFile(path.join(root, entry), '笔记锁文件');
+      continue;
+    }
+    if (isOwnedTemp(root, entry)) continue;
     if (entry === RESOURCES_DIR) {
       const dir = path.join(root, entry);
-      let stat: fs.Stats;
-      try {
-        stat = fs.lstatSync(dir);
-      } catch {
-        continue;
-      }
+      const stat = fs.lstatSync(dir);
       if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
-      if (fs.readdirSync(dir).length > 0) return false;
+      if (fs.readdirSync(dir).some(name => !isOwnedTemp(dir, name))) return false;
       continue;
     }
     return false;
   }
   return true;
+}
+
+/** 只在 OS 写锁内清理保留名字的普通单链接文件；读路径从不清理。 */
+function cleanOrphanTemps(root: string): void {
+  for (const dir of [root, resourcesDir(root)]) {
+    if (!fs.existsSync(dir)) continue;
+    assertSafePath(dir, 'dir', root);
+    for (const name of fs.readdirSync(dir)) {
+      if (isOwnedTemp(dir, name)) fs.unlinkSync(path.join(dir, name));
+    }
+  }
 }
 
 /**
@@ -350,6 +374,29 @@ function ensureStoreForWrite(root: string): NotesStoreResult<string> {
 
 /* ── 原子文件发布：temp → fsync → 核版本 → rename ────────────────────────── */
 
+/** POSIX 发布后同步目录项。Windows 不支持目录句柄 fsync 时明确降级，
+ * 只承诺进程崩溃原子性，不冒充掉电持久性；其他 IO 错误仍报保存失败。 */
+let warnedDirectorySync = false;
+function syncDirectory(dir: string): void {
+  let handle: number | undefined;
+  try {
+    handle = fs.openSync(dir, 'r');
+    fs.fsyncSync(handle);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (process.platform === 'win32' && ['EPERM', 'EACCES', 'EISDIR', 'EINVAL', 'ENOTSUP', 'EBADF'].includes(code ?? '')) {
+      if (!warnedDirectorySync) {
+        warnedDirectorySync = true;
+        console.warn('StudyMate：当前 Windows 文件系统不支持目录 fsync；笔记保存仅保证进程崩溃原子性，不保证掉电后的目录项持久性。');
+      }
+      return;
+    }
+    throw error;
+  } finally {
+    if (handle !== undefined) fs.closeSync(handle);
+  }
+}
+
 function atomicWrite(target: string, buffer: Buffer, root: string): void {
   const dir = path.dirname(target);
   assertSafePath(dir, 'dir', root);
@@ -364,6 +411,7 @@ function atomicWrite(target: string, buffer: Buffer, root: string): void {
     }
     assertSafePath(target, 'any', root);
     fs.renameSync(temp, target);
+    syncDirectory(dir);
   } catch (error) {
     try {
       if (fs.existsSync(temp)) fs.unlinkSync(temp);
@@ -411,6 +459,7 @@ function atomicWriteChecked(
     }
     assertSafePath(target, 'any', root);
     fs.renameSync(temp, target);
+    syncDirectory(dir);
     return { ok: true };
   } catch (error) {
     try {
@@ -450,25 +499,25 @@ function serializeNoteFile(resource: Record<string, unknown>): Buffer {
 export function parseNoteFile(text: string): { meta: Record<string, unknown>; markdown: string } {
   const first = readLine(text, 0);
   if (!first || first.line.trim() !== '---') {
-    throw new Error('笔记文件缺少元信息头（应以 "---" 开头）。');
+    throw shapeError('笔记文件缺少元信息头（应以 "---" 开头）。');
   }
   const second = readLine(text, first.next);
-  if (!second) throw new Error('笔记文件的元信息头不完整。');
+  if (!second) throw shapeError('笔记文件的元信息头不完整。');
   if (!second.line.startsWith(NOTE_HEADER_KEY)) {
-    throw new Error('笔记文件缺少 studymate_notes 元信息行。');
+    throw shapeError('笔记文件缺少 studymate_notes 元信息行。');
   }
   let meta: unknown;
   try {
     meta = JSON.parse(second.line.slice(NOTE_HEADER_KEY.length));
   } catch {
-    throw new Error('笔记文件的元信息不是合法 JSON。');
+    throw shapeError('笔记文件的元信息不是合法 JSON。');
   }
   if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) {
-    throw new Error('笔记文件的元信息必须是 JSON 对象。');
+    throw shapeError('笔记文件的元信息必须是 JSON 对象。');
   }
   const third = readLine(text, second.next);
   if (!third || third.line.trim() !== '---') {
-    throw new Error('笔记文件的元信息头没有正常收尾（第三行应为 "---"）。');
+    throw shapeError('笔记文件的元信息头没有正常收尾（第三行应为 "---"）。');
   }
   return { meta: meta as Record<string, unknown>, markdown: text.slice(third.next) };
 }
@@ -493,7 +542,7 @@ function openLockDb(root: string): LockDb {
   for (const suffix of ['', '-journal', '-wal', '-shm']) {
     assertSafeOptionalFile(`${dbFile}${suffix}`, `笔记锁文件${suffix === '' ? '' : `（${suffix}）`}`);
   }
-  // Node 内置 sqlite（node:sqlite）：engines 允许 ^22.19 / >=24，两者共有 API；
+  // Node 内置 sqlite（node:sqlite），版本范围沿用根包 engines（>=24）；
   // busy_timeout 用 PRAGMA 设置（构造函数 timeout 只是附加保险）。
   const db = new DatabaseSync(dbFile, { timeout: LOCK_BUSY_MS });
   try {
@@ -525,8 +574,9 @@ function prepareStoreRoot(root: string): NotesStoreResult<string> {
   if (!fs.existsSync(root)) {
     try {
       fs.mkdirSync(root, { recursive: true });
+      syncDirectory(path.dirname(root));
     } catch (error) {
-      return fail(500, 'write-failed', error instanceof Error ? error.message : String(error));
+      return mapStoreError(error);
     }
   }
   try {
@@ -550,15 +600,19 @@ function prepareStoreRoot(root: string): NotesStoreResult<string> {
  *  - `file-shape-unknown` → 503（数据域内容损坏，如同 id 双物理文件）
  *  - 其余 → 500 `write-failed`（不新增错误码；`write-verification-failed` 不在词表里）。
  */
-function mapStoreError(error: unknown): NotesStoreFail {
+function mapStoreError(error: unknown, reading = false): NotesStoreFail {
   const message = error instanceof Error ? error.message : String(error);
   const code = error instanceof Error ? (error as { code?: string }).code : undefined;
   if (code === 'path-invalid') return fail(400, 'path-invalid', message);
   if (code === 'file-shape-unknown') return fail(503, 'file-shape-unknown', message);
+  // 原始 IO/SQLite 细节只在服务端诊断中出现，不能把绝对路径装进 HTTP 回包。
+  console.warn('StudyMate：笔记数据域操作失败。', error);
   if (/SQLITE_BUSY|database is locked|busy/i.test(message)) {
     return fail(503, 'notes-unavailable', '笔记数据域正被其他进程写入，稍后重试。');
   }
-  return fail(500, 'write-failed', message);
+  return reading
+    ? fail(503, 'notes-unavailable', '笔记数据域暂时无法读取，请检查访问权限或稍后重试。')
+    : fail(500, 'write-failed', '笔记保存失败，本地草稿仍可保留；请检查磁盘与访问权限后重试。');
 }
 
 /**
@@ -583,6 +637,10 @@ function withWriteLock<T>(root: string, critical: () => T | NotesStoreResult<T>)
     // 只为确认写锁真的持有（若 BEGIN IMMEDIATE 本身没落锁，这里会落）。
     lock.run('BEGIN IMMEDIATE');
     lock.run('UPDATE lock_anchor SET held = held + 1 WHERE id = 1');
+    // 已有合法库或可认领的首次空库才清理；格式 1 只读时不动任何内容。
+    const marker = readFormatMarker(root);
+    if ((marker.state === 'ok' && marker.version === CURRENT_FORMAT_VERSION)
+      || (marker.state === 'missing' && rootIsPristine(root))) cleanOrphanTemps(root);
     let value: T | NotesStoreResult<T>;
     try {
       value = critical();
@@ -619,17 +677,7 @@ function withWriteLock<T>(root: string, critical: () => T | NotesStoreResult<T>)
         // 已经是失败路径，不再处理关闭错误。
       }
     }
-    const message = error instanceof Error ? error.message : String(error);
-    if (error instanceof Error && (error as { code?: string }).code === 'path-invalid') {
-      return fail(400, 'path-invalid', message);
-    }
-    if (error instanceof Error && (error as { code?: string }).code === 'file-shape-unknown') {
-      return fail(503, 'file-shape-unknown', message);
-    }
-    if (/SQLITE_BUSY|database is locked|busy/i.test(message)) {
-      return fail(503, 'notes-unavailable', '笔记数据域正被其他进程写入，稍后重试。');
-    }
-    return fail(500, 'write-failed', message);
+    return mapStoreError(error);
   }
 }
 
@@ -704,31 +752,31 @@ function parseResourceRecord(id: string, bytes: Buffer, kind: 'md' | 'json'): No
   const text = decodeUtf8Strict(bytes, `资源 ${id}`);
   if (kind === 'md') {
     const { meta, markdown } = parseNoteFile(text);
-    return { ...(meta as Record<string, unknown>), id, markdown } as unknown as NotesResourceRecord;
+    return { ...(meta as Record<string, unknown>), markdown } as unknown as NotesResourceRecord;
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error(`资源 ${id} 的 JSON 文件已损坏。`);
+    throw shapeError(`资源 ${id} 的 JSON 文件已损坏。`);
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`资源 ${id} 的 JSON 文件必须是对象。`);
+    throw shapeError(`资源 ${id} 的 JSON 文件必须是对象。`);
   }
-  return { ...(parsed as Record<string, unknown>), id } as NotesResourceRecord;
+  return { ...(parsed as Record<string, unknown>) } as NotesResourceRecord;
 }
 
 /** 读侧 DTO 也要过一遍契约校验：不认识的形状不许悄悄进客户端。 */
 function normalizeLoadedRecord(id: string, bytes: Buffer, kind: 'md' | 'json'): NotesResourceRecord {
   const raw = parseResourceRecord(id, bytes, kind);
   const check = checkResource(raw);
-  if (!check.ok) throw new Error(`资源 ${id} 的内容非法：${check.message}`);
+  if (!check.ok) throw shapeError(`资源 ${id} 的内容非法：${check.message}`);
   const value = check.value;
   // 文件名 id 与元信息 id 必须一致，不能靠覆盖 id 来蒙混。
-  if (value.id !== id) throw new Error(`资源 ${id} 的元信息 id「${String(value.id)}」与文件名不一致，数据域已损坏。`);
+  if (value.id !== id) throw shapeError(`资源 ${id} 的元信息 id「${String(value.id)}」与文件名不一致，数据域已损坏。`);
   // 物理文件扩展名必须与内容自洽（自有 note → .md；外部文件引用/其它类型 → .json）。
   if (physicalKindOf(value) !== kind) {
-    throw new Error(`资源 ${id} 的物理文件扩展名（.${kind}）与其类型/来源不匹配，数据域已损坏。`);
+    throw shapeError(`资源 ${id} 的物理文件扩展名（.${kind}）与其类型/来源不匹配，数据域已损坏。`);
   }
   return value as NotesResourceRecord;
 }
@@ -772,6 +820,10 @@ export function readNotesStore({ home }: { home: string }): NotesStoreResult<Not
     assertSafePath(root, 'dir', root);
     const marker = readFormatMarker(root);
     if (marker.state === 'missing') {
+      if (rootIsPristine(root)) return ok({
+        storeId: storeIdOf(root), schemaVersion: CURRENT_FORMAT_VERSION, requiresUpgrade: false,
+        resources: {}, resourceVersions: {}, layout: null, layoutVersion: null,
+      });
       return fail(503, 'file-shape-unknown', '笔记数据域缺少 _format.json，无法确认格式，拒绝读取。');
     }
     if (marker.state === 'broken') {
@@ -786,13 +838,17 @@ export function readNotesStore({ home }: { home: string }): NotesStoreResult<Not
       return fail(503, 'file-shape-unknown', `数据域资源数 ${files.length} 超过 ${MAX_RESOURCES} 篇上限，拒绝读取以免误清。`);
     }
     const seenIds = new Set<string>();
+    let totalBytes = 0;
     for (const item of files) {
       if (seenIds.has(item.id)) {
         return fail(503, 'file-shape-unknown', `资源 ${item.id} 同时存在 .md 与 .json 两份物理文件，数据域已损坏。`);
       }
       seenIds.add(item.id);
-      assertSafePath(item.file, 'file', root);
-      const bytes = fs.readFileSync(item.file);
+      const raw = loadResourceRaw(root, item.id);
+      if (!raw) throw shapeError('读取期间资源被移除，请重新加载。');
+      const bytes = raw.bytes;
+      totalBytes += bytes.byteLength;
+      if (totalBytes > MAX_TOTAL_RESOURCE_BYTES) throw shapeError('笔记资源实际文件总量超过 48 MiB 上限。');
       const record = normalizeLoadedRecord(item.id, bytes, item.kind);
       // 版本 = 原始字节的 SHA256（绝不 decode→re-encode）。
       resourceVersions[item.id] = sha256Of(bytes);
@@ -821,13 +877,7 @@ export function readNotesStore({ home }: { home: string }): NotesStoreResult<Not
       resources, resourceVersions, layout, layoutVersion,
     });
   } catch (error) {
-    if (error instanceof Error && (error as { code?: string }).code === 'path-invalid') {
-      return fail(400, 'path-invalid', error.message);
-    }
-    if (error instanceof Error && (error as { code?: string }).code === 'file-shape-unknown') {
-      return fail(503, 'file-shape-unknown', error.message);
-    }
-    return fail(503, 'notes-unavailable', error instanceof Error ? error.message : String(error));
+    return mapStoreError(error, true);
   }
 }
 
@@ -862,11 +912,8 @@ function scanResourceBudget(root: string): { totalBytes: number; count: number }
   let count = 0;
   for (const item of listResourceFiles(root)) {
     count += 1;
-    try {
-      totalBytes += fs.statSync(item.file).size;
-    } catch {
-      // 单个文件读不到不阻断整体检查。
-    }
+    assertSafePath(item.file, 'file', root);
+    totalBytes += fs.statSync(item.file).size;
   }
   return { totalBytes, count };
 }
@@ -918,7 +965,8 @@ export function writeNotesResource(input: WriteResourceInput): NotesStoreResult<
     const buffer = kind === 'md' ? serializeNoteFile(value) : Buffer.from(`${JSON.stringify(value)}\n`, 'utf8');
     const nextHash = sha256Of(buffer);
     if (currentHash === nextHash) {
-      // 同目标 bytes 幂等：不重复写盘。
+      // 同目标 bytes 幂等：不重复写盘，但补做前次 rename 后可能失败的目录同步。
+      syncDirectory(resourcesDir(root));
       return ok({ resource: normalizeLoadedRecord(id, buffer, kind), version: nextHash });
     }
     // 篇数预算（新增的第 251 篇拒绝）与总存储预算（约 48 MiB）都在锁内现算。
@@ -1017,6 +1065,7 @@ export function writeNotesLayout(input: WriteLayoutInput): NotesStoreResult<Writ
     const buffer = Buffer.from(`${JSON.stringify(check.value)}\n`, 'utf8');
     const nextHash = sha256Of(buffer);
     if (currentHash === nextHash) {
+      syncDirectory(root);
       return ok({ layout: check.value, version: nextHash });
     }
     let written: { ok: true } | { ok: false; currentVersion: string | null };
@@ -1108,6 +1157,7 @@ function writeBackupFile(root: string, target: string, bytes: Buffer, what: stri
   if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink > 1) {
     throw Object.assign(new Error(`${what} 不是普通单链接文件，拒绝备份。`), { code: 'path-invalid' });
   }
+  syncDirectory(path.dirname(target));
 }
 
 /** 失败清理：只删本轮建的备份目录里的名字，绝不跟随 symlink 去删域外文件。 */
@@ -1181,7 +1231,10 @@ export function upgradeNotesStore({ home }: { home: string }): NotesStoreResult<
       atomicWrite(path.join(root, FORMAT_FILE), Buffer.from(`${JSON.stringify(FORMAT_TOKEN)}\n`, 'utf8'), root);
       return ok(already);
     }
-    if (marker.version === CURRENT_FORMAT_VERSION) return ok(already);
+    if (marker.version === CURRENT_FORMAT_VERSION) {
+      syncDirectory(root);
+      return ok(already);
+    }
 
     // v1：先按现有契约完整载入一次；坏 layout / 坏资源 / 路径异常都不允许升级。
     const snapshot = readNotesStore({ home });
@@ -1194,6 +1247,7 @@ export function upgradeNotesStore({ home }: { home: string }): NotesStoreResult<
     }
     const backupDir = path.join(root, backupId);
     let backupCreated = false;
+    let publicationStarted = false;
     let result: NotesStoreResult<UpgradeStoreValue>;
     try {
       const formatBytes = readBackupSource(root, path.join(root, FORMAT_FILE), '格式标记');
@@ -1217,7 +1271,12 @@ export function upgradeNotesStore({ home }: { home: string }): NotesStoreResult<
         writeBackupFile(root, path.join(backupResourcesDir, item.name), item.bytes, `资源备份 ${item.name}`);
       }
 
+      syncDirectory(backupResourcesDir);
+      syncDirectory(backupDir);
+      syncDirectory(root);
       // 仅替换 marker；正文、布局与资源文件原始 bytes 一字不动。
+      // 从这里开始，失败也可能已发布新版 marker；不再删除完整备份。
+      publicationStarted = true;
       const written = atomicWriteChecked(
         path.join(root, FORMAT_FILE),
         Buffer.from(`${JSON.stringify(FORMAT_TOKEN)}\n`, 'utf8'),
@@ -1234,7 +1293,7 @@ export function upgradeNotesStore({ home }: { home: string }): NotesStoreResult<
     } catch (error) {
       result = mapStoreError(error);
     }
-    if (backupCreated && !result.ok) removeBackupDir(root, backupDir);
+    if (backupCreated && !result.ok && !publicationStarted) removeBackupDir(root, backupDir);
     return result;
   });
 }
