@@ -420,6 +420,48 @@ test('#213 草稿：只更新顶层草稿，不 push 历史、不动上次结果
   assert.equal(refreshed.attempts.questions[OPEN], undefined, '草稿不出现在作答历史里');
 });
 
+test('#213 草稿：键数到上限后按 时 驱逐最旧，本次写入那条一定留', async () => {
+  const { home, workspace, attemptsDir } = makeHome();
+  process.env.DSH_HOME = home;
+
+  // 先摆 200 条旧草稿（时从早到晚），再走真路由写第 201 条；驱逐方向才可判定。
+  fs.mkdirSync(attemptsDir, { recursive: true });
+  const file = path.join(attemptsDir, `0001-${NODE}.json`);
+  const seed = {
+    节点: NODE, 课件: `0001-${NODE}.md`, 最后写入: '2026-09-01T00:00:00.000Z', 题: {}, 草稿: {},
+  };
+  for (let i = 0; i < 200; i += 1) {
+    seed.草稿[`旧题#${i}`] = {
+      文本: `旧草稿 ${i}`,
+      时: new Date(Date.UTC(2026, 8, 1, 0, i)).toISOString(),
+    };
+  }
+  fs.writeFileSync(file, JSON.stringify(seed, null, 2) + '\n', 'utf8');
+
+  const { route } = connect();
+  const fresh = '新写的#1';
+  const response = await post(route, {
+    subject: SUBJECT,
+    node: NODE,
+    questions: { [fresh]: { 草稿: { 文本: '刚写的最新一条', 时: '' } } },
+    operationId: op('draft-prune'),
+    expectedVersion: attemptsVersion({ workspace, subject: SUBJECT, node: NODE }),
+  });
+  assert.equal(response.status, 200);
+  const receipt = await response.json();
+  const keys = Object.keys(receipt.attempts['草稿']);
+  assert.equal(keys.length, 200, '上限 200：写第 201 条时要驱逐而不是继续长');
+  assert.ok(keys.includes(fresh), '本次写入那条必须在');
+  assert.equal(keys.includes('旧题#0'), false, '按 时 最旧的那条被驱逐');
+  assert.ok(keys.includes('旧题#199'), '较新的旧草稿保留');
+  assert.equal(receipt.attempts['草稿'][fresh]['文本'], '刚写的最新一条');
+  assert.equal(receipt.attempts['题'][fresh], undefined, '驱逐只发生在草稿那一格，不建题条目');
+
+  const refreshed = readLibrary({ workspace }).subjects[0].nodes[0];
+  assert.equal(Object.keys(refreshed.attempts.drafts).length, 200, '刷新读回同一份');
+  assert.deepEqual(refreshed.attempts.drafts, receipt.attempts['草稿'], '读侧不再二次裁剪，盘上是什么就读什么');
+});
+
 test('#213 草稿：文本进入幂等指纹（同 operationId 换文本要被拒）', async () => {
   const { home, workspace } = makeHome();
   process.env.DSH_HOME = home;

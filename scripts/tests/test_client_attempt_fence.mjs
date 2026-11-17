@@ -520,3 +520,95 @@ test('#213：带进答疑的引用文本 = 题干 + 我的作答；lesson 锚点
   assert.match(I.answerQuoteFor({ q: '先预测' }, '预测验证', '4', 'l.md').text, /我的预测：4/);
   assert.match(I.answerQuoteFor({}, '开放题', 'x', 'l.md').text, /^（题干缺失）\n我的作答：x$/);
 });
+
+test('#213：8192 按码点判定——5000 个 emoji（UTF-16 长度 10000）原样返回', () => {
+  const emoji = '😀'.repeat(5000);
+  assert.equal(emoji.length, 10000, '按 UTF-16 码元数是 10000，会被旧判定误当成超长');
+  assert.equal(Array.from(emoji).length, 5000);
+  assert.equal(I.capAnswerText(emoji), emoji, '码点数没到上限：一个字都不动');
+  assert.equal(Array.from(I.capAnswerText('😀'.repeat(8193))).length, 8192, '8193 个码点截到 8192');
+});
+
+test('#213：空草稿是墓碑——读侧当没有，值与时刻都回落到历史快照', () => {
+  const payload = {
+    id: NODE,
+    attempts: {
+      present: true, version: 'v1', questions: {},
+      drafts: { '每层各管一段#1': { 文本: '', 时: '2026-09-24T14:00:00.000Z' } },
+    },
+  };
+  const drafts = I.draftsFromPayload(payload);
+  assert.equal(drafts.size, 0, '空文本不进 Map（墓碑不是一段文本）');
+  assert.equal(
+    I.draftsFromPayload({ id: NODE, attempts: { drafts: { '每层各管一段#1': { 文本: '   ', 时: '' } } } }).size,
+    0,
+    '只含空白也当没有',
+  );
+
+  const previous = new Map([[KEY1, {
+    at: '2026-09-24T13:05:00', chosen: null, correct: true, self: '答了一半',
+    text: '上次写下的快照', seq: 0, pending: 0,
+  }]]);
+  const rendered = I.Question({
+    item: { q: '为什么？', answer: '参考' }, index: 1, node: { id: NODE }, subject: { slug: 'demo' },
+    stateKey: KEY1, chosen: null, self: null, attempts: previous, drafts,
+    record: () => {}, onChoose: () => {}, onSelf: () => {},
+  });
+  // SubjectiveBody 是函数组件元素，findByProp 不展开；按它拿到的 lastAt 找到这一层再看 value。
+  const body = findByProp(rendered, 'lastAt', '2026-09-24T13:05:00')[0];
+  assert.ok(body, 'Question 把快照时刻传给了输入框');
+  assert.equal(body.props.value, '上次写下的快照', '空草稿不把输入框清空：回落到历史快照');
+  assert.match(viewText(rendered), /上次作答：09-24 13:05/, '时刻也取快照的，不是清空那一刻（14:00）');
+});
+
+test('#213 竞态：草稿 409 重发同一份 patch，回执不吞本地 dirty 字，下一笔带本地文本', async () => {
+  const send = makeSend();
+  let drafts = new Map([[KEY1, draft('本地最新', { dirty: true, pending: 1, seq: 5 })]]);
+  const writer = I.createAttemptWriter({
+    send: send.send,
+    onApplied: (job, body) => {
+      const saved = body.attempts && body.attempts.草稿 && body.attempts.草稿[job.questionId];
+      drafts = I.settleDraft(drafts, job, saved);
+    },
+    onRefused: (job, body, retrying) => {
+      // 与 StudyMateApp 同形：草稿在 retrying 时直接 return，不拿回执盖本地
+      if (!retrying) drafts = I.settleDraft(drafts, job, null);
+    },
+  });
+  const job = I.attemptJob({
+    subject: 'demo', node: NODE, stateKey: KEY1, patch: {}, seq: 5, expectedVersion: 'v0',
+    draft: { text: '提交时那一版', at: '2026-09-24T13:03:00' },
+  });
+  writer.push(job);
+  send.reply(0, 409, {
+    ok: false, status: 409,
+    error: { code: 'version-conflict', message: '作答数据已经变了：版本号对不上，这次不写（请按当前内容重来）' },
+    version: 'v9',
+    attempts: {
+      节点: NODE, 课件: '0001-' + NODE + '.md', 最后写入: '2026-09-24T13:04:00.000Z', 题: {},
+      草稿: { '每层各管一段#1': { 文本: '盘上别处的版本', 时: '2026-09-24T13:02:00.000Z' } },
+    },
+  });
+  await tick();
+
+  assert.equal(send.calls.length, 2, '409 之后自动重来一次');
+  assert.equal(send.calls[1].expectedVersion, 'v9', '重来用回执带回的版本号');
+  assert.equal(send.calls[1].operationId, job.operationId, '同一个幂等键');
+  assert.deepEqual(send.calls[1].questions, send.calls[0].questions, '重发同一份 patch，不被盘上内容改写');
+  assert.equal(drafts.get(KEY1).text, '本地最新', '409 回执没把本地 dirty 字盖成盘上版本');
+  assert.equal(drafts.get(KEY1).dirty, true, '本地还有没落盘的改动');
+
+  const okBody = receipt('v10', NODE, {});
+  okBody.attempts.草稿 = { [job.questionId]: { 文本: '提交时那一版', 时: '2026-09-24T13:06:00.000Z' } };
+  send.reply(1, 200, okBody);
+  await tick();
+  assert.equal(drafts.get(KEY1).at, '2026-09-24T13:06:00.000Z', '回执的 时 被采纳');
+  assert.equal(drafts.get(KEY1).text, '本地最新', '保存期间又打的字还在');
+  assert.equal(drafts.get(KEY1).dirty, true, '盘上存的是旧一版：还得再写一次');
+
+  writer.push(I.attemptJob({
+    subject: 'demo', node: NODE, stateKey: KEY1, patch: {}, seq: 6, expectedVersion: 'v10',
+    draft: { text: drafts.get(KEY1).text, at: '2026-09-24T13:06:00.000Z' },
+  }));
+  assert.equal(send.calls[2].questions[job.questionId]['草稿']['文本'], '本地最新', '下一笔重发带的是本地文本');
+});

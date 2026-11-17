@@ -137,6 +137,9 @@ const QUESTIONS_MAX = 200;
 /** 一道题最多记多少条历史：回顾只用得上最近几条，留太多等于让文件无界增长。 */
 const HISTORY_MAX = 50;
 
+/** 草稿键上限：草稿只增不回收会把文件拖成无界；写侧按 `时` 驱逐最旧的，不设 TTL。 */
+const DRAFT_MAX = 200;
+
 /** 主观题文本（草稿与历史快照同一上限）：粘贴十万字进来的，写入侧截断而不是拒绝——拒绝会让人丢整段。 */
 const TEXT_MAX = 8192;
 
@@ -381,6 +384,38 @@ function capText(value: string): string {
   return points.length <= TEXT_MAX ? value : points.slice(0, TEXT_MAX).join('');
 }
 
+/** 草稿的 `时` 排序键；认不出时间的按最旧算（宁可先驱逐，也不让它永久占坑）。 */
+function draftTime(draft: AttemptDraft | undefined): number {
+  const raw = draft && typeof draft.时 === 'string' ? draft.时 : '';
+  const time = Date.parse(raw);
+  return Number.isFinite(time) ? time : 0;
+}
+
+/**
+ * 草稿键只增不回收→写侧到上限时按 `时` 保留最新 200 条。
+ * `keepIds` 是**本次写入**的题：即使它的时间戳比谁都旧，也不能刚写进去就被自己驱逐。
+ */
+export function pruneDrafts(
+  drafts: Record<string, AttemptDraft>,
+  keepIds: string[] = [],
+): Record<string, AttemptDraft> {
+  const ids = Object.keys(drafts);
+  if (ids.length <= DRAFT_MAX) return drafts;
+  const keep = new Set(keepIds.filter((id) => Object.prototype.hasOwnProperty.call(drafts, id)));
+  const rest = ids
+    .filter((id) => !keep.has(id))
+    .sort((a, b) => draftTime(drafts[b]) - draftTime(drafts[a]) || a.localeCompare(b));
+  const out: Record<string, AttemptDraft> = {};
+  for (const id of ids) {
+    if (keep.has(id)) out[id] = drafts[id];
+  }
+  for (const id of rest) {
+    if (Object.keys(out).length >= DRAFT_MAX) break;
+    out[id] = drafts[id];
+  }
+  return out;
+}
+
 /** 入参 → 一条历史记录。认不出的值按「没选、不对」收——**不猜**（猜成「对了」最坏）。 */
 function toEntry(raw: AttemptInput, at: string): AttemptEntry {
   const chosen = raw.选;
@@ -523,12 +558,12 @@ export function writeAttempts({ workspace, subject, node, questions, expectedVer
     节点: node, 课件: lessonName, 最后写入: '', 题: {},
   };
   const drafts: Record<string, AttemptDraft> = { ...(next.草稿 ?? {}) };
-  let wroteDraft = false;
+  const writtenDraftIds: string[] = [];
   for (const one of normalized) {
     if ('draft' in one) {
       // 草稿**只**更新顶层这一格：不 push 历史、不碰 `上次结果`——它不是一个作答事件
       drafts[one.id] = one.draft;
-      wroteDraft = true;
+      writtenDraftIds.push(one.id);
       continue;
     }
     const entry = one.entry;
@@ -542,7 +577,7 @@ export function writeAttempts({ workspace, subject, node, questions, expectedVer
       上次结果: entry,
     };
   }
-  if (wroteDraft) next.草稿 = drafts;
+  if (writtenDraftIds.length > 0) next.草稿 = pruneDrafts(drafts, writtenDraftIds);
   next.节点 = node;
   next.课件 = lessonName;
   next.最后写入 = at;

@@ -573,6 +573,60 @@ try {
       after.bodyOk && after.boundaries === 1 && after.questions === 3, JSON.stringify(after));
     return { questions: seen.questions, boundaries: seen.boundaries };
   });
+
+  /* 7. #213 清空草稿：落墓碑，但读侧当没有——刷新后输入框为空，「上次作答」回到历史快照时刻 */
+  await session.scene('attempts-subjective-cleared', async (ctx) => {
+    const SUBJECTIVE = ANCHOR + '#1';
+    const before = readAttempts();
+    const snapshot = before['题'][SUBJECTIVE]['上次结果'];
+    check('清空前的历史快照没有作答文本（回落的判据就是它）',
+      snapshot && !('作答' in snapshot), JSON.stringify(snapshot));
+
+    await openLesson(ctx);
+    await ctx.evaluate(`(() => {
+      const ta = document.querySelector('[data-proto="subjective-answer"]');
+      ta.value = ${JSON.stringify('准备清掉的这一段。')};
+      ta.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await ctx.sleep(1300);
+    const typed = readAttempts();
+    check('先落下一版非空草稿（清空之前的对照）',
+      typed['草稿'] && typed['草稿'][SUBJECTIVE] && typed['草稿'][SUBJECTIVE]['文本'] === '准备清掉的这一段。',
+      JSON.stringify(typed['草稿'] && typed['草稿'][SUBJECTIVE]));
+
+    await ctx.evaluate(`(() => {
+      const ta = document.querySelector('[data-proto="subjective-answer"]');
+      ta.value = '';
+      ta.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await ctx.sleep(1300);
+    const cleared = readAttempts();
+    const tombstone = cleared['草稿'] && cleared['草稿'][SUBJECTIVE];
+    check('清空落的是墓碑：键还在、文本为空（不是删键）',
+      !!tombstone && tombstone['文本'] === '', JSON.stringify(tombstone));
+    check('清空不动历史与上次结果',
+      JSON.stringify(cleared['题'][SUBJECTIVE]) === JSON.stringify(typed['题'][SUBJECTIVE]),
+      JSON.stringify(cleared['题'][SUBJECTIVE]));
+
+    await openLesson(ctx);
+    const seen = await ctx.evaluate(`(() => {
+      const ta = document.querySelector('[data-proto="subjective-answer"]');
+      const at = document.querySelector('[data-proto="answer-time"]');
+      return {
+        value: ta ? ta.value : null,
+        at: at ? at.textContent.trim() : '',
+        meta: document.querySelector('.smb-answer-meta') ? document.querySelector('.smb-answer-meta').textContent.trim() : '',
+      };
+    })()`);
+    const at = new Date(snapshot['时']);
+    const pad = (n) => (n < 10 ? '0' + n : String(n));
+    const expected = pad(at.getMonth() + 1) + '-' + pad(at.getDate()) + ' ' + pad(at.getHours()) + ':' + pad(at.getMinutes());
+    check('刷新后输入框为空（墓碑被读侧当成没有草稿）', seen.value === '', JSON.stringify(seen));
+    check('上次作答仍是历史快照的时刻，不是清空那一刻',
+      seen.at === '上次作答：' + expected, JSON.stringify({ seen: seen.at, expected }));
+    check('计数也回到「还没写」', /还没写/.test(seen.meta), JSON.stringify(seen.meta));
+    return { value: seen.value, at: seen.at, tombstone };
+  });
 } catch (error) {
   check('作答落盘的浏览器 QA 跑完（浏览器起来、夹具能开）', false, String(error && error.stack || error));
   await session.scene('attempts-error', async (ctx) => { ctx.note('harness', String(error && error.stack || error)); });
