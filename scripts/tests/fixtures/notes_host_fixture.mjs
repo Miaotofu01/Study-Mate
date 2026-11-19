@@ -65,12 +65,15 @@ const services = {
 };
 window.__probe = {
   get registrations(){return registrations.map(({spec})=>JSON.parse(JSON.stringify(spec)))},
+  get chunkRegistrations(){return Object.keys(chunkRegistrations)},
   get layoutSelects(){return layoutSelects},
   applied:false,
 };
-window.__ModuleLoader__={load(entry){window.__entry=entry}};
+const chunkRegistrations={};
+window.__ModuleLoader__={load(entry){ if(entry&&typeof entry.chunk==='string'){chunkRegistrations[entry.chunk]=entry;}else{window.__entry=entry;} }};
 window.__start=()=>{
   if(!window.__entry) throw new Error('组合产物没有登记模块');
+  const chunkPromises={};
   const require=(name)=>{
     if(name==='react')return React;
     if(name==='react/jsx-runtime')return jsxRuntime;
@@ -78,6 +81,30 @@ window.__start=()=>{
     if(name==='react-dom/client')return ReactDOMClient;
     throw new Error('夹具没有这个模块：'+name);
   };
+  // 宿主 require.async 的同形最小实现：包内相对分块按 CLIENT_CHUNK 正则筛，script 标签拉取
+  // 已登记的分块工厂并物化；成功按 fileName 缓存、失败不缓存（与宿主 pendingArrival.finally
+  // 删除同语义），重试会真的再发一次请求。
+  require.async=(spec)=>{
+    if(typeof spec!=='string'||!spec.startsWith('./'))return Promise.reject(new Error('夹具 require.async 只认包内相对分块：'+spec));
+    const fileName=spec.slice(2);
+    if(!/^client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js$/.test(fileName))return Promise.reject(new Error('夹具拒绝这个分块名：'+fileName));
+    if(!chunkPromises[fileName]){
+      chunkPromises[fileName]=new Promise((resolve,reject)=>{
+        const script=document.createElement('script');
+        script.src='/'+fileName;
+        script.onload=()=>{
+          const entry=chunkRegistrations[fileName];
+          if(!entry){delete chunkPromises[fileName];reject(new Error('分块脚本没有登记：'+fileName));return;}
+          try{resolve(entry.factory(require));}catch(error){delete chunkPromises[fileName];reject(error);}
+        };
+        script.onerror=()=>{delete chunkPromises[fileName];reject(new Error('分块脚本加载失败：'+fileName));};
+        document.head.appendChild(script);
+      });
+    }
+    return chunkPromises[fileName];
+  };
+  // 旧宿主能力：没有 require.async 时懒桥必须给出明确失败态，学习面照常工作。
+  if(window.__disableChunkAsync){delete require.async;}
   const cleanups=[];
   window.__entry.factory(require).apply({
     ...services,
@@ -94,7 +121,7 @@ window.__start=()=>{
 };
 `;
 
-async function writeBrowserHost(dir) {
+async function writeBrowserHost(dir, { asyncDisabled = false } = {}) {
   const esbuild = await import(pathToFileURL(rootRequire.resolve('esbuild')).href);
   await esbuild.build({
     absWorkingDir: ROOT,
@@ -103,7 +130,8 @@ async function writeBrowserHost(dir) {
     target: 'es2022', define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'silent',
   });
   fs.copyFileSync(path.join(ROOT, 'dist', 'client.js'), path.join(dir, 'client.js'));
-  fs.writeFileSync(path.join(dir, 'index.html'), `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>StudyMate notes persistence fixture</title><style>html,body,#root{height:100%;margin:0}body{background:#f6f7f9}</style></head><body><div id="root"></div><script src="/host.js"></script><script src="/client.js"></script><script>window.__start()</script></body></html>`);
+  fs.copyFileSync(path.join(ROOT, 'dist', 'client.notes.js'), path.join(dir, 'client.notes.js'));
+  fs.writeFileSync(path.join(dir, 'index.html'), `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>StudyMate notes persistence fixture</title><style>html,body,#root{height:100%;margin:0}body{background:#f6f7f9}</style></head><body><div id="root"></div><script>window.__disableChunkAsync=${JSON.stringify(asyncDisabled)}</script><script src="/host.js"></script><script src="/client.js"></script><script>window.__start()</script></body></html>`);
 }
 
 function requireOk(result) {
@@ -153,7 +181,7 @@ function safeStaticPath(dir, suffix) {
 }
 
 /** 每实例独立 HOME 与 localhost 端口；fault/delay 仅属于测试服务器，不进入产品。 */
-export async function startNotesHostFixture({ seedDemo = false, library = libraryPayload(), build = true } = {}) {
+export async function startNotesHostFixture({ seedDemo = false, library = libraryPayload(), build = true, asyncDisabled = false } = {}) {
   if (build) buildFormalNotesClient();
   const tempParent = path.resolve(os.tmpdir());
   const dir = fs.mkdtempSync(path.join(tempParent, 'studymate-notes-host-'));
@@ -161,12 +189,13 @@ export async function startNotesHostFixture({ seedDemo = false, library = librar
   fs.mkdirSync(home);
   let server;
   const requests = [];
+  const chunkRequests = [];
   const problems = [];
   const pendingReads = new Set();
   const pendingWrites = new Set();
   const pendingReadReplies = new Set();
   const controls = {
-    pauseReads: false, pauseWrites: false, pauseReadReplies: false, readFault: null, writeFault: null,
+    pauseReads: false, pauseWrites: false, pauseReadReplies: false, readFault: null, writeFault: null, chunkFailures: 0,
     releaseReads() { this.pauseReads = false; for (const release of pendingReads) release(); pendingReads.clear(); },
     releaseWrites() { this.pauseWrites = false; for (const release of pendingWrites) release(); pendingWrites.clear(); },
     releaseReadReplies() { this.pauseReadReplies = false; for (const release of pendingReadReplies) release(); pendingReadReplies.clear(); },
@@ -177,12 +206,25 @@ export async function startNotesHostFixture({ seedDemo = false, library = librar
     return controls[flag] ? new Promise(resolve => queue.add(resolve)) : undefined;
   };
   try {
-    await writeBrowserHost(dir);
+    await writeBrowserHost(dir, { asyncDisabled });
     if (seedDemo) seedNotesDemo(home);
     server = http.createServer(async (request, response) => {
       try {
         const url = new URL(request.url, 'http://127.0.0.1');
         const pathname = decodeURIComponent(url.pathname);
+        // 宿主按需拉的分块（client.*.js）：逐条记录 + 可注入一次失败（503），
+        // 验收断言用请求条数，不猜测浏览器缓存行为。
+        if (/^\/client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js$/.test(pathname)) {
+          const record = { path: pathname, status: null };
+          chunkRequests.push(record);
+          response.once('finish', () => { record.status = response.statusCode; });
+          if (controls.chunkFailures > 0) {
+            controls.chunkFailures -= 1;
+            response.writeHead(503, { 'content-type': 'text/plain' });
+            response.end('chunk failure injected by fixture');
+            return;
+          }
+        }
         if (pathname === NOTES_PATH) {
           const bytes = await requestBytes(request);
           let body = null;
@@ -236,7 +278,7 @@ export async function startNotesHostFixture({ seedDemo = false, library = librar
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     const origin = `http://127.0.0.1:${server.address().port}`;
     return {
-      dir, home, root: notesRoot(home), origin, server, controls, requests, problems,
+      dir, home, root: notesRoot(home), origin, server, controls, requests, chunkRequests, problems,
       read() { return requireOk(readNotesStore({ home })); },
       async close() {
         controls.releaseReads(); controls.releaseWrites(); controls.releaseReadReplies();
