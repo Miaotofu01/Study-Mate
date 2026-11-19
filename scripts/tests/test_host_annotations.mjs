@@ -1,4 +1,4 @@
-/* 特征化测试：Host 半数据层 · lib/annotations.ts（课件页标注，ADR-0015）
+/* 特征化测试：Host 半数据层 · lib/annotations.ts（课件页标注，ADR-0021）
    ────────────────────────────────────────────────────────────────────────
    钉住这些事（与总任务 ② 的验收项逐条对应）：
      1. **落盘形状**：`annotations/<NNNN>-<节点id>.json`，顶层 节点/课件/幂等键/最后写入/标，
@@ -513,7 +513,7 @@ test('标注绝不写回课件：.md 逐字不变，只落在 annotations/ 一�
   }));
   assert.equal(second.ok, true);
 
-  assert.deepEqual(fs.readFileSync(lesson), before, '课件正文必须逐字不变（ADR-0015 / ADR-0007）');
+  assert.deepEqual(fs.readFileSync(lesson), before, '课件正文必须逐字不变（ADR-0021 / ADR-0007）');
   assert.deepEqual(fs.readdirSync(path.join(subjectDir, 'lessons')), ['0001-net.layers.md']);
   assert.deepEqual(fs.readdirSync(annotationsDir), ['0001-net.layers.json'], '标注只落在 annotations/ 一个文件里');
 });
