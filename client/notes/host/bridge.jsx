@@ -313,8 +313,9 @@ export function EmbeddedConversation({ renderFactorySlot }) {
 // 409 冲突时抛 {code:'version-conflict', current, version}，供控制器停在 CONFLICT。
 function createNotesPersistenceAdapter() {
   const BASE = '/api/studymate/notes'
-  async function request(body) {
-    const res = await fetch(BASE, {
+  async function request(body, options = {}) {
+    const url = options.skipCorrupt ? `${BASE}?onCorrupt=skip` : BASE
+    const res = await fetch(url, {
       method: body ? 'POST' : 'GET',
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       credentials: 'same-origin', cache: 'no-store',
@@ -336,7 +337,7 @@ function createNotesPersistenceAdapter() {
     return json
   }
   return {
-    async loadStore() { return request(null) },
+    async loadStore(options = {}) { return request(null, options) },
     async upgradeStore() { return request({ operation: 'upgrade' }) },
     async saveResource(resource, expectedVersion) {
       const result = await request({ operation: 'resource', resource, expectedVersion: expectedVersion ?? null })

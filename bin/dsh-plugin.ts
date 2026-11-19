@@ -341,7 +341,7 @@ export async function apply(
   // 作答数据（#72）：路径、方法、请求体、状态码映射都在 lib/attempts-route.ts 里，这里只挂一行
   import('../lib/attempts-route.ts').then((module) => module.registerAttemptRoutes(ctx), (error) => { console.warn(`StudyMate：作答数据路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
 
-  // 课件页标注（ADR-0015）：作答数据族的第二个文件，路径、方法、请求体、状态码映射都在
+  // 课件页标注（ADR-0021）：作答数据族的第二个文件，路径、方法、请求体、状态码映射都在
   // lib/annotations-route.ts 里，这里同样只挂一行（注释见那段文件头）。
   import('../lib/annotations-route.ts').then((module) => module.registerAnnotationRoutes(ctx), (error) => { console.warn(`StudyMate：课件标注路由没挂上。${error instanceof Error ? error.message : String(error)}`); });
 

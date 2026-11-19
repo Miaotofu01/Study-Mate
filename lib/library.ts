@@ -48,7 +48,8 @@ import { normalizeMisconceptions, misconceptionIssues as misconceptionIssuesOf }
 import type { Misconception } from './core/misconceptions.ts';
 // 作答数据（attempts/<NNNN>-<节点id>.json）与课件一一对应，绝不写回题库（ADR-0007）
 import { readAttempts, attemptsVersion } from './attempts.ts';
-// 课件页标注（annotations/<NNNN>-<节点id>.json）与 attempts 是**同一族**（ADR-0015）：
+import type { AttemptDraft } from './attempts.ts';
+// 课件页标注（annotations/<NNNN>-<节点id>.json）与 attempts 是**同一族**（ADR-0021）：
 // 同为学生对内容的反应、同为派生记录、同一个栅栏（operationId 幂等 + expectedVersion）。
 // 这里只读它、挂进 payload；写路径归 lib/annotations.ts（阅读端走 POST 路由）。
 import { readAnnotations, annotationsVersion } from './annotations.ts';
@@ -135,10 +136,15 @@ interface AttemptsView {
   version: string;
   /** 题 id（<锚点文本>#<题号>）→ 这道题的作答记录 */
   questions: Record<string, unknown>;
+  /**
+   * 题 id → 主观题草稿。**与 questions 分开**：草稿是状态不是事件，不进历史、不改上次结果，
+   * 只服务「切 tab / 刷新之后输入框里的字还在」。
+   */
+  drafts: Record<string, AttemptDraft>;
 }
 
 /**
- * 阅读端要的标注数据（ADR-0015）：课件页把高亮与注释贴回正文时用。
+ * 阅读端要的标注数据（ADR-0021）：课件页把高亮与注释贴回正文时用。
  *
  * 与 `AttemptsView` 同一口径：`present` 区分「没标过」与「读不到」，`version` 是写回时
  * 要带上的栅栏。标注**按 id 排序**给出去——对象键的顺序在 JSON 里不是契约，界面要稳定
@@ -562,7 +568,7 @@ function buildSubject(subjectDir: string, dirName: string, workspace: string): S
     const attempt = lessonFile === null
       ? null
       : readAttempts({ workspace, subject: slug, node: nodeId });
-    // 课件页标注：与 attempts 是同一族（ADR-0015），同样只读、坏了不抛。每个节点只走一次
+    // 课件页标注：与 attempts 是同一族（ADR-0021），同样只读、坏了不抛。每个节点只走一次
     // 读取（读不到时再取一次空基线版本号——第一次标注要带上它，不能是空串）。
     const annotated = lessonFile === null
       ? null
@@ -604,6 +610,7 @@ function buildSubject(subjectDir: string, dirName: string, workspace: string): S
           ? attemptsVersion({ workspace, subject: slug, node: nodeId })
           : attempt.version,
         questions: attempt === null ? {} : attempt.data.题,
+        drafts: attempt === null ? {} : (attempt.data.草稿 ?? {}),
       },
       // 标注按 id 升序：对象键序不是契约，界面要稳定就由这里定序（与 attempts 的题 id 同一口径）
       annotations: {

@@ -14,6 +14,7 @@ import NoteEditor from './NoteEditor.jsx';
 import CourseReference from './CourseReference.jsx';
 import { NodeNotebookTree, NotesStatus } from './LearningNotes.jsx';
 import { createNotesWorkspace, sameSubject, sameCourse, courseRef, normalizeCourseRef, associateNote, notebookOf, ownedNote, resolveCourse } from './curriculum.js';
+import { corruptMessage } from './corrupt.js';
 import './layout-v2.css';
 import './components-v2.css';
 import './theme-v3.css';
@@ -98,7 +99,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   const foldersRef = useRef(folders); foldersRef.current = folders;
   const legacyNotebook = folders.find(folder => folder.kind === 'notebook')?.id;
   const nodeScope = node => node.data.notebookId || legacyNotebook;
-  const visibleNodes = scene.nodes.filter(node => nodeScope(node) === activeNotebook && !resources[node.data.contentId]?.trashed);
+  const visibleNodes = scene.nodes.filter(node => nodeScope(node) === activeNotebook && (!node.data.contentId || resources[node.data.contentId]) && !resources[node.data.contentId]?.trashed);
   const visibleIds = new Set(visibleNodes.map(node => node.id));
   const visibleEdges = scene.edges.filter(edge => visibleIds.has(edge.source) && visibleIds.has(edge.target));
   const [selectedFolder, setSelectedFolder] = useState('notes');
@@ -477,8 +478,9 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
 
   return <BoardContext.Provider value={ctx}><div ref={root} className={"app-shell v2 v3 v4 v5" + (hostTheme ? " is-hosted" : "")} data-theme={theme} data-resizing={resizing} style={{ '--v2-left-width': leftWidth + 'px', '--v2-right-width': rightWidth + 'px', '--v5-keep-left': leftWidth + 'px', '--v5-keep-right': rightWidth + 'px' }}>
     {notesPersistence.isNative && notesPersistence.loadState === 'loading' && <div className="persistence-gate" role="status"><p>正在载入笔记数据…</p></div>}
-    {notesPersistence.isNative && notesPersistence.loadState === 'error' && <div className="persistence-gate persistence-gate--error" role="alert"><p>笔记数据载入失败。未覆盖已有文件。</p><p>{notesPersistence.loadError?.message}</p><button className="button ghost" onClick={() => notesPersistence.reloadStore({ confirmDiscard: true })}>重试载入</button></div>}
+    {notesPersistence.isNative && notesPersistence.loadState === 'error' && <div className="persistence-gate persistence-gate--error" role="alert"><p>笔记数据载入失败。未覆盖已有文件。</p><p>{notesPersistence.loadError?.message}</p><button className="button ghost" onClick={() => notesPersistence.reloadStore({ confirmDiscard: true })}>重试载入</button><button className="button ghost" onClick={() => notesPersistence.reloadStore({ confirmDiscard: true, skipCorrupt: true })}>只读载入其余笔记</button></div>}
     {notesPersistence.isNative && notesPersistence.loadState === 'upgrade' && <div className="persistence-gate"><NotesStatus state={notesPersistence} dispatch={(name, ...args) => commands[name]?.(...args)} /></div>}
+    {notesPersistence.isNative && notesPersistence.corrupt.length > 0 && <div className="persistence-corrupt-list" role="status">{notesPersistence.corrupt.map(entry => <div className="persistence-corrupt" key={entry.id}>{corruptMessage(entry, courseLibrary, folders, scene)}</div>)}</div>}
     {notesPersistence.isNative && notesPersistence.conflictKeys.length > 0 && <div className="persistence-conflict" role="alert"><p>文件版本已改变。本地最新草稿仍保留，不会自动覆盖文件。</p><button className="button ghost" onClick={() => { if (window.confirm('保留本地最新草稿，并针对刚看到的文件版本重试保存？若文件再次改变，仍会停止并提示冲突。')) notesPersistence.conflictKeys.forEach(key => notesPersistence.resolveConflict(key, { discard: false })); }}>保留本地并重试保存</button></div>}
     <header className="topbar">
       <div className="view-switch" aria-label="主视图"><button className={view === 'canvas' ? 'is-active' : ''} aria-pressed={view === 'canvas'} onClick={() => { setView('canvas'); setEditingNode(null); }}><LayoutDashboard size={13} />画布</button><button className={view === 'document' ? 'is-active' : ''} aria-pressed={view === 'document'} onClick={() => openDocument(current?.id)}><FileText size={13} />文档</button></div>
