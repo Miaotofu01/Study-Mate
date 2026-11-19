@@ -16,6 +16,7 @@
    插件卸载时各自拆各自的。
    ───────────────────────────────────────────────────────────────────────── */
 
+import type { StatusRegistration } from './status.ts';
 import { buildStatus, failedStatus } from './status.ts';
 
 /** 路由路径：客户端 `lib/client.js` 的 `STATUS_ENDPOINT` 必须与它逐字一致。 */
@@ -48,10 +49,15 @@ interface RouteContext {
  * @param ctx - 插件外层上下文。
  * @param options.profile - 当前 profile 名（查 `installModes` 用）；缺省时 `mode: 'unknown'`。
  * @param options.watch - 监听状态读取；由 bin 域注入，lib 域不直接 import watch。
+ * @param options.registration - 预设注册的成败；启动失败时由插件入口注入，页面据此显示错误原文。
  */
 export function registerStatusRoute(
   ctx: RouteContext | null | undefined,
-  options: { profile?: string; watch?: () => { watching: boolean; backend: string } | Promise<{ watching: boolean; backend: string }> } = {},
+  options: {
+    profile?: string;
+    registration?: StatusRegistration;
+    watch?: () => { watching: boolean; backend: string } | Promise<{ watching: boolean; backend: string }>;
+  } = {},
 ): void {
   if (!ctx || typeof ctx.inject !== 'function') return;
   ctx.inject(['connection'], (connectionCtx: ConnectionContext) => {
@@ -71,11 +77,11 @@ export function registerStatusRoute(
             watch = undefined;
           }
           try {
-            return Response.json(buildStatus({ profile: options.profile, watch }));
+            return Response.json(buildStatus({ profile: options.profile, watch, registration: options.registration }));
           } catch (error) {
             // 读盘抛了也不把页面打成 500：状态卡要能说「读不到」，而不是让整页报错。
             console.warn(`StudyMate：插件页状态读取失败。${error instanceof Error ? error.message : String(error)}`);
-            return Response.json(failedStatus('internal'));
+            return Response.json(failedStatus('internal', new Date(), options.registration));
           }
         },
       }), 'studymate: 插件页状态路由');
