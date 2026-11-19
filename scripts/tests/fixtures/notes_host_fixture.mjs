@@ -229,7 +229,7 @@ export async function startNotesHostFixture({ seedDemo = false, library = librar
           const bytes = await requestBytes(request);
           let body = null;
           if (bytes.length) { try { body = JSON.parse(bytes.toString('utf8')); } catch { /* 真 route 判断 JSON */ } }
-          const record = { method: request.method, body, status: null };
+          const record = { method: request.method, url: request.url, body, status: null };
           requests.push(record);
           const kind = request.method === 'GET' ? 'read' : 'write';
           await waitIfPaused(kind);

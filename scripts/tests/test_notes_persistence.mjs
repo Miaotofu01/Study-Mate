@@ -25,6 +25,7 @@ import {
   SaveState,
   LIMITS,
 } from '../../client/notes/persistence.js';
+import { corruptMessage } from '../../client/notes/corrupt.js';
 
 // ---------------------------------------------------------------------------
 // 序列化：strip runtime/refpayload/unknown origin
@@ -790,4 +791,60 @@ test('LIMITS 上限存在且合理', () => {
   assert.equal(LIMITS.maxMetaChars, 2000);
   assert.equal(LIMITS.maxNodeTextChars, 20000);
   assert.equal(LIMITS.maxEdgeLabelChars, 500);
+});
+
+
+/* ── #304 坏资源清单的 hydrate 与三档文案 ─────────────────────────────────── */
+
+function storePayload(extra = {}) {
+  return {
+    ok: true, schemaVersion: 2, requiresUpgrade: false, storeId: 'notes-test',
+    resources: {}, resourceVersions: {}, layout: null, layoutVersion: null, ...extra,
+  };
+}
+
+test('hydrateStore 缺省 corrupt 为空数组，显式清单按白名单收下', () => {
+  assert.deepEqual(hydrateStore(storePayload()).corrupt, []);
+  const payload = storePayload({
+    corrupt: [{
+      id: 'bad', kind: 'json', notebook: '笔记本甲', message: '资源文件已损坏，暂时无法载入。',
+      title: '坏链接', associations: [{ workspace: 'ws', subject: 'math', node: 'n-1', title: '数学' }],
+    }],
+  });
+  const parsed = hydrateStore(payload);
+  assert.equal(parsed.corrupt.length, 1);
+  assert.equal(parsed.corrupt[0].title, '坏链接');
+  assert.equal(parsed.corrupt[0].notebook, '笔记本甲');
+  assert.equal(parsed.corrupt[0].associations[0].node, 'n-1');
+});
+
+test('hydrateStore 拒绝非数组/坏 kind/超长 title/坏课程关联', () => {
+  assert.throws(() => hydrateStore(storePayload({ corrupt: {} })), /corrupt 必须是数组/);
+  assert.throws(() => hydrateStore(storePayload({ corrupt: [{ id: 'bad', kind: 'txt', notebook: null, message: 'x' }] })), /kind 非法/);
+  assert.throws(() => hydrateStore(storePayload({ corrupt: [{ id: 'bad', kind: 'md', notebook: null, message: 'x', title: 'a'.repeat(2001) }] })), /title 非法/);
+  assert.throws(() => hydrateStore(storePayload({ corrupt: [{ id: 'bad', kind: 'md', notebook: null, message: 'x', associations: [{ workspace: 'ws' }] }] })), /课程关联非法/);
+});
+
+test('corruptMessage 按课程 → 笔记本 → 未知逐档降级，不猜课程', () => {
+  const courseLibrary = { workspace: 'ws', subjects: [{ slug: 'math', name: '数学', nodes: [{ id: 'n-1', title: '数学课' }] }] };
+  const folders = [{ id: 'nb', kind: 'notebook', name: '笔记本甲' }];
+  const scene = { nodes: [{ data: { contentId: 'bad', notebookId: 'nb' } }] };
+  const base = { id: 'bad', kind: 'md', notebook: '笔记本甲', message: '资源文件已损坏，暂时无法载入。' };
+  assert.equal(
+    corruptMessage({ ...base, title: '坏笔记', associations: [{ workspace: 'ws', subject: 'math', node: 'n-1' }] }, courseLibrary, folders, scene),
+    '课程「数学课」下的笔记「坏笔记」的文件已损坏，未载入；其余笔记可正常编辑。',
+  );
+  assert.equal(
+    corruptMessage(base, courseLibrary, folders, scene),
+    '笔记本「笔记本甲」中的资源「bad」的文件已损坏，未载入。',
+  );
+  assert.equal(
+    corruptMessage({ ...base, notebook: null }, courseLibrary, [], { nodes: [] }),
+    '元数据损坏、无法确定课程（文件 bad）：内容无法解析，未载入。',
+  );
+  // workspace 不匹配时不拿坏文件里的课程标题猜课程，退到笔记本档。
+  assert.equal(
+    corruptMessage({ ...base, title: '坏笔记', associations: [{ workspace: 'other', subject: 'math', node: 'n-1', title: '别处课程' }] }, courseLibrary, folders, scene),
+    '笔记本「笔记本甲」中的资源「坏笔记」的文件已损坏，未载入。',
+  );
 });

@@ -499,6 +499,8 @@ const groups = {
       // #302 / ADR-0019：懒分块——学习首屏零分块请求、首开恰一次、往返保活、失败重试、
       // 旧宿主（无 require.async）学习面照常且笔记明确失败不静默回退。
       'browser/notes_lazy_chunk_test.mjs',
+      // #303：拖动/折叠只提交布局、隐藏面暂停轮询——真浏览器性能回归。
+      'browser/notes_performance_test.mjs',
       // #270：学习端节点笔记接线——空节点、默认本、左右同一原稿、拖动只改关联、
       // 软删除恢复、无界节点视图同分类、课程卡只读与精确跳回。真临时 HOME，不 seedDemo。
       'browser/notes_curriculum_test.mjs',

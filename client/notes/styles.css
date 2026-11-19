@@ -243,3 +243,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* #304 坏资源只读降级横幅：只列确定事实，逐条渲染；作用域限定在笔记宿主内。 */
+.studymate-notes .persistence-corrupt-list { position: fixed; top: 64px; left: 50%; z-index: 70; width: max-content; max-width: min(760px, calc(100vw - 32px)); max-height: 42vh; overflow: auto; padding: 10px 14px; transform: translateX(-50%); border: 1px solid #e2be74; border-radius: 10px; background: #fffaf0; color: #6d4b0f; box-shadow: 0 8px 24px #0000001f; font-size: 12px; line-height: 1.65; text-align: left; }
+.studymate-notes .persistence-corrupt + .persistence-corrupt { margin-top: 4px; }
+.studymate-notes .app-shell.v2[data-theme="dark"] .persistence-corrupt-list { border-color: #6f5a2c; background: #2b2718; color: #f0d9a6; }
+@media (max-width: 699px) {
+  .studymate-notes .persistence-corrupt-list { top: 56px; max-height: 46vh; }
+}

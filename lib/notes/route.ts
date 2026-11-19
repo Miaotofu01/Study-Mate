@@ -118,7 +118,9 @@ export async function handleNotes(request: Request, home: string): Promise<Respo
       return routeError(400, 'path-invalid', '数据根必须是绝对路径，不能是相对路径或空白——否则笔记会落到当前工作目录下。');
     }
     if (request.method === 'GET') {
-      const result = readNotesStore({ home });
+      // 只有显式 `?onCorrupt=skip` 才允许逐资源降级；缺省/非法值交给数据层判定。
+      const onCorrupt = new URL(request.url).searchParams.get('onCorrupt') ?? undefined;
+      const result = readNotesStore({ home, onCorrupt });
       if (!result.ok) {
         return Response.json(errorBody(result.code, result.message, result.extra ?? {}), { status: result.status });
       }
@@ -131,6 +133,7 @@ export async function handleNotes(request: Request, home: string): Promise<Respo
         resourceVersions: result.value.resourceVersions,
         layout: result.value.layout,
         layoutVersion: result.value.layoutVersion,
+        ...(result.value.corrupt ? { corrupt: result.value.corrupt } : {}),
       }, { status: 200 });
     }
     if (request.method !== 'POST') {
