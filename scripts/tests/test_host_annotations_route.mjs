@@ -1,4 +1,4 @@
-/* 特征化测试：Host 半路由 · `POST /api/studymate/annotations`（ADR-0015 的 Host 半）
+/* 特征化测试：Host 半路由 · `POST /api/studymate/annotations`（ADR-0021 的 Host 半）
    ────────────────────────────────────────────────────────────────────────
    数据层（`lib/annotations.ts`）的栅栏已经由 test_host_annotations.mjs 钉住；这里钉的是
    **阅读端真正打到的那一层**：路由怎么挂、请求体什么形状、状态码怎么映射、错误怎么说话。
@@ -353,7 +353,7 @@ test('整轮写入前后：课件正文逐字节相等（标注绝不写回 .md�
   // 再来一次被拒的写入（冲突路径也不许碰课件）
   await post(route, submission(workspace, { expectedVersion: '0000000000000000', operationId: op('conflict') }));
 
-  assert.deepEqual(fs.readFileSync(lesson), lessonBytes, '课件正文必须逐字不变（ADR-0015）');
+  assert.deepEqual(fs.readFileSync(lesson), lessonBytes, '课件正文必须逐字不变（ADR-0021）');
   assert.deepEqual(fs.readdirSync(path.join(subjectDir, 'lessons')), [`0001-${NODE}.md`]);
   assert.deepEqual(fs.readdirSync(annotationsDir), [`0001-${NODE}.json`], '标注只落在 annotations/ 一个文件里');
 

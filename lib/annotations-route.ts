@@ -1,10 +1,10 @@
 /* ─────────────────────────────────────────────────────────────────────────
    StudyMate · Host 半路由 —— 课件页标注的写入端点
 
-   `POST /api/studymate/annotations` 是阅读端落盘标注的**唯一**入口（ADR-0015：标注与
+   `POST /api/studymate/annotations` 是阅读端落盘标注的**唯一**入口（ADR-0021：标注与
    `attempts/` 同族，落在 ADR-0010 已批准的「阅读端只能碰 reference/ 与作答数据」那一侧）。
    阅读端划选正文 → 这里 → `lib/annotations.ts` 写 `annotations/<NNNN>-<节点id>.json`；
-   **课件正文与题库一个字节都不碰**（ADR-0015 / ADR-0007）。
+   **课件正文与题库一个字节都不碰**（ADR-0021 / ADR-0007）。
 
    为什么单独成文件、只导出 `registerAnnotationRoutes(ctx)` 加一个 handler：与
    `lib/attempts-route.ts` 同一种拆法——`bin/dsh-plugin.ts` 是全插件共享的入口，那里只留
