@@ -247,6 +247,55 @@ test('真实 DSH 宿主写盘形态：80 列折行的双引号长字符串不会
   });
 });
 
+test('跨行流式集合：显式开启后按 YAML 的 flow 折行规则读，默认仍报错', () => {
+  const opts = {
+    tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
+    quotedScalarContinuation: true, flowCollectionContinuation: true,
+  };
+  // issue #317 的真实形态：模型清单写成 `- {` 换行、几行之后才闭合（标准 YAML，宿主自己读得动）。
+  assert.deepEqual(parseYaml([
+    '- id: bundle',
+    '  config:',
+    '    models:',
+    '      - {',
+    '          id: "openai/gpt-6-luna",',
+    '          name: "GPT-6 Luna",',
+    '          contextWindow: 1050000',
+    '        }',
+    '    enabled: true',
+    '',
+  ].join('\n'), opts), [{
+    id: 'bundle',
+    config: {
+      models: [{ id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', contextWindow: 1050000 }],
+      enabled: true,
+    },
+  }]);
+  // 嵌套的流式集合、末尾逗号、流式集合里的行尾注释、跨行的引号标量：都按 PyYAML 的 flow 口径读
+  assert.deepEqual(parseYaml([
+    '- {a: 1, b: {c: [1, 2,',
+    '    3]},',
+    '   d: x,} # 行尾注释',
+    '- {e: "x',
+    '    y"}',
+    '',
+  ].join('\n'), opts), [{ a: 1, b: { c: [1, 2, 3] }, d: 'x' }, { e: 'x y' }]);
+  // 空行夹在两个 token 之间只是分隔空白；夹在 plain 标量里折成一个换行（与 PyYAML 同口径）
+  assert.deepEqual(parseYaml('- {a: 1,\n\n   b: 2}\n', opts), [{ a: 1, b: 2 }]);
+  assert.deepEqual(parseYaml('- [a\n\n   b]\n', opts), [['a\nb']]);
+  // 双引号里行尾的 \ 转义掉换行：不补空格
+  assert.deepEqual(parseYaml('- {a: "con\\\n    cat"}\n', opts), [{ a: 'concat' }]);
+  // 孩子就是以流式集合起头（键的下一行才给 `[`），闭合之后的同级键照常读
+  assert.deepEqual(parseYaml('- key:\n    [\n      1,\n      2,\n    ]\n- 尾\n', opts), [{ key: [1, 2] }, '尾']);
+  // 闭合括号后面的多余内容，报在闭合那一行
+  assert.throws(() => parseYaml('- {a: 1} extra\n', opts), (error) => error.line === 1 && /多余内容/.test(error.message));
+  // 默认关闭：学习文件仍按老规矩报错（行号指向 `{` 起头那一行）
+  assert.throws(() => parseYaml('- {\n    a: 1\n  }\n'), (error) => error.line === 1 && /缺少闭合/.test(error.message));
+  // 文档根是流式集合时本来就能跨行（与选项无关）；折行之后注释里的 `]` 也不会把闭合判错
+  assert.deepEqual(parseYaml('[\n  # 注释里有个 ]\n  {a: 1},\n  [2,\n   3],\n]\n'), [{ a: 1 }, [2, 3]]);
+  assert.throws(() => parseYaml('[]\nfoo: 1\n'), (error) => error.line === 2 && /多余内容/.test(error.message));
+});
+
 test('标签加块标量：`!!js >-` 先折行再过标签，profile 补丁里的 embedding 三项读得出来', () => {
   const options = {
     tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,

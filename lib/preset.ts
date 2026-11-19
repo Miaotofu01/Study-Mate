@@ -354,7 +354,7 @@ function scanDocument(text: string): PatchDocument & { contentLines: Array<{ sta
  */
 const PATCH_PARSE_OPTIONS = {
   tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
-  quotedScalarContinuation: true,
+  quotedScalarContinuation: true, flowCollectionContinuation: true,
 } as const;
 
 /** 解析并校验一份补丁文件；返回解析出的内容与插入位置。 */
