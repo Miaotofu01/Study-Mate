@@ -454,12 +454,49 @@ test('#213 草稿：键数到上限后按 时 驱逐最旧，本次写入那条�
   assert.ok(keys.includes(fresh), '本次写入那条必须在');
   assert.equal(keys.includes('旧题#0'), false, '按 时 最旧的那条被驱逐');
   assert.ok(keys.includes('旧题#199'), '较新的旧草稿保留');
+  assert.equal(keys[0], '旧题#1', '驱逐只删键、不重排：留下的键保持原文件里的先后');
+  assert.equal(keys[keys.length - 1], fresh, '本次写入那条落在原来的位置（追加在末尾），不插到最前');
   assert.equal(receipt.attempts['草稿'][fresh]['文本'], '刚写的最新一条');
   assert.equal(receipt.attempts['题'][fresh], undefined, '驱逐只发生在草稿那一格，不建题条目');
 
   const refreshed = readLibrary({ workspace }).subjects[0].nodes[0];
   assert.equal(Object.keys(refreshed.attempts.drafts).length, 200, '刷新读回同一份');
   assert.deepEqual(refreshed.attempts.drafts, receipt.attempts['草稿'], '读侧不再二次裁剪，盘上是什么就读什么');
+});
+
+test('#213 文本口径：预测与作答都原样落盘（只截断），只含空白的两边都不占键', async () => {
+  const { home, workspace } = makeHome();
+  process.env.DSH_HOME = home;
+  const { route } = connect();
+  const version = attemptsVersion({ workspace, subject: SUBJECT, node: NODE });
+
+  const prediction = '  4  \n';
+  const answer = '\n  第一行\n    缩进第二行\n';
+  const response = await post(route, {
+    subject: SUBJECT,
+    node: NODE,
+    questions: { [OPEN]: { 选: null, 对: false, 自评: '没答上', 预测: prediction, 作答: answer } },
+    operationId: op('text-raw'),
+    expectedVersion: version,
+  });
+  assert.equal(response.status, 200);
+  const receipt = await response.json();
+  const lastOne = receipt.attempts['题'][OPEN]['上次结果'];
+  assert.equal(lastOne['预测'], prediction, '预测原样落盘：首尾空格与换行不被 trim 掉');
+  assert.equal(lastOne['作答'], answer, '作答原样落盘：缩进与换行保留');
+
+  const blank = await post(route, {
+    subject: SUBJECT,
+    node: NODE,
+    questions: { [OPEN]: { 选: null, 对: true, 预测: '   \n', 作答: '\t\n ' } },
+    operationId: op('text-blank'),
+    expectedVersion: receipt.version,
+  });
+  assert.equal(blank.status, 200, '只含空白不算校验失败，只是不占键');
+  const blankReceipt = await blank.json();
+  const blankLast = blankReceipt.attempts['题'][OPEN]['上次结果'];
+  assert.equal('预测' in blankLast, false, '只含空白的预测不占键（空判据按 trim 后的值）');
+  assert.equal('作答' in blankLast, false, '只含空白的作答不占键（与预测同一口径）');
 });
 
 test('#213 草稿：文本进入幂等指纹（同 operationId 换文本要被拒）', async () => {
