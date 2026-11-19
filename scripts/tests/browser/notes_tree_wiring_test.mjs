@@ -81,16 +81,33 @@ async function renameViaMenu(page, label, menuAria, next) {
   await input.fill(next);
   await input.press('Enter');
 }
-async function createNote(page, fixture, text) {
-  await notes(page).getByRole('button', { name: '新建笔记', exact: true }).click();
+// 左栏只有一个「新建」菜单：点开 → role=menuitem → 同名弹窗 → 创建。
+const CREATE_LABEL = { notebook: '新建笔记本', folder: '新建文件夹', note: '新建笔记' };
+const CREATE_FIELD = { notebook: '笔记本名称', folder: '文件夹名称', note: '笔记名称' };
+async function createViaMenu(page, kind, name) {
+  const label = CREATE_LABEL[kind];
+  await notes(page).locator('.left-panel .panel-header').getByRole('button', { name: '新建', exact: true }).click();
+  await notes(page).getByRole('menuitem', { name: label, exact: true }).click();
+  const dialog = page.locator(`[role=dialog][aria-label="${label}"]`);
+  await dialog.waitFor({ state: 'visible', timeout: 5000 });
+  if (name !== undefined) await dialog.getByRole('textbox', { name: CREATE_FIELD[kind] }).fill(name);
+  await dialog.getByRole('button', { name: '创建', exact: true }).click();
+  await dialog.waitFor({ state: 'detached', timeout: 5000 });
+  await delay(200);
+}
+const createFolder = (page, name) => createViaMenu(page, 'folder', name);
+const createNotebook = (page, name) => createViaMenu(page, 'notebook', name);
+async function createNote(page, fixture, text, name) {
+  const before = new Set(Object.keys(fixture.read().resources));
+  await createViaMenu(page, 'note', name);
   const editor = notes(page).locator('.note-editor .markdown-inline-editor .cm-content[role="textbox"]');
   await editor.waitFor({ state: 'visible', timeout: 12000 });
   await editor.click();
   await page.keyboard.press('Control+A');
   await page.keyboard.insertText(text);
-  await until(() => Object.values(fixture.read().resources).some(r => r.markdown === text), '新笔记没有真实保存');
+  await until(() => Object.values(fixture.read().resources).some(r => !before.has(r.id) && r.markdown === text), '新笔记没有真实保存');
   await saved(page);
-  return Object.values(fixture.read().resources).find(r => r.markdown === text).id;
+  return Object.values(fixture.read().resources).find(r => !before.has(r.id) && r.markdown === text).id;
 }
 function externalMarkdown(fixture, id, text) {
   const file = path.join(fixture.root, 'resources', `r-${id}.md`);
@@ -156,6 +173,34 @@ try {
       await until(async () => JSON.stringify(await classes()) === '[true,false]', '切回资源视图没有恢复高亮');
     });
 
+    await guarded('左栏「新建」菜单：三项顺序、贴住触发器、Escape 还焦点', async () => {
+      const trigger = notes(page).locator('.left-panel .panel-header button.notes-create-trigger');
+      assert.equal(await trigger.count(), 1, '左栏应有唯一「新建」按钮');
+      assert.equal(await notes(page).locator('.left-panel').getByRole('button', { name: '新建笔记', exact: true }).count(), 0, '左栏不该再有独立的新建按钮');
+      assert.equal(await trigger.getAttribute('aria-haspopup'), 'menu');
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+      await trigger.click();
+      const menu = page.locator('[role="menu"][aria-label="新建资源"]');
+      await menu.waitFor({ state: 'visible', timeout: 5000 });
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
+      const items = (await menu.getByRole('menuitem').allInnerTexts()).map(text => text.split('\n')[0].trim());
+      assert.deepEqual(items, ['新建笔记本', '新建文件夹', '新建笔记'], '菜单项顺序不对：' + JSON.stringify(items));
+      const placed = await page.evaluate(() => {
+        const menu = document.querySelector('[role="menu"][aria-label="新建资源"]');
+        const trigger = document.querySelector('.notes-create-trigger');
+        const m = menu.getBoundingClientRect(), t = trigger.getBoundingClientRect();
+        return { inside: Boolean(menu.closest('.app-shell')), gap: m.top - t.bottom, overlap: m.left < t.right && m.right > t.left };
+      });
+      assert.equal(placed.inside, true, '新建菜单没有挂到 .app-shell 下');
+      assert.ok(placed.gap >= -2 && placed.gap <= 24, '新建菜单没有贴在触发器下方：' + placed.gap);
+      assert.equal(placed.overlap, true, '新建菜单没有对齐触发器');
+      await page.keyboard.press('Escape');
+      await menu.waitFor({ state: 'detached', timeout: 5000 });
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+      assert.equal(await page.evaluate(() => Boolean(document.activeElement?.closest('.notes-create-trigger'))), true, 'Escape 后焦点没有回到「新建」');
+    });
+
+
     await guarded('目录重命名走 App 回调并真实落盘（layout.json + saved）', async () => {
       await renameViaMenu(page, '参考', '参考 的目录操作', '参考资料');
       await until(() => fixture.read().layout.folders.some(f => f.id === 'references' && f.name === '参考资料'), '目录重命名没有落盘');
@@ -171,13 +216,75 @@ try {
       await saved(page);
     });
 
+    await guarded('⋯ 复制 Markdown：同目录副本、不建画布卡片；归档占位', async () => {
+      const text = '# COPY-WIRING\n';
+      const id = await createNote(page, fixture, text, '复制源.md');
+      const nodeCount = fixture.read().layout.nodes.length;
+      await openMenu(page, '复制源.md');
+      const menu = page.locator('[role="menu"][aria-label="复制源.md 的文件操作"]');
+      const items = (await menu.getByRole('menuitem').allInnerTexts()).map(text => text.split('\n')[0].trim());
+      assert.deepEqual(items, ['重命名', '复制 Markdown', '归档'], '文件菜单项顺序不对：' + JSON.stringify(items));
+      const archive = menu.getByRole('menuitem', { name: '归档' });
+      assert.equal(await archive.getAttribute('aria-disabled'), 'true', '归档占位应禁用');
+      assert.equal(await archive.getAttribute('title'), '归档尚未实现，先占位。');
+      await menu.getByRole('menuitem', { name: /^复制 Markdown/ }).click();
+      await notes(page).locator('.toast').filter({ hasText: '未复制课程关联或画布卡片' }).waitFor({ timeout: 5000 });
+      let copyId = null;
+      await until(() => {
+        const found = Object.values(fixture.read().resources).find(r => r.id !== id && r.markdown === text);
+        if (found) copyId = found.id;
+        return Boolean(found);
+      }, '复制 Markdown 没有真实落盘');
+      await saved(page);
+      const store = fixture.read();
+      assert.equal(store.resources[copyId].title, '复制源（副本）.md');
+      assert.equal(store.resources[copyId].parent, store.resources[id].parent, '副本没有落在与原件同一目录');
+      assert.equal(store.resources[copyId].origin?.mode, 'copy');
+      assert.equal(store.layout.nodes.length, nodeCount, '复制自动加了画布卡片');
+      assert.equal(await notes(page).locator('button[aria-label="打开 复制源（副本）.md"]').count(), 1, '树里没有副本行');
+    });
+
+    await guarded('左树拖入画布：只引用同一原件，不新建资源、不弹导入模式', async () => {
+      const text = '# DRAG-REFERENCE\n';
+      const id = await createNote(page, fixture, text, '拖入源.md');
+      await notes(page).locator('.view-switch[aria-label="主视图"]').getByRole('button', { name: '画布', exact: true }).click();
+      await notes(page).locator('.canvas-stage').waitFor({ state: 'visible', timeout: 10000 });
+      const before = fixture.read();
+      const row = notes(page).locator('.tree-row.tree-file').filter({ hasText: '拖入源.md' }).first();
+      await row.dragTo(notes(page).locator('.canvas-stage'), { targetPosition: { x: 620, y: 400 } });
+      assert.equal(await page.locator('[role=dialog][aria-label="选择导入模式"]').count(), 0, '内部拖动不该弹导入模式');
+      await until(() => fixture.read().layout.nodes.length === before.layout.nodes.length + 1, '拖入后没有加画布卡片');
+      await saved(page);
+      const after = fixture.read();
+      assert.equal(Object.keys(after.resources).length, Object.keys(before.resources).length, '内部拖动复制出了新资源');
+      const added = after.layout.nodes.find(node => !before.layout.nodes.some(old => old.id === node.id));
+      assert.equal(added.data?.contentId, id, '卡片没有引用同一原件');
+      assert.equal(await notes(page).locator(`.react-flow__node:has([data-content-id="${id}"])`).count(), 1, '画布上没有该原件卡片');
+    });
+
+    await guarded('笔记本目录菜单有「课程绑定」入口并打开绑定面板', async () => {
+      await openMenu(page, '学习与理解');
+      const menu = page.locator('[role="menu"][aria-label="学习与理解 的目录操作"]');
+      const items = (await menu.getByRole('menuitem').allInnerTexts()).map(text => text.split('\n')[0].trim());
+      assert.deepEqual(items, ['重命名', '课程绑定', '删除'], '笔记本目录菜单项不对：' + JSON.stringify(items));
+      const bind = menu.getByRole('menuitem', { name: '课程绑定' });
+      assert.equal(await bind.getAttribute('aria-disabled'), null, '已接线时「课程绑定」应可用');
+      await bind.click();
+      const panel = page.locator('[role=dialog][aria-label="课程绑定"]');
+      await panel.waitFor({ state: 'visible', timeout: 5000 });
+      await page.keyboard.press('Escape');
+      await panel.waitFor({ state: 'detached', timeout: 5000 });
+    });
+
+
     await guarded('空目录删除：确认后落盘，选中目录回退到父目录', async () => {
-      await notes(page).getByRole('button', { name: '新建文件夹', exact: true }).click();
-      await page.getByRole('dialog').getByRole('textbox', { name: '文件夹名称' }).fill('临时夹');
-      await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click();
+      await createFolder(page, '临时夹');
       await until(() => fixture.read().layout.folders.some(f => f.name === '临时夹'), '新建文件夹没有落盘');
       await saved(page);
       const folderId = fixture.read().layout.folders.find(f => f.name === '临时夹').id;
+      // 父目录取自建时的 picked 快照（前面点过文件时可能落在学习与理解，不一定是「概念」）。
+      const parentId = fixture.read().layout.folders.find(f => f.id === folderId).parent;
+      const parentName = fixture.read().layout.folders.find(f => f.id === parentId)?.name;
       await notes(page).locator(`button[aria-label="临时夹 文件夹"]`).click();
       await delay(80);
       assert.deepEqual(await activeRows(page), ['folder:临时夹'], '点击后没有高亮新目录');
@@ -188,14 +295,12 @@ try {
       await deleteItem.click();
       await until(() => !fixture.read().layout.folders.some(f => f.id === folderId), '确认删除没有落盘');
       await saved(page);
-      // 选中回退：临时夹挂在「概念」（notes）下，删除后回退到父目录
-      await until(async () => JSON.stringify(await activeRows(page)) === JSON.stringify(['folder:概念']), '删除后选中没有回退到父目录');
+      // 选中回退：「临时夹」挂在 parentName 下，删除后回退到父目录
+      await until(async () => JSON.stringify(await activeRows(page)) === JSON.stringify([`folder:${parentName}`]), '删除后选中没有回退到父目录');
     });
 
     await guarded('空且未绑定的笔记本可删（保护判据放行）', async () => {
-      await notes(page).getByRole('button', { name: '新建笔记本', exact: true }).click();
-      await page.getByRole('dialog').getByRole('textbox', { name: '笔记本名称' }).fill('临时本');
-      await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click();
+      await createNotebook(page, '临时本');
       await until(() => fixture.read().layout.folders.some(f => f.name === '临时本' && f.kind === 'notebook'), '新建笔记本没有落盘');
       await saved(page);
       const bookId = fixture.read().layout.folders.find(f => f.name === '临时本').id;
@@ -219,9 +324,7 @@ try {
     await guarded('画布有节点的笔记本删除禁用（hasCanvasContent 经 App 传入）', async () => {
       // 用一个没有子目录/文件的全新笔记本：保证禁用理由走「画布上还有内容」分支，
       // 而不是被子目录/文件计数掩盖（学习与理解有子目录，理由串会先列子目录）。
-      await notes(page).getByRole('button', { name: '新建笔记本', exact: true }).click();
-      await page.getByRole('dialog').getByRole('textbox', { name: '笔记本名称' }).fill('画布本');
-      await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click();
+      await createNotebook(page, '画布本');
       await until(() => fixture.read().layout.folders.some(f => f.name === '画布本'), '新建笔记本没有落盘');
       await saved(page);
       await notes(page).locator('button[aria-label="打开画布本画布"]').click();
@@ -244,9 +347,7 @@ try {
       assert.ok((await fallbackItem.textContent()).includes('未归属文件的默认去处'), await fallbackItem.textContent());
       await page.keyboard.press('Escape');
       // 文件计数分支：自建目录放一个文件，理由必须是「N 个文件」而非子目录/画布。
-      await notes(page).getByRole('button', { name: '新建文件夹', exact: true }).click();
-      await page.getByRole('dialog').getByRole('textbox', { name: '文件夹名称' }).fill('计数夹');
-      await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click();
+      await createFolder(page, '计数夹');
       await until(() => fixture.read().layout.folders.some(f => f.name === '计数夹'), '计数夹没有落盘');
       await saved(page);
       await notes(page).locator('button[aria-label="计数夹 文件夹"]').click();
@@ -287,12 +388,17 @@ try {
       // layout.json 必须传当前 layoutVersion（sha256），否则 409。
       // 学习与理解此刻是唯一笔记本，model 的「最后一本」优先级高于非空——先建陪跑本，
       // 才能让禁用理由走到画布/非空分支。
-      await notes(page).getByRole('button', { name: '新建笔记本', exact: true }).click();
-      await page.getByRole('dialog').getByRole('textbox', { name: '笔记本名称' }).fill('陪跑本');
-      await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click();
+      await createNotebook(page, '陪跑本');
       await until(() => fixture.read().layout.folders.some(f => f.name === '陪跑本' && f.kind === 'notebook'), '陪跑本没有落盘');
       await saved(page);
       const store = fixture.read();
+      // 本套件前面的「复制 Markdown」「左树拖入画布」用例会在学习与理解根目录留下文件，
+      // 文件计数分支会先于画布分支命中。先把这些文件挪到「概念」，让禁用理由只走画布口径。
+      for (const resource of Object.values(store.resources)) {
+        if (resource.parent !== 'book' || resource.trashed) continue;
+        const moved = writeNotesResource({ home: fixture.home, resource: { ...resource, parent: 'concepts' }, expectedVersion: store.resourceVersions[resource.id] });
+        assert.ok(moved.ok, '搬走根目录文件失败: ' + (moved.ok ? '' : moved.message));
+      }
       const resourceWrite = writeNotesResource({ home: fixture.home, resource: { id: 'trashcanary', type: 'note', title: '废纸篓样例.md', markdown: '# TRASHED-CANARY\n', parent: 'references', trashed: true }, expectedVersion: null });
       assert.ok(resourceWrite.ok, '废纸篓资源写入失败: ' + (resourceWrite.ok ? '' : resourceWrite.message));
       const layoutWrite = writeNotesLayout({ home: fixture.home, layout: { ...store.layout, folders: store.layout.folders.filter(f => f.parent !== 'book' || f.kind === 'notebook'), nodes: [...store.layout.nodes, { id: 'trash-node', type: 'knowledge', position: { x: 0, y: 0 }, data: { contentId: 'trashcanary', notebookId: 'book' } }] }, expectedVersion: store.layoutVersion });
@@ -330,9 +436,7 @@ try {
       // 独特视口，删掉活动的「学习与理解」→ App 把相机切到回退本；删除自身的
       // layout 提交必须已快照新相机（effect 在 setViewport(duration:0) 同步生效后
       // 才读 getViewport），刷新后不得落回已删本的相机。
-      await notes(page).getByRole('button', { name: '新建笔记本', exact: true }).click();
-      await page.getByRole('dialog').getByRole('textbox', { name: '笔记本名称' }).fill('第二本');
-      await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click();
+      await createNotebook(page, '第二本');
       await until(() => fixture.read().layout.folders.some(f => f.name === '第二本' && f.kind === 'notebook'), '第二本没有落盘');
       await saved(page);
       const before = fixture.read();

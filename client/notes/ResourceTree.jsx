@@ -1,21 +1,62 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronRight, ChevronDown, Folder, FolderOpen, NotebookPen, FileText, Link2, BookOpen, Image, FileCode, LayoutGrid, MoreHorizontal, Pencil, Trash2, Archive } from 'lucide-react';
+import { ChevronRight, ChevronDown, Folder, FolderOpen, NotebookPen, FileText, Link2, BookOpen, Image, FileCode, LayoutGrid, MoreHorizontal, Pencil, Trash2, Archive, Copy } from 'lucide-react';
 import {
   initialParent, resourceFolder, folderDeleteBlockReason,
   canRenameResource, validateFolderName, validateFileTitle, FOLDER_NAME_MAX, FILE_TITLE_MAX,
 } from './resource-tree-model.js';
+import { isUnsupportedNote } from './note-types.js';
+import './resource-tree-menu.css';
 
 const icons = { note: FileText, course: BookOpen, link: Link2, image: Image, svg: FileCode, html: FileCode };
 export { initialFolders, initialParent } from './resource-tree-model.js';
 
 // 键盘导航与初始焦点共用：只算真正可用的菜单项（aria-disabled / 原生 disabled 都排除）。
 const ENABLED_MENU_ITEM = '[role="menuitem"]:not([aria-disabled="true"]):not(:disabled)';
+// 菜单与触发按钮的间距、菜单离可用外框（视口 ∩ 宿主）的最小距离。
+const MENU_GAP = 4;
+const MENU_MARGIN = 8;
+
+const clampNumber = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const viewportRect = () => ({
+  left: 0,
+  top: 0,
+  right: document.documentElement.clientWidth || window.innerWidth,
+  bottom: document.documentElement.clientHeight || window.innerHeight,
+});
+
+// 从 element 起向上与每一层滚动/裁切祖先（overflow 非 visible）求交，再与 base 相交。
+// 菜单与触发按钮都只能在「视口 ∩ 所有会裁切它们的祖先」里出现。
+function clippingRect(element, base) {
+  let { left, top, right, bottom } = base;
+  for (let node = element; node; node = node.parentElement) {
+    const style = window.getComputedStyle(node);
+    if (!/(auto|scroll|hidden|clip)/.test(style.overflowX + ' ' + style.overflowY)) continue;
+    const rect = node.getBoundingClientRect();
+    const nodeLeft = rect.left + (node.clientLeft || 0), nodeTop = rect.top + (node.clientTop || 0);
+    left = Math.max(left, nodeLeft);
+    top = Math.max(top, nodeTop);
+    right = Math.min(right, nodeLeft + node.clientWidth);
+    bottom = Math.min(bottom, nodeTop + node.clientHeight);
+  }
+  return { left, top, right, bottom };
+}
+
+// 菜单可用的外框：视口 ∩ portal 宿主及其裁切祖先（.app-shell / .studymate-notes 的
+// overflow:hidden）。真实外壳里 .app-shell 可能是 static、只占宿主面板的一部分，
+// 所以这里不能只拿 .app-shell 自己的矩形。
+const usableBounds = (host) => clippingRect(host, viewportRect());
+
+// 触发按钮实际可见的区域：视口再与每一层滚动/裁切祖先求交。
+// 完全落在交集之外（被滚出滚动容器或被视口切掉）时，菜单不能继续挂在原地。
+const visibleClip = (trigger) => clippingRect(trigger.parentElement, viewportRect());
 
 export default function ResourceTree({
   folders, resources, search, selectedId, selectedFolder,
   onFolderSelect, onSelect, onOpenDocument, onCanvas,
   canEdit = true, onRenameFolder, onDeleteFolder, onRenameResource, hasCanvasContent,
+  onCopyMarkdown, canCopyMarkdown, onManageNotebook, getNotebookBindingLabel, onPickEntry,
 }) {
   const [closed, setClosed] = useState(new Set());
   const query = search.trim().toLocaleLowerCase();
@@ -41,34 +82,128 @@ export default function ResourceTree({
   const folderActive = (id) => pick?.kind === 'folder' && pick.id === id;
   const pickFile = (id) => { lastFileId.current = id; setPick({ kind: 'file', id }); };
   const pickFolder = (id) => { lastFolderId.current = id; setPick({ kind: 'folder', id }); };
+  // 只在用户主动点选行时向外报告；外部 selectedId/selectedFolder 变化不报告（那是我方跟随，不是用户选择）。
+  // 画布行是笔记本的一部分，报告笔记本目录 id。
+  const reportPick = (kind, id) => { onPickEntry?.({ kind, id }); };
 
-  // ---- 更多菜单（portal 到 .app-shell，复用 import-menu-items 的成套样式） ----
+  // 笔记本行的绑定摘要：只在调用方给出非空字符串时显示；菜单里的「课程绑定」同理借用这份数据。
+  const bindingOf = (folder) => {
+    if (folder?.kind !== 'notebook' || typeof getNotebookBindingLabel !== 'function') return '';
+    const label = getNotebookBindingLabel(folder);
+    return typeof label === 'string' ? label.trim() : '';
+  };
+
+  // ---- 更多菜单（portal 到 .app-shell）：锚定触发按钮、按实际尺寸选上下、滚动跟随 ----
   const rootRef = useRef(null), menuRef = useRef(null);
   const [menu, setMenu] = useState(null), [menuPos, setMenuPos] = useState({ left: 0, top: 0 });
   const portalHost = useCallback(() => rootRef.current?.closest('.app-shell') || document.body, []);
   const closeMenu = useCallback(() => setMenu(null), []);
   const toggleMenu = (event, entry) => {
     event.stopPropagation();
-    setMenu((previous) => previous && previous.kind === entry.kind && previous.id === entry.id ? null : { ...entry, trigger: event.currentTarget });
+    const trigger = event.currentTarget;
+    // 先用「宿主坐标」给个即时位置，避免打开那一帧停在旧位置；准确的
+    // offsetParent 坐标在 useLayoutEffect（绘制前）里由 placeMenu 校正。
+    const buttonRect = trigger.getBoundingClientRect(), hostRect = portalHost().getBoundingClientRect();
+    setMenuPos({
+      left: Math.round(buttonRect.left - hostRect.left),
+      top: Math.round(buttonRect.bottom - hostRect.top + MENU_GAP),
+    });
+    setMenu((previous) => previous && previous.kind === entry.kind && previous.id === entry.id ? null : { ...entry, trigger });
   };
+
+  // 位置每次都用真实几何重算：按钮走到哪菜单跟到哪；按钮完全滚出视口/滚动容器则收起。
+  const placeMenu = useCallback(() => {
+    const trigger = menu?.trigger;
+    const box = menuRef.current;
+    if (!trigger) return;
+    if (!trigger.isConnected) { setMenu(null); return; }
+    const host = portalHost();
+    if (!box || !host) return;
+    const triggerRect = trigger.getBoundingClientRect();
+    if (!(triggerRect.width > 0 && triggerRect.height > 0)) { setMenu(null); return; }
+
+    const bounds = usableBounds(host);
+    if (bounds.right - bounds.left < MENU_MARGIN * 2 || bounds.bottom - bounds.top < MENU_MARGIN * 2) { setMenu(null); return; }
+    const clip = visibleClip(trigger);
+    if (!(triggerRect.right > clip.left && triggerRect.left < clip.right && triggerRect.bottom > clip.top && triggerRect.top < clip.bottom)) {
+      setMenu(null);
+      return;
+    }
+
+    // 用菜单**实际渲染尺寸**：条目数/禁用项说明都会改变宽高，不能按 240×140 估。
+    const menuRect = box.getBoundingClientRect();
+    const width = Math.max(1, Math.round(menuRect.width));
+    const height = Math.max(1, Math.round(menuRect.height));
+
+    // 水平：优先让菜单左缘贴按钮左缘；右边放不下就改成右缘贴按钮右缘，再夹进可用外框。
+    let left = triggerRect.left;
+    if (left + width > bounds.right - MENU_MARGIN) left = triggerRect.right - width;
+    left = clampNumber(left, bounds.left + MENU_MARGIN, Math.max(bounds.left + MENU_MARGIN, bounds.right - MENU_MARGIN - width));
+
+    // 垂直：默认在按钮下方；下方放不下且上方放得下 → 翻到上方；两边都放不下时选空间大的一侧再夹紧。
+    const below = triggerRect.bottom + MENU_GAP;
+    const above = triggerRect.top - MENU_GAP - height;
+    const spaceBelow = bounds.bottom - MENU_MARGIN - below;
+    const spaceAbove = triggerRect.top - MENU_GAP - (bounds.top + MENU_MARGIN);
+    let top;
+    if (height <= spaceBelow) top = below;
+    else if (height <= spaceAbove) top = above;
+    else top = spaceAbove > spaceBelow ? above : below;
+    top = clampNumber(top, bounds.top + MENU_MARGIN, Math.max(bounds.top + MENU_MARGIN, bounds.bottom - MENU_MARGIN - height));
+
+    // absolute 的坐标原点是 offsetParent 的 padding box；portal 宿主可能是 static（真实外壳里
+    // .app-shell 就不是定位元素，原点是 .studymate-notes），所以按菜单自己的 offsetParent 换算。
+    const origin = box.offsetParent || host;
+    const originRect = origin.getBoundingClientRect();
+    const next = {
+      left: Math.round(left - (originRect.left + (origin.clientLeft || 0))),
+      top: Math.round(top - (originRect.top + (origin.clientTop || 0))),
+    };
+    setMenuPos((previous) => previous.left === next.left && previous.top === next.top ? previous : next);
+  }, [menu, portalHost]);
+
+  useLayoutEffect(() => { if (menu) placeMenu(); }, [menu, placeMenu]);
+
+  // 菜单开着时逐帧锚定：滚动、宿主布局变化、面板滑入滑出都会改按钮几何；
+  // 只在几何真的变了才重算（每帧一次 getBoundingClientRect，足够便宜）。
   useEffect(() => {
     if (!menu) return undefined;
-    const place = () => {
-      const host = portalHost(), button = menu.trigger?.getBoundingClientRect(), box = host?.getBoundingClientRect?.();
-      if (!button || !box || (!box.width && !box.height)) return;
-      setMenuPos({
-        left: Math.max(8, Math.min(button.left - box.left, box.width - 240)),
-        top: Math.min(button.bottom - box.top + 4, Math.max(8, box.height - 140)),
-      });
+    let frame = 0;
+    let lastKey = '';
+    const tick = () => {
+      frame = requestAnimationFrame(tick);
+      const trigger = menu.trigger;
+      if (!trigger?.isConnected) { setMenu(null); return; }
+      const rect = trigger.getBoundingClientRect();
+      // 菜单自身的尺寸也进 key：条目随调用方数据增减（如复制可用性变化）时，
+      // 即使触发按钮没动也要重算上下方向，否则会压出可用外框。
+      const box = menuRef.current?.getBoundingClientRect();
+      const key = [rect.left, rect.top, rect.width, rect.height, box?.width, box?.height, window.innerWidth, window.innerHeight].join('|');
+      if (key === lastKey) return;
+      lastKey = key;
+      placeMenu();
     };
-    place();
+    const invalidate = () => { lastKey = ''; };
+    frame = requestAnimationFrame(tick);
+    document.addEventListener('scroll', invalidate, true);
+    window.addEventListener('resize', invalidate);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener('scroll', invalidate, true);
+      window.removeEventListener('resize', invalidate);
+    };
+  }, [menu, placeMenu]);
+
+  // 外点关闭 + 初始焦点。焦点放在 placeMenu 的绘制前校正之后（useEffect 在 paint 后），
+  // 菜单已落到正确位置，focus 不会触发外壳滚动。
+  useEffect(() => {
+    if (!menu) return undefined;
     const outside = (event) => { if (!menuRef.current?.contains(event.target) && !event.target.closest?.('.tree-more')) closeMenu(); };
     document.addEventListener('pointerdown', outside, true);
-    window.addEventListener('resize', place);
     // 初始焦点给第一个可用项；全部禁用（如引用文件菜单）时退回首项——禁用项仍可聚焦、带 title 说明。
     (menuRef.current?.querySelector(ENABLED_MENU_ITEM) || menuRef.current?.querySelector('[role="menuitem"]'))?.focus();
-    return () => { document.removeEventListener('pointerdown', outside, true); window.removeEventListener('resize', place); };
-  }, [menu, closeMenu, portalHost]);
+    return () => document.removeEventListener('pointerdown', outside, true);
+  }, [menu, closeMenu]);
   const menuKeys = (event) => {
     const items = [...(menuRef.current?.querySelectorAll(ENABLED_MENU_ITEM) || [])];
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); menu.trigger?.focus(); }
@@ -164,18 +299,26 @@ export default function ResourceTree({
   const renderMenu = () => {
     if (!menu || !canEdit) return null;
     const { kind, id } = menu;
+    const menuStyle = { position: 'absolute', left: menuPos.left, top: menuPos.top };
     if (kind === 'folder') {
       const folder = folders.find((item) => item.id === id);
       if (!folder) return null;
       const name = folder.name;
       const deleteHint = deleteHintFor(folder);
       const canRename = Boolean(onRenameFolder), canDelete = Boolean(onDeleteFolder) && !deleteHint;
+      const isNotebook = folder.kind === 'notebook';
+      const canManageBinding = isNotebook && Boolean(onManageNotebook);
       return <div ref={menuRef} className="import-menu-items tree-more-menu" role="menu" aria-label={name + ' 的目录操作'}
-        style={{ position: 'absolute', left: menuPos.left, top: menuPos.top }} onKeyDown={menuKeys}>
+        style={menuStyle} onKeyDown={menuKeys}>
         <button role="menuitem" aria-disabled={!canRename || undefined} title={canRename ? '' : '当前环境未接入重命名。'}
           onClick={() => { if (canRename) startRename('folder', id, folder.name); }}>
           <Pencil size={15} /><span><b>重命名</b></span>
         </button>
+        {isNotebook && <button role="menuitem" aria-disabled={!canManageBinding || undefined}
+          title={canManageBinding ? '管理「' + name + '」的课程绑定。' : '当前环境未接入课程绑定。'}
+          onClick={() => { if (!canManageBinding) return; closeMenu(); onManageNotebook(id); }}>
+          <BookOpen size={15} /><span><b>课程绑定</b>{!canManageBinding && <small>当前环境未接入课程绑定</small>}</span>
+        </button>}
         <button role="menuitem" aria-disabled={!canDelete || undefined} title={deleteHint || (canDelete ? '' : '当前环境未接入删除。')}
           onClick={() => { if (canDelete) requestDelete(folder); }}>
           <Trash2 size={15} /><span><b>删除</b>{deleteHint && <small>{deleteHint}</small>}</span>
@@ -189,12 +332,21 @@ export default function ResourceTree({
     const name = resource.title || '未命名.md';
     const renameHint = renameHintFor(resource);
     const canRename = !renameHint;
+    // 「复制 Markdown」完全由调用方的 canCopyMarkdown 决定是否提供；回调没接上时仍保留条目但禁用，
+    // 与重命名/删除的「有 UI 无接线」语义一致。
+    const canCopy = typeof canCopyMarkdown === 'function' && canCopyMarkdown(resource) === true;
+    const canCopyNow = canCopy && Boolean(onCopyMarkdown);
     return <div ref={menuRef} className="import-menu-items tree-more-menu" role="menu" aria-label={name + ' 的文件操作'}
-      style={{ position: 'absolute', left: menuPos.left, top: menuPos.top }} onKeyDown={menuKeys}>
+      style={menuStyle} onKeyDown={menuKeys}>
       <button role="menuitem" aria-disabled={!canRename || undefined} title={renameHint}
         onClick={() => { if (canRename) startRename('file', id, resource.title || '未命名.md'); }}>
         <Pencil size={15} /><span><b>重命名</b>{renameHint && <small>{renameHint}</small>}</span>
       </button>
+      {canCopy && <button role="menuitem" aria-disabled={!canCopyNow || undefined}
+        title={canCopyNow ? '把这份 Markdown 复制到剪贴板。' : '当前环境未接入复制。'}
+        onClick={() => { if (!canCopyNow) return; closeMenu(); onCopyMarkdown(id); }}>
+        <Copy size={15} /><span><b>复制 Markdown</b>{!canCopyNow && <small>当前环境未接入复制</small>}</span>
+      </button>}
       <button role="menuitem" aria-disabled="true" title="归档尚未实现，先占位。">
         <Archive size={15} /><span><b>归档</b><small>尚未实现，先占位</small></span>
       </button>
@@ -207,26 +359,30 @@ export default function ResourceTree({
     if (query && !hasMatches(folder)) return null;
     const open = query || !closed.has(folder.id);
     const Icon = folder.kind === 'notebook' ? NotebookPen : open ? FolderOpen : Folder;
+    const binding = bindingOf(folder);
     return <div key={folder.id} role="treeitem" aria-expanded={!!open} aria-level={depth + 1}>
       <div className={'tree-row' + (folderActive(folder.id) ? ' is-active' : '') + (folder.kind === 'notebook' ? ' is-notebook' : '')}
         style={{ paddingLeft: 8 + depth * 16 }}>
         {renameField('folder', folder.id, '重命名 ' + folder.name) || <button className="tree-row-label" aria-label={folder.name + ' 文件夹'} onClick={() => {
           pickFolder(folder.id);
           onFolderSelect(folder.id);
+          reportPick('folder', folder.id);
           setClosed((prev) => { const next = new Set(prev); if (next.has(folder.id)) next.delete(folder.id); else next.add(folder.id); return next; });
         }}>
           <span className="tree-toggle">{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span><Icon size={16} className="tree-icon" /><span className="tree-label">{folder.name}</span>
+          {binding && <span className="tree-binding" data-tree-binding="1" title={binding}>{binding}</span>}
         </button>}
         {renderMoreButton({ kind: 'folder', id: folder.id }, folder.name)}
       </div>
       {open && <div role="group">
-        {folder.kind === 'notebook' && <button className="tree-row tree-canvas" style={{ paddingLeft: 24 + (depth + 1) * 16 }} onClick={() => onCanvas(folder.id)} aria-label={'打开' + folder.name + '画布'}><LayoutGrid size={15} /><span className="tree-label">画布</span></button>}
+        {folder.kind === 'notebook' && <button className="tree-row tree-canvas" style={{ paddingLeft: 24 + (depth + 1) * 16 }} onClick={() => { onCanvas(folder.id); reportPick('folder', folder.id); }} aria-label={'打开' + folder.name + '画布'}><LayoutGrid size={15} /><span className="tree-label">画布</span></button>}
         {children.map((child) => renderFolder(child, depth + 1))}
         {files.map((resource) => {
           const IconForFile = icons[resource.type] || FileText;
           return <div className={'tree-row tree-file' + (fileActive(resource.id) ? ' is-active' : '')} key={resource.id} style={{ paddingLeft: 24 + (depth + 1) * 16 }}
             role="treeitem" aria-level={depth + 2} draggable={canEdit} onDragStart={(event) => { event.dataTransfer.setData('application/studymate-resource', resource.id); event.dataTransfer.effectAllowed = 'copy'; }}>
-            {renameField('file', resource.id, '重命名 ' + resource.title) || <button className="tree-file-open" aria-label={'打开 ' + resource.title} onClick={() => { pickFile(resource.id); onSelect(resource.id); }} onDoubleClick={() => onOpenDocument(resource.id)}><IconForFile size={15} className="tree-icon" /><span className="tree-label">{resource.title || '未命名.md'}</span></button>}
+            {renameField('file', resource.id, '重命名 ' + resource.title) || <button className="tree-file-open" aria-label={'打开 ' + resource.title} onClick={() => { pickFile(resource.id); onSelect(resource.id); reportPick('file', resource.id); }} onDoubleClick={() => onOpenDocument(resource.id)}><IconForFile size={15} className="tree-icon" /><span className="tree-label">{resource.title || '未命名.md'}</span></button>}
+            {isUnsupportedNote(resource) && <span className="tree-binding" title="改回支持的 Markdown 扩展名可恢复">不支持的文件类型</span>}
             {resource.origin && <span className="resource-origin-badge" data-origin={resource.origin.mode === 'reference' ? 'link' : 'local'} title={resource.origin.mode === 'reference' ? '只读文件引用，不写回原件' : '独立副本，修改不影响来源'}>{resource.origin.mode === 'reference' ? '引用' : '副本'}</span>}
             {renderMoreButton({ kind: 'file', id: resource.id }, resource.title || '未命名.md')}
           </div>;

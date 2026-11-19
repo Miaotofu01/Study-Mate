@@ -25,6 +25,8 @@ import {
   dominantEol,
   editorChangesForRaw,
   fenceLanguage,
+  listLineBodyStart,
+  listMarkerLayout,
   normalizeLineEndings,
   parseGfmTable,
   parseImageSyntax,
@@ -32,6 +34,7 @@ import {
   rawOffsetMap,
   selectionTouchesSpan,
 } from './markdown-inline.js';
+import { editorGutter, gutterTheme } from './editor-gutter.js';
 import './inline-editor.css';
 
 /**
@@ -45,7 +48,12 @@ import './inline-editor.css';
  * 也就不可能顺手把 Markdown 规范化。
  *
  * 集成契约：
- *   props: value/onChange/onApi/onSelectionChange/theme/label/readOnly
+ *   props: value/onChange/onApi/onSelectionChange/theme/label/readOnly/sourceMode
+ *   sourceMode: false（默认）是渲染编辑——休息态的列表项显示排版后的项目符号/编号
+ *               （有序按文档里的起始号递增），续行按同一段位宽悬挂对齐；只有被光标/
+ *               选区碰到的片段才露出真实 Markdown 字符。true 时在**同一个 EditorView**
+ *               里摘掉全部行内装饰、挂上带行号槽的阅读型 gutter，显示完整原字符；
+ *               切模式不重建 view、不写正文、不发 onChange。
  *   onApi(api): api.read() → { text, from, to }；api.edit({ changes, selection }) → boolean；
  *               api.focus() / api.undo() / api.redo()。卸载时 onApi(null)。
  *   `text`、`from`/`to`、`changes` 的 from/to、`selection` 全是 **canonical 原始字符串坐标**，
@@ -194,6 +202,87 @@ class TaskWidget extends WidgetType {
   }
 }
 
+/* 列表标记：休息态用真的项目符号/编号顶替源码里的 `- ` / `3. `。
+   缩进与悬挂对齐都由同一份 listMarkerLayout 算出来：widget 占满 pad，
+   行样式再把 padding-left/text-indent 设成同一数值，软换行就落在正文起点。
+   点它把光标放进该项正文开头——选区碰到列表项，widget 随之让位给真实标记。 */
+class ListMarkWidget extends WidgetType {
+  constructor(layout, from) {
+    super();
+    this.layout = layout;
+    this.from = from;
+  }
+
+  eq(other) {
+    return other instanceof ListMarkWidget
+      && other.from === this.from
+      && other.layout.label === this.layout.label
+      && other.layout.padEm === this.layout.padEm
+      && other.layout.indentEm === this.layout.indentEm
+      && other.layout.markEm === this.layout.markEm;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+
+  toDOM(view) {
+    const wrapper = document.createElement('span');
+    wrapper.className = 'md-list-marker';
+    wrapper.contentEditable = 'false';
+    wrapper.style.width = `${this.layout.padEm}em`;
+    const indent = document.createElement('span');
+    indent.className = 'md-list-marker__indent';
+    indent.style.width = `${this.layout.indentEm}em`;
+    const glyph = document.createElement('span');
+    glyph.className = this.layout.ordered ? 'md-list-mark md-list-mark--ordered' : 'md-list-mark';
+    glyph.style.width = `${this.layout.markEm}em`;
+    glyph.textContent = this.layout.label;
+    wrapper.appendChild(indent);
+    wrapper.appendChild(glyph);
+    wrapper.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      view.dispatch({ selection: { anchor: this.from }, scrollIntoView: true });
+      view.focus();
+    });
+    return wrapper;
+  }
+}
+
+/* 续行的悬挂缩进：把源文件里的前导空白（以及行首引用前缀）换成与标记同宽的
+   占位，让 `- 第一行\n  第二行` 与惰性续行 `- 第一行\n第二行` 的正文都落在同一列。 */
+class ListSpacerWidget extends WidgetType {
+  constructor(padCss, from) {
+    super();
+    this.padCss = padCss;
+    this.from = from;
+  }
+
+  eq(other) {
+    return other instanceof ListSpacerWidget && other.padCss === this.padCss && other.from === this.from;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+
+  toDOM(view) {
+    const spacer = document.createElement('span');
+    spacer.className = 'md-list-spacer';
+    spacer.contentEditable = 'false';
+    spacer.style.width = this.padCss;
+    spacer.setAttribute('aria-hidden', 'true');
+    spacer.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      view.dispatch({ selection: { anchor: this.from }, scrollIntoView: true });
+      view.focus();
+    });
+    return spacer;
+  }
+}
+
 /* 围栏语言角标：休息态把「```python」整行收起后语言就不见了，
    这里用只读 chip 顶替开围栏行；点它把光标放回围栏，源码就地显形。 */
 class CodeLangWidget extends WidgetType {
@@ -237,7 +326,11 @@ class CodeLangWidget extends WidgetType {
     chip.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') reveal(event);
     });
-    return chip;
+    const header = document.createElement('div');
+    header.className = 'md-code-lang-bar';
+    header.contentEditable = 'false';
+    header.appendChild(chip);
+    return header;
   }
 }
 
@@ -323,14 +416,46 @@ class ImageWidget extends WidgetType {
   }
 }
 
+function listLineStyle(padCss) {
+  // 悬挂缩进：padding 由 CSS 按 var(--md-list-pad) 落到行上，软换行因此推到正文起点；
+  // 负 text-indent 只把首行拉回行首，首行的真字符由 widget 占同等宽度（同一份 padCss）。
+  return `--md-list-pad:${padCss};text-indent:calc(-1 * ${padCss});`;
+}
+
+// 惰性续行前面没有可换掉的空白：不插占位，只靠行内边距把整行（含软换行）推到正文列。
+function listLazyLineStyle(padCss) {
+  return `--md-list-pad:${padCss};`;
+}
+
+// 任务行的勾选框列宽：与 inline-editor.css 的 --md-task-slot 同源。
+// 首行由 TaskWidget 自己撑满整个 `[ ] ` 槽位，续行用同一个变量对齐，不额外画符号。
+const TASK_LIST_PAD = 'var(--md-task-slot)';
+
+function listPadFor(span) {
+  return span.task ? TASK_LIST_PAD : `${listMarkerLayout(span).padEm}em`;
+}
+
 function lineClassesFor(state, spans, ranges) {
-  const classes = new Map();
-  const add = (from, name) => {
-    const set = classes.get(from);
-    if (set) set.add(name);
-    else classes.set(from, new Set([name]));
+  const entries = new Map();
+  const add = (from, name, style) => {
+    let entry = entries.get(from);
+    if (!entry) {
+      entry = { classes: new Set(), style: '' };
+      entries.set(from, entry);
+    }
+    if (name) entry.classes.add(name);
+    if (style && !entry.style) entry.style = style;
   };
   for (const span of spans) {
+    // 列表项是行内节点（block=false），但它的行要挂渲染态缩进，先于 block 判断处理。
+    if (span.kind === 'list') {
+      const first = state.doc.lineAt(Math.min(span.from, state.doc.length));
+      // 被光标碰到的那一项回到真实标记，不能再挂渲染态的悬挂缩进（真标记会被推一截）；
+      // 任务项的首行没有符号，只有勾选框，缩进槽位由 --md-task-slot 决定。
+      const rendered = !selectionTouchesSpan(span, ranges);
+      add(first.from, 'md-line-list', rendered ? listLineStyle(listPadFor(span)) : '');
+      continue;
+    }
     if (!span.block) continue;
     const first = state.doc.lineAt(Math.min(span.from, state.doc.length));
     const last = state.doc.lineAt(Math.min(span.to, state.doc.length));
@@ -348,12 +473,11 @@ function lineClassesFor(state, spans, ranges) {
       continue;
     }
     if (span.kind === 'heading') add(first.from, 'md-line-heading');
-    if (span.kind === 'list') add(first.from, 'md-line-list');
     if (span.kind === 'quote') {
       for (let number = first.number; number <= last.number; number += 1) add(state.doc.line(number).from, 'md-line-quote');
     }
   }
-  return classes;
+  return entries;
 }
 
 function buildDecorations(state) {
@@ -416,13 +540,16 @@ function buildDecorations(state) {
 
   // GFM 任务：休息态显示只读勾选框，紧挨着的正文仍然是普通可编辑文字；
   // 选区进来后勾选框消失，真实 `[x]`/`[ ]` 以灰字显形，可逐字改写。
+  // 勾选框连同标记后的那一个空格一起占位：`[ ] ` 是一个完整槽位，续行才能按
+  // --md-task-slot 对齐，正文也不再多吃一个空格。
   for (const span of spans) {
     if (span.kind !== 'task' || selectionTouchesSpan(span, ranges) || overlapsReplaced(span.from, span.to)) continue;
     const marker = text.slice(span.from, span.to);
-    replaced.push({ from: span.from, to: span.to });
+    const end = text[span.to] === ' ' ? span.to + 1 : span.to;
+    replaced.push({ from: span.from, to: end });
     out.push(Decoration.replace({
       widget: new TaskWidget(/\[[xX]\]/.test(marker), span.from),
-    }).range(span.from, span.to));
+    }).range(span.from, end));
   }
 
   // 图片：只做本地占位（alt + URL 提示），永不设置 img.src。
@@ -451,12 +578,91 @@ function buildDecorations(state) {
     }
   }
 
+  // 列表：休息态用真的项目符号/编号顶替源码里的 `- ` / `3. `；选区碰到该项时
+  // widget 消失，原标记以灰字显形（和标题、引用同一条「碰到才露」规则）。
+  // 任务项不叠符号：休息态只留勾选框，任务标记本身的 widget 见上。
+  for (const span of spans) {
+    if (span.kind !== 'list' || span.task || selectionTouchesSpan(span, ranges)) continue;
+    const end = span.delimiters[0]?.to ?? span.from;
+    if (end <= span.indentFrom || overlapsReplaced(span.indentFrom, end)) continue;
+    const layout = listMarkerLayout(span);
+    replaced.push({ from: span.indentFrom, to: end });
+    out.push(Decoration.replace({
+      widget: new ListMarkWidget(layout, span.content?.from ?? end),
+    }).range(span.indentFrom, end));
+  }
+
+  const lineEntries = lineClassesFor(state, spans, ranges);
+
+  // 列表项续行的悬挂对齐：覆盖「带缩进的续行」「惰性续行（行首无缩进）」与
+  // 「同项里空行之后的新段落」。边界只认语法树里 ListItem 的节点范围：
+  // 项之外的行、空行、代码/表格/块公式都不放占位，避免凭空多出缩进或行高。
+  const itemStartLines = new Set();
+  const blockedLines = new Set();
+  const blockLine = (number) => blockedLines.add(number);
+  for (const span of spans) {
+    if (span.kind === 'list') itemStartLines.add(state.doc.lineAt(span.from).number);
+    if (span.kind !== 'fenced-code' && span.kind !== 'table') continue;
+    const first = state.doc.lineAt(span.from).number;
+    const last = state.doc.lineAt(Math.min(span.to, state.doc.length)).number;
+    for (let number = first; number <= last; number += 1) blockLine(number);
+  }
+  for (const span of mathSpans) {
+    if (!span.block) continue;
+    const first = state.doc.lineAt(span.from).number;
+    const last = state.doc.lineAt(Math.min(span.to, state.doc.length)).number;
+    for (let number = first; number <= last; number += 1) blockLine(number);
+  }
+  const continuationOwner = new Map();
+  for (const span of spans) {
+    if (span.kind !== 'list' || selectionTouchesSpan(span, ranges)) continue;
+    const first = state.doc.lineAt(Math.min(span.from, state.doc.length)).number;
+    const last = state.doc.lineAt(Math.min(span.to, state.doc.length)).number;
+    for (let number = first + 1; number <= last; number += 1) {
+      const current = continuationOwner.get(number);
+      // 同一个深层嵌套项同时被外层覆盖时，取层级更深的那个的悬挂位。
+      if (!current || span.depth > current.depth) continuationOwner.set(number, span);
+    }
+  }
+  // 行首已经被别的 widget 整体换掉（如图片）时，再插空白占位会打架，直接让位。
+  const replacedAt = (offset) => replaced.some((range) => range.from <= offset && offset < range.to);
+  for (const [number, span] of continuationOwner) {
+    if (itemStartLines.has(number) || blockedLines.has(number)) continue;
+    const line = state.doc.line(number);
+    // 空行/纯空白行不放占位：那会凭空造出一行的高度或宽度。
+    if (!line.text.trim()) continue;
+    const bodyStart = listLineBodyStart(line.text);
+    const padCss = listPadFor(span);
+    let entry = lineEntries.get(line.from);
+    if (!entry) {
+      entry = { classes: new Set(), style: '' };
+      lineEntries.set(line.from, entry);
+    }
+    entry.classes.add('md-line-list');
+    if (bodyStart === 0) {
+      // 惰性续行（行首没有空白也没有引用前缀）：没有可换掉的字符，就不插占位。
+      // 只给行内边距，正文与首行同列，软换行也落在同一列；零长 replace 会被 CM 拒绝。
+      if (!entry.style) entry.style = listLazyLineStyle(padCss);
+      continue;
+    }
+    const from = line.from;
+    const to = from + bodyStart;
+    if (overlapsReplaced(from, to) || replacedAt(from)) continue;
+    replaced.push({ from, to });
+    out.push(Decoration.replace({
+      widget: new ListSpacerWidget(padCss, to),
+    }).range(from, to));
+    if (!entry.style) entry.style = listLineStyle(padCss);
+  }
+
   for (const mark of marks) {
     if (mark.to <= mark.from || overlapsReplaced(mark.from, mark.to)) continue;
     out.push(Decoration.mark({ class: mark.classes }).range(mark.from, mark.to));
   }
-  for (const [from, names] of lineClassesFor(state, spans, ranges)) {
-    out.push(Decoration.line({ class: Array.from(names).join(' ') }).range(from));
+  for (const [from, entry] of lineEntries) {
+    const options = { class: Array.from(entry.classes).join(' ') };
+    if (entry.style) options.attributes = { style: entry.style };
+    out.push(Decoration.line(options).range(from));
   }
   return Decoration.set(out, true);
 }
@@ -482,6 +688,16 @@ function changesOf(transaction) {
   return changes;
 }
 
+// 源码模式下这两组扩展整体摘掉：inlineDecorations 不再生成任何 widget/隐藏标记，
+// 行号槽换成阅读型带行号的 gutter；渲染模式反之。Compartment 保证同 view 内原地重配。
+function decorationsFor(sourceMode) {
+  return sourceMode ? [] : inlineDecorations;
+}
+
+function gutterFor(sourceMode, dark) {
+  return sourceMode ? [editorGutter(), gutterTheme(dark)] : [];
+}
+
 export default function MarkdownInlineEditor({
   value = '',
   onChange,
@@ -490,6 +706,7 @@ export default function MarkdownInlineEditor({
   theme = 'light',
   label = 'Markdown 正文',
   readOnly = false,
+  sourceMode = false,
 }) {
   const hostRef = useRef(null);
   const viewRef = useRef(null);
@@ -514,12 +731,18 @@ export default function MarkdownInlineEditor({
   const onSelectionChangeRef = useRef(onSelectionChange);
   const readOnlySlot = useRef(new Compartment());
   const attributesSlot = useRef(new Compartment());
+  // 源码模式只换「装饰 + 行号槽」两组扩展：同一个 EditorView、同一份文档、
+  // 同一条撤销栈，切模式不发 onChange。渲染态的局部显形逻辑整个下线。
+  const decorationsSlot = useRef(new Compartment());
+  const gutterSlot = useRef(new Compartment());
+  const sourceModeRef = useRef(sourceMode);
   const [error, setError] = useState(typeof value === 'string' && value.length > MAX_MARKDOWN_LENGTH ? OVERSIZE_MESSAGE : '');
 
   onChangeRef.current = onChange;
   onApiRef.current = onApi;
   onSelectionChangeRef.current = onSelectionChange;
   readOnlyRef.current = readOnly;
+  sourceModeRef.current = sourceMode;
 
   // 原始坐标投影表按「当前 canonical 字符串」缓存；一次选区变化不重复建 128 KiB 的数组。
   function rawProjectionFor(canonical) {
@@ -724,7 +947,9 @@ export default function MarkdownInlineEditor({
           markdown({ base: markdownLanguage, codeLanguages }),
           // 固定生成色在深色主题下过不了 AA；只用类名，颜色交给本模块 CSS 的 tok-* 变量。
           syntaxHighlighting(classHighlighter),
-          inlineDecorations,
+          // 装饰与行号都走 Compartment：渲染态是局部显形，源码态是原样全显 + 行号。
+          decorationsSlot.current.of(decorationsFor(sourceModeRef.current)),
+          gutterSlot.current.of(gutterFor(sourceModeRef.current, theme === 'dark')),
           readOnlySlot.current.of([
             EditorState.readOnly.of(readOnlyRef.current),
             EditorView.editable.of(!readOnlyRef.current),
@@ -942,6 +1167,19 @@ export default function MarkdownInlineEditor({
     });
   }, [label, readOnly]);
 
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    // 只重配这两组扩展：文档、选区、撤销栈、输入法组合态都原地不动。
+    view.dispatch({
+      effects: [
+        decorationsSlot.current.reconfigure(decorationsFor(sourceMode)),
+        gutterSlot.current.reconfigure(gutterFor(sourceMode, theme === 'dark')),
+      ],
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceMode, theme]);
+
   function handleRootFocus() {
     viewRef.current?.focus();
   }
@@ -951,6 +1189,7 @@ export default function MarkdownInlineEditor({
       className="markdown-inline-editor"
       data-testid="markdown-inline-editor"
       data-theme={theme}
+      data-source-mode={sourceMode ? 'true' : 'false'}
       onClick={handleRootFocus}
     >
       <div className="markdown-inline-editor__host" ref={hostRef} />

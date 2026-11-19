@@ -50,6 +50,43 @@ const INITIAL = [
   '![示意图](https://example.com/a.png)',
 ].join('\r\n');
 const MIXED = 'a\r\nb\nc\rd';
+// 续行对齐的验收面：惰性续行（行首 0 个字符）、项内空行后的新段落、引用里的列表
+// （缩进续行与惰性续行）、任务续行；末尾三段是反证——项外的水平线与段落不该被占位。
+// 每段都用同一个首字（对/段/引/任）量正文左缘，避免字形侧承影响比较。
+const CONTINUATION_SOURCE = [
+  '- 对齐基准首行',
+  '对齐基准续行',
+  '',
+  '- 段落基准',
+  '',
+  '  段落续段',
+  '- 后续项',
+  '',
+  '> - 引用基准',
+  '>   引用基准续行',
+  '> 引用基准惰性续行',
+  '',
+  '> 纯引用行',
+  '',
+  '- [ ] 任务基准',
+  '任务基准续行',
+  '- 收尾项',
+  '',
+  '***',
+  '',
+  '项外段落',
+].join('\r\n');
+const LIST_SOURCE = [
+  '- 第一项',
+  '  续行与正文同列',
+  '- 第二项',
+  '',
+  '3. 从三开始',
+  '4. 接着四',
+  '   - 嵌套项',
+  '',
+  '- [ ] 任务项',
+].join('\r\n');
 
 let checks = 0;
 let failures = 0;
@@ -108,9 +145,11 @@ function App() {
   const [value, setValue] = React.useState(INITIAL);
   const [theme, setTheme] = React.useState('light');
   const [readOnly, setReadOnly] = React.useState(false);
+  const [sourceMode, setSourceMode] = React.useState(false);
   React.useEffect(() => {
     window.__setTheme = setTheme;
     window.__setReadOnly = setReadOnly;
+    window.__setSourceMode = setSourceMode;
     window.__setValue = (next) => { window.__value = next; setValue(next); };
   }, []);
   return (
@@ -119,6 +158,7 @@ function App() {
         value={value}
         theme={theme}
         readOnly={readOnly}
+        sourceMode={sourceMode}
         label="Markdown 正文"
         onChange={(next) => {
           window.__changes.push(next);
@@ -746,6 +786,311 @@ async function main() {
           JSON.stringify(nestedHit.visible));
         check('嵌套强调点选不改写正文、不回调', nestedHit.changes === 0, String(nestedHit.changes));
       }
+
+      // ── 列表：休息态是真实的符号/编号（有序按起始号递增），点入才露出 `- `/`3. ` ──
+      await page.evaluate((value) => {
+        window.__setValue(value);
+        window.__changes.length = 0;
+      }, LIST_SOURCE);
+      await page.waitForTimeout(150);
+      const listState = await page.evaluate(() => {
+        const markers = [...document.querySelectorAll('.markdown-inline-editor .md-list-marker')];
+        const listLines = [...document.querySelectorAll('.markdown-inline-editor .cm-line')]
+          .filter((line) => line.querySelector('.md-list-marker'));
+        return {
+          count: markers.length,
+          labels: markers.map((node) => node.querySelector('.md-list-mark')?.textContent),
+          ordered: markers.map((node) => node.querySelector('.md-list-mark')?.classList.contains('md-list-mark--ordered')),
+          spacers: document.querySelectorAll('.markdown-inline-editor .md-list-spacer').length,
+          padding: listLines.map((line) => parseFloat(getComputedStyle(line).paddingLeft) || 0),
+          indent: listLines.map((line) => parseFloat(getComputedStyle(line).textIndent) || 0),
+          widths: markers.map((node) => node.getBoundingClientRect().width),
+          continuation: (() => {
+            const line = [...document.querySelectorAll('.markdown-inline-editor .cm-line')]
+              .find((node) => node.querySelector('.md-list-spacer'));
+            return line ? line.textContent.trimStart() : '';
+          })(),
+          geometry: (() => {
+            const firstLine = [...document.querySelectorAll('.markdown-inline-editor .cm-line')]
+              .find((node) => node.querySelector('.md-list-marker'));
+            const contLine = [...document.querySelectorAll('.markdown-inline-editor .cm-line')]
+              .find((node) => node.querySelector('.md-list-spacer'));
+            if (!firstLine || !contLine) return null;
+            const lr = firstLine.getBoundingClientRect();
+            const mr = firstLine.querySelector('.md-list-marker').getBoundingClientRect();
+            const sr = contLine.querySelector('.md-list-spacer').getBoundingClientRect();
+            return { markerLeft: mr.left - lr.left, spacerLeft: sr.left - lr.left, markerWidth: mr.width, spacerWidth: sr.width };
+          })(),
+          text: window.__api.read().text,
+          changes: window.__changes.length,
+        };
+      });
+      check('渲染态列表：每个非任务项恰好由一个符号/编号占位',
+        listState.count === 5, `markers=${listState.count}`);
+      check('有序编号沿用列表起始号（3.→4.），无序项是真项目符号',
+        JSON.stringify(listState.labels) === JSON.stringify(['•', '•', '3.', '4.', '•']) &&
+          JSON.stringify(listState.ordered) === JSON.stringify([false, false, true, true, false]),
+        JSON.stringify(listState.labels));
+      check('列表行有悬挂缩进：负 text-indent 与 padding 同宽，且与标记占位等宽',
+        listState.padding.every((value) => value > 0) &&
+          listState.indent.every((value, index) => Math.abs(value + listState.padding[index]) < 0.5) &&
+          listState.widths.every((width, index) => Math.abs(width - listState.padding[index]) <= 1.5),
+        `padding=${JSON.stringify(listState.padding)} indent=${JSON.stringify(listState.indent)} widths=${JSON.stringify(listState.widths)}`);
+      check('嵌套项缩进递增（一级 1.5em，嵌套位宽更大）',
+        listState.padding[4] > listState.padding[2] && listState.padding[2] > listState.padding[0] &&
+          Math.abs((listState.padding[4] - listState.padding[0]) - 1.5 * 13) <= 1.5,
+        JSON.stringify(listState.padding));
+      check('列表项续行的前导空白换成同宽占位，正文与首行同列',
+        listState.spacers === 1 && listState.continuation.startsWith('续行与正文同列'),
+        `spacers=${listState.spacers} text=${JSON.stringify(listState.continuation)}`);
+      check('几何对齐：首行标记与续行占位都从行左缘起排且等宽，正文落在同一列',
+        Boolean(listState.geometry) &&
+          Math.abs(listState.geometry.markerLeft) <= 1 &&
+          Math.abs(listState.geometry.spacerLeft) <= 1 &&
+          Math.abs(listState.geometry.markerWidth - listState.geometry.spacerWidth) <= 1,
+        JSON.stringify(listState.geometry));
+      check('列表渲染不改写原始字节、不触发 onChange',
+        listState.text === LIST_SOURCE && listState.changes === 0,
+        `changes=${listState.changes}`);
+
+      // 点第一项的符号：只有这一项回到真实 `- `，其它项仍是排版后的符号。
+      await page.locator('.markdown-inline-editor .md-list-marker').first().click();
+      await page.waitForTimeout(150);
+      const listTouched = await page.evaluate(() => {
+        const visible = [...document.querySelectorAll('.markdown-inline-editor .md-syntax:not(.md-syntax-hidden)')]
+          .map((node) => node.textContent).join('');
+        const firstLine = [...document.querySelectorAll('.markdown-inline-editor .cm-line')]
+          .find((line) => line.textContent.startsWith('- 第一项'));
+        return {
+          markers: document.querySelectorAll('.markdown-inline-editor .md-list-marker').length,
+          spacers: document.querySelectorAll('.markdown-inline-editor .md-list-spacer').length,
+          visible,
+          padding: firstLine ? parseFloat(getComputedStyle(firstLine).paddingLeft) || 0 : -1,
+          from: window.__api.read().from,
+          text: window.__api.read().text,
+          changes: window.__changes.length,
+        };
+      });
+      check('点入列表项只露出这一项的真实 `- `，其余仍是符号/编号',
+        listTouched.markers === 4 && listTouched.visible === '- ',
+        `markers=${listTouched.markers} visible=${JSON.stringify(listTouched.visible)}`);
+      check('活动项不再挂渲染态悬挂缩进（真标记不被推一截）',
+        listTouched.padding === 0 && listTouched.spacers === 0,
+        `padding=${listTouched.padding} spacers=${listTouched.spacers}`);
+      check('点入列表项把光标放到该项正文开头且不改正文',
+        listTouched.from === LIST_SOURCE.indexOf('第一项') &&
+          listTouched.text === LIST_SOURCE && listTouched.changes === 0,
+        `from=${listTouched.from} expected=${LIST_SOURCE.indexOf('第一项')}`);
+
+      // ── 续行对齐的验收面：惰性续行、项内续段、引用里的列表、任务续行，外加三条反证 ──
+      // 边界只认语法树 ListItem 的范围：项外的惰性段落、空行、水平线都不该被占位。
+      // 行号固定，直接按序号取行：渲染后行首是符号/编号，不能拿 `- ` 当匹配前缀。
+      await page.evaluate((value) => {
+        window.__setValue(value);
+        window.__changes.length = 0;
+      }, CONTINUATION_SOURCE);
+      await page.waitForTimeout(150);
+      // 光标放到最后一行（列表之外）：光标落在某项里时那一项会回到真实标记。
+      await page.locator('.markdown-inline-editor .cm-line').last().click();
+      await page.waitForTimeout(150);
+      const continuation = await page.evaluate(() => {
+        const lines = [...document.querySelectorAll('.markdown-inline-editor .cm-line')];
+        const at = (number) => lines[number - 1] || null;
+        const glyphLeft = (line, needle) => {
+          if (!line) return null;
+          const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+          let node;
+          while ((node = walker.nextNode())) {
+            const index = node.textContent.indexOf(needle);
+            if (index < 0) continue;
+            const range = document.createRange();
+            range.setStart(node, index);
+            range.setEnd(node, index + 1);
+            const rect = range.getBoundingClientRect();
+            if (rect.width > 0) return rect.left;
+          }
+          return null;
+        };
+        const spacerOf = (line) => (line ? line.querySelector('.md-list-spacer') : null);
+        const padOf = (line) => (line ? parseFloat(getComputedStyle(line).paddingLeft) || 0 : -1);
+        const task = at(15);
+        return {
+          lineCount: lines.length,
+          cursor: window.__api.read().from,
+          markerCount: document.querySelectorAll('.markdown-inline-editor .md-list-marker').length,
+          taskCount: document.querySelectorAll('.markdown-inline-editor .md-task-widget').length,
+          lazy: {
+            firstLeft: glyphLeft(at(1), '对'),
+            bodyLeft: glyphLeft(at(2), '对'),
+            firstPad: padOf(at(1)),
+            bodyPad: padOf(at(2)),
+            hasSpacer: Boolean(spacerOf(at(2))),
+          },
+          para: {
+            firstLeft: glyphLeft(at(4), '段'),
+            bodyLeft: glyphLeft(at(6), '段'),
+            hasSpacer: Boolean(spacerOf(at(6))),
+            blankHasSpacer: Boolean(spacerOf(at(5))),
+            blankPad: padOf(at(5)),
+          },
+          quote: {
+            listLeft: glyphLeft(at(9), '引'),
+            indentedLeft: glyphLeft(at(10), '引'),
+            lazyLeft: glyphLeft(at(11), '引'),
+            listPad: padOf(at(9)),
+            lazyPad: padOf(at(11)),
+            plainPad: padOf(at(13)),
+            plainHasSpacer: Boolean(spacerOf(at(13))),
+          },
+          task: {
+            bodyLeft: glyphLeft(task, '任'),
+            bodyPad: padOf(task),
+            nextLeft: glyphLeft(at(16), '任'),
+            nextPad: padOf(at(16)),
+            markerOnTaskLine: Boolean(task?.querySelector('.md-list-marker')),
+            slot: getComputedStyle(document.querySelector('.markdown-inline-editor'))
+              .getPropertyValue('--md-task-slot').trim(),
+            widgetWidth: task?.querySelector('.md-task-widget')?.getBoundingClientRect().width ?? -1,
+            showsBracket: (task?.textContent || '').includes('['),
+          },
+          counter: {
+            rulePad: padOf(at(19)),
+            ruleSpacer: Boolean(spacerOf(at(19))),
+            outsidePad: padOf(at(21)),
+            outsideSpacer: Boolean(spacerOf(at(21))),
+          },
+          text: window.__api.read().text,
+          changes: window.__changes.length,
+        };
+      });
+      check('渲染态列表：任务项只出一个勾选框、不重复符号，其余项各一个标记',
+        continuation.lineCount === 21 &&
+          continuation.markerCount === 5 && continuation.taskCount === 1,
+        `lines=${continuation.lineCount} markers=${continuation.markerCount} tasks=${continuation.taskCount}`);
+      check('惰性续行（行首无缩进）只靠行内边距悬挂：正文与首行同列、软换行同列',
+        null !== continuation.lazy.bodyLeft &&
+          Math.abs(continuation.lazy.bodyLeft - continuation.lazy.firstLeft) <= 1.5 &&
+          continuation.lazy.firstPad > 0 &&
+          Math.abs(continuation.lazy.bodyPad - continuation.lazy.firstPad) <= 0.5 &&
+          continuation.lazy.hasSpacer === false,
+        JSON.stringify(continuation.lazy));
+      check('项内空行之后的新段落也悬挂对齐，空行本身不造占位、不挂缩进',
+        continuation.para.hasSpacer &&
+          null !== continuation.para.bodyLeft &&
+          Math.abs(continuation.para.bodyLeft - continuation.para.firstLeft) <= 1.5 &&
+          continuation.para.blankHasSpacer === false && continuation.para.blankPad === 0,
+        JSON.stringify(continuation.para));
+      check('引用里的列表叠加引用缩进：首行、缩进续行、惰性续行的正文落在同一列',
+        null !== continuation.quote.listLeft &&
+          Math.abs(continuation.quote.listLeft - continuation.quote.indentedLeft) <= 1.5 &&
+          Math.abs(continuation.quote.listLeft - continuation.quote.lazyLeft) <= 1.5,
+        JSON.stringify(continuation.quote));
+      check('引用缩进不被列表覆盖：列表行比纯引用行正好多一段列表位宽',
+        Math.abs(continuation.quote.plainPad - 10) <= 0.5 &&
+          continuation.quote.plainHasSpacer === false &&
+          Math.abs(continuation.quote.listPad - continuation.quote.lazyPad) <= 0.5 &&
+          Math.abs((continuation.quote.listPad - continuation.quote.plainPad) - continuation.lazy.firstPad) <= 1,
+        JSON.stringify({ ...continuation.quote, slot: continuation.lazy.firstPad }));
+      check('任务续行按勾选框槽位对齐，且不再出现第二个标记或 `[`',
+        null !== continuation.task.bodyLeft &&
+          Math.abs(continuation.task.nextLeft - continuation.task.bodyLeft) <= 1.5 &&
+          continuation.task.markerOnTaskLine === false && continuation.task.showsBracket === false,
+        JSON.stringify(continuation.task));
+      check('任务槽位与勾选框同源：首行与续行读同一段 --md-task-slot 宽度',
+        continuation.task.slot.length > 0 && continuation.task.widgetWidth > 0 &&
+          Math.abs(continuation.task.bodyPad - continuation.task.widgetWidth) <= 1 &&
+          Math.abs(continuation.task.nextPad - continuation.task.widgetWidth) <= 1 &&
+          Math.abs(continuation.task.bodyPad - continuation.task.nextPad) <= 0.5,
+        JSON.stringify(continuation.task));
+      check('反证：项外的水平线与项外段落都不加占位、不挂悬挂缩进',
+        continuation.counter.rulePad === 0 && continuation.counter.ruleSpacer === false &&
+          continuation.counter.outsidePad === 0 && continuation.counter.outsideSpacer === false,
+        JSON.stringify(continuation.counter));
+      check('续行对齐全部是装饰：原始字节与 onChange 都不动',
+        continuation.text === CONTINUATION_SOURCE && continuation.changes === 0,
+        `changes=${continuation.changes}`);
+
+      // ── 源码模式：同一个 EditorView 里摘掉装饰、挂上行号，不写正文 ───────────
+      await page.evaluate((value) => {
+        window.__setValue(value);
+        window.__changes.length = 0;
+      }, INITIAL);
+      await page.waitForTimeout(120);
+      await page.evaluate(() => { window.__contentNode = document.querySelector('.markdown-inline-editor .cm-content'); });
+      const previewInfo = await page.evaluate(() => ({
+        hidden: document.querySelectorAll('.markdown-inline-editor .md-syntax-hidden').length,
+        gutters: document.querySelectorAll('.markdown-inline-editor .cm-lineNumbers').length,
+      }));
+      check('渲染模式默认没有行号槽、且有隐藏标记', previewInfo.gutters === 0 && previewInfo.hidden > 0,
+        `gutters=${previewInfo.gutters} hidden=${previewInfo.hidden}`);
+
+      await page.evaluate(() => window.__setSourceMode(true));
+      await page.waitForTimeout(150);
+      const sourceInfo = await page.evaluate(() => ({
+        attr: document.querySelector('.markdown-inline-editor')?.dataset.sourceMode,
+        gutters: document.querySelectorAll('.markdown-inline-editor .cm-lineNumbers .cm-gutterElement').length,
+        gutterWidth: (() => {
+          const gutters = document.querySelector('.markdown-inline-editor .cm-gutters');
+          return gutters ? gutters.getBoundingClientRect().width : 0;
+        })(),
+        numbers: [...document.querySelectorAll('.markdown-inline-editor .cm-lineNumbers .cm-gutterElement')]
+          .map((node) => node.textContent.trim())
+          .filter(Boolean),
+        hidden: document.querySelectorAll('.markdown-inline-editor .md-syntax-hidden').length,
+        widgets: document.querySelectorAll('.markdown-inline-editor .md-task-widget, .markdown-inline-editor .md-table-widget, .markdown-inline-editor .md-list-marker').length,
+        same: window.__contentNode === document.querySelector('.markdown-inline-editor .cm-content'),
+        raw: document.querySelector('.markdown-inline-editor .cm-content')?.innerText || '',
+        doc: window.__api.read().text,
+        changes: window.__changes.length,
+      }));
+      check('切到源码模式：data-source-mode=true、出现行号、DOM 仍是同一个 EditorView',
+        sourceInfo.attr === 'true' && sourceInfo.gutters >= 5 && sourceInfo.same === true,
+        `attr=${sourceInfo.attr} gutters=${sourceInfo.gutters} same=${sourceInfo.same}`);
+      check('源码模式行号真的可见：栏有宽度、编号覆盖文档真实行',
+        sourceInfo.gutterWidth >= 20 && sourceInfo.numbers.includes('1') && sourceInfo.numbers.includes('5'),
+        `width=${sourceInfo.gutterWidth} numbers=${JSON.stringify(sourceInfo.numbers)}`);
+      check('源码模式显示全部真实 Markdown 字符：无隐藏标记、无替换 widget',
+        sourceInfo.hidden === 0 && sourceInfo.widgets === 0 &&
+          sourceInfo.raw.includes('- [x] done') && sourceInfo.raw.includes('**bold**') &&
+          sourceInfo.raw.includes('```js') && sourceInfo.raw.includes('# Head'),
+        `hidden=${sourceInfo.hidden} widgets=${sourceInfo.widgets}`);
+      check('切换源码模式不改写正文、不触发 onChange',
+        sourceInfo.doc === INITIAL && sourceInfo.changes === 0,
+        `changes=${sourceInfo.changes}`);
+
+      await page.locator('.markdown-inline-editor .cm-content').click();
+      await page.keyboard.press('Control+End');
+      await page.keyboard.type('X');
+      await page.waitForTimeout(150);
+      const sourceTyped = await page.evaluate(() => ({
+        text: window.__api.read().text,
+        changes: window.__changes.length,
+      }));
+      check('源码模式里输入照常合并成一次 onChange 且字节保真',
+        sourceTyped.changes === 1 && sourceTyped.text === `${INITIAL}X`,
+        `changes=${sourceTyped.changes}`);
+      await page.keyboard.press('Control+Z');
+      await page.waitForTimeout(150);
+      check('源码模式里的 Ctrl+Z 回到未输入的正文',
+        (await page.evaluate(() => window.__api.read().text)) === INITIAL,
+        JSON.stringify(await page.evaluate(() => window.__api.read().text)));
+
+      await page.evaluate(() => { window.__changes.length = 0; });
+      await page.evaluate(() => window.__setSourceMode(false));
+      await page.waitForTimeout(150);
+      const backInfo = await page.evaluate(() => ({
+        attr: document.querySelector('.markdown-inline-editor')?.dataset.sourceMode,
+        gutters: document.querySelectorAll('.markdown-inline-editor .cm-lineNumbers').length,
+        widgets: document.querySelectorAll('.markdown-inline-editor .md-task-widget').length,
+        same: window.__contentNode === document.querySelector('.markdown-inline-editor .cm-content'),
+        doc: window.__api.read().text,
+        changes: window.__changes.length,
+      }));
+      check('切回渲染模式：同 view、隐藏/勾选框恢复、行号消失',
+        backInfo.attr === 'false' && backInfo.gutters === 0 && backInfo.widgets >= 1 &&
+          backInfo.same === true && backInfo.doc === INITIAL,
+        `gutters=${backInfo.gutters} widgets=${backInfo.widgets} same=${backInfo.same}`);
+      check('来回切模式都不触发 onChange', backInfo.changes === 0, String(backInfo.changes));
 
       check('没有远端图片/公式请求', requests.length === 0, requests.join(', '));
       check('无 console/page 错误', errors.length === 0, errors.join(' / '));

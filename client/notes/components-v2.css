@@ -5,6 +5,10 @@
 .app-shell.v2 .tree-file-open { display:flex;align-items:center;gap:7px;flex:1;min-width:0;align-self:stretch;border:0;background:none;color:inherit;text-align:left;padding:0;cursor:pointer;font:inherit; }
 .app-shell.v2 .tree-file-open .tree-icon { flex-shrink:0; }
 .app-shell.v2 .tree-actions { flex-shrink:0; }
+.app-shell.v2 .notes-create-control { position:relative; }
+.app-shell.v2 .notes-create-trigger { display:flex; align-items:center; gap:3px; white-space:nowrap; padding-inline:7px; }
+.app-shell.v2 .notes-create-menu { inset:calc(100% + 4px) 0 auto auto; min-width:138px; width:max-content; z-index:8; }
+.app-shell.v2 .notes-create-menu button { min-width:0; }
 .app-shell.v2 .tree-footer { margin-top:auto;align-items:center; }
 .app-shell.v2 .resource-detail { padding:16px;gap:16px; }
 .app-shell.v2 .resource-detail h2 { font-size:16px; }
@@ -83,6 +87,5 @@
   .app-shell.v2 .canvas-toolbar .icon-button { width:28px;height:30px; }
   .app-shell.v2 .canvas-toolbar i { margin:0 2px; }
   .app-shell.v2 .canvas-toolbar .zoom-label { width:30px;font-size:9px; }
-  .app-shell.v2 .document-toolbar { flex-wrap:wrap;padding:8px 12px;gap:8px; }
-  .app-shell.v2 .document-toolbar input { flex-basis:100%; }
+  .app-shell.v2 .document-toolbar { padding:8px 12px;gap:8px; }
 }

@@ -318,6 +318,9 @@ const groups = {
       'scripts/tests/test_notes_store_recovery.mjs',
       'scripts/tests/test_notes_route.mjs',
       'scripts/tests/test_notes_persistence.mjs',
+      // 同一标签页宿主的持久化会话（client/notes/persistence-session.js）：卸载交还租约而不
+      // dispose 控制器、重挂复用同一控制器与同一在途 GET、失败不复用、竞争租约 fail closed。
+      'scripts/tests/test_notes_persistence_session.mjs',
       'scripts/tests/test_notes_serialization_cache.mjs',
       'scripts/tests/test_notes_curriculum.mjs',
       // #270 编辑交互后续：真实局部 Markdown 标记与原稿坐标格式命令。
@@ -525,6 +528,14 @@ const groups = {
       // #312：导航卸载前后 pending/error 的真实可达状态——输入不串文件、不被误标草稿、
       // 无未确认草稿时不误拦关闭页面。未确认草稿本身只在组件层 fixture 可构造。
       'browser/notes_draft_navigation_test.mjs',
+      // #312：关掉 main 再挂回来——真 React 19（development，StrictMode 真双调 effect）+
+      // 假 transport：在途/debounce/失败/409 草稿与 layout 跨卸载保留，重挂不重发 GET、
+      // 不把默认相机写成草稿、两个 main 竞争时旧实例 fail closed。
+      'browser/notes_persistence_session_test.mjs',
+      // ADR-0019：真 dist 组合客户端 + 真 notes HTTP；宿主 main 整个卸载、同标签重进，
+      // 验笔记面/同篇文档/按篇文档模式、活动笔记本画布与学习课件位置的恢复，以及
+      // 保存请求在途时真卸载后的草稿恢复。品牌切换只用于切面，不作为退出替代。
+      'browser/notes_host_reentry_test.mjs',
       'browser/reading_test.mjs',
       'browser/reading_position_test.mjs',
       'browser/attempts_test.mjs',

@@ -39,9 +39,16 @@ async function body(page, text) {
   await editor.click();
   await page.keyboard.press('Control+A'); await page.keyboard.insertText(text);
 }
-async function createNote(page, fixture, text) {
+// 左栏「新建」菜单 → role=menuitem「新建笔记」→ 同名弹窗「创建」；默认名 未命名.md。
+async function createNote(page, fixture, text, name) {
   const before = new Set(Object.keys(fixture.read().resources));
-  await notes(page).getByRole('button', { name: '新建笔记', exact: true }).click();
+  await notes(page).locator('.left-panel .panel-header').getByRole('button', { name: '新建', exact: true }).click();
+  await notes(page).getByRole('menuitem', { name: '新建笔记', exact: true }).click();
+  const dialog = page.locator('[role=dialog][aria-label="新建笔记"]');
+  await dialog.waitFor({ state: 'visible', timeout: 5000 });
+  if (name !== undefined) await dialog.getByRole('textbox', { name: '笔记名称' }).fill(name);
+  await dialog.getByRole('button', { name: '创建', exact: true }).click();
+  await dialog.waitFor({ state: 'detached', timeout: 5000 });
   await body(page, text);
   await until(() => Object.values(fixture.read().resources).some(r => !before.has(r.id) && r.markdown === text), '新笔记没有真实保存');
   await saved(page);

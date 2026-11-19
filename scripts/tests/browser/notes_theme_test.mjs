@@ -11,7 +11,7 @@
    - 覆盖期间宿主再变化**不**跟随（覆盖优先）；刷新后回到跟随宿主；
    - hosted 模式不写宿主 DOM：html 无 data-theme / 无内联 colorScheme，宿主 body 背景不变；
    - host dark + 模块 light 时宿主暗色规则不倒灌：app-shell color-scheme 仍是 light，
-     树内 scrollbar-color 仍是模块亮色值（ui-v4 的模块级滚动条规则压过宿主 body * 规则）；
+     树内 scrollbar-color 仍是模块亮色值（主动注入更晚的宿主级规则，并用模块外的 DOM 作正控）；
    - 独立 /preview/：写 documentElement（data-theme + colorScheme），覆盖压过系统偏好；
    - 全程无控制台/页面错误。
    需要 Microsoft Edge；没有就退出码 3。不连接真实 DSH 或模型。 */
@@ -148,20 +148,35 @@ try {
     }); // 场景结束时 override=null，宿主 light
 
     await guarded('host dark + 模块 light：宿主暗色规则不倒灌（color-scheme / 滚动条）', async () => {
-      await setHostDark(page, true); // 先跟随 dark
+      // 夹具不加载 DSH 样式。特意在分块样式之后加入宿主规则，并选一个不等于模块色板的颜色。
+      await page.addStyleTag({ content: `body[data-ds-dark-theme] * {
+        color-scheme: dark; scrollbar-color: rgb(17, 19, 23) transparent;
+      }` });
+      await setHostDark(page, true);
       await waitForTheme(page, 'dark');
+      const host = await page.locator('#root').evaluate(el => {
+        const style = getComputedStyle(el);
+        return { colorScheme: style.colorScheme, scrollbarColor: style.scrollbarColor };
+      });
+      assert.equal(host.colorScheme, 'dark', '宿主规则没有作用于模块外的正控');
+      assert.ok(host.scrollbarColor.includes('rgb(17, 19, 23)'), `宿主滚动条规则未生效：${host.scrollbarColor}`);
       await toggle(page); // override = light：宿主暗色 + 模块亮色并存
       await waitForTheme(page, 'light');
-      const probe = await page.evaluate(() => {
+      const probe = (readyOnly) => {
         const shell = document.querySelector('.studymate-notes .app-shell');
-        const tree = document.querySelector('.studymate-notes .resource-tree');
-        return {
-          colorScheme: getComputedStyle(shell).colorScheme,
+        const tree = shell?.querySelector('.resource-tree');
+        const actual = {
+          colorScheme: shell ? getComputedStyle(shell).colorScheme : '(no shell)',
           scrollbarColor: tree ? getComputedStyle(tree).scrollbarColor : '(no tree)',
         };
+        return !readyOnly || (actual.colorScheme === 'light' && actual.scrollbarColor.includes('rgb(207, 212, 222)'))
+          ? actual : null;
+      };
+      // data-theme 已翻转不代表 Edge 同一拍已重算后代的滚动条样式。
+      const sample = await page.waitForFunction(probe, true, { timeout: 5000 }).catch(async cause => {
+        assert.fail(`模块没有保持亮色样式：${JSON.stringify(await page.evaluate(probe))} (${cause.message})`);
       });
-      assert.equal(probe.colorScheme, 'light', '宿主暗色 color-scheme 倒灌进模块');
-      assert.ok(probe.scrollbarColor.includes('rgb(207, 212, 222)'), `宿主 body * 滚动条规则倒灌进模块：${probe.scrollbarColor}`);
+      await sample.dispose();
     });
 
     check('hosted 全程无控制台/页面/失败请求', problems.length === 0, problems.join(' | '));

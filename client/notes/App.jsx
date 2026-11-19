@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReactFlow, ReactFlowProvider, Background, BackgroundVariant, MiniMap, useReactFlow, useNodesInitialized, applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, FolderPlus, FileText, Link2, HelpCircle, RotateCcw, X, Undo2, Redo2, ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Type, Trash2, LayoutDashboard, Sun, Moon, LocateFixed, Copy, RefreshCw } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, FolderPlus, FileText, Link2, HelpCircle, RotateCcw, X, Undo2, Redo2, ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Type, Trash2, LayoutDashboard, Sun, Moon, LocateFixed, Copy, RefreshCw, ChevronDown, NotebookPen } from 'lucide-react';
 import { makeDemo, card, textCard, edge } from './fixtures.js';
 import { BoardContext } from './BoardContext.js';
 import { nodeTypes, edgeTypes } from './CanvasNodes.jsx';
@@ -8,12 +8,15 @@ import ResourceTree, { initialFolders, initialParent } from './ResourceTree.jsx'
 import { folderDeleteBlockReason, canRenameResource, validateFolderName, validateFileTitle } from './resource-tree-model.js';
 import MediaRenderer from './MediaRenderer.jsx';
 import ImportControls from './ImportControls.jsx';
-import { IMPORT_FILE_ACCEPT, IMPORT_PICKER_TYPES, captureFileDrop, readImportedEntry, resolveFileReference, isFileReference, copyResource, originDescription, gridAppearance } from './imports.js';
+import { IMPORT_FILE_ACCEPT, IMPORT_PICKER_TYPES, captureFileDrop, readImportedEntry, resolveFileReference, isFileReference, originDescription, gridAppearance } from './imports.js';
 import useNotesPersistence, { SaveState } from './useNotesPersistence.js';
 import ChatPanel from './ChatPanel.jsx';
 import NoteEditor from './NoteEditor.jsx';
+import NoteTitleInput from './NoteTitleInput.jsx';
+import { isMarkdownResource, isUnsupportedNote, noteExtension, copyNoteTitle } from './note-types.js';
 import CourseReference from './CourseReference.jsx';
 import { NodeNotebookTree, NotesStatus } from './LearningNotes.jsx';
+import { CourseAssociationBar, NotebookBindingsForm, NoteAssociationsForm, notebookBindingLabel } from './CourseRelations.jsx';
 import { createNotesWorkspace, sameSubject, sameCourse, courseRef, normalizeCourseRef, associateNote, notebookOf, ownedNote, resolveCourse } from './curriculum.js';
 import './layout-v2.css';
 import './components-v2.css';
@@ -21,8 +24,19 @@ import './theme-v3.css';
 import './ui-v4.css';
 import './ui-v5.css';
 
+const DOCUMENT_MODES = [['preview', '预览'], ['edit', '编辑'], ['split', '双列'], ['inline', '渲染编辑']];
+
 const uid = (prefix) => prefix + '-' + crypto.randomUUID();
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function folderPath(folders, id) {
+  const names = [], seen = new Set();
+  while (id && !seen.has(id)) {
+    const folder = folders.find(item => item.id === id);
+    if (!folder) return '目标已不可用';
+    seen.add(id); names.unshift(folder.name); id = folder.parent;
+  }
+  return names.join(' › ') || '目标已不可用';
+}
 const editable = (target) => target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"], .cm-editor, .note-editor'));
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const fresh = () => {
@@ -63,6 +77,27 @@ function Modal({ title, onClose, children, className = '' }) {
   return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section ref={ref} className={"modal " + className} role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><h2>{title}</h2><button className="icon-button" aria-label="关闭弹窗" onClick={onClose}><X size={18} /></button></div>{children}</section></div>;
 }
 
+const CREATE_ENTRIES = [['notebook', '新建笔记本', NotebookPen], ['folder', '新建文件夹', FolderPlus], ['note', '新建笔记', FileText]];
+function CreateMenu({ disabled, onChoose }) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef(null), menu = useRef(null);
+  useEffect(() => { if (open && !disabled) menu.current?.querySelector('button')?.focus(); }, [open, disabled]);
+  useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
+  return <div className="notes-create-control" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
+    <button ref={trigger} className="button ghost notes-create-trigger" type="button" disabled={disabled} aria-expanded={open && !disabled} aria-haspopup="menu" onClick={() => setOpen(!open)}>新建 <ChevronDown size={13} aria-hidden="true" /></button>
+    {open && !disabled && <div ref={menu} className="import-menu-items notes-create-menu" role="menu" aria-label="新建资源" onKeyDown={event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); }
+      else if (['ArrowUp','ArrowDown','Home','End'].includes(event.key)) {
+        const items = [...event.currentTarget.querySelectorAll('button')], index = items.indexOf(document.activeElement);
+        event.preventDefault();
+        items[event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+      }
+    }}>
+      {CREATE_ENTRIES.map(([kind, text, Icon]) => <button key={kind} type="button" role="menuitem" onClick={() => { trigger.current?.focus(); setOpen(false); onChoose(kind); }}><Icon size={15} aria-hidden="true" />{text}</button>)}
+    </div>}
+  </div>;
+}
+
 function PersistenceBadge({ status, loadState }) {
   // 汇总所有 key 的保存状态：任一 conflict → 冲突；任一 error → 失败；任一 saving/pending → 保存中；否则已保存
   const values = Object.values(status || {})
@@ -76,11 +111,11 @@ function PersistenceBadge({ status, loadState }) {
   return <span className="prototype-badge persistence-badge" data-state={kind} role="status">{label}</span>
 }
 
-function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, persistence = null, workspaceBridge = null, courseLibrary = null, onNavigateCourse, renderCourse }) {
+function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, persistence = null, persistenceSession, viewMemory, workspaceBridge = null, courseLibrary = null, onNavigateCourse, renderCourse }) {
   const localBridge = useRef(null); if (!localBridge.current) localBridge.current = createNotesWorkspace();
   const shared = workspaceBridge || localBridge.current;
-  const [treeMode, setTreeMode] = useState('files');
-  const [activeNotebook, setActiveNotebook] = useState('book');
+  const [treeMode, setTreeMode] = useState(viewMemory?.treeMode || 'files');
+  const [activeNotebook, setActiveNotebook] = useState(viewMemory?.activeNotebook || 'book');
   const flow = useReactFlow();
   const [themeOverride, setThemeOverride] = useState(null);
   const [systemTheme, setSystemTheme] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -104,10 +139,16 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   const visibleNodes = scene.nodes.filter(node => nodeScope(node) === activeNotebook && !resources[node.data.contentId]?.trashed);
   const visibleIds = new Set(visibleNodes.map(node => node.id));
   const visibleEdges = scene.edges.filter(edge => visibleIds.has(edge.source) && visibleIds.has(edge.target));
-  const [selectedFolder, setSelectedFolder] = useState('notes');
-  const [currentId, setCurrentId] = useState(persistence ? '' : 'note-recall');
-  const [view, setView] = useState('canvas');
-  const [leftOpen, setLeftOpen] = useState(true), [rightOpen, setRightOpen] = useState(false);
+  const [selectedFolder, setSelectedFolder] = useState(viewMemory?.selectedFolder || 'notes');
+  const [pickedEntry, setPickedEntry] = useState(viewMemory?.pickedEntry || null);
+  const [createAt, setCreateAt] = useState(null);
+  const [manageAt, setManageAt] = useState(null);
+  const [currentId, setCurrentId] = useState(viewMemory?.currentId ?? (persistence ? '' : 'note-recall'));
+  const [view, setView] = useState(viewMemory?.view || 'canvas');
+  const [documentModes, setDocumentModes] = useState(viewMemory?.documentModes || {});
+  const [documentActions, setDocumentActions] = useState(null);
+  const [resourceActions, setResourceActions] = useState(null);
+  const [leftOpen, setLeftOpen] = useState(viewMemory?.leftOpen ?? true), [rightOpen, setRightOpen] = useState(viewMemory?.rightOpen ?? false);
   const [leftWidth, setLeftWidth] = useState(264), [rightWidth, setRightWidth] = useState(352);
   const [resizing, setResizing] = useState(false);
   const [search, setSearch] = useState('');
@@ -123,9 +164,11 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   const getPortalHost = useCallback(() => root.current, []);
   const mediaImport = useRef(false);
   const timer = useRef(null);
-  const current = (resources[currentId] && !resources[currentId].trashed ? resources[currentId] : null) || Object.values(resources).find((resource) => resource.type === 'note' && !resource.trashed);
+  const chosen = resources[currentId] && !resources[currentId].trashed ? resources[currentId] : null;
+  const current = chosen || (view === 'canvas' ? Object.values(resources).find(resource => isMarkdownResource(resource) && !resource.trashed) : null);
   const referenceReadOnly = isFileReference(current);
-  const documentMode = current?.type === 'note' ? 'inline' : 'preview';
+  const currentMarkdown = isMarkdownResource(current);
+  const documentMode = currentMarkdown ? (Object.hasOwn(documentModes, current.id) ? documentModes[current.id] : 'inline') : 'preview';
   const currentCard = visibleNodes.find((node) => node.data.contentId === current?.id);
   const grid = gridAppearance(zoom);
   const announce = useCallback((message) => { setNotice(message); clearTimeout(timer.current); timer.current = setTimeout(() => setNotice(''), 6000); }, []);
@@ -133,7 +176,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
 
   // ---- 持久化（原生 DSH）：编辑门禁、自动保存、冲突处理 ----
   const notesPersistence = useNotesPersistence({
-    persistence,
+    persistence, persistenceSession,
     resources, setResources,
     scene, setScene,
     folders, setFolders,
@@ -142,6 +185,24 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
     initialFolders,
     announce,
   });
+  const positionReady = !notesPersistence.isNative || ['ready', 'upgrade'].includes(notesPersistence.loadState);
+  const pendingNotebook = useRef(viewMemory?.activeNotebook);
+  useEffect(() => {
+    if (!positionReady) return;
+    if (view === 'document' && !chosen) {
+      setView('canvas'); setCurrentId(''); setRightOpen(false);
+      announce('原文档已不可用，已回到画布。');
+    }
+    const id = pendingNotebook.current;
+    if (!id) return;
+    pendingNotebook.current = undefined;
+    const book = folders.find(folder => folder.id === id && folder.kind === 'notebook');
+    if (book?.viewport) void flow.setViewport(book.viewport, { duration: 0 });
+  }, [positionReady, view, chosen, folders, flow, announce]);
+  useEffect(() => {
+    if (!viewMemory || !positionReady || (view === 'document' && !chosen)) return;
+    Object.assign(viewMemory, { treeMode, activeNotebook, selectedFolder, pickedEntry, currentId, view, documentModes, leftOpen, rightOpen });
+  }, [viewMemory, positionReady, chosen, treeMode, activeNotebook, selectedFolder, pickedEntry, currentId, view, documentModes, leftOpen, rightOpen]);
   useEffect(() => { onResourcesChange?.(notesPersistence.canEdit ? resources : {}); }, [resources, onResourcesChange, notesPersistence.canEdit]);
   const workspaceRef = useRef(null);
   useEffect(() => { if (workspaceRef.current) workspaceRef.current.inert = !notesPersistence.canEdit; }, [notesPersistence.canEdit]);
@@ -173,8 +234,8 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
     void flow.setViewport(book.viewport || { x: 0, y: 0, zoom: 1 }, { duration: 0 });
   };
   useEffect(() => {
-    if (!folders.some(folder => folder.id === activeNotebook && folder.kind === 'notebook')) setActiveNotebook(legacyNotebook || '');
-  }, [folders, activeNotebook, legacyNotebook]);
+    if (positionReady && !folders.some(folder => folder.id === activeNotebook && folder.kind === 'notebook')) setActiveNotebook(legacyNotebook || '');
+  }, [positionReady, folders, activeNotebook, legacyNotebook]);
   const storeResources = next => { resourcesRef.current = next; setResources(next); };
   const storeFolders = next => { foldersRef.current = next; setFolders(next); };
   const patchOwnedNote = (id, patch) => {
@@ -226,50 +287,96 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   }, [notesPersistence.markEdit, hasCanvasContent, announce, activeNotebook, flow]);
   const renameResource = useCallback((resourceId, title) => {
     const resource = resourcesRef.current[resourceId];
-    if (!canRenameResource(resource) || !validateFileTitle(title).ok) return;
-    if (!notesPersistence.markEdit()) return;
-    storeResources({ ...resourcesRef.current, [resourceId]: { ...resource, title } });
-  }, [notesPersistence.markEdit]);
+    const result = validateFileTitle(title);
+    if (!canRenameResource(resource) || !result.ok || !notesPersistence.canEdit) return false;
+    const name = result.name;
+    if (name === resource.title) return true;
+    if (resource.type === 'note' && noteExtension(resource.title) !== noteExtension(name)
+      && !window.confirm('更改扩展名可能导致文件无法识别。确定要更改扩展名吗？')) return false;
+    if (resourcesRef.current[resourceId] !== resource || !notesPersistence.markEdit()) return false;
+    storeResources({ ...resourcesRef.current, [resourceId]: { ...resource, title: name } });
+    return true;
+  }, [notesPersistence.markEdit, notesPersistence.canEdit]);
+  const withoutSubject = (list, ref) => (list || []).filter(item => !sameSubject(item, ref));
+  const withDefault = (book, ref) => {
+    const bindings = [...withoutSubject(book.bindings, ref), ref];
+    const defaultForSubjects = [...withoutSubject(book.defaultForSubjects, ref), ref];
+    if (bindings.length > 32 || defaultForSubjects.length > 32) throw new Error('每本最多绑定 32 个科目。');
+    return { ...book, bindings, defaultForSubjects };
+  };
   const bindNotebook = (id, scope) => {
     const ref = normalizeCourseRef(scope, { subjectOnly: true });
     const book = foldersRef.current.find(folder => folder.id === id && folder.kind === 'notebook');
     if (!book) throw new Error('请选择有效的笔记本。');
+    if (book.bindings?.some(item => sameSubject(item, ref))) return id;
+    const bindings = [...(book.bindings || []), ref];
+    if (bindings.length > 32) throw new Error('每本最多绑定 32 个科目。');
     if (!notesPersistence.markEdit()) return false;
-    const bindings = (book.bindings || []).filter(item => !sameSubject(item, ref));
-    if (bindings.length >= 32) throw new Error('每本最多绑定 32 个科目。');
-    storeFolders(foldersRef.current.map(folder => folder.id === id ? { ...folder, bindings: [...bindings, ref] } : folder));
+    storeFolders(foldersRef.current.map(folder => folder.id === id ? { ...folder, bindings } : folder));
     return id;
+  };
+  const unbindNotebook = (id, scope, replacement) => {
+    const ref = normalizeCourseRef(scope, { subjectOnly: true });
+    const all = foldersRef.current;
+    const book = all.find(folder => folder.id === id && folder.kind === 'notebook');
+    if (!book?.bindings?.some(item => sameSubject(item, ref))) throw new Error('绑定已变化，请重新查看。');
+    const wasDefault = book.defaultForSubjects?.some(item => sameSubject(item, ref));
+    const target = all.find(folder => folder.id !== id && folder.id === replacement && folder.kind === 'notebook');
+    if (wasDefault && replacement !== null && !target) throw new Error('请明确选择替代本或清除默认本。');
+    const substituted = wasDefault && target ? withDefault(target, ref) : null;
+    if (!notesPersistence.markEdit()) return false;
+    storeFolders(all.map(folder => folder.id === id
+      ? { ...folder, bindings: withoutSubject(folder.bindings, ref), defaultForSubjects: withoutSubject(folder.defaultForSubjects, ref) }
+      : folder.id === substituted?.id ? substituted : folder));
+    return true;
   };
   const commands = {
     select(id) { if (resourcesRef.current[id] && !resourcesRef.current[id].trashed) setCurrentId(id); },
-    rename(id, title) { if (typeof title !== 'string' || [...title].length > 2000) throw new Error('笔记名称超过 2000 字符上限。'); return patchOwnedNote(id, { title }); },
-    markdown(id, markdown) { if (typeof markdown !== 'string' || [...markdown].length > 128 * 1024 || new TextEncoder().encode(markdown).length > 512 * 1024) throw new Error('笔记正文超过大小上限，原稿未截断。'); return patchOwnedNote(id, { markdown }); },
-    trash(id, trashed) { return patchOwnedNote(id, { trashed: Boolean(trashed) }); },
-    associate(id, ref) { const original = resourcesRef.current[id]; if (!ownedNote(original) || original.trashed) throw new Error('请选择有效的自有笔记。'); const next = associateNote(original, ref); return patchOwnedNote(id, { associations: next.associations }); },
-    bind: bindNotebook,
-    relinkNotebook(id) {
-      const subjects = courseLibrary?.subjects || [];
-      const slug = window.prompt('请输入要绑定的科目 slug：\n' + subjects.map(subject => subject.slug + ' · ' + subject.name).join('\n'));
-      if (slug === null) return;
-      const subject = subjects.find(item => item.slug === slug);
-      if (!subject) { announce('科目不存在，未改变绑定。'); return; }
-      return bindNotebook(id, { workspace: courseLibrary.workspace, subject: subject.slug, title: subject.name });
+    rename: renameResource,
+    markdown(id, markdown) {
+      if (!isMarkdownResource(resourcesRef.current[id])) return false;
+      if (typeof markdown !== 'string' || markdown.length > 128 * 1024 || new TextEncoder().encode(markdown).length > 512 * 1024) throw new Error('笔记正文超过大小上限，原稿未截断。');
+      return patchOwnedNote(id, { markdown });
     },
+    trash(id, trashed) { return patchOwnedNote(id, { trashed: Boolean(trashed) }); },
+    associate(id, ref) {
+      const original = resourcesRef.current[id];
+      if (!isMarkdownResource(original) || !ownedNote(original) || original.trashed) throw new Error('请选择有效的自有笔记。');
+      const resolved = resolveCourse(courseLibrary, ref);
+      if (!resolved) throw new Error('课程节点已失效，原关联未改变。');
+      const nextRef = courseRef(ref, resolved.node);
+      const previous = original.associations?.find(item => sameSubject(item, nextRef));
+      if (sameCourse(previous, nextRef)) return true;
+      const next = associateNote(original, nextRef);
+      if (previous && !window.confirm('将本笔记在「' + resolved.subject.name + '」的关联从「' + (previous.title || previous.node) + '」移到「' + nextRef.title + '」？原件和画布不会移动。')) return false;
+      if (resourcesRef.current[id] !== original) throw new Error('笔记已变化，请重新确认。');
+      return patchOwnedNote(id, { associations: next.associations });
+    },
+    removeAssociation(id, ref) {
+      const original = resourcesRef.current[id];
+      if (!ownedNote(original) || original.trashed) throw new Error('请选择有效的自有笔记。');
+      const associations = original.associations || [];
+      if (!associations.some(item => sameCourse(item, ref))) return true;
+      return patchOwnedNote(id, { associations: associations.filter(item => !sameCourse(item, ref)) });
+    },
+    bind: bindNotebook,
+    unbind: unbindNotebook,
     setDefault(scope, id, name) {
       const ref = normalizeCourseRef(scope, { subjectOnly: true });
       if (!notesPersistence.canEdit) return null;
       let next = foldersRef.current;
       if (!id) {
-        if (!name?.trim() || name.length > 200 || next.length >= 80) throw new Error('笔记本名称或目录数量不合法。');
-        id = uid('book'); next = [...next, { id, name: name.trim(), parent: next.some(folder => folder.id === 'library') ? 'library' : null, kind: 'notebook' }];
+        const title = validateFolderName(name);
+        if (!title.ok || next.length >= 80) throw new Error('笔记本名称或目录数量不合法。');
+        id = uid('book'); next = [...next, { id, name: title.name, parent: next.find(folder => folder.parent === null)?.id ?? null, kind: 'notebook' }];
       }
       const book = next.find(folder => folder.id === id && folder.kind === 'notebook');
       if (!book) throw new Error('请选择有效的笔记本。');
-      const bindings = [...(book.bindings || []).filter(item => !sameSubject(item, ref)), ref];
-      const defaults = [...(book.defaultForSubjects || []).filter(item => !sameSubject(item, ref)), ref];
-      if (bindings.length > 32 || defaults.length > 32) throw new Error('每本最多绑定 32 个科目。');
+      if (book.defaultForSubjects?.some(item => sameSubject(item, ref))) return id;
+      const target = withDefault(book, ref);
       if (!notesPersistence.markEdit()) return null;
-      storeFolders(next.map(folder => folder.id === id ? { ...folder, bindings, defaultForSubjects: defaults } : { ...folder, ...(folder.defaultForSubjects ? { defaultForSubjects: folder.defaultForSubjects.filter(item => !sameSubject(item, ref)) } : {}) }));
+      storeFolders(next.map(folder => folder.id === id ? target : folder.defaultForSubjects?.some(item => sameSubject(item, ref))
+        ? { ...folder, defaultForSubjects: withoutSubject(folder.defaultForSubjects, ref) } : folder));
       return id;
     },
     createNote(scope, node, notebookId) {
@@ -332,7 +439,43 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
     checkpoint(); changeScene((previous) => ({ ...previous, nodes: [...previous.nodes, { ...node, selected: true }] })); setView('canvas');
   };
   const addText = () => { if (sceneRef.current.nodes.length >= 120) { announce('此体验版最多放置 120 个节点'); return; } if (!notesPersistence.markEdit()) return; const point = center(), id = uid('text'); checkpoint(); changeScene((previous) => ({ ...previous, nodes: [...previous.nodes.map((node) => ({ ...node, selected: false })), { id, type: 'text', position: { x: point.x - 130, y: point.y - 65 }, style: { width: 260, height: 130 }, data: { text: '' }, selected: true }] })); setEditingNode(id); setView('canvas'); };
-  const addNote = () => { if (Object.keys(resourcesRef.current).length >= 250) { announce('此体验版最多保留 250 个资源'); return; } if (!notesPersistence.markEdit()) return; const id = uid('note'), resource = { id, type: 'note', title: '未命名.md', markdown: '# 新笔记\n\n', parent: selectedFolder || 'notes' }; setResources((previous) => ({ ...previous, [id]: resource })); setCurrentId(id); setView('document'); setRightOpen(true); };
+  const beginCreate = (kind) => {
+    const all = foldersRef.current;
+    const selected = pickedEntry?.kind === 'file' ? resourcesRef.current[pickedEntry.id] : null;
+    const rootFolder = all.find(folder => folder.parent === null);
+    const id = kind === 'notebook' ? rootFolder?.id : pickedEntry?.kind === 'folder' ? pickedEntry.id
+      : selected && !selected.trashed ? selected.parent || initialParent(selected) : null;
+    const parent = all.find(folder => folder.id === id) || all.find(folder => folder.id === activeNotebook) || rootFolder;
+    if (!parent || !notesPersistence.canEdit) return;
+    setCreateAt({ kind, parent: parent.id });
+    setFolderName(kind === 'note' ? '未命名.md' : '');
+    setFormError(''); setModal('create');
+  };
+  const finishCreate = (event) => {
+    event.preventDefault();
+    const all = foldersRef.current;
+    const parent = all.find(folder => folder.id === createAt?.parent);
+    const kind = createAt?.kind;
+    const check = kind === 'note' ? validateFileTitle(folderName) : validateFolderName(folderName);
+    if (!parent || (kind === 'notebook' && parent.parent !== null)) { setFormError('目标目录已变化，请关闭后重新选择。'); return; }
+    if (!check.ok) { setFormError(check.error); return; }
+    if (kind === 'note') {
+      if (Object.keys(resourcesRef.current).length >= 250) { setFormError('最多保留 250 个资源（含废纸篓）。'); return; }
+      if (isUnsupportedNote({ type: 'note', title: check.name })) { setFormError('新建笔记请使用 Markdown 扩展名。'); return; }
+    } else if (all.length >= 80) { setFormError('目录数量已达上限。'); return; }
+    const title = kind === 'note' && !noteExtension(check.name) ? check.name + '.md' : check.name;
+    if (kind === 'note' && !validateFileTitle(title).ok) { setFormError('加上 .md 后名称过长。'); return; }
+    if (!notesPersistence.markEdit()) { setFormError('当前无法写入。'); return; }
+    const id = uid(kind === 'notebook' ? 'book' : kind);
+    if (kind === 'note') {
+      storeResources({ ...resourcesRef.current, [id]: { id, type: 'note', title, markdown: '', parent: parent.id } });
+      setCurrentId(id); setPickedEntry({ kind: 'file', id }); setView('document'); setRightOpen(true);
+    } else {
+      storeFolders([...all, { id, name: check.name, parent: parent.id, kind }]);
+      setSelectedFolder(id); setPickedEntry({ kind: 'folder', id });
+    }
+    setModal(null);
+  };
   const deleteSelection = useCallback(() => { const previous = sceneRef.current, scoped = new Set(previous.nodes.filter(node => nodeScope(node) === activeNotebook).map(node => node.id)), ids = new Set(previous.nodes.filter(node => scoped.has(node.id) && node.selected).map(node => node.id)), edgeIds = new Set(previous.edges.filter(edge => scoped.has(edge.source) && scoped.has(edge.target) && edge.selected).map(edge => edge.id)); if (!ids.size && !edgeIds.size) return; checkpoint(); changeScene(value => ({ nodes: value.nodes.filter(node => !ids.has(node.id)), edges: value.edges.filter(edge => !edgeIds.has(edge.id) && !ids.has(edge.source) && !ids.has(edge.target)) })); setEditingNode(null); setEditingEdge(null); }, [checkpoint, changeScene, activeNotebook, legacyNotebook]);
   const removeCurrentCard = () => { const node = sceneRef.current.nodes.find((node) => node.data.contentId === current?.id && nodeScope(node) === activeNotebook); if (!node) return; checkpoint(); changeScene((previous) => ({ nodes: previous.nodes.filter((value) => value.id !== node.id), edges: previous.edges.filter((value) => value.source !== node.id && value.target !== node.id) })); announce('已移出画布，文件保留'); };
   // 折叠只留标题栏：节点自身高度压到 48，展开时恢复折叠前的高度；两者都进画板历史。
@@ -494,40 +637,55 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
       } catch (error) { announce(error.message); return; }
     }
     const id = event.dataTransfer.getData('application/studymate-resource');
-    const entries = resources[id] ? null : captureFileDrop(event.dataTransfer);
-    if (!resources[id] && !entries?.length) return;
+    const source = id && resourcesRef.current[id];
+    const entries = source ? null : captureFileDrop(event.dataTransfer);
+    if (!source && !entries?.length) return;
     event.preventDefault(); event.stopPropagation(); setDropActive(false);
     const position = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    setPendingImport(resources[id] ? { kind: 'resource', id, position } : { kind: 'files', entries, position });
+    if (source) {
+      if (!notesPersistence.canEdit || source.trashed) return;
+      placeResource(id, position);
+      setCurrentId(id); setRightOpen(true);
+      return;
+    }
+    setPendingImport({ entries, position });
     setModal('drop-mode');
   };
   const applyDropMode = async (importMode) => {
     const pending = pendingImport; setPendingImport(null); setModal(null);
     if (!pending) return;
-    // App 级写入门禁：拖放导入与菜单/文件选择一视同仁。引用分支的 placeResource 与
-    // 文件分支的 importEntries 各自经 canEdit/markEdit 门禁；副本分支在下面显式再验。
     if (!notesPersistence.canEdit) { announce('笔记数据未就绪或只读，导入被拒绝'); return; }
-    if (pending.kind === 'files') { await importEntries(pending.entries, importMode, pending.position); return; }
-    const source = resourcesRef.current[pending.id];
-    if (!source) return;
-    if (importMode === 'reference') { placeResource(source.id, pending.position); announce('已引用同一原件；已有节点时直接定位'); return; }
-    if (Object.keys(resourcesRef.current).length >= 250 || sceneRef.current.nodes.length >= 120) { announce('资源或节点数量已达上限'); return; }
+    await importEntries(pending.entries, importMode, pending.position);
+  };
+  const canCopyMarkdown = (resource) => isMarkdownResource(resource) && !resource.trashed
+    && (!isFileReference(resource) || Boolean(resource.fileHandle || resource.sourceFile));
+  const copyMarkdown = async (sourceId) => {
+    const source = resourcesRef.current[sourceId];
+    if (!notesPersistence.canEdit || !canCopyMarkdown(source)) return;
     try {
-      const original = await resolveFileReference(source), id = uid('resource');
-      // 异步拷贝完成前权限/数据可能已变（载入失败、外部回灌、冲突重载）：写前以 ref 重验
-      if (resourcesRef.current?.[pending.id] !== source || !notesPersistence.markEdit()) { announce('数据已变化或进入只读，副本未创建'); return; }
-      const copied = copyResource(original, id, selectedFolder || source.parent || 'references');
-      const total = Object.values(resourcesRef.current).reduce((sum, item) => sum + (item.bytes || 0), 0);
-      if (total + (copied.bytes || 0) > 32 * 1024 * 1024) throw new Error('复制后超过本页 32 MiB 总量限制');
-      storeResources({ ...resourcesRef.current, [id]: copied });
-      const node = nodeForResource(uid('node'), copied, pending.position.x - 150, pending.position.y - 120, 310, 260);
-      checkpoint(); changeScene((previous) => ({ ...previous, nodes: [...previous.nodes, node] })); setCurrentId(id); setRightOpen(true);
-      announce('已创建独立副本，后续修改不影响原件；网页或课程只复制已存内容，不抓取来源');
+      const original = isFileReference(source) ? await resolveFileReference(source) : source;
+      const latest = resourcesRef.current;
+      if (latest[sourceId] !== source) throw new Error('原文件已变化，副本未创建，请重试。');
+      if (Object.keys(latest).length >= 250) throw new Error('最多保留 250 个资源（含废纸篓）。');
+      if (!isMarkdownResource(original) || typeof original.markdown !== 'string') throw new Error('无法读取原始 Markdown，副本未创建。');
+      const bytes = new TextEncoder().encode(original.markdown).length;
+      const total = Object.values(latest).reduce((sum, item) => sum + (item.bytes || 0), 0);
+      if (total + bytes > 32 * 1024 * 1024) throw new Error('复制后超过本页 32 MiB 总量限制。');
+      if (!notesPersistence.markEdit()) return;
+      const id = uid('note');
+      storeResources({ ...latest, [id]: { id, type: 'note', title: copyNoteTitle(source.title), markdown: original.markdown, parent: source.parent || initialParent(source), bytes, mime: 'text/markdown', origin: { kind: 'workspace', mode: 'copy', sourceId } } });
+      announce('已在同目录复制 Markdown，未复制课程关联或画布卡片。');
     } catch (error) { announce(error.message); }
   };
   const reset = () => { const next = fresh(); setResources(next.resources); const value = { nodes: next.nodes, edges: next.edges }; sceneRef.current = value; setScene(value); history.current = { past: [], future: [] }; setFolders(initialFolders); setCurrentId('note-recall'); setSelectedFolder('notes'); setQuoteIds([]); setChatDraft(''); setEditingNode(null); setEditingEdge(null); setSearch(''); setModal(null); setPendingImport(null); setDropActive(false); setView('canvas'); setRightOpen(false); requestAnimationFrame(() => fit()); };
+  const manageNotebook = (id) => { setManageAt(id); setModal('notebook-bindings'); };
+  const manageAssociation = (id) => { setManageAt(id); setModal('note-associations'); };
+  const managedBook = folders.find(folder => folder.id === manageAt && folder.kind === 'notebook');
+  const managedNote = resources[manageAt];
+  const associationBar = current?.type === 'note' && <CourseAssociationBar resource={current} library={courseLibrary}
+    onNavigate={onNavigateCourse} onManage={() => manageAssociation(current.id)} canEdit={notesPersistence.canEdit && currentMarkdown && ownedNote(current)} />;
   const ctx = { resources, openDocument, editingNode, setEditingNode, editingEdge, setEditingEdge, checkpoint, updateNodeText, commitEdgeLabel, toggleCardCollapsed, navigateCourse: onNavigateCourse, courseLibrary };
-  const documentBody = current?.courseRef ? <CourseReference key={current.id} resource={current} library={courseLibrary} renderCourse={renderCourse} onNavigate={onNavigateCourse} canEdit={notesPersistence.canEdit} onChange={patch => updateResource(current.id, patch)} /> : current?.type === 'note' ? <NoteEditor key={current.id} resource={current} theme={theme} onChange={markdown => updateResource(current.id, { markdown })} readOnly={referenceReadOnly || !notesPersistence.canEdit || !active} /> : <div className="document-preview-pane">{current && ['image', 'svg', 'html'].includes(current.type) ? <div className="document-content"><MediaRenderer resource={current} className="media-preview document-media" /></div>
+  const documentBody = current?.courseRef ? <CourseReference key={current.id} resource={current} library={courseLibrary} renderCourse={renderCourse} onNavigate={onNavigateCourse} canEdit={notesPersistence.canEdit} onChange={patch => updateResource(current.id, patch)} /> : currentMarkdown ? <NoteEditor key={current.id} resource={current} theme={theme} mode={documentMode} exportTarget={documentActions} onChange={markdown => updateResource(current.id, { markdown })} readOnly={referenceReadOnly || !notesPersistence.canEdit || !active} /> : isUnsupportedNote(current) ? <p className="unsupported-note" role="status">不支持的文件类型。改回支持的 Markdown 扩展名可恢复编辑，原内容仍保留。</p> : <div className="document-preview-pane">{current && ['image', 'svg', 'html'].includes(current.type) ? <div className="document-content"><MediaRenderer resource={current} className="media-preview document-media" /></div>
     : <div className="document-content"><h1>{current?.title}</h1><p>{current?.summary}</p>{current?.type === 'link' && <a href={current.url} target="_blank" rel="noopener noreferrer">打开网页</a>}</div>}</div>;
 
   return <BoardContext.Provider value={ctx}><div ref={root} className={"app-shell v2 v3 v4 v5" + (hostTheme ? " is-hosted" : "")} data-theme={theme} data-resizing={resizing} style={{ '--v2-left-width': leftWidth + 'px', '--v2-right-width': rightWidth + 'px', '--v5-keep-left': leftWidth + 'px', '--v5-keep-right': rightWidth + 'px' }}>
@@ -553,10 +711,10 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
     </header>
     <div className="workspace" ref={workspaceRef}>
       <aside className={'side-panel left-panel' + (!leftOpen ? ' is-collapsed' : '')} style={{ width: leftOpen ? leftWidth : 0 }} inert={!leftOpen ? true : undefined} aria-hidden={!leftOpen}>
-        <div className="panel-inner"><div className="panel-header"><span className="panel-title">文件</span><div className="panel-actions"><ImportControls onChooseMode={beginImport} getPortalHost={getPortalHost} /><button className="icon-button" aria-label="新建文件夹" title="新建文件夹" disabled={!notesPersistence.canEdit} onClick={() => { setFolderName(''); setModal('folder'); }}><FolderPlus size={16} /></button><button className="icon-button" aria-label="新建笔记" title="新建笔记" disabled={!notesPersistence.canEdit} onClick={addNote}><Plus size={18} /></button><button className="icon-button" aria-label="收起文件侧栏" title="收起文件侧栏" onClick={() => setLeftOpen(false)}><PanelLeftClose size={17} /></button></div></div>
+        <div className="panel-inner"><div className="panel-header"><span className="panel-title">文件</span><div className="panel-actions"><ImportControls onChooseMode={beginImport} getPortalHost={getPortalHost} /><CreateMenu disabled={!notesPersistence.canEdit} onChoose={beginCreate} /><button className="icon-button" aria-label="收起文件侧栏" title="收起文件侧栏" onClick={() => setLeftOpen(false)}><PanelLeftClose size={17} /></button></div></div>
           <div className="tree-tools"><input className="tree-search" aria-label="搜索文件" placeholder="搜索" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
-          <div className="view-switch" aria-label="笔记目录视图"><button className={treeMode === 'files' ? 'is-active' : ''} aria-pressed={treeMode === 'files'} onClick={() => setTreeMode('files')}>资源视图</button><button className={treeMode === 'nodes' ? 'is-active' : ''} aria-pressed={treeMode === 'nodes'} onClick={() => setTreeMode('nodes')}>节点视图</button><button aria-label="新建笔记本" disabled={!notesPersistence.canEdit} onClick={() => { setFolderName(''); setModal('notebook'); }}>＋笔记本</button></div>
-          {treeMode === 'nodes' ? <NodeNotebookTree bridge={shared} library={courseLibrary} search={search} onCanvas={switchNotebook} onSelect={() => { setRightOpen(true); }} /> : <ResourceTree folders={folders} resources={resources} search={search} selectedId={current?.id} selectedFolder={selectedFolder} onFolderSelect={setSelectedFolder} onSelect={view === 'document' ? openDocument : selectResource} onOpenDocument={openDocument} onCanvas={switchNotebook} canEdit={notesPersistence.canEdit} onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameResource={renameResource} hasCanvasContent={hasCanvasContent} />}
+          <div className="view-switch" aria-label="笔记目录视图"><button className={treeMode === 'files' ? 'is-active' : ''} aria-pressed={treeMode === 'files'} onClick={() => setTreeMode('files')}>资源视图</button><button className={treeMode === 'nodes' ? 'is-active' : ''} aria-pressed={treeMode === 'nodes'} onClick={() => setTreeMode('nodes')}>节点视图</button></div>
+          {treeMode === 'nodes' ? <NodeNotebookTree bridge={shared} library={courseLibrary} search={search} onCanvas={switchNotebook} onSelect={view === 'document' ? openDocument : selectResource} onPickEntry={setPickedEntry} onManageNotebook={manageNotebook} /> : <ResourceTree folders={folders} resources={resources} search={search} selectedId={current?.id} selectedFolder={selectedFolder} onFolderSelect={setSelectedFolder} onSelect={view === 'document' ? openDocument : selectResource} onOpenDocument={openDocument} onCanvas={switchNotebook} canEdit={notesPersistence.canEdit} onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameResource={renameResource} hasCanvasContent={hasCanvasContent} onPickEntry={setPickedEntry} onManageNotebook={manageNotebook} getNotebookBindingLabel={book => notebookBindingLabel(book, courseLibrary)} onCopyMarkdown={copyMarkdown} canCopyMarkdown={canCopyMarkdown} />}
 
         </div>{leftOpen && <ResizeBar side="left" value={leftWidth} onChange={setLeftWidth} onResizing={setResizing} />}
       </aside>
@@ -575,31 +733,33 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
             <Background id="studymate-grid" variant={BackgroundVariant.Dots} gap={grid.gap} size={grid.size} color="var(--grid-dot)" bgColor="var(--canvas)" /><MiniMap style={{ width: 138, height: 90, overflow: 'hidden' }} pannable zoomable nodeColor={(node) => node.type === 'text' ? (theme === 'dark' ? '#8f8453' : '#d8c88e') : resources[node.data.contentId]?.type === 'course' ? (theme === 'dark' ? '#a68b61' : '#dfcba4') : (theme === 'dark' ? '#6d9c8a' : '#aacbbb')} maskColor="var(--minimap-mask)" />
           </ReactFlow>
           {space && <div ref={panLayer} className="pan-capture-layer" data-testid="space-pan-layer" onPointerDown={forcedPan} />}
-          <div className={'canvas-drop-hint' + (dropActive ? ' is-active' : '')}>松开后选择：副本（独立内容）或引用（同一原件）</div>
+          <div className={'canvas-drop-hint' + (dropActive ? ' is-active' : '')}>从左树拖入即引用同一原件；外部文件可选导入方式</div>
           <div className="canvas-toolbar" role="toolbar" aria-label="画布工具"><button className={'icon-button' + (tool === 'select' ? ' active' : '')} aria-label="选择工具" title="选择 V" onClick={() => setTool('select')}><MousePointer2 size={17} /></button><button className={'icon-button' + (tool === 'hand' ? ' active' : '')} aria-label="平移工具" title="平移 H / 按住空格" onClick={() => setTool('hand')}><Hand size={17} /></button><i />
             <button className="icon-button" aria-label="添加纯内容节点" title="纯内容节点" disabled={!notesPersistence.canEdit} onClick={addText}><Type size={18} /></button><i />
             <button className="icon-button" aria-label="撤销画板操作" title="撤销" disabled={!history.current.past.length} onClick={() => restore('undo')}><Undo2 size={17} /></button><button className="icon-button" aria-label="重做画板操作" title="重做" disabled={!history.current.future.length} onClick={() => restore('redo')}><Redo2 size={17} /></button><i />
             <button className="icon-button" aria-label="缩小画布" onClick={() => flow.zoomOut({ duration: reducedMotion() ? 0 : 140 })}><ZoomOut size={17} /></button><span className="zoom-label">{Math.round(zoom * 100)}%</span><button className="icon-button" aria-label="放大画布" onClick={() => flow.zoomIn({ duration: reducedMotion() ? 0 : 140 })}><ZoomIn size={17} /></button><button className="icon-button" aria-label="适应全部卡片" title="适应画布 1" onClick={fit}><Maximize size={17} /></button>
           </div>
         </section>
-        {view === 'document' && <section className="document-stage"><div className="document-toolbar">{current?.type === 'note' && !referenceReadOnly ? <input aria-label="文档标题" value={current.title} maxLength={160} onChange={(event) => updateResource(current.id, { title: event.target.value })} /> : <span className="document-title">{current?.title}</span>}
-        </div><div className={'document-scroll is-' + documentMode}>{documentBody}</div></section>}
+        {view === 'document' && <section className="document-stage"><div className="document-toolbar" ref={setDocumentActions}>{current?.type === 'note' && !referenceReadOnly ? <NoteTitleInput resource={current} label="文档标题" onRename={renameResource} disabled={!notesPersistence.canEdit} /> : <span className="document-title">{current?.title}</span>}
+        </div>{associationBar}{currentMarkdown && <div className="editor-mode-switch document-mode-switch" role="group" aria-label="文档视图模式">{DOCUMENT_MODES.map(([mode, label]) => <button key={mode} type="button" className={documentMode === mode ? 'is-active' : ''} aria-pressed={documentMode === mode} onClick={() => setDocumentModes(previous => ({ ...previous, [current.id]: mode }))}>{label}</button>)}</div>}
+          <div className={'document-scroll is-' + documentMode + (currentMarkdown ? ' note-document-scroll' : '')}>{documentBody}</div></section>}
       </main>
       <aside id="right-panel" className={'side-panel right-panel' + (!rightOpen ? ' is-collapsed' : '')} style={{ width: rightOpen ? rightWidth : 0 }} inert={!rightOpen ? true : undefined} aria-hidden={!rightOpen}><div className="panel-inner">
         <div className="panel-header resource-header"><span className="panel-title resource-header-title" title={current?.title}>{view === 'document' ? 'AI 对话' : current?.title || '文件'}</span>
-          {view === 'canvas' && <div className="resource-header-actions">
+          {view === 'canvas' && <div className="resource-header-actions" ref={setResourceActions}>
             <button className="icon-button" disabled={!current} aria-label={currentCard ? '定位节点' : '放到画布'} title={currentCard ? '定位节点' : '放到画布'} onClick={() => placeResource(current.id)}>{currentCard ? <LocateFixed size={16} /> : <Plus size={16} />}</button>
             <button className="icon-button" disabled={!current} aria-label="打开文档" title="打开文档" onClick={() => openDocument(current.id)}><FileText size={16} /></button>
             <button className="icon-button danger" disabled={!currentCard} title="删除节点，保留文件" aria-label="移出画布" onClick={removeCurrentCard}><Trash2 size={16} /></button>
           </div>}
         </div>
         {view === 'document' ? <ChatComponent resources={resources} currentId={current?.id} quoteIds={quoteIds} onQuote={quote} onRemoveQuote={(id) => setQuoteIds((previous) => previous.filter((value) => value !== id))} draft={chatDraft} onDraftChange={setChatDraft} />
-          : <div className="resource-detail panel-body">
+          : <div className={'resource-detail panel-body' + (currentMarkdown ? ' is-note-detail' : '')}>
+            {associationBar}
             {originDescription(current) && <div className="resource-origin-badge" data-origin={current.referenceError ? 'missing' : referenceReadOnly ? 'link' : 'local'}>{originDescription(current)}</div>}
             {referenceReadOnly && <button className="button ghost" onClick={() => refreshResource(current.id)}><RefreshCw size={13} />重新读取引用</button>}
             {referenceReadOnly && notesPersistence.isNative && <button className="button ghost" onClick={() => relinkFileReference(current.id)}><FileText size={13} />重新关联文件</button>}
             {current?.referenceError && <p className="validation-error" role="alert">{current.referenceError}</p>}
-            {current?.courseRef ? <CourseReference key={current.id} resource={current} library={courseLibrary} renderCourse={renderCourse} onNavigate={onNavigateCourse} canEdit={notesPersistence.canEdit} onChange={patch => updateResource(current.id, patch)} /> : current?.type === 'note' ? <NoteEditor key={current.id} resource={current} theme={theme} readOnly={referenceReadOnly || !notesPersistence.canEdit || !active || !rightOpen} onChange={markdown => updateResource(current.id, { markdown })} /> : current && ['image', 'svg', 'html'].includes(current.type) ? <MediaRenderer resource={current} className="media-preview" /> : <><h2>{current?.title}</h2><p>{current?.summary}</p>{current?.type === 'link' && <a href={current.url} target="_blank" rel="noopener noreferrer">打开网页</a>}</>}
+            {current?.courseRef ? <CourseReference key={current.id} resource={current} library={courseLibrary} renderCourse={renderCourse} onNavigate={onNavigateCourse} canEdit={notesPersistence.canEdit} onChange={patch => updateResource(current.id, patch)} /> : currentMarkdown ? <NoteEditor key={current.id} resource={current} theme={theme} exportTarget={resourceActions} readOnly={referenceReadOnly || !notesPersistence.canEdit || !active || !rightOpen} onChange={markdown => updateResource(current.id, { markdown })} /> : isUnsupportedNote(current) ? <p className="unsupported-note" role="status">不支持的文件类型。改回支持的 Markdown 扩展名可恢复编辑，原内容仍保留。</p> : current && ['image', 'svg', 'html'].includes(current.type) ? <MediaRenderer resource={current} className="media-preview" /> : <><h2>{current?.title}</h2><p>{current?.summary}</p>{current?.type === 'link' && <a href={current.url} target="_blank" rel="noopener noreferrer">打开网页</a>}</>}
           </div>}
         </div>{rightOpen && <ResizeBar side="right" value={rightWidth} onChange={setRightWidth} onResizing={setResizing} />}
       </aside>
@@ -608,8 +768,8 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
     {notice && <div className="toast" role="status">{notice}</div>}
     {modal === 'help' && <Modal title="操作说明" className="help-modal" onClose={() => setModal(null)}><div className="help-dialog">
       <div className="help-sections"><section><h3>画布与关系</h3><ul><li>拖动卡片移动；双击后阅读选字或编辑纯内容节点。网页链接本身就是一个文本节点。</li><li>按住空格拖动，随时平移；保持空格时滚轮也可缩放。</li><li>拖动圆形连接点建立关系；双击连线可写说明，说明可以为空，空说明不显示标签。</li><li>点阵与节点使用同一套画布坐标，缩放时一起放大缩小，相对间距不变。</li></ul></section>
-      <section><h3>文件与导入</h3><ul><li>左上“导入”选择副本或引用；拖入画布也会先询问模式。</li><li>副本是独立内容，不随来源变化；资源引用仍指向同一原件，已有节点会定位。</li><li>本地文件引用只读、不写回。有文件句柄时打开/引用发送会重新读取；不支持句柄的环境仅保留本次文件，原件变化需重新选择。</li><li>带标题的卡片可用标题右侧箭头折叠为仅标题；箭头已替换原来的“打开文档”图标。</li><li>右详情标题栏集中放置定位、打开文档和移出画布；删除节点不删除文件。</li></ul></section>
-      <section><h3>编辑与布局</h3><ul><li>文件名下的格式栏直接修改同一份 Markdown；光标触及的格式片段显示可编辑灰色标记，其他内容保留排版。</li><li>Ctrl / ⌘ + B、I、K 对当前正文应用粗体、斜体、链接；正文撤销与画布历史分开。侧栏边界仍可拖宽。</li><li>右栏开关在顶栏最右侧；DSH 内跟随宿主明暗，独立预览可在本页切换。</li></ul></section>
+      <section><h3>文件与导入</h3><ul><li>从电脑导入或拖入画布时选择副本或引用。从左树拖入画布只添加引用；要复制 Markdown，在文件的「更多」菜单选择「复制 Markdown」。</li><li>副本是独立内容，不随来源变化；资源引用仍指向同一原件，已有节点会定位。</li><li>本地文件引用只读、不写回。有文件句柄时打开/引用发送会重新读取；不支持句柄的环境仅保留本次文件，原件变化需重新选择。</li><li>带标题的卡片可用标题右侧箭头折叠为仅标题；箭头已替换原来的“打开文档”图标。</li><li>右详情标题栏集中放置定位、打开文档和移出画布；删除节点不删除文件。</li></ul></section>
+      <section><h3>编辑与布局</h3><ul><li>文件名下的格式栏直接修改同一份 Markdown；光标触及的格式片段显示可编辑灰色标记，其他内容保留排版。</li><li>Ctrl / ⌘ + B、I、K 对当前正文应用粗体、斜体、链接；正文撤销与画布历史分开。侧栏边界仍可拖宽。</li><li>右栏开关在顶栏最右侧。独立文档有预览、编辑、双列和渲染编辑，每篇分别记忆；窄双列可切换源码或预览。明暗默认跟随宿主或系统，也可在本页切换。</li></ul></section>
       <section><h3>安全与保存</h3><p>{notesPersistence.isNative
         ? '笔记内容与画布已接入 DSH 持久化服务，刷新或重启宿主后可恢复。保存中/未保存/已保存/失败/冲突状态见顶栏。'
         : '笔记、导入内容与画布仍只存本页，刷新即重置。'}项目内 examples/static-page.html 是可直接用“导入”打开的安全静态页面示例。{hostTheme ? 'DSH 会话由宿主管理，先显式选择，不自动发送。' : '独立预览未连接宿主会话，发送禁用。'}</p><p>图片 ≤4 MiB / 8192边长 / 1600万像素；SVG ≤512 KiB / 2000元素；HTML ≤256 KiB / 1500元素；本页文件总量 ≤32 MiB。不执行脚本、不加载外部资源、不递归访问文件夹。</p></section></div>
@@ -617,10 +777,23 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
         {[['空格 + 拖动', '强制平移画布'], ['滚轮 / 空格 + 滚轮', '缩放画布（卡内滚动除外）'], ['H / V', '平移 / 选择工具'], ['1', '适应全部节点'], ['Shift + 点击', '多选节点'], ['Delete / Backspace', '删除所选节点/连线，保留文件'], ['Ctrl / ⌘ + Z', '撤销当前焦点所属的操作'], ['Ctrl / ⌘ + Shift + Z', '重做'], ['Esc', '退出编辑 / 关闭弹窗'], ['Ctrl / ⌘ + Enter', '提交纯内容节点编辑'], ['行号点击 / 拖动', '选择整行 / 连续多行']].map(([key, action]) => <tr key={key}><td><kbd>{key}</kbd></td><td>{action}</td></tr>)}
       </tbody></table></div></div></Modal>}
     {!notesPersistence.isNative && modal === 'reset' && <Modal title="恢复示例？" onClose={() => setModal(null)}><p>会清除本页的编辑、导入文件与草稿，不能撤销。</p><div className="modal-actions"><button className="button ghost" onClick={() => setModal(null)}>取消</button><button className="button primary" onClick={reset}>确认恢复</button></div></Modal>}
-    {['folder', 'notebook'].includes(modal) && <Modal title={modal === 'notebook' ? '新建笔记本' : '新建文件夹'} onClose={() => setModal(null)}><form onSubmit={(event) => { event.preventDefault(); const name = folderName.trim(); if (!name || folders.length >= 80 || !notesPersistence.markEdit()) return; const newFolder = modal === 'notebook' ? { id: uid('book'), name, parent: folders.some(folder => folder.id === 'library') ? 'library' : null, kind: 'notebook' } : { id: uid('folder'), name, parent: selectedFolder || 'library', kind: 'folder' }; setFolders((previous) => [...previous, newFolder]); setModal(null); }}><label>名称<input className="text-input" aria-label={modal === 'notebook' ? '笔记本名称' : '文件夹名称'} value={folderName} maxLength={80} onChange={(event) => setFolderName(event.target.value)} /></label><div className="modal-actions"><button className="button primary" disabled={!folderName.trim()} type="submit">创建</button></div></form></Modal>}
+    {modal === 'create' && createAt && <Modal title={CREATE_ENTRIES.find(([kind]) => kind === createAt.kind)?.[1]} onClose={() => setModal(null)}><form onSubmit={finishCreate}>
+      <p className="notes-create-target">新建位置：{folderPath(folders, createAt.parent)}</p>
+      <label>名称<input className="text-input" aria-label={createAt.kind === 'notebook' ? '笔记本名称' : createAt.kind === 'folder' ? '文件夹名称' : '笔记名称'} value={folderName} maxLength={createAt.kind === 'note' ? 160 : 80} onChange={event => setFolderName(event.target.value)} /></label>
+      {formError && <p className="validation-error" role="alert">{formError}</p>}
+      <div className="modal-actions"><button className="button primary" disabled={!folderName.trim()} type="submit">创建</button></div>
+    </form></Modal>}
+    {modal === 'notebook-bindings' && <Modal title="课程绑定" onClose={() => setModal(null)}>{managedBook
+      ? <NotebookBindingsForm key={manageAt} book={managedBook} folders={folders} library={courseLibrary} canEdit={notesPersistence.canEdit}
+          onBind={scope => bindNotebook(manageAt, scope)} onSetDefault={scope => commands.setDefault(scope, manageAt)} onUnbind={(scope, replacement) => unbindNotebook(manageAt, scope, replacement)} />
+      : <p role="status">笔记本已不可用。</p>}</Modal>}
+    {modal === 'note-associations' && <Modal title="管理课程关联" onClose={() => setModal(null)}>{managedNote && !managedNote.trashed
+      ? <NoteAssociationsForm key={manageAt} resource={managedNote} library={courseLibrary} canEdit={notesPersistence.canEdit && isMarkdownResource(managedNote)}
+          onAssociate={ref => commands.associate(manageAt, ref)} onRemove={ref => commands.removeAssociation(manageAt, ref)} />
+      : <p role="status">笔记已不可用。</p>}</Modal>}
     {modal === 'link' && <Modal title="添加网页" onClose={() => setModal(null)}><form onSubmit={(event) => { event.preventDefault(); try { const url = new URL(linkUrl); if (!['http:', 'https:'].includes(url.protocol)) throw new Error('仅支持 HTTP 或 HTTPS 地址'); if (Object.keys(resources).length >= 250) throw new Error('资源数量已达上限'); if (!notesPersistence.markEdit()) return; const id = uid('link'); setResources((previous) => ({ ...previous, [id]: { id, type: 'link', title: linkTitle.trim() || url.hostname, url: url.href, summary: '网页引用', parent: selectedFolder || 'references' } })); setCurrentId(id); setModal(null); announce('已添加网页引用，不抓取网页正文'); } catch (error) { setFormError(error.message); } }}><label>标题<input className="text-input" aria-label="网页标题" value={linkTitle} maxLength={160} onChange={(event) => setLinkTitle(event.target.value)} /></label><label>地址<input className="text-input" aria-label="网页地址" value={linkUrl} maxLength={2048} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://" /></label>{formError && <p className="validation-error" role="alert">{formError}</p>}<div className="modal-actions"><button className="button primary" type="submit">添加</button></div></form></Modal>}
     {modal === 'reference-source' && <Modal title="添加引用" onClose={() => setModal(null)}><div className="import-mode-dialog"><p>保留原件关联，不写回原文件。请选择引用来源。</p><div className="import-mode-options"><button className="button ghost" onClick={() => chooseFiles('reference')}><FileText size={16} />选择本地文件</button><button className="button ghost" onClick={() => setModal('link')}><Link2 size={16} />添加网页引用</button></div><p className="muted">原型仍仅在本页保留引用；浏览器不支持文件句柄时会明确提示。</p></div></Modal>}
-    {modal === 'drop-mode' && pendingImport && <Modal title="选择导入模式" className="import-choice-modal" onClose={() => { setPendingImport(null); setModal(null); }}><div className="import-mode-dialog"><p>{pendingImport.kind === 'resource' ? resources[pendingImport.id]?.title : pendingImport.entries.length + ' 个外部文件'}</p><div className="import-mode-options" role="group" aria-label="副本或引用"><button className="import-mode-option" aria-label="以副本模式导入" onClick={() => applyDropMode('copy')}><Copy size={20} /><span><strong>副本</strong><small>创建独立内容，后续修改不影响来源</small></span></button><button className="import-mode-option" aria-label="以引用模式导入" onClick={() => applyDropMode('reference')}><Link2 size={20} /><span><strong>引用</strong><small>{pendingImport.kind === 'resource' ? '使用同一原件；已有节点时定位，不重复创建' : '只读关联原文件；不支持文件句柄时仅保留本次文件'}</small></span></button></div><p className="muted">所有预览继续经过相同的大小、像素与静态安全检查。</p></div></Modal>}
+    {modal === 'drop-mode' && pendingImport && <Modal title="选择导入模式" className="import-choice-modal" onClose={() => { setPendingImport(null); setModal(null); }}><div className="import-mode-dialog"><p>{pendingImport.entries.length + ' 个外部文件'}</p><div className="import-mode-options" role="group" aria-label="副本或引用"><button className="import-mode-option" aria-label="以副本模式导入" onClick={() => applyDropMode('copy')}><Copy size={20} /><span><strong>副本</strong><small>创建独立内容，后续修改不影响来源</small></span></button><button className="import-mode-option" aria-label="以引用模式导入" onClick={() => applyDropMode('reference')}><Link2 size={20} /><span><strong>引用</strong><small>{'只读关联原文件；不支持文件句柄时仅保留本次文件'}</small></span></button></div><p className="muted">所有预览继续经过相同的大小、像素与静态安全检查。</p></div></Modal>}
     {modal === 'import-error' && <Modal title="部分文件未导入" onClose={() => setModal(null)}><p className="validation-error import-error" role="alert">{formError}</p></Modal>}
   </div></BoardContext.Provider>;
 }

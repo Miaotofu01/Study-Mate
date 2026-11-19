@@ -1007,22 +1007,28 @@ async function main() {
     const readonlyA3 = await page.evaluate(() => {
       const pres = [...document.querySelectorAll('.note-editor__preview pre')];
       return {
-        marked: pres.map((pre) => ({
-          lang: pre.getAttribute('data-md-lang') || '',
-          after: getComputedStyle(pre, '::after').content,
-        })),
+        marked: pres.map((pre) => {
+          const bar = pre.previousElementSibling;
+          const label = bar?.matches('.md-code-lang-bar') && bar.querySelector('.md-code-lang');
+          return {
+            lang: label?.textContent || '',
+            above: label && bar.getBoundingClientRect().bottom <= pre.getBoundingClientRect().top,
+            right: label && Math.abs(label.getBoundingClientRect().right - bar.getBoundingClientRect().right) < 1,
+          };
+        }),
         quote: (() => {
-          const quote = document.querySelector('.note-editor__preview blockquote');
-          return quote ? getComputedStyle(quote).borderLeftWidth : '';
+          const css = getComputedStyle(document.querySelector('.note-editor__preview blockquote'));
+          return { line: css.borderLeftWidth, inset: parseFloat(css.paddingLeft), fill: css.backgroundColor };
         })(),
       };
     });
-    check('A3 只读预览带语言代码块显示语言角标，无语言不标',
-      readonlyA3.marked.length === 2
-      && readonlyA3.marked[0].lang === 'python' && readonlyA3.marked[0].after.includes('python')
-      && readonlyA3.marked[1].lang === '' && (readonlyA3.marked[1].after === 'none' || readonlyA3.marked[1].after === 'normal'),
+    check('A3 只读预览语言标签在首行上方靠右，无语言不标',
+      readonlyA3.marked.length === 2 && readonlyA3.marked[0].lang === 'python'
+      && readonlyA3.marked[0].above && readonlyA3.marked[0].right && readonlyA3.marked[1].lang === '',
       JSON.stringify(readonlyA3));
-    check('A2 只读预览引用块有左边条', readonlyA3.quote === '3px', JSON.stringify(readonlyA3.quote));
+    check('A2 只读预览引用块有左边条、缩进和底色',
+      readonlyA3.quote.line === '3px' && readonlyA3.quote.inset > 0 && readonlyA3.quote.fill !== 'rgba(0, 0, 0, 0)',
+      JSON.stringify(readonlyA3.quote));
 
     // ── #312 A5 只读渲染面：只读态也盖加深面，亮暗两主题都断言 ─────────────────
     const readonlyFaceOf = () => page.evaluate(() => {
@@ -1038,8 +1044,8 @@ async function main() {
     await page.evaluate(() => window.__setTheme('dark'));
     await waitForPaint(page);
     const readonlyFaceDark = await readonlyFaceOf();
-    check('A5 只读渲染面暗色比旧宿主面 #1e2423 更深',
-      lumOf(readonlyFaceDark.face) < lumOf('rgb(30, 36, 35)'),
+    check('A5 只读暗色底面更深且为中性灰',
+      lumOf(readonlyFaceDark.face) < lumOf('rgb(30, 36, 35)') && /^rgb\((\d+), \1, \1\)$/.test(readonlyFaceDark.face),
       JSON.stringify(readonlyFaceDark));
     await page.evaluate(() => window.__setTheme('light'));
     await waitForPaint(page);
@@ -1206,8 +1212,8 @@ async function main() {
       && (await markdown(page)).startsWith('xhttps://example.com/typing')
       && (await page.locator('.cm-content a').count()) === 0);
 
-    // 文档带一个休息态围栏：chip 在亮暗两主题下都要过 AA（#312 A3 可访问性）。
-    await setMarkdown(page, '**粗体** 与 `代码`\n\n```js\nconst x = 1;\n```');
+    // 休息态围栏与引用：亮暗两主题下保持可辨，且不遮住代码。
+    await setMarkdown(page, '**粗体** 与 `代码`\n\n> 引用语句\n\n```js\nconst x = 1;\n```');
     const themeBold = (await markdown(page)).indexOf('粗体');
     await setRawSelection(page, themeBold, themeBold + 2);
     await page.setViewportSize({ width: 335, height: 760 });
@@ -1291,9 +1297,27 @@ async function main() {
       const select = document.querySelector('.md-format-toolbar__select');
       const option = select?.querySelector('option');
       const chip = document.querySelector('.md-code-lang');
+      const bar = chip?.parentElement;
+      const firstLine = document.querySelector('.md-code-body');
+      const quote = document.querySelector('.md-line-quote');
+      const face = getComputedStyle(document.querySelector('.note-editor')).backgroundColor;
       const alpha = (value) => (value.startsWith('rgba') ? Number((value.match(/[\d.]+/g) || [])[3] || 1) : 1);
+      // 用 Canvas 将半透明引用边线叠在实际正文底上，再量可见颜色。
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = face;
+      ctx.fillRect(0, 0, 1, 1);
+      ctx.fillStyle = getComputedStyle(quote).borderLeftColor;
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
       return {
         scheme: getComputedStyle(select).colorScheme,
+        quoteRatio: ratio(`rgb(${r}, ${g}, ${b})`, face),
+        quoteInset: parseFloat(getComputedStyle(quote).paddingLeft),
+        labelRight: bar && Math.abs(bar.getBoundingClientRect().right - chip.getBoundingClientRect().right) < 1,
+        labelAbove: bar && firstLine && Math.abs(bar.getBoundingClientRect().bottom - firstLine.getBoundingClientRect().top) < 1,
+        labelFused: chip && firstLine && getComputedStyle(chip).backgroundColor === getComputedStyle(firstLine).backgroundColor,
         selectBg: getComputedStyle(select).backgroundColor,
         optionColor: option ? getComputedStyle(option).color : '',
         optionBg: option ? getComputedStyle(option).backgroundColor : '',
@@ -1302,7 +1326,7 @@ async function main() {
         chipRatio: chip ? ratio(getComputedStyle(chip).color, getComputedStyle(chip).backgroundColor) : 0,
         chipColor: chip ? getComputedStyle(chip).color : '',
         chipBg: chip ? getComputedStyle(chip).backgroundColor : '',
-        face: getComputedStyle(document.querySelector('.note-editor')).backgroundColor,
+        face,
         host: getComputedStyle(document.querySelector('.studymate-notes')).backgroundColor,
       };
     });
@@ -1335,9 +1359,14 @@ async function main() {
     check('A3 暗色语言角标对比 >= AA',
       faceDark.chipRatio >= 4.5 && faceDark.chipBg !== 'rgba(0, 0, 0, 0)',
       JSON.stringify(faceDark));
-    check('A5 暗色编辑面比旧宿主面 #1e2423 更深',
-      lumOf(faceDark.face) < lumOf('rgb(30, 36, 35)'),
+    check('A5 暗色编辑底面更深且为中性灰',
+      lumOf(faceDark.face) < lumOf('rgb(30, 36, 35)') && /^rgb\((\d+), \1, \1\)$/.test(faceDark.face),
       JSON.stringify(faceDark));
+    for (const [name, view] of [['亮色', faceLight], ['暗色', faceDark]]) {
+      check(`${name}引用有缩进且边线实际对比 >= 3:1`, view.quoteInset > 0 && view.quoteRatio >= 3, JSON.stringify(view));
+      check(`${name}语言标签靠右紧贴首行上方，与代码同底且不重叠`,
+        view.labelRight && view.labelAbove && view.labelFused, JSON.stringify(view));
+    }
     await page.evaluate(() => window.__setTheme('light'));
     await waitForPaint(page);
 

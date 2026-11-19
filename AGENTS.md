@@ -12,7 +12,7 @@
 | 改递给宿主的**形状**：工具 schema、预设插件行、程序化建会话、阅读端的客户端服务调用 | [工程约束](docs/规范/工程约束.md) §三「宿主契约：形状照哪几份源码，怎么验」——那节指到宿主源码里的唯一判据，并给出 `npm run test:dsh-contract`（拿真宿主校验器验一遍） |
 | 写或改课件内容文件 | [课件内容格式](docs/规范/课件内容格式.md) |
 | 改阅读端呈现（`lib/client.js` 的页面、样式、问答面板） | [阅读端呈现](docs/规范/阅读端呈现.md)：四个面「看起来对不对」的判据；形状见 [目标态规格](docs/设计/目标态规格.md) §4，三栏让位见 [ADR-0011](docs/adr/0011-阅读端三栏让位顺序.md) |
-| 改无界笔记（`client/notes/`、`./client` 的构建、`prototypes/unbounded-notes/`） | [ADR-0015](docs/adr/0015-无界笔记模块与独立数据域.md)：模块、单入口构建、数据域边界；持久化见 [ADR-0016](docs/adr/0016-无界笔记持久化与单文件版本栅栏.md)，学习联动见 [ADR-0017](docs/adr/0017-学习节点笔记与共享即时编辑.md)，共享 Markdown 局部编辑与格式栏见 [ADR-0018](docs/adr/0018-共享Markdown局部编辑与格式栏.md)；呈现判据见 [阅读端呈现](docs/规范/阅读端呈现.md) §九；当前状态以[无界笔记设计](docs/设计/无界笔记.md) §0 为准 |
+| 改无界笔记（`client/notes/`、`./client` 的构建、`prototypes/unbounded-notes/`） | 先读[无界笔记设计 §0 的决策导航](docs/设计/无界笔记.md#决策导航)，按模块、持久化、课程关系或 Markdown 编辑进入对应 ADR 和现行说明；当前状态看该文件 §0，呈现判据见[阅读端呈现](docs/规范/阅读端呈现.md) §九 |
 | 改角色提示词 `preset/skills/**` | 该技能自己的 `SKILL.md`；课件规则归 `lesson-design`，题目归 `layered-practice` |
 | 判断该跑哪些检查、怎么单跑 | [测试说明](scripts/tests/README.md) |
 

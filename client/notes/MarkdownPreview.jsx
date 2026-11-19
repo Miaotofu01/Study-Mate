@@ -6,8 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import { normalizeHttpHref } from './markdown-formatting.js';
 
-/* remark-rehype 给带信息串的围栏 code 加 language-* 类；徽标样式在 styles.css
-   （.markdown-preview pre[data-md-lang]::after），没有语言标记的代码块不加。 */
+/* remark-rehype 给带信息串的围栏 code 加 language-* 类；没有语言标记的代码块不加标题。 */
 function codeLanguageOf(children) {
   const stack = Array.isArray(children) ? [...children] : [children];
   while (stack.length) {
@@ -33,7 +32,10 @@ export default function MarkdownPreview({ children = '', compact = false }) {
       img: ({ alt }) => <span className="markdown-image-placeholder">[图片{alt ? '：' + alt : ''}]</span>,
       pre: ({ node, children, ...props }) => {
         const lang = codeLanguageOf(children);
-        return lang ? <pre {...props} data-md-lang={lang}>{children}</pre> : <pre {...props}>{children}</pre>;
+        return lang ? <div className="md-code-block">
+          <div className="md-code-lang-bar"><span className="md-code-lang">{lang}</span></div>
+          <pre {...props} data-md-lang={lang}>{children}</pre>
+        </div> : <pre {...props}>{children}</pre>;
       },
     }}>{text || '*空白文档*'}</ReactMarkdown>;
 }

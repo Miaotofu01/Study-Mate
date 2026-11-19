@@ -38,7 +38,7 @@ async function assertNotesContrast(page, label) {
       '.learning-notes-tree .notes-status', '.learning-notes-tree .notes-help',
       '.learning-notes-tree .notes-empty-node', '.learning-notes-tree .notes-node-heading span',
       '.learning-notes-tree .notes-node-heading small', '.learning-notes-tree button',
-      '.learning-notes-panel .notes-status', '.learning-notes-panel .notes-title-input',
+      '.learning-notes-panel .notes-status', '.learning-notes-panel input[aria-label="学习笔记标题"]',
       '.learning-notes-panel .notes-actions select', '.learning-notes-panel .notes-help',
       '.learning-notes-panel .md-format-toolbar select', '.learning-notes-panel .md-format-toolbar button',
       '.learning-notes-panel .md-format-toolbar label', '.learning-notes-panel .md-format-toolbar input',
@@ -159,6 +159,17 @@ async function ensureLeftPane(page) {
   }
 }
 
+// 打开学习右栏的「笔记」。右栏收起时没有 tab，只有右侧窄轨；先点窄轨。
+async function openNotesPane(page) {
+  const panel = page.locator('.learning-notes-panel');
+  if (!(await panel.isVisible().catch(() => false))) {
+    const rail = page.locator('[data-proto="toggle-notes"]');
+    if (await rail.isVisible().catch(() => false)) await rail.click();
+    else await page.locator('[data-proto="tab-notes"]').click();
+  }
+  await panel.waitFor({ state: 'visible', timeout: 20000 });
+}
+
 async function openLesson(page, title) {
   await ensureLeftPane(page);
   const current = page.locator('.smb-node[data-proto="tree-node"][aria-current="true"]');
@@ -221,12 +232,19 @@ async function main() {
       assert.ok(groupText.some(text => text.includes(title)), '左栏缺少节点 ' + title);
     }
     assert.equal(await page.locator('.learning-notes-tree .notes-md-row').count(), 0, '开始前不应有笔记');
+    // 新建入口只在学习右栏：左树顶不再有「新建节点笔记」，顶部改为默认本 + 课程笔记本。
+    assert.equal(await page.locator('.learning-notes-tree').getByRole('button', { name: '新建节点笔记' }).count(), 0,
+      '左树顶不再有「新建节点笔记」');
+    assert.match(await page.locator('.learning-notes-tree .notes-default-book').innerText(), /默认本：尚未选择/,
+      '左栏顶部显示默认本');
     await SCREENSHOT(page, '01-empty-nodes');
 
     // ② 首次新建：先让用户选/建默认本，再建 .md，并关联当前节点。
-    const treeNewNote = page.locator('.learning-notes-tree').getByRole('button', { name: '新建节点笔记' });
-    await waitEnabled(treeNewNote, '笔记数据载入后可新建');
-    await treeNewNote.click();
+    await openNotesPane(page);
+    await waitReady(page, '.learning-notes-panel');
+    const panelNewNote = page.locator('.learning-notes-panel').getByRole('button', { name: '新建笔记', exact: true });
+    await waitEnabled(panelNewNote, '笔记数据载入后可新建');
+    await panelNewNote.click();
     await waitReady(page, '.notes-picker');
     assert.equal(await page.locator('.notes-picker').getByText('只影响以后新建的笔记，不搬动已有文件。').count(), 1,
       '首次新建必须先确认默认笔记本');
@@ -240,9 +258,15 @@ async function main() {
     await page.locator('[data-proto="tab-notes"][aria-selected="true"]').waitFor({ state: 'visible' });
     await waitReady(page, '.learning-notes-panel');
     await waitSaved(page, '.learning-notes-tree');
-    assert.match(await page.locator('.learning-notes-panel .notes-help').innerText(), /课程笔记.*课程甲/,
-      '右栏应显示同一默认本与当前节点');
-    assert.equal(await page.locator('.learning-notes-panel .notes-title-input').inputValue(), '课程甲.md',
+    assert.match(await page.locator('.learning-notes-panel .notes-origin').innerText(), /原件目录：课程笔记/,
+      '右栏标题下显示原件目录（不重复文件名）');
+    assert.match(await page.locator('.learning-notes-panel .notes-association').innerText(), /课程甲/,
+      '右栏显示本课关联');
+    assert.match(await page.locator('.learning-notes-tree .notes-default-book').innerText(), /默认本：课程笔记/,
+      '新建后左栏顶部显示默认本');
+    assert.equal(await page.locator('.learning-notes-tree .notes-book-of').first().innerText(), '课程笔记',
+      '左树笔记行显示所属本');
+    assert.equal(await page.locator('.learning-notes-panel input[aria-label="学习笔记标题"]').inputValue(), '课程甲.md',
       '新建的 Markdown 标题取当前节点');
     await SCREENSHOT(page, '02-first-note');
 
@@ -262,6 +286,8 @@ async function main() {
     const source = page.locator('.learning-notes-panel .markdown-inline-editor .cm-content[role="textbox"]');
     await source.waitFor({ state: 'visible' });
     assert.equal(await page.locator('.learning-notes-panel [role="toolbar"][aria-label="Markdown 格式"]').count(), 1, '文件标题下只有一条格式栏');
+    await page.locator('.learning-notes-panel .notes-title-row').getByRole('button', { name: '导出当前 Markdown' }).waitFor({ state: 'visible' });
+    assert.equal(await page.locator('.learning-notes-panel .note-editor').getByRole('button', { name: '导出当前 Markdown' }).count(), 0, '学习侧栏导出只在标题行');
     assert.equal(await page.locator('.learning-notes-panel .note-editor__modes, .learning-notes-panel .markdown-live-editor__hint').count(), 0, '旧模式和常驻说明已移除');
     const flat = await page.locator('.learning-notes-panel .note-editor').evaluate(el =>
       [el, el.querySelector('.markdown-inline-editor')].map(node => {
@@ -285,7 +311,7 @@ async function main() {
     noteA = noteByTitle(fixture.read(), '课程甲.md');
     assert.ok(noteA.markdown.includes('即时写入的正文。') && noteA.markdown.includes('源码追加的正文。'), '两次输入写入同一原稿');
     assert.equal(noteA.parent, bookA.id, '编辑正文不改原件归属');
-    assert.equal(await page.locator('.learning-notes-panel .notes-title-input').inputValue(), '课程甲.md', '格式栏不会改动文件名');
+    assert.equal(await page.locator('.learning-notes-panel input[aria-label="学习笔记标题"]').inputValue(), '课程甲.md', '格式栏不会改动文件名');
     await waitSaved(page, '.learning-notes-panel');
     await SCREENSHOT(page, '03-editor');
 
@@ -301,7 +327,7 @@ async function main() {
     for (const theme of ['light', 'dark', 'light']) {
       await page.evaluate(value => document.body.toggleAttribute('data-ds-dark-theme', value === 'dark'), theme);
       await waitFor(async () => await page.locator('.learning-notes-panel .note-editor').getAttribute('data-theme') === theme, '侧栏编辑器跟随宿主主题');
-      await page.locator('.learning-notes-panel .notes-title-input').focus();
+      await page.locator('.learning-notes-panel input[aria-label="学习笔记标题"]').focus();
       await assertNotesContrast(page, theme + '/正常渲染');
       await strong.click();
       assert.equal(await page.locator('.learning-notes-panel .md-syntax:not(.md-syntax-hidden)').count(), 2, '仅当前粗体的两组真实标记显现');
@@ -312,7 +338,7 @@ async function main() {
       await dialog.getByLabel('链接地址', { exact: true }).fill('https://example.org/notes-aa');
       await assertNotesContrast(page, theme + '/链接框');
       await dialog.getByRole('button', { name: '取消', exact: true }).click();
-      const inputColor = await page.locator('.learning-notes-panel .notes-title-input').evaluate(el => getComputedStyle(el).backgroundColor);
+      const inputColor = await page.locator('.learning-notes-panel input[aria-label="学习笔记标题"]').evaluate(el => getComputedStyle(el).backgroundColor);
       if (theme === 'dark') assert.notEqual(inputColor, 'rgb(255, 255, 255)', '暗色标题输入框不能仍是白底');
       await strong.click();
       await SCREENSHOT(page, theme === 'dark' ? '03b-editor-dark' : '03c-editor-light');
@@ -327,9 +353,15 @@ async function main() {
     // ④ 给课程乙建一条笔记，再把课程甲那条拖到课程乙：只换关联。
     await openLesson(page, '课程乙');
     await page.locator('[data-proto="left-pane-notes"]').click();
-    const treeNewNoteB = page.locator('.learning-notes-tree').getByRole('button', { name: '新建节点笔记' });
-    await waitEnabled(treeNewNoteB, '课程乙可新建笔记');
-    await treeNewNoteB.click();
+    await openNotesPane(page);
+    await waitReady(page, '.learning-notes-panel');
+    // 切节点禁止沿用上一课的选中：选择器为空，标题与正文都不在。
+    await waitFor(async () => (await page.locator('.learning-notes-panel [aria-label="选择学习笔记"]').inputValue()) === '',
+      '切到课程乙后右栏不沿用课程甲的选中');
+    assert.equal(await page.locator('.learning-notes-panel input[aria-label="学习笔记标题"]').count(), 0, '切课后不显示上一课的笔记');
+    const panelNewNoteB = page.locator('.learning-notes-panel').getByRole('button', { name: '新建笔记', exact: true });
+    await waitEnabled(panelNewNoteB, '课程乙可新建笔记');
+    await panelNewNoteB.click();
     await waitFor(async () => await page.locator('.learning-notes-tree .notes-md-row').count() === 2,
       '课程乙创建第二条笔记');
     await waitSaved(page, '.learning-notes-tree');
@@ -340,7 +372,10 @@ async function main() {
     const beforeNote = noteByTitle(beforeDrag, '课程甲.md');
     const groupA = page.locator('.learning-notes-tree .notes-node-group').filter({ hasText: '课程甲' }).first();
     const groupB = page.locator('.learning-notes-tree .notes-node-group').filter({ hasText: '课程乙' }).first();
+    // 同科目换节点由 App 统一确认一次（ADR-0019）；拖动只 dispatch associate，确认在那一层。
+    const sameSubjectConfirm = page.waitForEvent('dialog', { timeout: 10000 }).then(dialog => dialog.accept());
     await groupA.locator('.notes-md-row').first().dragTo(groupB);
+    await sameSubjectConfirm;
     await waitFor(() => {
       const current = noteByTitle(fixture.read(), '课程甲.md');
       return current && assocNodeIds(current).join() === WORKSPACE + '|demo|course-b';
@@ -357,25 +392,35 @@ async function main() {
     // ⑤ 换默认本只影响以后新建。课程丙已是无课件节点，仍能打开学习右栏笔记。
     await openLesson(page, '课程丙');
     await page.locator('[data-proto="left-pane-notes"]').click();
-    const defaultButton = page.locator('.learning-notes-tree').getByRole('button', { name: '默认笔记本' });
-    await waitEnabled(defaultButton, '可更换默认笔记本');
-    await defaultButton.click();
-    await waitReady(page, '.notes-picker');
-    await page.locator('[aria-label="科目默认笔记本"]').selectOption('new');
-    await page.locator('[aria-label="笔记本名称"]').fill('第二本');
-    const confirmSecondDefault = page.locator('.notes-picker').getByRole('button', { name: '确认选择' });
-    await waitEnabled(confirmSecondDefault, '第二本表单可提交');
-    await confirmSecondDefault.click();
-    await waitFor(async () => (await page.locator('.learning-notes-tree .notes-help').innerText()).includes('第二本'),
+    const booksToggle = page.locator('.learning-notes-tree').getByRole('button', { name: '课程笔记本' });
+    await waitEnabled(booksToggle, '可打开课程笔记本列表');
+    await booksToggle.click();
+    await waitReady(page, '.learning-notes-tree .notes-books');
+    const booksPanel = page.locator('.learning-notes-tree .notes-books');
+    assert.match(await booksPanel.innerText(), /课程笔记/, '课程笔记本列表显示当前科目绑定的本');
+    assert.match(await booksPanel.innerText(), /默认本/, '列表标出当前默认本');
+    await booksPanel.getByRole('button', { name: '新建笔记本并设为默认本…' }).click();
+    await booksPanel.getByLabel('新课程笔记本名称').fill('第二本');
+    await booksPanel.getByRole('button', { name: '创建并设为默认本' }).click();
+    await waitFor(async () => (await page.locator('.learning-notes-tree .notes-default-book').innerText()).includes('第二本'),
       '默认本切换为第二本');
-    const treeNewNoteC = page.locator('.learning-notes-tree').getByRole('button', { name: '新建节点笔记' });
-    await waitEnabled(treeNewNoteC, '课程丙可新建笔记');
-    await treeNewNoteC.click();
+    await booksPanel.getByRole('button', { name: '关闭', exact: true }).click();
+    await openNotesPane(page);
+    const panelNewNoteC = page.locator('.learning-notes-panel').getByRole('button', { name: '新建笔记', exact: true });
+    await waitEnabled(panelNewNoteC, '课程丙可新建笔记');
+    await panelNewNoteC.click();
     await waitFor(async () => await page.locator('.learning-notes-tree .notes-md-row').count() === 3,
       '课程丙在第二本下新建第三条笔记');
     await page.locator('[data-proto="tab-notes"][aria-selected="true"]').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('.learning-notes-panel .notes-title-input').inputValue(), '课程丙.md',
+    assert.equal(await page.locator('.learning-notes-panel input[aria-label="学习笔记标题"]').inputValue(), '课程丙.md',
       '没有课件的节点也能在学习右栏打开笔记');
+    // 已绑定的本之间也能改默认本：把默认本改回课程笔记。
+    await booksToggle.click();
+    await waitReady(page, '.learning-notes-tree .notes-books');
+    await page.locator('.learning-notes-tree .notes-books').getByRole('button', { name: '设为默认本' }).first().click();
+    await waitFor(async () => (await page.locator('.learning-notes-tree .notes-default-book').innerText()).includes('课程笔记'),
+      '可把默认本改回已绑定的本');
+    await page.locator('.learning-notes-tree .notes-books').getByRole('button', { name: '关闭', exact: true }).click();
     const storeAfterDefault = await waitFor(() => {
       const value = fixture.read();
       return noteByTitle(value, '课程丙.md') && value.layout.folders.some(folder => folder.name === '第二本')
@@ -391,6 +436,24 @@ async function main() {
     assert.equal(await page.locator('[data-proto="missing-lesson-notice"]').count(), 1, '无课件节点明确提示缺课件');
     await waitSaved(page, '.learning-notes-tree');
     await SCREENSHOT(page, '05-no-lesson-default-book');
+
+    // ④b 展开分组不切课；跨节点点某一篇先切课，再由右栏打开那一篇（ADR-0019）。
+    await openLesson(page, '课程丙');
+    await page.locator('[data-proto="left-pane-notes"]').click();
+    const groupBNode = page.locator('.learning-notes-tree .notes-node-group').filter({ hasText: '课程乙' }).first();
+    const toggleB = groupBNode.getByRole('button', { name: /(收起|展开) 课程乙/ });
+    await toggleB.click();
+    assert.equal(await page.locator('.smb-center__head').filter({ hasText: '课程丙' }).count(), 1, '收起分组不切课');
+    await toggleB.click();
+    assert.equal(await page.locator('.smb-center__head').filter({ hasText: '课程丙' }).count(), 1, '展开分组也不切课');
+    await groupBNode.locator('.notes-md-row').filter({ hasText: '课程甲.md' }).locator('.notes-md-open').click();
+    await page.locator('.smb-center__head').filter({ hasText: '课程乙' }).waitFor({ state: 'visible', timeout: 20000 });
+    await page.locator('.learning-notes-panel input[aria-label="学习笔记标题"]').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('.learning-notes-panel input[aria-label="学习笔记标题"]').inputValue(), '课程甲.md',
+      '跨节点点笔记：先切到课程乙，再在右栏打开同一篇');
+    const notesPaneButton = page.locator('[data-proto="left-pane-notes"]');
+    if (await notesPaneButton.count() && (await notesPaneButton.getAttribute('aria-pressed')) !== 'true') await notesPaneButton.click();
+    await waitReady(page, '.learning-notes-tree');
 
     // ⑨ 软删除→恢复：原文、归属和画布布局都原样回来，只移出各视图。
     const beforeTrash = fixture.read();
@@ -441,6 +504,20 @@ async function main() {
     const bookTwoText = await bookTwoNode.innerText();
     assert.match(bookTwoText, /课程丙\.md/, '第二本只含自己的笔记');
     assert.doesNotMatch(bookTwoText, /课程甲\.md|课程乙\.md/, '第一本的笔记不串到第二本');
+    // 本名旁是绑定摘要；行内「⋯ → 课程绑定」替代手输 slug；笔记文件行不放这个菜单。
+    assert.equal(await page.locator('.node-notebook-tree').getByRole('button', { name: '手动绑定科目' }).count(), 0,
+      '不再用手输 slug 的手动绑定按钮');
+    assert.match(await bookOneNode.locator('.notes-book-binding').innerText(), /课程科目/,
+      '本名旁显示绑定摘要');
+    assert.equal(await bookOneNode.getByRole('button', { name: /更多操作/ }).count(), 0,
+      '笔记文件行不放课程绑定菜单，管理入口在标题下');
+    await bookOneNode.getByRole('button', { name: '更多 课程笔记 操作' }).click();
+    await bookOneNode.getByRole('menuitem', { name: '课程绑定' }).click();
+    const bindForm = page.locator('[data-proto="notebook-bindings-form"]');
+    await bindForm.waitFor({ state: 'visible', timeout: 10000 });
+    assert.match(await bindForm.innerText(), /课程科目/, '「⋯ → 课程绑定」打开绑定表单');
+    assert.ok(await bindForm.getByRole('button', { name: '解除绑定' }).count() >= 1, '绑定行有解除绑定入口');
+    await page.getByRole('button', { name: '关闭弹窗' }).click();
     await SCREENSHOT(page, '06-node-view');
 
     // ⑦ 拖课程节点到画布：只有标题 + 跳转，不复制正文；侧栏是实际只读课件。

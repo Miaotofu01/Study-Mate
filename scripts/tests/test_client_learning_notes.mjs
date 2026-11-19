@@ -293,7 +293,7 @@ test('左栏选中笔记走「打开」而不是开关：右栏已停在笔记�
   // 状态 setter 在 React 桩里是空操作，这里只能从接线处钉住语义：笔记树的 onOpen
   // 走 openNotesTab（setWantRight(true)），右窄轨才走 openTab（同 tab 再点收起）。
   const source = fs.readFileSync(CLIENT_PATH, 'utf8');
-  assert.match(source, /const openNotesTab = \(\) => \{[\s\S]*?setWantRight\(true\);/);
+  assert.match(source, /const openNotesTab = \(ref, id\) => \{[\s\S]*?if \(ref && onOpenLessonNote && !onOpenLessonNote\(ref, id\)\) return;[\s\S]*?setWantRight\(true\);/);
   assert.match(source, /onOpenNotes: openNotesTab/);
 });
 
@@ -343,7 +343,8 @@ test('StudyMateApp 把四个新 props 递进 NativeMainPanel，并在 LessonPage
     'courseLibrary: library.data',
     'onNavigateCourse,',
     'renderCourse,',
-    'notesContext, onSubject: goSubject, missing: !lesson',
+    'viewMemory: viewMemory?.board',
+    'notesContext, onSubject: goSubject, onOpenLessonNote: onNavigateCourse, missing: !lesson',
   ]) {
     assert.ok(source.includes(seam), `缺了接缝：${seam}`);
   }

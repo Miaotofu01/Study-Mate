@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { MAX_MARKDOWN_LENGTH } from './markdown-inline.js';
 import MarkdownPreview from './MarkdownPreview.jsx';
 import MarkdownInlineEditor from './MarkdownInlineEditor.jsx';
@@ -106,7 +107,19 @@ export default function NoteEditor(props) {
   return <NoteDocument key={props.resource?.id || 'empty-note'} {...props} />;
 }
 
-function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', label = 'Markdown 正文' }) {
+function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', label = 'Markdown 正文', exportTarget, mode = 'inline' }) {
+  const [splitSide, setSplitSide] = useState('source');
+  const [splitWidth, setSplitWidth] = useState(50);
+  const [narrowSplit, setNarrowSplit] = useState(false);
+  const panesRef = useRef(null);
+  const split = mode === 'split';
+  const showEditor = mode !== 'preview' && (!split || !narrowSplit || splitSide === 'source');
+  const showPreview = mode === 'preview' || (split && (!narrowSplit || splitSide === 'preview'));
+  const changeSplitWidth = (width) => setSplitWidth(Math.min(75, Math.max(25, Math.round(width))));
+  const moveDivider = (event) => {
+    const box = panesRef.current?.getBoundingClientRect();
+    if (box?.width) changeSplitWidth((event.clientX - box.left) * 100 / box.width);
+  };
   const markdown = String(resource?.markdown ?? '');
   const resourceId = resource?.id || '';
   // 本实例唯一 token：暂存按它分条，干净实例不会清掉别人的草稿。
@@ -144,6 +157,17 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
   // 只保留「看得见 / 导得出 / 显式载入文件版本」三条路。解冲突必须由用户点按钮完成。
   const conflict = externalNotice;
   const locked = readOnly || conflict;
+  const readOnlySource = readOnly && !conflict && (mode === 'edit' || split);
+
+  useEffect(() => {
+    const panes = panesRef.current;
+    if (!split || (locked && !readOnlySource) || !panes) return undefined;
+    const measure = () => setNarrowSplit(panes.clientWidth < 540);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(panes);
+    return () => observer.disconnect();
+  }, [split, locked, readOnlySource]);
 
   useEffect(() => {
     if (markdown === lastPropRef.current) return;
@@ -320,13 +344,20 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
     }
   };
 
+  // 按钮渲染在所属标题栏，但仍由同一个编辑器实例读取原稿。
+  // undefined 表示没有外部标题栏，null 表示标题栏尚未挂载。
+  const exportButton = exportTarget === undefined ? <div className="note-editor__actions">
+    <button type="button" className="note-editor__export" aria-label="导出当前 Markdown" title="导出当前 Markdown" onClick={handleExport}><Download size={14} aria-hidden="true" />导出 Markdown</button>
+  </div> : exportTarget && createPortal(
+    <button type="button" className="icon-button note-editor__export-icon" aria-label="导出当前 Markdown" title="导出当前 Markdown" onClick={handleExport}><Download size={16} aria-hidden="true" /></button>,
+    exportTarget,
+  );
+
   // 只读与「外部新版 vs 未保存草稿」冲突共用这一屏：没有编辑器就没有写入路径，
   // 冲突期间不可能再用旧草稿覆盖新版本。解冲突只能由用户显式点「载入文件版本」。
-  if (locked) return <section className="note-editor is-readonly" data-theme={theme} data-conflict={conflict ? '1' : undefined} aria-label={label} data-testid="note-editor">
-    <div className="note-editor__actions">
-      <button type="button" className="note-editor__export" aria-label="导出当前 Markdown" title="导出当前 Markdown" onClick={handleExport}><Download size={14} strokeWidth={1.8} aria-hidden="true" />导出 Markdown</button>
-      {conflict && <button type="button" className="note-editor__export" onClick={loadExternalVersion} aria-label="载入文件版本" title="放弃本地草稿，改为显示文件里的版本">载入文件版本（放弃本地草稿）</button>}
-    </div>
+  if (locked && !readOnlySource) return <section className="note-editor is-readonly" data-theme={theme} data-conflict={conflict ? '1' : undefined} aria-label={label} data-testid="note-editor">
+    {exportButton}
+    {conflict && <div className="note-editor__actions"><button type="button" className="note-editor__export" onClick={loadExternalVersion} aria-label="载入文件版本" title="放弃本地草稿，改为显示文件里的版本">载入文件版本（放弃本地草稿）</button></div>}
     {error && <p className="note-editor__error" role="alert">{error}</p>}
     {conflict && <p className="note-editor__error" role="alert">文件已在外部更新；这里保留你尚未保存的草稿（未写入文件）。为避免覆盖新版本，编辑已暂停。</p>}
     {unconfirmed && <p className="note-editor__error" role="status">当前显示的是尚未保存的本地草稿，未写入文件。</p>}
@@ -339,11 +370,9 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
     <div className="note-editor__preview markdown-preview"><MarkdownPreview>{draft}</MarkdownPreview></div>
   </section>;
 
-  return <section ref={rootRef} className="note-editor" data-theme={theme} data-mode="inline" aria-label={label} data-testid="note-editor" onKeyDownCapture={onKeyDown}>
-    <MarkdownFormatToolbar onCommand={runCommand} selection={selection} disabled={!ready || oversize} />
-    <div className="note-editor__actions">
-      <button type="button" className="note-editor__export" aria-label="导出当前 Markdown" title="导出当前 Markdown" onClick={handleExport}><Download size={14} strokeWidth={1.8} aria-hidden="true" />导出 Markdown</button>
-    </div>
+  return <section ref={rootRef} className="note-editor" data-theme={theme} data-mode={mode} aria-label={label} data-testid="note-editor" onKeyDownCapture={mode === 'inline' ? onKeyDown : undefined}>
+    {mode === 'inline' && <MarkdownFormatToolbar onCommand={runCommand} selection={selection} disabled={!ready || oversize} />}
+    {exportButton}
     {recovered && !conflict && <p className="note-editor__status" role="status">已恢复上次离开这个文件时的未保存草稿（未写入文件）。
       <button type="button" className="note-editor__link" onClick={() => { deleteStashedDraft(resourceId, owner); setDraft(markdown); setRecovered(false); setError(''); }}>放弃本地草稿，载入文件版本</button>
     </p>}
@@ -352,7 +381,32 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
       <button type="button" className="note-editor__link" onClick={dropOlderDrafts}>丢弃这些旧草稿</button>
     </p>}
     {oversize && <p className="note-editor__error" role="alert">{OVERSIZE_MESSAGE}</p>}
-    <MarkdownInlineEditor value={draft} onChange={handleChange} onApi={acceptApi} onSelectionChange={acceptSelection} theme={theme} label={label} />
+    {split && narrowSplit && <div className="note-editor__split-tabs" role="group" aria-label="双列可见侧">
+      <button type="button" aria-pressed={splitSide === 'source'} onClick={() => setSplitSide('source')}>源码</button>
+      <button type="button" aria-pressed={splitSide === 'preview'} onClick={() => setSplitSide('preview')}>预览</button>
+    </div>}
+    <div ref={panesRef} className={'note-editor__panes' + (split && !narrowSplit ? ' is-split' : '')} style={{ '--document-source-width': splitWidth + '%' }}>
+      {/* 保持同一 EditorView：临时预览不能卸载/清空撤销、中文组合或原稿坐标。 */}
+      <div className="note-editor__source" hidden={!showEditor}>
+        <MarkdownInlineEditor value={draft} onChange={handleChange} onApi={acceptApi} onSelectionChange={acceptSelection} theme={theme} label={label} readOnly={readOnly} sourceMode={mode === 'edit' || split} />
+      </div>
+      {split && !narrowSplit && <div className="document-split-handle" role="separator" tabIndex={0} aria-label="调整编辑与预览宽度" aria-orientation="vertical" aria-valuemin={25} aria-valuemax={75} aria-valuenow={splitWidth}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          event.currentTarget.focus();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          moveDivider(event);
+        }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) moveDivider(event); }}
+        onDoubleClick={() => changeSplitWidth(50)}
+        onKeyDown={event => {
+          const changes = { ArrowLeft: splitWidth - 3, ArrowRight: splitWidth + 3, Home: 25, End: 75 };
+          if (!Object.hasOwn(changes, event.key)) return;
+          event.preventDefault();
+          changeSplitWidth(changes[event.key]);
+        }} />}
+      {showPreview && <div className="note-editor__preview markdown-preview"><MarkdownPreview>{draft}</MarkdownPreview></div>}
+    </div>
     {error && !oversize && <p className="note-editor__error" role="alert">{error}</p>}
   </section>;
 }

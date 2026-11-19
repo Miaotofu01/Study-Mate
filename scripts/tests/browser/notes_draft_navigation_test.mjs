@@ -56,9 +56,24 @@ async function body(page, text) {
   await editor.click();
   await page.keyboard.press('Control+A'); await page.keyboard.insertText(text);
 }
-async function createNote(page, fixture, text) {
+// 左栏「新建」菜单 → role=menuitem → 同名弹窗；名字可留默认（未命名.md）。
+async function createResource(page, kind, name) {
+  const label = kind === 'note' ? '新建笔记' : kind === 'folder' ? '新建文件夹' : '新建笔记本';
+  await notes(page).locator('.left-panel .panel-header').getByRole('button', { name: '新建', exact: true }).click();
+  await notes(page).getByRole('menuitem', { name: label, exact: true }).click();
+  const dialog = page.locator(`[role=dialog][aria-label="${label}"]`);
+  await dialog.waitFor({ state: 'visible', timeout: 5000 });
+  if (name !== undefined) {
+    const field = kind === 'note' ? '笔记名称' : kind === 'folder' ? '文件夹名称' : '笔记本名称';
+    await dialog.getByRole('textbox', { name: field }).fill(name);
+  }
+  await dialog.getByRole('button', { name: '创建', exact: true }).click();
+  await dialog.waitFor({ state: 'detached', timeout: 5000 });
+  await delay(120);
+}
+async function createNote(page, fixture, text, name) {
   const before = new Set(Object.keys(fixture.read().resources));
-  await notes(page).getByRole('button', { name: '新建笔记', exact: true }).click();
+  await createResource(page, 'note', name);
   await body(page, text);
   await until(() => Object.values(fixture.read().resources).some(r => !before.has(r.id) && r.markdown === text), '新笔记没有真实保存');
   await saved(page);
@@ -78,12 +93,11 @@ async function openFromTree(page, title, { waitSaved = true } = {}) {
   if (waitSaved) await saved(page);
 }
 async function twoNotes(page, fixture, first, second) {
-  const a = await createNote(page, fixture, first.body);
-  await notes(page).locator('input[aria-label="文档标题"]').first().fill(first.title);
-  await saved(page);
-  const b = await createNote(page, fixture, second.body);
-  await notes(page).locator('input[aria-label="文档标题"]').first().fill(second.title);
-  await saved(page);
+  // 名字在新建弹窗里一次给全：标题输入框是「Enter/失焦才提交」的，不靠 fill 即改即存。
+  const a = await createNote(page, fixture, first.body, first.title);
+  const b = await createNote(page, fixture, second.body, second.title);
+  assert.equal(a.title, first.title);
+  assert.equal(b.title, second.title);
   return { a, b };
 }
 
