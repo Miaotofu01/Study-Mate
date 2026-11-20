@@ -5,9 +5,10 @@ import MarkdownInlineEditor from './MarkdownInlineEditor.jsx';
 import MarkdownFormatToolbar from './MarkdownFormatToolbar.jsx';
 import { formatMarkdown } from './markdown-formatting.js';
 import './note-editor.css';
+import { useNotesLocale } from './locale.js';
 
-const OVERSIZE_MESSAGE = '正文最多 128 Ki 字符；原稿已保留，请先缩短正文再编辑。';
-const SAVE_ERROR = '这次修改未提交，编辑中的草稿仍在。请重试保存。';
+const OVERSIZE_MESSAGE = 'oversize';
+const SAVE_ERROR = 'save_error';
 
 // Each resource owns its editor lifetime. A newly selected file never receives
 // the previous file's draft, undo history, selection or deferred composition.
@@ -15,7 +16,9 @@ export default function NoteEditor(props) {
   return <NoteDocument key={props.resource?.id || 'empty-note'} {...props} />;
 }
 
-function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', label = 'Markdown 正文' }) {
+function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', label: suppliedLabel }) {
+  const nt = useNotesLocale();
+  const label = suppliedLabel ?? nt('markdown');
   const markdown = String(resource?.markdown ?? '');
   const [draft, setDraft] = useState(markdown);
   const [error, setError] = useState('');
@@ -81,7 +84,7 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
       // its original selection, but cannot apply it to a changed document.
       const current = api.read();
       if (popupSnapshot && popupSnapshot.text !== current.text) {
-        setError('打开链接框后正文已更新。请重新选择文字并打开链接框；本次未改动原稿。');
+        setError('stale_link');
         return;
       }
       const edit = formatMarkdown(popupSnapshot || current, command, value);
@@ -91,13 +94,13 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
         return;
       }
       if (api.edit(edit) === false) {
-        setError('格式修改未应用；原稿保留，请检查正文长度与可编辑状态。');
+        setError('format_refused');
         return;
       }
       setError('');
       setSelection(api.read());
     } catch (cause) {
-      setError(cause?.message || '格式修改未应用，原稿仍在。');
+      setError(cause?.message ? { message: cause.message } : 'format_error');
     }
   }, [readOnly, oversize]);
 
@@ -110,7 +113,7 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
       runCommand(key === 'b' ? 'bold' : 'italic');
     } else if (key === 'k') {
       event.preventDefault(); event.stopPropagation();
-      rootRef.current?.querySelector('[aria-label="链接"]')?.click();
+      rootRef.current?.querySelector('[data-command="link"]')?.click();
     } else if (key === 'z' || key === 'y') {
       event.preventDefault(); event.stopPropagation();
       runCommand(key === 'y' || event.shiftKey ? 'redo' : 'undo');
@@ -123,9 +126,9 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
 
   return <section ref={rootRef} className="note-editor" data-theme={theme} data-mode="inline" aria-label={label} data-testid="note-editor" onKeyDownCapture={onKeyDown}>
     <MarkdownFormatToolbar onCommand={runCommand} selection={selection} disabled={!ready || oversize} />
-    {oversize && <p className="note-editor__error" role="alert">{OVERSIZE_MESSAGE}</p>}
+    {oversize && <p className="note-editor__error" role="alert">{nt(OVERSIZE_MESSAGE)}</p>}
     <MarkdownInlineEditor value={draft} onChange={handleChange} onApi={acceptApi} onSelectionChange={acceptSelection} theme={theme} label={label} />
-    {error && !oversize && <p className="note-editor__error" role="alert">{error}</p>}
+    {error && !oversize && <p className="note-editor__error" role="alert">{typeof error === 'string' ? nt(error) : error.message}</p>}
   </section>;
 }
 

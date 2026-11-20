@@ -459,6 +459,7 @@ const groups = {
       'scripts/tests/test_host_status.mjs',
       'scripts/tests/test_client_plugin_page.mjs',
       'scripts/tests/test_client_locale.mjs',
+      'scripts/tests/test_notes_locale.mjs',
     ],
   },
   '--static': {
@@ -496,6 +497,7 @@ const groups = {
       'browser/notes_test.mjs',
       'browser/notes_brand_test.mjs',
       'browser/locale_test.mjs',
+      'browser/notes_locale_test.mjs',
       // #268：真实临时 notes HTTP/数据域；独立页仍纯内存，不接真实会话。
       'browser/notes_persistence_test.mjs',
       // #302 / ADR-0019：懒分块——学习首屏零分块请求、首开恰一次、往返保活、失败重试、

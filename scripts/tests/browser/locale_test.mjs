@@ -90,7 +90,7 @@ try {
   await page.locator('.studymate-notes .app-shell').waitFor();
   await page.waitForFunction(() => !document.querySelector('.studymate-notes .persistence-gate'));
   await check('notes course-reference preview switches live with unchanged course content', async () => {
-    await page.getByRole('button', { name: '打开 中文课程引用', exact: true }).dblclick();
+    await page.getByRole('button', { name: 'Open 中文课程引用', exact: true }).dblclick();
     await page.locator('[data-proto="course-ref-open"]').waitFor();
     assert.equal(await page.locator('[data-proto="course-ref-open"]').innerText(), 'Open in learning');
     const content = await page.locator('.smb-refcourse__body .smb-sec-block').allTextContents();
@@ -100,8 +100,8 @@ try {
     assert.deepEqual(await page.locator('.smb-refcourse__body .smb-sec-block').allTextContents(), content);
   });
   await check('unsaved notes dialog survives locale removal/rearrival without writes', async () => {
-    await page.getByRole('button', { name: '新建文件夹', exact: true }).click();
-    const input = page.getByRole('textbox', { name: '文件夹名称', exact: true });
+    await page.getByRole('button', { name: 'New folder', exact: true }).click();
+    const input = page.locator('.modal input');
     await input.fill('未保存的文件夹 draft');
     await input.evaluate(el => { window.__draftElement = el; });
     const before = writes.length;
