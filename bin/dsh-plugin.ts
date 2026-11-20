@@ -116,9 +116,16 @@ export async function apply(
     // 拷出去跑的边界夹具没有 lib/：没有 override 就等于沿用安装器配置
   }
 
+  /* 这次 apply 里预设没注册上的原因，空串＝正常。解析失败（例如 profile 补丁里的跨行 flow
+     集合，#317）以前只留一行 console.warn：预设不注册、config 不落盘，用户在界面上看到的却是
+     「没有学习工作区」。原因随后交给插件页状态卡（`GET /api/studymate/status` 的
+     `registration` 字段）与 no-workspace 信封。刻意做成**每次 apply 一份**：同一个进程里
+     两个 profile 共用这个模块，一个失败不该让另一个也显示失败。 */
+  let startupFailure = '';
   const profile = ctx.get?.('profileContext');
   if (!profile || !ctx.agentPresets?.register) {
-    console.warn('StudyMate：当前 DSH 不支持原生插件接口（需要 0.1.7-alpha.1+）；已跳过原生加载。旧版请使用 npx -y @yunmiao/studymate@latest install。');
+    startupFailure = '当前 DSH 不支持原生插件接口（需要 0.1.7-alpha.1+）';
+    console.warn(`StudyMate：${startupFailure}；已跳过原生加载。旧版请使用 npx -y @yunmiao/studymate@latest install。`);
   } else {
     try {
       // installPayload 在 bin/studymate.mjs（本次不迁）：TS 从 JS 里推断出「四个必填参数」，
@@ -134,8 +141,9 @@ export async function apply(
         await ctx.effect!(() => ctx.agentPresets!.register(registration.qaConfig));
       }
     } catch (error) {
+      startupFailure = error instanceof Error ? error.message : String(error);
       // Startup may report a problem, but must not migrate profile ownership.
-      console.warn(`StudyMate：已跳过原生加载。${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`StudyMate：已跳过原生加载。${startupFailure}`);
     }
   }
 
@@ -162,10 +170,15 @@ export async function apply(
   // ── 插件页：只读状态（`GET /api/studymate/status`）──────────────────────
   // 与阅读端那几条同一种姿势：各自 `inject(['connection'])`，缺了不挂、挂不上只警告。
   // watch 状态由这里（bin 域）读，lib 域不 import watch——否则 lib → watch → lib 成环。
+  // 预设注册的成败也一并交出去：解析失败时状态卡要能说出「哪份文件、什么错误」，而不是空着说没配置。
   void import('../lib/status-route.ts')
     .then(async (module) => {
       const { watchState } = await import('../lib/watch/index.ts');
-      module.registerStatusRoute(ctx, { profile: profile?.name, watch: () => watchState() });
+      module.registerStatusRoute(ctx, {
+        profile: profile?.name,
+        registration: { ok: startupFailure === '', error: startupFailure },
+        watch: () => watchState(),
+      });
     })
     .catch((error) => { console.warn(`StudyMate：插件页状态路由挂不上。${error instanceof Error ? error.message : String(error)}`); });
 
@@ -193,6 +206,13 @@ export async function apply(
   const envelope = async (status: number, code: string, message: string): Promise<Response> =>
     (await import('../lib/route-envelope.ts')).routeError(status, code, message);
 
+  // 没工作区时给的那句「先跑一次 install」只在预设注册成功时成立：启动就失败（例如补丁解析不过）
+  // 的场合，安装器走的是同一份补丁，再跑一遍也是同一个错误。把失败原因一并说清（#317）。
+  const noWorkspaceMessage = startupFailure === ''
+    ? '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。'
+    : `没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。原生加载失败（${startupFailure}）。`
+      + '先修好这条错误，再重跑一次 npx @yunmiao/studymate install。';
+
   // ── 阅读端的数据通路 ───────────────────────────────────────────────────
   // 每次请求现读工作区：学习文件是纯文本、体量小（目标态 §12「按需扫描足够」），
   // 不落盘索引、不加缓存，也就没有「文件变了页面还是旧的」这类要同步的状态。
@@ -213,7 +233,7 @@ export async function apply(
           ]);
           const workspace = resolveWorkspace();
           if (!workspace) {
-            return envelope(500, 'no-workspace', '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。');
+            return envelope(500, 'no-workspace', noWorkspaceMessage);
           }
           // #222：阅读端按科目隔离坏数据——一门读不了，其余科目照常打开，坏的那门带错误
           // 进 `unreadable` 由页面点名。导出与原生工具不传这个开关，照旧整份失败。
@@ -265,7 +285,7 @@ export async function apply(
           const { resolveWorkspace } = await import('../lib/workspace.ts');
           const workspace = resolveWorkspace();
           if (!workspace) {
-            return envelope(500, 'no-workspace', '没找到学习工作区：~/.dsh/studymate-config.yaml 里没有 workspace。先跑一次 npx @yunmiao/studymate install。');
+            return envelope(500, 'no-workspace', noWorkspaceMessage);
           }
           const { readReference, writeReference } = await import('../lib/reference.ts');
 

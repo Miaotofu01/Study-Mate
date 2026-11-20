@@ -151,6 +151,21 @@ test('插件页：状态投影只带事实与计数，空态/错误态说人话'
   assert.equal(failed.state, 'error');
   assert.equal(failed.lead, DICT_ZH.status_read_failed);
 
+  // 预设没注册上（#317）：比「还没配置」更靠前说，理由原样带出来——旧载荷没有这个字段，走上面的常规路径。
+  const unregistered = statusView({
+    ok: true, configured: false, initialized: false, workspace: '', source: '', mode: 'unknown',
+    registration: { ok: false, error: 'cordis.patch.yml:4:1: 流式集合缺少闭合的 "}"' },
+    today: '2026-11-07', subjects: [], unreadable: [], watch: { watching: false, backend: '未起' },
+  }, t);
+  assert.equal(unregistered.state, 'error');
+  assert.equal(unregistered.lead, DICT_ZH.status_lead_unregistered);
+  assert.equal(unregistered.note,
+    DICT_ZH.status_registration_failed.replace('{reason}', 'cordis.patch.yml:4:1: 流式集合缺少闭合的 "}"'));
+  assert.deepEqual(statusView({
+    ok: true, configured: false, initialized: false, workspace: '',
+    registration: { ok: true, error: '' }, subjects: [], unreadable: [], watch: { watching: false, backend: '未起' },
+  }, t).lead, DICT_ZH.status_lead_unconfigured);
+
   const unconfigured = statusView({
     ok: true, configured: false, initialized: false, workspace: '', source: '', mode: 'unknown',
     today: '2026-11-07', subjects: [], unreadable: [], watch: { watching: false, backend: '未起' },

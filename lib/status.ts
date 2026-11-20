@@ -48,10 +48,22 @@ export interface StatusUnreadable {
   error: string;
 }
 
+/**
+ * 预设注册的成败。启动失败（补丁解析不过、宿主接口缺失……）时 `ok:false`，`error` 是
+ * 插件入口 catch 到的那句原文——页面照原样显示，别再让用户只看到「没有学习工作区」。
+ * 这是**注入**的事实，不是读盘事实：`ok:false` 不影响本载荷的 `ok`（状态本身读到了）。
+ */
+export interface StatusRegistration {
+  ok: boolean;
+  error: string;
+}
+
 export interface StudyMateStatus {
   /** 这份状态是不是读成功（false 时 `error` 给机器码，页面翻字典）。 */
   ok: boolean;
   error?: 'internal' | 'workspace-unreadable';
+  /** 预设注册的成败；缺省（老载荷）按成功算。 */
+  registration: StatusRegistration;
   workspace: string;
   source: 'plugin-config' | 'installer-config' | '';
   configured: boolean;
@@ -110,8 +122,11 @@ function subjectSummary(subject: {
  * @param options.profile - 用来查 `studymate-config.yaml` 的 `installModes`；缺省时 `mode: 'unknown'`。
  * @param options.now - 测试注入的时钟（today / generated_at）。
  * @param options.watch - 监听状态；由 bin 域从 `watchState()` 传入，缺省表示没有监听。
+ * @param options.registration - 预设注册的成败；由 bin 域的插件入口注入，缺省按成功算。
  */
-export function buildStatus(options: { profile?: string; now?: Date; watch?: StatusWatch } = {}): StudyMateStatus {
+export function buildStatus(options: {
+  profile?: string; now?: Date; watch?: StatusWatch; registration?: StatusRegistration;
+} = {}): StudyMateStatus {
   const now = options.now ?? new Date();
   const file = configFile();
   const config = readConfigObject(file) ?? {};
@@ -129,6 +144,7 @@ export function buildStatus(options: { profile?: string; now?: Date; watch?: Sta
 
   const base: StudyMateStatus = {
     ok: true,
+    registration: options.registration ?? { ok: true, error: '' },
     workspace,
     source,
     configured: workspace !== '',
@@ -158,12 +174,17 @@ export function buildStatus(options: { profile?: string; now?: Date; watch?: Sta
   }
 }
 
-/** 读盘本身出错时的兜底载荷：仍然是 200，页面能画「读不到」。 */
-export function failedStatus(error: 'internal' | 'workspace-unreadable', now = new Date()): StudyMateStatus {
+/** 读盘本身出错时的兜底载荷：仍然是 200，页面能画「读不到」。注册状态照常透传。 */
+export function failedStatus(
+  error: 'internal' | 'workspace-unreadable',
+  now = new Date(),
+  registration: StatusRegistration = { ok: true, error: '' },
+): StudyMateStatus {
   const { today, timeZone } = localToday(now);
   return {
     ok: false,
     error,
+    registration,
     workspace: '',
     source: '',
     configured: false,
