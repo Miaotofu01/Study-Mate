@@ -259,6 +259,41 @@ test('an install-boundary failure is reported without stopping the host or creat
   assert.equal(fs.existsSync(f.dshHome), false);
 });
 
+test('启动失败的原因交给插件页状态卡，而不是只留一行 console.warn（#317）', t => {
+  const f = fixture(t);
+  // 连折行也救不回来的补丁：`- {` 一直没闭合。真实 installPayload 在解析这一步就失败，
+  // 与 #317 里那条 Windows 上报是同一个 catch——区别只是这里错误照旧可见。
+  fs.mkdirSync(path.dirname(f.patch), { recursive: true });
+  fs.writeFileSync(f.patch, 'plugins:\n  - {\n    id: broken\n', 'utf8');
+  const result = f.run(`import { apply } from ${JSON.stringify(plugin)};
+    const state = {warnings: [], handlers: {}};
+    console.warn = message => state.warnings.push(String(message));
+    const ctx = {
+      get: () => ({name: 'web', home: process.env.DSH_HOME}),
+      agentPresets: {register: async () => {}},
+      effect: async fn => {await fn();},
+      inject: (names, handler) => handler({
+        connection: {fetch: {register: route => {state.handlers[route.path] = route.fetch; return () => {};}}},
+        effect: fn => fn(),
+      }),
+    };
+    await apply(ctx);
+    // 状态路由是浮动 Promise 挂上去的（lib/ 动态 import），等它落位再问。
+    for (let i = 0; i < 100 && !state.handlers['/api/studymate/status']; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const response = await state.handlers['/api/studymate/status'](new Request('http://x/api/studymate/status'));
+    state.status = await response.json();
+    console.log(JSON.stringify(state));`);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const state = JSON.parse(result.stdout);
+  assert.ok(state.warnings.some(warning => /已跳过原生加载/.test(warning)), JSON.stringify(state.warnings));
+  assert.equal(state.status.ok, true);
+  assert.equal(state.status.registration.ok, false);
+  assert.match(state.status.registration.error, /cordis\.patch\.yml/);
+  assert.match(state.status.registration.error, /缺少闭合/);
+});
+
 test('an old host skips unsupported native loading without blocking startup', async () => {
   const { apply } = await import(plugin);
   const warnings = [];
