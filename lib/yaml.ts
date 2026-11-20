@@ -598,6 +598,8 @@ function foldFlowLines(first: string, line: SourceLine, column: number, file: st
   const close = open === '[' ? ']' : open === '{' ? '}' : '';
   if (close === '') fail(file, line, column, line.raw, '内部错误：foldFlowLines 只接受以 [ 或 { 开头的值');
   let out = '';
+  // out 里最后一个「不是原文空白」的字符之后的位置：折行时只裁未转义的行尾空白
+  let keep = 0;
   let depth = 0;
   let quote: '' | '"' | "'" = '';
   // 双引号里这一行以 `\` 结尾：换行被转义掉，不补空格、也不去行尾空白
@@ -608,7 +610,7 @@ function foldFlowLines(first: string, line: SourceLine, column: number, file: st
   for (;;) {
     if (i >= chunk.length) {
       const escaped = escapedBreak;
-      if (!escaped) out = out.replace(/[ \t]+$/, '');
+      if (!escaped) out = out.slice(0, keep);
       escapedBreak = false;
       // 往下找第一行非空行；中间的空行各折成一个换行（PyYAML 的流式标量折行规则）
       let blanks = 0;
@@ -622,6 +624,7 @@ function foldFlowLines(first: string, line: SourceLine, column: number, file: st
       }
       if (blanks > 0) out += '\n'.repeat(blanks);
       else if (!escaped) out += ' ';
+      keep = out.length;
       cur = { line: index + 1, raw: sourceLines[index] };
       chunk = cur.raw;
       i = 0;
@@ -636,13 +639,16 @@ function foldFlowLines(first: string, line: SourceLine, column: number, file: st
         i++;
         continue;
       }
-      out += ch;
       if (ch === '\\') {
-        out += chunk[i + 1] ?? '';
+        // 转义对是内容：`\ `（转义空格）折行时不能被当成行尾空白裁掉
+        out += ch + (chunk[i + 1] ?? '');
+        keep = out.length;
         i += 2;
         continue;
       }
+      out += ch;
       if (ch === '"') quote = '';
+      if (ch !== ' ' && ch !== '\t') keep = out.length;
       i++;
       continue;
     }
@@ -651,11 +657,13 @@ function foldFlowLines(first: string, line: SourceLine, column: number, file: st
       if (ch === "'") {
         if (chunk[i + 1] === "'") {
           out += "'";
+          keep = out.length;
           i += 2;
           continue;
         }
         quote = '';
       }
+      if (ch !== ' ' && ch !== '\t') keep = out.length;
       i++;
       continue;
     }
@@ -666,12 +674,14 @@ function foldFlowLines(first: string, line: SourceLine, column: number, file: st
     if (ch === '[' || ch === '{') {
       depth++;
       out += ch;
+      keep = out.length;
       i++;
       continue;
     }
     if (ch === ']' || ch === '}') {
       depth--;
       out += ch;
+      keep = out.length;
       i++;
       if (depth === 0) {
         return { text: out, rest: chunk.slice(i), closeLine: { line: cur.line, raw: cur.raw }, restColumn: i + 1 };
@@ -682,10 +692,12 @@ function foldFlowLines(first: string, line: SourceLine, column: number, file: st
     if (ch === '"' || ch === "'") {
       quote = ch;
       out += ch;
+      keep = out.length;
       i++;
       continue;
     }
     out += ch;
+    if (ch !== ' ' && ch !== '\t') keep = out.length;
     i++;
   }
 }

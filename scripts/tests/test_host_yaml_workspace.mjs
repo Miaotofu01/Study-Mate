@@ -285,6 +285,10 @@ test('跨行流式集合：显式开启后按 YAML 的 flow 折行规则读，�
   assert.deepEqual(parseYaml('- [a\n\n   b]\n', opts), [['a\nb']]);
   // 双引号里行尾的 \ 转义掉换行：不补空格
   assert.deepEqual(parseYaml('- {a: "con\\\n    cat"}\n', opts), [{ a: 'concat' }]);
+  // 双引号里行尾的转义空格是内容：折行只裁未转义的空白（与 readQuoted 同口径）
+  assert.deepEqual(parseYaml('{\n  a: "foo\\ \n  bar"\n}\n', opts), { a: 'foo  bar' });
+  assert.deepEqual(parseYaml('{\n  a: "foo\\   \n  bar"\n}\n', opts), { a: 'foo  bar' });
+  assert.deepEqual(parseYaml('{\n  a: "foo\\ \n\n  bar"\n}\n', opts), { a: 'foo \nbar' });
   // 孩子就是以流式集合起头（键的下一行才给 `[`），闭合之后的同级键照常读
   assert.deepEqual(parseYaml('- key:\n    [\n      1,\n      2,\n    ]\n- 尾\n', opts), [{ key: [1, 2] }, '尾']);
   // 闭合括号后面的多余内容，报在闭合那一行
