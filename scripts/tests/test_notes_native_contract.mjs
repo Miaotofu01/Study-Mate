@@ -261,11 +261,11 @@ test('注册原生槽位时不选择、不新建、不发送任何会话，且�
   const ctx = { get(name) { assert.ok(services[name]); return services[name]; }, effect(task) { cleanups.push(task()); } };
   const module = bridge.createClientModule();
   module.apply(ctx);
-  // 笔记只是学习主面板里的第二个面：唯一登记的座位是它自己的会话内容槽。
-  assert.deepEqual(registrations.map((entry) => entry.spec.name), [bridge.CHAT_SLOT]);
-  assert.equal(registrations.some((entry) => entry.spec.key === 'studymate-notes'), false);
-  assert.equal(registrations.some((entry) => entry.spec.name === 'main' || entry.spec.name === 'sidebar.panellist'), false);
-  assert.equal(registrations[0].spec.scope, undefined);
+  // 笔记只是学习里的第二个面：两处宿主入口各声明一个会话内容子槽。
+  assert.deepEqual(registrations.map((entry) => entry.spec), [
+    { name: bridge.CHAT_SLOT }, { name: `${bridge.CHAT_SLOT}.rightbar` },
+  ]);
+  assert.equal(registrations[0].component, registrations[1].component);
   for (const dispose of cleanups.reverse()) dispose?.();
 });
 

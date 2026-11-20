@@ -59,7 +59,7 @@
   --v4-panel-shadow-right: -8px 0 24px rgb(16 24 40 / 10%);
   --v4-rail: 0px;                 /* 左栏收起时内容左移的量：左栏是 flex 项、宽 0，所以是 0 */
   --v4-rail-width: 32px;
-  --v4-dur: 200ms;
+  --v4-dur: var(--smb-motion, 200ms);
   --v4-ease: cubic-bezier(.2, .7, .3, 1);
 }
 
@@ -253,11 +253,11 @@
 .app-shell.v4 .document-scroll.is-split .document-split-handle {
   position: relative; grid-column: 2; grid-row: 1; z-index: 3;
   width: 2px; min-height: 100%; padding: 0; border: 0; touch-action: none;
-  cursor: col-resize; background: var(--v4-border); transition: background-color 140ms ease;
+  cursor: col-resize; background: var(--v4-border); transition: background-color var(--smb-motion, 140ms) ease;
 }
 .app-shell.v4 .document-scroll.is-split .document-split-handle::before { position: absolute; top: 0; bottom: 0; left: -3px; width: 8px; content: ""; }
 /* 2px 握把用伪元素画，命中区在它两侧，不参与布局 */
-.app-shell.v4 .document-scroll.is-split .document-split-handle::after { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--v4-edge-line); content: ""; transition: background-color 140ms ease; }
+.app-shell.v4 .document-scroll.is-split .document-split-handle::after { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--v4-edge-line); content: ""; transition: background-color var(--smb-motion, 140ms) ease; }
 .app-shell.v4 .document-scroll.is-split .document-split-handle:hover::after { background: var(--v4-text-2); }
 .app-shell.v4 .document-scroll.is-split .document-split-handle:active::after { background: var(--v4-focus); }
 .app-shell.v4 .document-scroll.is-split .document-split-handle:focus-visible { outline: 2px solid var(--v4-focus); outline-offset: -1px; background: var(--v4-accent-soft); }
@@ -382,7 +382,7 @@
   position: relative; display: flex; flex-direction: row; align-items: flex-start; gap: 10px;
   margin: 0; padding: 11px 12px; color: var(--v4-text-2); border: 1px solid var(--v4-border);
   border-radius: 9px; background: var(--v4-surface); font-size: 12px; line-height: 1.6;
-  cursor: pointer; transition: border-color 120ms ease, background-color 120ms ease;
+  cursor: pointer; transition: border-color var(--smb-motion, 120ms) ease, background-color var(--smb-motion, 120ms) ease;
 }
 .app-shell.v4 .import-mode-option:hover { border-color: var(--v4-border-strong); background: var(--v4-hover); }
 /* 选中：描边 + 细环，不给整块上色 */
@@ -421,7 +421,7 @@
   color: var(--v4-text-2); border: 2px dashed var(--v4-border-strong); border-radius: 12px;
   background: color-mix(in srgb, var(--v4-surface) 72%, transparent);
   font-size: 12px; line-height: 1.7; text-align: center; pointer-events: none; opacity: 0;
-  transition: opacity 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  transition: opacity var(--smb-motion, 120ms) ease, border-color var(--smb-motion, 120ms) ease, background-color var(--smb-motion, 120ms) ease;
 }
 .app-shell.v4 .canvas-drop-hint[hidden] { display: none; }
 .app-shell.v4 .canvas-drop-hint.is-active, .app-shell.v4 .canvas-drop-hint[data-active="true"],
@@ -520,6 +520,6 @@
 
 /* ── 12. 减少动效：位置类过渡整段关掉，直接换终态（不停在半路） ──────── */
 @media (prefers-reduced-motion: reduce) {
-  .app-shell.v4 :is(.side-panel, .side-panel .panel-inner, .panel-rail, .canvas-drop-hint,
+  .app-shell.v4:not(.is-hosted) :is(.side-panel, .side-panel .panel-inner, .panel-rail, .canvas-drop-hint,
     .document-split-handle, .document-split-handle::after, .import-menu-items) { transition: none !important; }
 }

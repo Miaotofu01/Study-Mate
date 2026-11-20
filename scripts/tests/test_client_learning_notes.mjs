@@ -202,21 +202,24 @@ test('没有 notesContext 的纯旧用法：右栏只有题目/问答，没有�
   assert.equal(findByProp(top, 'data-proto', 'brand-home').length, 1);
 });
 
-test('无界顶栏不渲染学习工作台与动效，学习顶栏保持两者', () => {
+test('学习与无界顶栏共用字号和动效，学习工作台与搜索只在学习面', () => {
   const props = { view: 'lesson', subject, node: lessonNode, onToggleSurface: () => {},
-    onWorkspace: () => {}, onSubject: () => {}, onSearch: () => {}, motion: 'reduced', onMotion: () => {} };
+    onWorkspace: () => {}, onSubject: () => {}, onSearch: () => {}, motion: 'reduced', onMotion: () => {},
+    font: 'xlarge', onFont: () => {} };
   const learning = renderElement(TopBar, { ...props, surface: 'learning' });
   const notes = renderElement(TopBar, { ...props, surface: 'notes' });
-  assert.equal(findByProp(learning, 'data-proto', 'workspace-home').length, 1);
-  assert.equal(findByProp(notes, 'data-proto', 'workspace-home').length, 0);
+  for (const [key, value] of [['data-proto', 'workspace-home'], ['className', 'smb-searchbtn']]) {
+    assert.equal(findByProp(learning, key, value).length, 1);
+    assert.equal(findByProp(notes, key, value).length, 0);
+  }
   assert.equal(findByProp(notes, 'data-proto', 'brand-switch').length, 1);
-  const motionNodes = node => {
-    if (!node || typeof node !== 'object') return [];
-    if (Array.isArray(node)) return node.flatMap(motionNodes);
-    return [...(typeof node.type === 'function' && node.props?.level === 'reduced' ? [node] : []), ...motionNodes(node.children)];
-  };
-  assert.equal(motionNodes(learning).length, 1);
-  assert.equal(motionNodes(notes).length, 0);
+  for (const bar of [learning, notes]) {
+    for (const [level, onPick] of [[props.motion, props.onMotion], [props.font, props.onFont]]) {
+      const pickers = findByProp(bar, 'level', level);
+      assert.equal(pickers.length, 1);
+      assert.equal(pickers[0].props.onPick, onPick);
+    }
+  }
 });
 
 /* ── 3. 左栏平级切换 ──────────────────────────────────────────────────── */
@@ -299,7 +302,7 @@ test('左栏选中笔记走「打开」而不是开关：右栏已停在笔记�
 
 test('笔记面在前台时，学习面的搜索快捷键让路（隐藏面不吃键）', () => {
   const source = fs.readFileSync(CLIENT_PATH, 'utf8');
-  assert.match(source, /if \(surface !== 'learning'\) return;\s*if \(\(event\.metaKey/);
+  assert.match(source, /if \(surface !== 'learning' \|\| event\.defaultPrevented\) return;\s*if \(\(event\.metaKey/);
 });
 
 /* ── 5. 无界里的只读课程卡 ─────────────────────────────────────────────── */

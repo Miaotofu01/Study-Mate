@@ -42,12 +42,13 @@ function materialize(source) {
   const sandbox = {
     window: { __ModuleLoader__: loader },
     document: {
+      querySelector: () => null,
       createElement: () => ({ dataset: {}, textContent: '', remove() { elements.splice(elements.indexOf(this), 1); } }),
       head: { appendChild: element => elements.push(element) },
     },
   };
   new vm.Script(source).runInNewContext(sandbox);
-  const react = { shared: true }, requested = [];
+  const react = { shared: true, Component: class {}, createElement: (type, props, ...children) => ({ type, props, children }) }, requested = [];
   const require = name => { requested.push(name); return react; };
   const plugin = registrations[0]?.chunk
     ? registrations[0].factory(Object.assign(require, { async: () => Promise.resolve(react) }))
@@ -169,6 +170,74 @@ test('真实入口产物是单次正式登记的普通脚本，未夹带构建�
   assert.equal(typeof registrations[0].factory, 'function');
   assert.ok(!source.includes(root));
   assert.ok(!source.includes(root.replaceAll('\\', '/')));
+});
+
+test('正式构建仅在右栏服务可用时注册原生开始项，与旧全宽入口共用阅读端', () => {
+  const source = fs.readFileSync(path.join(root, 'dist/client.js'), 'utf8');
+  const { plugin, ctx, effects } = materialize(source);
+  const slots = new Map();
+  const childOwners = new Map();
+  const pending = [];
+  const dictionaries = new Map();
+  const kinds = new Map();
+  let lang = 'zh';
+  const services = {
+    slots: {
+      inject(name, task) { return task(); },
+      register(spec, component) {
+        const key = spec.key || spec.id;
+        const seat = `${spec.name}:${key}`;
+        assert.ok(!slots.has(seat), seat);
+        for (const [child, shape] of Object.entries(spec.children ?? {})) {
+          assert.ok(!childOwners.has(child), `${child} has two owners`);
+          assert.equal(shape.kind, 'single');
+          assert.equal(shape.scope, 'session');
+          childOwners.set(child, seat);
+        }
+        slots.set(seat, { spec, component });
+        return () => { slots.delete(seat); for (const child of Object.keys(spec.children ?? {})) childOwners.delete(child); };
+      },
+    },
+    locale: {
+      register(ns, copy) { dictionaries.set(ns, copy); return () => dictionaries.delete(ns); },
+      bind(ns) { return key => dictionaries.get(ns)[lang][key]; },
+    },
+    sidebarRightTabs: {
+      register(tab) { kinds.set(tab.kind, tab); return () => kinds.delete(tab.kind); },
+    },
+  };
+  Object.assign(ctx, {
+    get: name => services[name],
+    slots: services.slots,
+    inject: (names, start) => pending.push({ names, start }),
+  });
+  assert.ok(!plugin.inject.includes('sidebarRightTabs'), '旧宿主不能被挡在 apply 外');
+  const cleanup = plugin.apply(ctx);
+  assert.deepEqual([...slots.keys()], ['main:studymate', 'sidebar.panellist:studymate']);
+  assert.equal(kinds.size, 0, '未注入右栏服务时不注册');
+
+  const rightbar = pending.find(({ names }) => names.includes('sidebarRightTabs'));
+  assert.deepEqual([...rightbar.names].sort(), ['locale', 'sidebarRightTabs']);
+  rightbar.start(ctx);
+  assert.equal(kinds.size, 1);
+  const tab = kinds.get('studymate');
+  const main = slots.get('main:studymate');
+  const body = slots.get(`sidebar.right.pane.tab:${tab.id}`);
+  assert.equal(body.component({}).children[0].type, main.component, '右栏不能重做一份阅读端');
+  assert.equal(body.component({}).children[0].props.inRightbar, true);
+  assert.deepEqual(Object.keys(body.spec.children), ['studymate.ask.session.rightbar', 'studymate.notes.session.rightbar']);
+  assert.deepEqual([...slots.keys()], ['main:studymate', 'sidebar.panellist:studymate', `sidebar.right.pane.tab:${tab.id}`]);
+  assert.equal(tab.guide.length, 1);
+  assert.equal(tab.guide[0].title(), '学习');
+  assert.match(tab.guide[0].description(), /学习工作区/);
+  lang = 'en';
+  assert.equal(tab.guide[0].title(), 'Study');
+  assert.equal(tab.title(), 'Study');
+  cleanup?.();
+  for (const dispose of effects.reverse()) dispose?.();
+  assert.equal(kinds.size, 0);
+  assert.ok(!slots.has(`sidebar.right.pane.tab:${tab.id}`));
+  assert.equal(dictionaries.size, 0);
 });
 
 test('真实懒控制器可物化：CJS 出口交出 createNotesEntry，工厂返回完整 notes 形状', async () => {
