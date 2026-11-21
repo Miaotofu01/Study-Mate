@@ -69,7 +69,7 @@
   height: 100%;
   background: transparent;
   color: inherit;
-  font-size: 13px;
+  font-size: var(--smb-fs-body, 13px);
 }
 
 .markdown-inline-editor .cm-editor.cm-focused {
@@ -80,7 +80,7 @@
   overflow: auto;
   overscroll-behavior: contain;
   font-family: inherit;
-  line-height: 1.7;
+  line-height: var(--smb-lh-body, 1.7);
 }
 
 .markdown-inline-editor .cm-content {

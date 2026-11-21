@@ -23,7 +23,7 @@ import './ui-v4.css';
 import './ui-v5.css';
 
 const uid = (prefix) => prefix + '-' + crypto.randomUUID();
-const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const standaloneMotionScale = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1;
 const editable = (target) => target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"], .cm-editor, .note-editor'));
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const fresh = () => {
@@ -80,7 +80,7 @@ function PersistenceBadge({ status, loadState }) {
   return <span className="prototype-badge persistence-badge" data-state={kind} role="status">{nt(label)}</span>
 }
 
-function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, persistence = null, workspaceBridge = null, courseLibrary = null, onNavigateCourse, renderCourse }) {
+function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, scopedShortcuts = false, getMotionScale = standaloneMotionScale, persistence = null, workspaceBridge = null, courseLibrary = null, onNavigateCourse, renderCourse }) {
   useNotesLocale();
   const localBridge = useRef(null); if (!localBridge.current) localBridge.current = createNotesWorkspace();
   const shared = workspaceBridge || localBridge.current;
@@ -264,7 +264,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   };
   const selectResource = (id) => { setCurrentId(id); setEditingNode(null); if (view === 'canvas') setRightOpen(true); void refreshResource(id); };
   const openDocument = (id) => { if (!resources[id]) return; setCurrentId(id); setView('document'); setRightOpen(true); setEditingNode(null); setEditingEdge(null); void refreshResource(id); };
-  const fit = () => flow.fitView({ padding: 0.2, duration: reducedMotion() ? 0 : 220, maxZoom: 1.25 });
+  const fit = () => flow.fitView({ padding: 0.2, duration: 220 * getMotionScale(), maxZoom: 1.25 });
   // 初始适应画布要等所有节点都量到尺寸：文本节点比卡片晚一帧，过早 fitView 会把它留在屏幕外。
   const initialized = useNodesInitialized();
   const didInitialFit = useRef(false);
@@ -279,7 +279,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   const placeResource = (id, position) => {
     if (!notesPersistence.canEdit) return;
     const existing = sceneRef.current.nodes.find((node) => node.data.contentId === id && nodeScope(node) === activeNotebook);
-    if (existing) { if (view === 'canvas') flow.setCenter(existing.position.x + (existing.width || existing.style?.width || 300) / 2, existing.position.y + 130, { zoom: 1, duration: reducedMotion() ? 0 : 220 }); else setView('canvas'); announce('已定位画布中的卡片'); return; }
+    if (existing) { if (view === 'canvas') flow.setCenter(existing.position.x + (existing.width || existing.style?.width || 300) / 2, existing.position.y + 130, { zoom: 1, duration: 220 * getMotionScale() }); else setView('canvas'); announce('已定位画布中的卡片'); return; }
     if (sceneRef.current.nodes.length >= 120) { announce('此体验版最多放置 120 个节点'); return; }
     const point = position || (view === 'canvas' ? center() : { x: 420, y: 240 });
     const resource = resourcesRef.current[id];
@@ -315,7 +315,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
     // 按 1/Delete/空格都会落到隐藏笔记上。
     if (!active || !notesPersistence.canEdit) return undefined;
     const keyDown = (event) => {
-      if (modal) return;
+      if (modal || (scopedShortcuts && !root.current?.contains(event.target instanceof Node ? event.target : null))) return;
       if (event.code === 'Space' && view === 'canvas') { setSpace(true); if (!editable(event.target)) event.preventDefault(); return; }
       if (editable(event.target)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); restore(event.shiftKey ? 'redo' : 'undo'); }
@@ -329,7 +329,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
     const blur = () => setSpace(false);
     window.addEventListener('keydown', keyDown, true); window.addEventListener('keyup', keyUp, true); window.addEventListener('blur', blur);
     return () => { window.removeEventListener('keydown', keyDown, true); window.removeEventListener('keyup', keyUp, true); window.removeEventListener('blur', blur); };
-  }, [active, modal, view, restore, deleteSelection, notesPersistence.canEdit]);
+  }, [active, scopedShortcuts, modal, view, restore, deleteSelection, notesPersistence.canEdit]);
   const forcedPan = (event) => {
     if (event.button !== 0) return;
     event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);
@@ -527,7 +527,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
           <div className="canvas-toolbar" role="toolbar" aria-label={nt('canvas_tools')}><button className={'icon-button' + (tool === 'select' ? ' active' : '')} aria-label={nt('select_tool')} title={nt('select_shortcut')} onClick={() => setTool('select')}><MousePointer2 size={17} /></button><button className={'icon-button' + (tool === 'hand' ? ' active' : '')} aria-label={nt('pan_tool')} title={nt('pan_shortcut')} onClick={() => setTool('hand')}><Hand size={17} /></button><i />
             <button className="icon-button" aria-label={nt('add_text')} title={nt('text_node')} disabled={!notesPersistence.canEdit} onClick={addText}><Type size={18} /></button><i />
             <button className="icon-button" aria-label={nt('undo_canvas')} title={nt('undo')} disabled={!history.current.past.length} onClick={() => restore('undo')}><Undo2 size={17} /></button><button className="icon-button" aria-label={nt('redo_canvas')} title={nt('redo')} disabled={!history.current.future.length} onClick={() => restore('redo')}><Redo2 size={17} /></button><i />
-            <button className="icon-button" aria-label={nt('zoom_out')} onClick={() => flow.zoomOut({ duration: reducedMotion() ? 0 : 140 })}><ZoomOut size={17} /></button><span className="zoom-label">{Math.round(zoom * 100)}%</span><button className="icon-button" aria-label={nt('zoom_in')} onClick={() => flow.zoomIn({ duration: reducedMotion() ? 0 : 140 })}><ZoomIn size={17} /></button><button className="icon-button" aria-label={nt('fit')} title={nt('fit_shortcut')} onClick={fit}><Maximize size={17} /></button>
+            <button className="icon-button" aria-label={nt('zoom_out')} onClick={() => flow.zoomOut({ duration: 140 * getMotionScale() })}><ZoomOut size={17} /></button><span className="zoom-label">{Math.round(zoom * 100)}%</span><button className="icon-button" aria-label={nt('zoom_in')} onClick={() => flow.zoomIn({ duration: 140 * getMotionScale() })}><ZoomIn size={17} /></button><button className="icon-button" aria-label={nt('fit')} title={nt('fit_shortcut')} onClick={fit}><Maximize size={17} /></button>
           </div>
         </section>
         {view === 'document' && <section className="document-stage"><div className="document-toolbar">{current?.type === 'note' && !referenceReadOnly ? <input aria-label={nt('document_title')} value={current.title} maxLength={160} onChange={(event) => updateResource(current.id, { title: event.target.value })} /> : <span className="document-title">{current?.title}</span>}

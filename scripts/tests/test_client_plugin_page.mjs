@@ -92,7 +92,7 @@ test('插件页：locale 注册 zh/en 两本基线与两个官方槽位', () => 
   const pageDictionaries = locale.registered.filter(item => item.namespace === PAGE_NS);
   assert.equal(pageDictionaries.length, 1);
   assert.deepEqual(Object.keys(pageDictionaries[0].dictionaries).sort(), ['en', 'zh']);
-  assert.deepEqual(injected, [['locale'], ['locale'], ['uiWorkspace']]);
+  assert.deepEqual(injected.filter(names => !names.includes('sidebarRightTabs')), [['locale'], ['locale'], ['uiWorkspace']]);
 
   const byName = name => registrations.filter(item => item.entry.name === name);
   assert.deepEqual(byName('plugins.detail.section').map(item => ({
@@ -378,7 +378,8 @@ test('插件页 i18n：两本字典键集一致、en 零 CJK、占位符一致�
     assert.deepEqual(placeholders(DICT_EN[key]), placeholders(DICT_ZH[key]),
       `${key} 两边的占位符不一致：zh=${DICT_ZH[key]} / en=${DICT_EN[key]}`);
   }
-  const used = new Set([...source.matchAll(/\bt\(\s*'([^']+)'/gu)].map(match => match[1]));
+  const pageSource = source.slice(source.indexOf('const DICT_ZH ='), source.indexOf('const TEST_HOOK ='));
+  const used = new Set([...pageSource.matchAll(/\bt\(\s*'([^']+)'/gu)].map(match => match[1]));
   assert.ok(used.size > 10, `没扫到几个文案 key（${used.size}），门可能失效了`);
   for (const key of used) {
     assert.equal(Object.prototype.hasOwnProperty.call(DICT_ZH, key), true, `用到的 key 没有定义：${key}`);

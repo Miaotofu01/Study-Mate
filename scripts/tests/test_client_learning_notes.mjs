@@ -299,7 +299,7 @@ test('左栏选中笔记走「打开」而不是开关：右栏已停在笔记�
 
 test('笔记面在前台时，学习面的搜索快捷键让路（隐藏面不吃键）', () => {
   const source = fs.readFileSync(CLIENT_PATH, 'utf8');
-  assert.match(source, /if \(surface !== 'learning'\) return;\s*if \(\(event\.metaKey/);
+  assert.match(source, /if \(surface !== 'learning' \|\| event\.defaultPrevented\) return;\s*if \(\(event\.metaKey/);
 });
 
 /* ── 5. 无界里的只读课程卡 ─────────────────────────────────────────────── */

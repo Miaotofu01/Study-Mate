@@ -14,11 +14,14 @@
 */
 import fs from 'node:fs';
 
-/** 插件内联 CSS 的原文。`const CSS = \`…\`;` 那一串，CSS 体内没有反引号与 `${`。 */
+/** 取插件内联 CSS，并展开主面板和右栏共用的窄档规则，不执行插件。 */
 export function extractCss(source) {
-  const match = /const CSS = `([\s\S]*?)`;\n/.exec(source);
-  if (!match) throw new Error('lib/client.js 里找不到 `const CSS = \\`…\\`;` —— 解析口径要跟着改');
-  return match[1];
+  const literal = name => {
+    const match = new RegExp('const ' + name + ' = `([\\s\\S]*?)`;').exec(source);
+    if (!match) throw new Error('lib/client.js 里找不到 CSS 字符串 ' + name);
+    return match[1];
+  };
+  return literal('CSS').replaceAll('${NARROW_CSS}', () => literal('NARROW_CSS'));
 }
 
 /** `--a: b; --c: d;` → Map。注释先去掉（值里不会有 `/*`）。 */
