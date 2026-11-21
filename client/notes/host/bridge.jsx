@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import App from '../App.jsx'
 import { resolveFileReference } from '../imports.js'
+import { isMarkdownResource } from '../note-types.js'
+import { createNotesPersistenceSession } from '../persistence-session.js'
 import { registerNotesLocale } from '../locale.js'
+
+// 资料库属于当前宿主档位；同一网页里的新 main 重用保存队列，课程工作区只隔离视图。
+const persistenceSession = createNotesPersistenceSession({ label: 'notes-main' })
 
 export const CHAT_SLOT = 'studymate.notes.session'
 export const REFERENCE_SOURCE = 'studymate-notes-resource'
@@ -28,7 +33,7 @@ export function resourceText(resource) {
   if (!resource || typeof resource !== 'object') return undefined
   const type = String(resource.type ?? 'resource')
   const title = String(resource.title ?? resource.name ?? '未命名资源')
-  if (type === 'note') return typeof resource.markdown === 'string' ? resource.markdown : undefined
+  if (type === 'note') return isMarkdownResource(resource) && typeof resource.markdown === 'string' ? resource.markdown : undefined
   if (type === 'course') return typeof resource.summary === 'string' && resource.summary.trim() ? resource.summary : undefined
   if (type === 'link') {
     if (typeof resource.url !== 'string' || !/^https?:\/\//i.test(resource.url)
@@ -378,7 +383,7 @@ export function NativeMainPanel(props) {
   const BoundChatPanel = useCallback(chatProps => <NativeChatPanel {...chatProps} hostKit={hostKit} />, [hostKit])
 
   return <div className="studymate-notes">
-    <App ChatComponent={BoundChatPanel} hostTheme={hostTheme} onResourcesChange={updateResourceCache} active={active} scopedShortcuts={props.scopedShortcuts} getMotionScale={props.getMotionScale} persistence={persistence} workspaceBridge={props.workspaceBridge} courseLibrary={props.courseLibrary} onNavigateCourse={props.onNavigateCourse} renderCourse={props.renderCourse} />
+    <App ChatComponent={BoundChatPanel} hostTheme={hostTheme} onResourcesChange={updateResourceCache} active={active} persistenceSession={persistenceSession} viewMemory={props.viewMemory} scopedShortcuts={props.scopedShortcuts} getMotionScale={props.getMotionScale} persistence={persistence} workspaceBridge={props.workspaceBridge} courseLibrary={props.courseLibrary} onNavigateCourse={props.onNavigateCourse} renderCourse={props.renderCourse} />
   </div>
 }
 

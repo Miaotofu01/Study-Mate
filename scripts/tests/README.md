@@ -6,7 +6,7 @@
 npm test
 ```
 
-需要 Node.js（支持范围看 `package.json` 的 `engines`）。**不需要 Python**：引擎随包发 TypeScript，`node` 直接跑 `.ts`（Node 原生类型擦除）。`npm ci` 按根锁文件装 devDependencies：类型门禁与客户端构建都要它们。默认门禁先构建单一客户端 `dist/client.js` 及许可证，再跑 Node 套件；前端依赖只参加构建，不成为 Host 运行时依赖。**各命令的前置以本文件为准**，别处只给指针：Actions 实际用 Node 24，只在 Ubuntu 上跑一次，不展开系统和运行时矩阵。默认检查只跑安装器、插件打包、引擎（数据层/内容层）、静态契约与发布逻辑，不安装真实 DSH、pnpm 或浏览器，不调用模型。
+需要 Node.js（支持范围看 `package.json` 的 `engines`）。**不需要 Python**：引擎随包发 TypeScript，`node` 直接跑 `.ts`（Node 原生类型擦除）。`npm ci` 按根锁文件装 devDependencies：类型门禁与客户端构建都要它们。默认门禁先构建客户端入口 `dist/client.js`、按需分块 `dist/client.notes.js` 及许可证，再跑 Node 套件；前端依赖只参加构建，不成为 Host 运行时依赖。**各命令的前置以本文件为准**，别处只给指针：Actions 实际用 Node 24，只在 Ubuntu 上跑一次，不展开系统和运行时矩阵。默认检查只跑安装器、插件打包、引擎（数据层/内容层）、静态契约与发布逻辑，不安装真实 DSH、pnpm 或浏览器，不调用模型。
 
 测试使用临时目录，不读写学生的 `workspace/`。
 
@@ -31,7 +31,7 @@ Git 装在其他位置时，用实际安装目录替换上面的路径。Node �
 | `npm run test:antigravity` | Antigravity 插件 ZIP、原生 agents、导出保护与重复构建 |
 | `npm run test:release` | 版本、changelog、重试和发布保护 |
 | `npm run test:static` | 技能调用面与提示词规则归属、词表与发布元数据、文档悬空引用、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
-| `npm run test:notes:browser` | 构建共享网页并运行七套独立 Edge 回归：画布与占位会话、品牌切换、临时数据域持久化、笔记性能（拖动不重序列化正文、隐藏面不轮询、共享笔记仍可编辑）、学习节点联动、共享格式栏与局部编辑、底层编辑器。验证刷新和冲突保护、只读升级、真实灰色标记、原稿坐标和输入法、亮暗对比度、媒体边界及无操作零保存；不连接真实 DSH 或模型，前置见「浏览器套件与手动工具」 |
+| `npm run test:notes:browser` | 构建共享网页并运行无界笔记 Edge 回归，包括正式客户端懒分块、同标签卸载重进、持久化、四种文档视图和共享编辑器。具体范围见[浏览器套件与手动工具](#浏览器套件与手动工具)；只用临时夹具，不连接用户正在使用的 DSH 或模型 |
 | `npm run test:browser` | 阅读端与无界笔记的真实浏览器渲染测试（阅读端本体、阅读位置、作答落盘、监听推送、跑一次、导出产物、公式排版、四路由 × 三档视口、课件页正文与页头、问答会话与引用、课件页标注），浏览器二进制自动探测 |
 | `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录；native 安装下还验九个原生工具的注册、body 可调用（走真 dispatch）与越权抛，以及 #70 的引擎路径：`root` 指向已安装的包、`~/.dsh/studymate/engine/` 不再出现 |
 | `npm run test:dsh-contract` | **宿主契约守门**：拿真宿主自己的 schema 校验器（`dsh-tools` 的 `assertSupportedJsonSchema`）扫注册点上全部工具的 `parameters` 与 `output.schema`，并核对参考调用 `createWebhookSession` 的字段清单没漂，并逐行解析预设里的模块（宿主删掉的子路径必须带停用条件，`#244`）；附一条反证（已知不合规的 schema 必须报错）。同一个 `STUDYMATE_DSH_PACKAGE`，没设就跳过。指针与纪律在 [工程约束](../../docs/规范/工程约束.md) §三「宿主契约」 |
@@ -66,6 +66,8 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | [test_notes_store_recovery.mjs](test_notes_store_recovery.mjs) | 真实进程在初始化 marker 发布前崩溃后的恢复、锁内孤儿临时文件清理、坏格式机读码与路径隐私、目录同步故障及升级备份保留、250 篇/48 MiB 边界、中文数据根与双进程同版本 CAS；只用临时数据域，默认 Node 门禁可达 |
 | `test_notes_native_contract.mjs` | 显式会话引用的坐标/去重/取消/资源世代与权限失效栅栏、宿主槽位注册；临时 bundle 在系统临时目录创建并清理，不连接真实 DSH/模型 |
 | `test_notes_serialization_cache.mjs` | #303 资源序列化缓存行为：同一资源对象连续 250 次提交只序列化/指纹一次，新对象身份（编辑/新建/导入/undo）重算且不原地改旧 DTO，`invalidate()`（load/applyBase/dispose）与序列化失败后的 `forget()` 语义；`--expose-gc` 时再验旧对象不强持 |
+| `test_notes_resource_tree.mjs` | #312 资源树纯逻辑层：单高亮互斥收敛与外部跟随、删除四层保护（根/initialParent 回退目录/最后一本笔记本/默认本/绑定本/非空计数含废纸篓与画布）、目录与文件名称校验（trim、代码点计长）、引用与已删资源不可改名 |
+| `test_notes_note_export.mjs` | #312 三面共用 NoteEditor 的统一导出：标题 → 安全文件名（非法字符、Windows 保留名、末尾点空格、长度）与原稿逐字导出、对象 URL 回收 |
 | `test_notes_curriculum.mjs`、`test_client_learning_notes.mjs` | 完整来源身份、关联换节点不搬原件、多科目默认本与相机/分区字段往返、两面共享状态和学习左右栏接线；纯阅读端导出不出现死笔记入口 |
 | `test_openai_plugin.mjs` | ZIP 用**独立读取器**解开后不依赖源码或 DSH 即可跑交互断点（read → update → answer）、没有 0 字节文件也没有 Python 文件；构建可重复，失败时保留已有产物 |
 | `test_preset_install.mjs` | 预设注册（`lib/preset.ts`，原 Python 安装助手的**行为移植**）：版本边界各自独立、补丁形态保留与幂等（注释、`!!js`、CRLF、流式列表）、暂存与 `--patch-output`、手动声明/越界 profile/坏清单/符号链接一律在写盘之前失败、`--bundle` 给 DSH 的 config 形状 |
@@ -154,15 +156,8 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 
 `scripts/tests/browser/` 下是两套**骨架不同**的浏览器套件，别混着读：
 
-- **阅读端套件**（`test:browser` 组里的那些，下面列出的六份无界笔记套件除外）**都走同一个骨架** [browser/harness.mjs](browser/harness.mjs)：
-  探测本机浏览器 → 起 CDP → 收**控制台错误 / 页面错误（未捕获异常）/ 失败请求** → 每个场景出截图与 `summary.json`。
-  另收 `Network.requestWillBeSent` 进 `ctx.requests`（场景维度、不算问题）：断「零请求 / 发的是哪些」
-  的套件用它（`file://` 下 `performance.getEntriesByType('resource')` 返回空数组）。
-- **无界笔记套件** [browser/notes_test.mjs](browser/notes_test.mjs)（`npm run test:notes:browser`）是**例外**：
-  它自己用 Playwright 起一台独立 Edge（`channel: 'msedge'`、一次性 context），**不用** harness，也不复用它的
-  浏览器探测与产物格式。理由见该文件头：它要的浏览器（独立 Edge、一次性 context）与 harness 起的那台
-  （无头 Chrome + CDP）不是同一个，两边的控制台/请求收集也不共用。它的跳过与失败边界比阅读端套件更紧，
-  写在它自己的文件里。
+- **阅读端套件**走 [browser/harness.mjs](browser/harness.mjs)：探测本机浏览器 → 起 CDP → 收集控制台错误、页面错误和失败请求 → 每个场景出截图与 `summary.json`。另收 `Network.requestWillBeSent` 进 `ctx.requests`，供网络断言使用（`file://` 下的 Resource Timing 不提供这份数据）。
+- **无界笔记套件**（`npm run test:notes:browser`）不复用这个骨架。套件通过 Playwright 使用独立 Edge（`channel: 'msedge'`、一次性 context）：独立网页、组件夹具与正式客户端临时宿主分别覆盖不同层，不访问用户笔记或正在运行的 DSH。`test:browser` 也登记了两类套件；具体范围见下表。
 
 | 情况 | 阅读端套件（harness） | 无界笔记套件 |
 | --- | --- | --- |
@@ -174,11 +169,19 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 
 | 文件 | 用途 |
 | --- | --- |
+| `browser/notes_test.mjs` | 独立网页中的画布、资源引用与独立复制、四种文档视图及窄屏双列、内存态刷新和占位会话 |
+| `browser/notes_host_reentry_test.mjs` | 正式客户端在临时宿主夹具中真实卸载并重挂 React 根：同标签恢复学习／笔记面、位置和逐篇文档模式，在途草稿保留，重进不重复请求懒分块；不连接正在运行的 DSH |
+| `browser/notes_persistence_session_test.mjs` | 真 React 重挂与受控 transport：验证待保存、在途、失败及冲突状态，显式丢弃、旧格式只读、相机恢复零误写和 StrictMode 租约 |
 | `browser/notes_brand_test.mjs` | 正式组合客户端的品牌双向切换：同一个学习面板、名称与自有图标互换、学习导航保留、笔记场景保活、隐藏面不接焦点和快捷键；独立 Edge + 隔离宿主夹具，不使用真实会话 |
 | `browser/notes_persistence_test.mjs` | 真客户端 + 临时 HOME 的保存、刷新、冲突、失败和格式1只读→取消/确认升级→逐字节备份；不碰个人笔记库 |
 | `browser/notes_lazy_chunk_test.mjs` | #302 懒分块（ADR-0019）：学习首屏零分块请求且课件页照常、首次打开笔记恰一次请求、往返保活不重拉不重挂、503 失败有明确错误态可重试、旧宿主没有 `require.async` 时学习面照常且笔记明确失败不静默回退；网络断言走真 HTTP 记录 |
 | `browser/notes_performance_test.mjs` | #303 笔记性能与隐藏面：拖动/折叠连续改布局时正文仍落盘但不再重序列化/散列资源；隐藏超过一个轮询周期不发外部 GET、重显立刻补读；隐藏的共享笔记仍能在学习页新建/编辑；零控制台/页面/外网错误 |
+| `browser/notes_resource_tree_test.mjs` | #312 侧栏资源树（esbuild 临时页挂真组件）：单高亮互斥与外部跟随、文件/目录行级更多菜单、行内重命名（含切换目标不丢值）、删除四层保护文案与二次确认、只读禁拖拽、菜单初始焦点；不碰共享 dist |
+| `browser/notes_tree_wiring_test.mjs` | #312 资源树与画布/App 的接线回归：集成回调（重命名/删除/画布计数）与视图切换 |
+| `browser/notes_theme_test.mjs` | #312 笔记面亮暗主题：对比度与切换回归 |
+| `browser/notes_persistence_hidden_draft_test.mjs` | #312 隐藏面草稿保护（依赖 #303 的重显立即核对语义）：隐藏期在途/失败/409 冲突草稿重显不丢、之后可明确恢复；隐藏零轮询、清洁重显立即核对且零写 |
 | `browser/notes_curriculum_test.mjs` | 十项节点笔记场景：空节点、显式默认本、原稿共享、关联拖动、未来默认、软删除恢复、节点树/课程引用卡、只读课件跳转、笔记本画布隔离与相机；学习左右笔记亮→暗→亮、渲染/局部灰色标记/链接框的实测 AA，光标、弹窗和主题切换不改写原稿 |
+| `browser/notes_draft_navigation_test.mjs` | 真实 dist 组合客户端的导航卸载回归：保存请求在途（pending）与保存失败（error）时继续输入，切到另一个文件后输入仍留在原文件、不串数据、不被误标为未保存草稿；没有未确认草稿时不误拦 beforeunload。未确认草稿的恢复与冲突锁定在组件层 `notes_live_editor_test.mjs` 覆盖 |
 | `browser/notes_live_editor_test.mjs` | 实际共享 NoteEditor 与单格式栏：选区保持、格式局部事务、真实灰色字符、原始坐标/混合换行、链接冻结与失效拒绝、只读/超限修复、StrictMode/受控输入法和快捷键；用临时页面和隔离 Edge |
 | `browser/notes_inline_editor_test.mjs` | 底层局部编辑器：真实分隔符显隐/直接编辑、原始字节与撤销、外部更新/空正文/输入法、GFM 表格/任务标记/公式/代码/图片占位、安全与亮暗对比度 |
 | `browser/attempts_test.mjs` | 作答落盘（#72）：把阅读端打进一个说 HTTP 的迷你宿主，真落盘到工作区文件 |

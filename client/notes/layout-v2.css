@@ -188,3 +188,33 @@ body:has(.app-shell.v2[data-resizing="true"]) { user-select: none; cursor: col-r
 .app-shell.v2[data-theme="dark"] .persistence-gate { background: #1b1e24f2; color: #e3e5ea; }
 .app-shell.v2[data-theme="dark"] .persistence-conflict { background: #302424; color: #f1c9c6; }
 @media (max-width: 699px) { .app-shell.v2 .persistence-actions { max-width: 45vw; overflow-x: auto; } }
+
+/* ── 资源树：行内重命名与更多菜单（#312；样式只在此追加，不改上面既有规则） ──
+   树行从单个 <button> 改成「标签按钮 + 更多按钮」并排的行容器（.tree-row 现在是 div），
+   高亮/hover/笔记本加粗等既有 .tree-row 规则按类名继续生效；菜单复用
+   ImportControls 的 .import-menu-items 成套样式（ui-v4.css，.app-shell.v4 下生效）。 */
+.app-shell.v2 .tree-row-label {
+  display: flex; min-width: 0; flex: 1; align-self: stretch; align-items: center; gap: 7px;
+  border: 0; background: none; color: inherit; text-align: left; padding: 0; cursor: pointer; font: inherit;
+}
+.app-shell.v2 .tree-row-label .tree-label { flex: 1; }
+.app-shell.v2 .tree-more {
+  flex: 0 0 auto; width: 22px; height: 22px; opacity: 0; color: #8b9891;
+  transition: opacity 120ms ease;
+}
+.app-shell.v2 .tree-row:hover .tree-more, .app-shell.v2 .tree-row:focus-within .tree-more,
+.app-shell.v2 .tree-more[aria-expanded="true"], .app-shell.v2 .tree-more:focus-visible,
+.app-shell.v2 .tree-more[aria-expanded="true"]:focus { opacity: 1; }
+.app-shell.v2 .tree-more:focus-visible { outline: 2px solid #72958a; outline-offset: -1px; }
+.app-shell.v2 .tree-row .tree-rename { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: center; gap: 7px; }
+.app-shell.v2 .tree-rename-input {
+  min-width: 0; flex: 1; min-height: 24px; padding: 1px 6px; border: 1px solid #72958a;
+  border-radius: 5px; background: #fff; color: #39463f; font: inherit; font-size: 11px;
+}
+.app-shell.v2 .tree-rename-input.is-invalid { border-color: #a04442; }
+.app-shell.v2 .tree-rename-input:focus-visible { outline: 2px solid #72958a; outline-offset: -1px; }
+.app-shell.v2 .tree-rename-error { display: block; flex-basis: 100%; color: #a04442; font-size: 11px; line-height: 1.4; }
+.app-shell.v2[data-theme="dark"] .tree-rename-input { border-color: #4c6a60; background: #22282b; color: #d7e0db; }
+.app-shell.v2[data-theme="dark"] .tree-rename-input.is-invalid { border-color: #c9807d; }
+.app-shell.v2[data-theme="dark"] .tree-rename-error { color: #d89895; }
+.app-shell.v2[data-theme="dark"] .tree-more { color: #94a39b; }

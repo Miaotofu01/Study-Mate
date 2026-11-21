@@ -63,13 +63,16 @@ try {
     assert.equal(await page.locator('.persistence-badge').innerText(), 'Saved');
   });
   await check('English folder dialog', async () => {
-    await page.locator('.panel-actions button').filter({ has: page.locator('svg.lucide-folder-plus') }).click();
+    // #320 后左栏只有一个「新建」菜单：点开菜单再选文件夹项，弹窗标题仍按语言切换。
+    await page.locator('.notes-create-trigger').click();
+    await page.getByRole('menuitem', { name: 'New folder', exact: true }).click();
     assert.equal(await page.locator('.modal').getAttribute('aria-label'), 'New folder');
     await page.keyboard.press('Escape');
   });
   await check('open folder/import dialogs switch live, retain drafts/focus and never save', async () => {
     const saved = fixture.read(), before = writes.length;
-    await page.getByRole('button', { name: 'New folder', exact: true }).click();
+    await page.locator('.notes-create-trigger').click();
+    await page.getByRole('menuitem', { name: 'New folder', exact: true }).click();
     const input = page.locator('.modal input');
     await input.fill('未保存的名称 draft');
     await input.evaluate(el => { el.setSelectionRange(2, 5); window.__folderInput = el; });

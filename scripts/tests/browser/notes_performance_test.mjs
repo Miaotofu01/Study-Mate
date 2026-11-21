@@ -114,7 +114,12 @@ async function main() {
       }
       await page.locator('[data-proto="left-pane-notes"]').click();
       const tree = page.locator('.learning-notes-tree');
-      await tree.getByRole('button', { name: '新建节点笔记', exact: true }).click();
+      // 新建入口在学习右栏（ADR-0019 起左树顶不再有「新建节点笔记」）；右栏收起时先点窄轨。
+      const notesRail = page.locator('[data-proto="toggle-notes"]');
+      if (await notesRail.isVisible().catch(() => false)) await notesRail.click();
+      else await page.locator('[data-proto="tab-notes"]').click();
+      await page.locator('.learning-notes-panel').waitFor({ state: 'visible', timeout: 20000 });
+      await page.locator('.learning-notes-panel').getByRole('button', { name: '新建笔记', exact: true }).click();
       const picker = page.locator('.notes-picker');
       await picker.waitFor({ state: 'visible' });
       await page.locator('[aria-label="科目默认笔记本"]').selectOption('book');

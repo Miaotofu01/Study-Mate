@@ -141,7 +141,8 @@ try {
     await guarded('内页不再重复品牌图标/名称，外层品牌和工具栏仍在', async () => {
       assert.equal(await page.locator('.studymate-notes .brand-icon, .studymate-notes .brand-name').count(), 0);
       assert.equal(await page.locator('.smb-brand').count(), 1);
-      assert.equal(await page.locator('.studymate-notes button[aria-label="新建笔记"]').count(), 1);
+      assert.equal(await page.locator('.studymate-notes .left-panel .notes-create-trigger').count(), 1);
+      assert.equal(await page.locator('.studymate-notes button[aria-label="新建笔记"]').count(), 0);
       assert.equal(await page.locator('.studymate-notes .canvas-toolbar').count(), 1);
     });
 
@@ -157,7 +158,11 @@ try {
     await shot('02-notes-surface');
 
     await guarded('新建笔记切走再切回：同DOM且正文资源仍在', async () => {
-      await page.locator('.studymate-notes button[aria-label="新建笔记"]').click();
+      await page.locator('.studymate-notes .left-panel .panel-header .notes-create-trigger').click();
+      await page.locator('.studymate-notes [role="menu"][aria-label="新建资源"]').getByRole('menuitem', { name: '新建笔记', exact: true }).click();
+      const dialog = page.locator('[role=dialog][aria-label="新建笔记"]');
+      await dialog.getByRole('button', { name: '创建', exact: true }).click();
+      await dialog.waitFor({ state: 'detached', timeout: 8000 });
       await page.waitForFunction(() => [...document.querySelectorAll('.studymate-notes .tree-row')].some(row => row.textContent.includes('未命名.md')), null, { timeout: 8000 });
       await page.evaluate(() => { window.__notesElement = document.querySelector('.studymate-notes'); });
       await page.locator('[data-proto="brand-switch"]').click();
@@ -170,7 +175,7 @@ try {
     await shot('03-notes-after-roundtrip');
 
     await guarded('笔记前台快捷键 V/H 生效', async () => {
-      await page.locator('.studymate-notes .view-switch button', { hasText: '画布' }).click();
+      await page.locator('.studymate-notes .view-switch[aria-label="主视图"] button', { hasText: '画布' }).click();
       await page.keyboard.press('v');
       await page.waitForFunction(() => document.querySelector('.studymate-notes .canvas-toolbar button[aria-label="选择工具"]')?.classList.contains('active'));
       await page.keyboard.press('h');

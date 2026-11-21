@@ -1,0 +1,28 @@
+/* 资源树 · 更多菜单与笔记本绑定摘要（#312 之后新增的 UI）。
+   只放 ResourceTree 自己的选择器；不改 layout-v2.css / ui-v4.css 里已有的规则。
+   菜单本身的成套装扮仍复用 .import-menu-items（ui-v4.css），这里只补绑定摘要。 */
+
+.app-shell.v2 .resource-tree .tree-binding {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 46%;
+  overflow: hidden;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #eef4f0;
+  color: #5d7369;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell.v2 .resource-tree .tree-row.is-active .tree-binding {
+  background: #e2eee8;
+}
+
+.app-shell.v2[data-theme="dark"] .resource-tree .tree-binding {
+  background: #2a3330;
+  color: #b9c8bf;
+}

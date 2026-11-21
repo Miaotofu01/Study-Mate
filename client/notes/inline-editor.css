@@ -14,6 +14,12 @@
   --md-inline-code-bg: #eef1ef;
   --md-inline-code-bg: color-mix(in srgb, var(--code, var(--border, #e2e8e4)) 72%, var(--surface, #fff));
   --md-selection-bg: var(--accent-soft, #e8f2ef);
+  /* 编辑面比宿主面深一档：优先取 .note-editor 里的 --ne-surface（note-editor.css 已加深），
+     独立使用时回退宿主 --surface。 */
+  --md-editor-surface: var(--ne-surface, var(--surface, #fff));
+  /* 任务项首行的勾选框槽位（勾选框 + 其后那一个空格）。TaskWidget 和续行的
+     悬挂缩进都读这一个变量，首行正文与续行正文因此落在同一列。 */
+  --md-task-slot: calc(1.15em + 5px);
 
   /* 代码高亮只给类名（classHighlighter），颜色在这里按亮暗各给一套。
      浅色取值对白底均 >= 4.5:1；深色沿用课程端已验证的一套。 */
@@ -34,15 +40,14 @@
   overflow: hidden;
   border: 1px solid var(--border, #dbe3de);
   border-radius: 8px;
-  background: var(--surface, #fff);
+  background: var(--md-editor-surface, var(--surface, #fff));
   color: var(--text, var(--ink, #293431));
 }
 
 .markdown-inline-editor[data-theme="dark"] {
   --md-syntax-color: #aab7b0;
   --md-syntax-color: color-mix(in srgb, var(--muted, #a0ada6) 82%, var(--text, #d7e0db));
-  --md-inline-code-bg: #2a3230;
-  --md-inline-code-bg: color-mix(in srgb, var(--code, var(--border, #39433f)) 82%, var(--surface, #1e2423));
+  --md-inline-code-bg: var(--code, #272727);
   --md-tok-comment: #9eaaa3;
   --md-tok-keyword: #ef9ac2;
   --md-tok-string: #95d5a4;
@@ -104,7 +109,7 @@
 }
 
 .markdown-inline-editor .cm-panels {
-  background: var(--surface, #fff);
+  background: var(--md-editor-surface, var(--surface, #fff));
   color: var(--text, var(--ink, #293431));
 }
 
@@ -155,9 +160,18 @@
   font-family: var(--md-inline-mono);
 }
 
+/* 标题层级梯度：层级类 md-heading-1..6 由 markdown-inline.js 按节点名给出，
+   只动字号与行高，不改粗体本身，编辑态与预览态同一套梯度。 */
 .markdown-inline-editor .md-heading {
   font-weight: 700;
 }
+
+.markdown-inline-editor .md-heading-1 { font-size: 1.38em; line-height: 1.4; }
+.markdown-inline-editor .md-heading-2 { font-size: 1.24em; line-height: 1.4; }
+.markdown-inline-editor .md-heading-3 { font-size: 1.12em; line-height: 1.4; }
+.markdown-inline-editor .md-heading-4 { font-size: 1.02em; line-height: 1.45; }
+.markdown-inline-editor .md-heading-5 { font-size: 0.95em; line-height: 1.5; }
+.markdown-inline-editor .md-heading-6 { font-size: 0.9em; line-height: 1.5; }
 
 .markdown-inline-editor .md-list,
 .markdown-inline-editor .md-quote {
@@ -167,19 +181,36 @@
 /* ── 块级：栅栏、表格、引用条只上轻背景/边线，不抢正文 ───────────────────── */
 
 .markdown-inline-editor .md-code-fence {
+  padding-inline: 8px;
   color: var(--md-syntax-color);
+  background: var(--md-inline-code-bg);
   font-family: var(--md-inline-mono);
 }
 
-/* 围栏行休息态被空替换收起，只留一条很薄的空白行，避免整段 ``` 常驻。 */
+/* 围栏行休息态被空替换收起，只留一条很薄的空白行，避免整段 ``` 常驻。
+   开围栏带语言信息时由 CodeLangWidget 顶替成语言角标 chip。 */
 .markdown-inline-editor .md-code-fence-off {
   line-height: 0.55;
 }
 
 .markdown-inline-editor .md-code-body {
+  padding-inline: 8px;
   background: var(--md-inline-code-bg);
   font-family: var(--md-inline-mono);
 }
+
+/* 块级 widget 不用 margin 或绝对定位，保留 CodeMirror 行高测量与坐标。 */
+.markdown-inline-editor .md-code-lang-bar {
+  --md-code-block-bg: var(--md-inline-code-bg);
+  --md-code-lang-ink: var(--md-syntax-color);
+  border-radius: 6px 6px 0 0;
+}
+.markdown-inline-editor .md-code-lang {
+  user-select: none;
+  cursor: pointer;
+}
+.markdown-inline-editor .md-code-lang:hover { color: var(--text); text-decoration: underline; }
+.markdown-inline-editor .md-code-lang:focus-visible { outline: 1px solid currentColor; outline-offset: -1px; }
 
 .markdown-inline-editor .md-line-table {
   font-family: var(--md-inline-mono);
@@ -187,8 +218,75 @@
 }
 
 .markdown-inline-editor .md-line-quote {
-  border-left: 2px solid var(--border, #dbe3de);
-  padding-left: 8px;
+  padding-left: 10px;
+}
+
+/* 列表行的悬挂缩进宽度由装饰里的 `--md-list-pad` 逐个给（无序 1.4em、有序随位数、
+   任务项取 --md-task-slot）。首行靠负 text-indent 拉回行首，软换行和续行都落在正文列。
+   引用里的列表要叠加，所以单独给一条更高优先级的组合规则，不覆盖引用本身的 10px。 */
+.markdown-inline-editor .md-line-list {
+  padding-left: var(--md-list-pad, 0px);
+}
+
+.markdown-inline-editor .md-line-list.md-line-quote {
+  padding-left: calc(10px + var(--md-list-pad, 0px));
+}
+
+/* ── 列表：休息态是排版后的符号/编号，触及的那一项才回到真实标记 ───────────── */
+
+/* 标记占位与行上的 padding-left 同宽（都由 listMarkerLayout 算），
+   首行负 text-indent 把占位拉回行首，正文正好落在悬挂列上。 */
+.markdown-inline-editor .md-list-marker {
+  display: inline-flex;
+  align-items: baseline;
+  box-sizing: border-box;
+  vertical-align: baseline;
+  user-select: none;
+  cursor: text;
+}
+
+.markdown-inline-editor .md-list-marker__indent {
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.markdown-inline-editor .md-list-mark {
+  display: inline-block;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  text-align: center;
+  white-space: nowrap;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 多位数编号右对齐，`9.` 与 `10.` 的句点在同一列。 */
+.markdown-inline-editor .md-list-mark--ordered {
+  text-align: right;
+  padding-right: 0.34em;
+}
+
+/* 续行的悬挂占位：只换掉「缩进 + 引用前缀」这类真的占着字符的位置。
+   惰性续行（行首无字符）不插占位，直接由 .md-line-list 的 padding 悬挂，见下。 */
+.markdown-inline-editor .md-list-spacer {
+  display: inline-block;
+  vertical-align: baseline;
+  user-select: none;
+}
+
+/* ── 源码模式：行号槽 + 原样 Markdown（不挂任何显隐装饰） ─────────────────── */
+
+.markdown-inline-editor[data-source-mode="true"] .cm-gutters {
+  border-right: 1px solid var(--border, #dbe3de);
+  background: transparent;
+  color: var(--md-syntax-color);
+  user-select: none;
+}
+
+.markdown-inline-editor[data-source-mode="true"] .cm-lineNumbers .cm-gutterElement {
+  padding: 0 6px;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── 非活动公式：KaTeX 渲染；点到它就把光标放回源码，源码就地显形 ─────────── */
@@ -209,7 +307,7 @@
   padding: 8px 8px;
   border: 1px solid var(--border, #dbe3de);
   border-radius: 6px;
-  background: var(--surface, #fff);
+  background: var(--md-editor-surface, var(--surface, #fff));
 }
 
 .markdown-inline-editor .md-math-source {
@@ -226,7 +324,7 @@
   overflow-x: auto;
   border: 1px solid var(--border, #dbe3de);
   border-radius: 6px;
-  background: var(--surface, #fff);
+  background: var(--md-editor-surface, var(--surface, #fff));
 }
 
 .markdown-inline-editor .md-table {
@@ -281,9 +379,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.15em;
+  width: var(--md-task-slot, 1.15em);
   height: 1.15em;
-  margin-right: 5px;
   vertical-align: -0.18em;
   cursor: text;
 }
@@ -375,7 +472,7 @@
   margin: 0;
   padding: 6px 12px;
   border-top: 1px solid var(--border, #dbe3de);
-  background: var(--surface, #fff);
+  background: var(--md-editor-surface, var(--surface, #fff));
   color: var(--text, var(--ink, #293431));
   font-size: 12px;
   line-height: 1.5;

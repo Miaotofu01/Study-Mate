@@ -128,6 +128,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .card-body h1, .markdown-preview h1 { font-size: 1.32em; }
 .card-body h2, .markdown-preview h2 { font-size: 1.18em; }
 .card-body h3, .markdown-preview h3 { font-size: 1.06em; }
+.card-body h4, .markdown-preview h4 { margin: .2em 0 .4em; color: var(--text-strong, var(--ink, #34423c)); font-size: 1em; line-height: 1.4; }
+.card-body h5, .markdown-preview h5 { margin: .2em 0 .4em; color: var(--text-strong, var(--ink, #34423c)); font-size: .95em; line-height: 1.4; }
+.card-body h6, .markdown-preview h6 { margin: .2em 0 .4em; color: var(--muted, #738079); font-size: .9em; line-height: 1.4; }
+/* 引用使用专用边线而非分隔线；两种主题都比普通段落明显。 */
+.markdown-preview blockquote,
+.markdown-inline-editor .md-line-quote {
+  border-inline-start: 3px solid var(--muted, #646c75);
+  border-inline-start-color: color-mix(in srgb, currentColor 58%, transparent);
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+.markdown-preview blockquote { margin: .6em 0; padding: .15em .8em; }
+.markdown-preview blockquote p { margin: .3em 0; }
 .markdown-preview p { margin: .45em 0; }
 .markdown-preview ul, .markdown-preview ol { margin: .4em 0; padding-left: 1.45em; }
 .markdown-preview li { margin: .18em 0; }
@@ -137,6 +149,41 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .markdown-preview code { padding: .12em .35em; border-radius: 4px; background: var(--code, #f0f3f1); font-family: Consolas, "Cascadia Code", monospace; font-size: .91em; }
 .markdown-preview pre { overflow: auto; padding: 9px 10px; border: 1px solid var(--line, #e8edea); border-radius: 7px; background: var(--code, #f7f9f8); line-height: 1.5; }
 .markdown-preview pre code { padding: 0; background: none; }
+/* 编辑、预览共用同一种语言顶栏，正文独占下一行。 */
+:is(.markdown-inline-editor, .markdown-preview) .md-code-lang-bar {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  background: var(--md-code-block-bg, var(--code, #f7f9f8));
+}
+:is(.markdown-inline-editor, .markdown-preview) .md-code-lang {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 8px;
+  color: var(--md-code-lang-ink, var(--text, #34423c));
+  background: var(--md-code-block-bg, var(--code, #f7f9f8));
+  font: 500 11px/22px ui-monospace, "Cascadia Code", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.markdown-preview .md-code-block {
+  min-width: 0;
+  overflow: hidden;
+  margin: 1em 0;
+  border: 1px solid var(--line, #e8edea);
+  border-radius: 7px;
+  background: var(--code, #f7f9f8);
+}
+.markdown-preview .md-code-block > pre[data-md-lang] {
+  margin: 0;
+  padding-top: 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.markdown-preview .md-code-block > pre > code { background: transparent; }
 .card-summary { padding: 0 13px 9px; color: #788680; font-size: 10px; line-height: 1.5; }
 .card-summary-tag { margin-top: 8px; color: #8a795d; font-size: 9px; }
 .card-link { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; color: #397f72; font-size: 11px; text-decoration: none; overflow-wrap: anywhere; }

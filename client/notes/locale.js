@@ -57,6 +57,10 @@ export const zh = {
   add_text: '添加纯内容节点', text_node: '纯内容节点', undo_canvas: '撤销画板操作', redo_canvas: '重做画板操作',
   zoom_out: '缩小画布', zoom_in: '放大画布', fit: '适应全部卡片', fit_shortcut: '适应画布 1',
   chat: 'AI 对话', locate: '定位节点', place: '放到画布', open_document: '打开文档', remove_node_hint: '删除节点，保留文件', remove_canvas: '移出画布',
+  new: '新建', new_resource: '新建资源', note_name: '笔记名称', create_target: '新建位置：{path}',
+  document_mode_preview: '预览', document_mode_edit: '编辑', document_mode_split: '双列', document_mode_inline: '渲染编辑',
+  document_view_mode: '文档视图模式',
+  unsupported_note: '不支持的文件类型。改回支持的 Markdown 扩展名可恢复编辑，原内容仍保留。',
 };
 
 export const en = {
@@ -115,6 +119,10 @@ export const en = {
   add_text: 'Add text node', text_node: 'Text node', undo_canvas: 'Undo canvas action', redo_canvas: 'Redo canvas action',
   zoom_out: 'Zoom out', zoom_in: 'Zoom in', fit: 'Fit all cards', fit_shortcut: 'Fit canvas 1',
   chat: 'AI chat', locate: 'Locate node', place: 'Place on canvas', open_document: 'Open document', remove_node_hint: 'Delete node, keep file', remove_canvas: 'Remove from canvas',
+  new: 'New', new_resource: 'New resource', note_name: 'Note name', create_target: 'New location: {path}',
+  document_mode_preview: 'Preview', document_mode_edit: 'Edit', document_mode_split: 'Split', document_mode_inline: 'Inline edit',
+  document_view_mode: 'Document view mode',
+  unsupported_note: 'Unsupported file type. Restoring a supported Markdown extension re-enables editing; the content is preserved.',
 };
 
 const scope = createLocaleScope('@yunmiao/studymate/notes', { zh, en });
