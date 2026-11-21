@@ -16,6 +16,8 @@ import { readFileSync } from 'node:fs';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 
 import {
+  LIST_BULLET_EM,
+  LIST_INDENT_EM,
   MAX_MARKDOWN_LENGTH,
   SPAN_CLASS,
   applyRawSourceChanges,
@@ -29,7 +31,10 @@ import {
   dominantEol,
   editorChangesForRaw,
   editorOffsetForRaw,
+  fenceLanguage,
   formatDelimiters,
+  listLineBodyStart,
+  listMarkerLayout,
   normalizeLineEndings,
   parseGfmTable,
   parseImageSyntax,
@@ -152,6 +157,7 @@ test('标题 / 列表 / 引用：前缀连同后面的一个空格一起算分�
   assert.equal(heading.content.from, 2);
   assert.equal(list.delimiters[0].to, text.indexOf('item'));
   assert.equal(quote.delimiters[0].to, text.indexOf('quote'));
+  assert.equal(quote.block, true, '引用要参与块级行装饰，不能只隐藏 > 分隔符');
 });
 
 test('HTML / 未知语法保持普通文本，不产生格式区间', () => {
@@ -509,4 +515,180 @@ test('测试样例与线上样例一致：plain **bold** plain **other**', () =>
     { from: 8, to: 12 },
     { from: 23, to: 28 },
   ]);
+});
+
+/* ── #312 A2/A3/A5：标题层级、围栏语言角标与面背景的纯函数/静态契约 ────────── */
+
+test('A2 标题层级：span 携带 level，正文类追加 md-heading-N', () => {
+  const text = '# 一\n\n## 二\n\n###### 六\n\n正文';
+  const headings = byKind(spansOf(text), 'heading');
+  assert.deepEqual(headings.map((span) => span.level), [1, 2, 6]);
+  const classes = marksOf(text).map((mark) => mark.classes);
+  assert.ok(classes.includes('md-heading md-heading-1'), JSON.stringify(classes));
+  assert.ok(classes.includes('md-heading md-heading-2'), JSON.stringify(classes));
+  assert.ok(classes.includes('md-heading md-heading-6'), JSON.stringify(classes));
+  assert.ok(!classes.some((value) => value.includes('md-heading-0')), JSON.stringify(classes));
+});
+
+test('A3 围栏语言：fenceLanguage 取信息串首 token，无信息串为空', () => {
+  assert.equal(fenceLanguage('```js'), 'js');
+  assert.equal(fenceLanguage('```python title=x'), 'python');
+  assert.equal(fenceLanguage('~~~ts'), 'ts');
+  assert.equal(fenceLanguage('```'), '');
+  assert.equal(fenceLanguage('``````'), '');
+  assert.equal(fenceLanguage('  ```C#'), 'C#');
+  assert.equal(fenceLanguage('正文 ``` 不是围栏'), '');
+});
+
+test('A3 编辑态接线：CodeLangWidget 用 fenceLanguage 顶替开围栏行，CSS 有角标样式', () => {
+  const component = readSource('MarkdownInlineEditor.jsx');
+  assert.match(component, /new CodeLangWidget/);
+  assert.match(component, /fenceLanguage\(/, '语言名必须来自与测试共用的一份判据');
+  assert.match(component, /setAttribute\('role', 'button'\)/, 'chip 行为上是按钮，必须有 button 语义');
+  assert.match(component, /chip\.tabIndex = -1;/, '不进编辑器 Tab 序（Tab 留给 indentWithTab 缩进）');
+  assert.match(component, /event\.detail === 0/, '读屏激活的 detail=0 click 必须生效');
+  assert.match(component, /event\.key === 'Enter' \|\| event\.key === ' '/, 'Enter/Space 键盘可操作');
+  const css = readSource('inline-editor.css');
+  assert.match(css, /\.markdown-inline-editor \.md-code-lang/);
+});
+
+test('A1/A5 CSS 静态契约：下拉 color-scheme、编辑面比宿主面深一档', () => {
+  const toolbar = readSource('markdown-toolbar.css');
+  assert.match(toolbar, /color-scheme: light/);
+  assert.match(toolbar, /\[data-theme="dark"\] \.md-format-toolbar__select \{[\s\S]*?color-scheme: dark/, '暗色必须切到 dark 弹层');
+  assert.match(toolbar, /\.md-format-toolbar__select \{[\s\S]*?background: var\(--mt-surface\);/, '收起态必须有明确实底色');
+  assert.match(toolbar, /\.md-format-toolbar__select option \{[\s\S]*?background: var\(--mt-surface\);[\s\S]*?color: var\(--mt-text\);/, 'option 弹层必须实底且钉文字色');
+
+  const noteEditor = readSource('note-editor.css');
+  assert.match(noteEditor, /--ne-surface: color-mix\(in srgb, var\(--smb-bg/);
+  assert.match(noteEditor, /\.note-editor\[data-theme="dark"\] \{[\s\S]*?--ne-surface: #([\da-f]{2})\1\1;/i, '暗色笔记正文底色必须为中性灰');
+  // A5：编辑与只读渲染两态都盖加深面——background 直接落在 .note-editor 上，无 :not(.is-readonly) 豁免。
+  assert.match(noteEditor, /background: var\(--ne-surface\);/);
+  assert.doesNotMatch(noteEditor, /\.note-editor:not\(\.is-readonly\)/, '只读渲染面不再豁免');
+  // 正文编辑器本体保持透明：面由 .note-editor 承担。
+  assert.match(noteEditor, /\.note-editor \.markdown-inline-editor[\s\S]*?background: transparent;/);
+
+  const inline = readSource('inline-editor.css');
+  assert.match(inline, /--md-editor-surface: var\(--ne-surface, var\(--surface, #fff\)\);/);
+  // 注：live-editor.css/MarkdownLiveEditor 是死代码，#303（f7135f6）会删除它们；
+  // A1/A5 的有效落点只在 note-editor.css 与 inline-editor.css，这里刻意不耦合 live-editor.css。
+});
+
+/* ── #312 列表：渲染态符号/编号、嵌套缩进、续行悬挂与源码模式切换 ─────────── */
+
+test('列表版面：无序用 •，有序按列表起始号递增，编号位数决定位宽', () => {
+  const text = '3. third\n4. fourth\n\n- bullet\n\n10. tenth\n11. eleventh';
+  const lists = byKind(spansOf(text), 'list');
+  assert.deepEqual(lists.map((span) => span.ordered), [true, true, false, true, true]);
+  // 有序编号从列表自己的起始号开始，不是恒从 1 起；无序项没有编号。
+  assert.deepEqual(lists.map((span) => span.number), [3, 4, null, 10, 11]);
+  const layouts = lists.map(listMarkerLayout);
+  assert.deepEqual(layouts.map((layout) => layout.label), ['3.', '4.', '•', '10.', '11.']);
+  assert.equal(layouts[0].indentEm, 0, '顶层列表不再额外缩进');
+  assert.equal(layouts[0].padEm, layouts[0].markEm, '顶层正文起点就是编号位宽');
+  assert.equal(layouts[2].markEm, LIST_BULLET_EM, '无序项的符号位宽固定');
+  assert.ok(layouts[3].markEm > layouts[0].markEm, '两位数编号比一位数占更宽，不压正文');
+  assert.equal(layouts[3].label, '10.');
+
+  // `2)` 也是合法有序标记：渲染沿用文档里的收尾符，不擅自改成 `.`。
+  const paren = byKind(spansOf('2) two\n3) three'), 'list');
+  assert.deepEqual(paren.map((span) => listMarkerLayout(span).label), ['2)', '3)']);
+});
+
+test('列表版面：嵌套按层级累加缩进，深度进 span', () => {
+  const text = '- a\n  - b\n    - c';
+  const lists = byKind(spansOf(text), 'list');
+  assert.deepEqual(lists.map((span) => span.depth), [1, 2, 3]);
+  const layouts = lists.map(listMarkerLayout);
+  assert.deepEqual(layouts.map((layout) => layout.indentEm), [0, LIST_INDENT_EM, LIST_INDENT_EM * 2]);
+  assert.ok(layouts[0].padEm < layouts[1].padEm && layouts[1].padEm < layouts[2].padEm);
+});
+
+test('列表标记起点：跳过引用前缀与行首缩进，标记后 1–4 个空格整体并入', () => {
+  const quoted = '> - item';
+  const quotedList = byKind(spansOf(quoted), 'list')[0];
+  assert.equal(quotedList.indentFrom, quoted.indexOf('-'), '引用条由引用装饰负责，标记从 - 开始');
+  assert.equal(quotedList.delimiters[0].to, quoted.indexOf('item'));
+  assert.ok(!quoted.slice(quotedList.indentFrom, quotedList.delimiters[0].to).includes('>'));
+
+  const prefixed = '  >   - item';
+  const prefixedList = byKind(spansOf(prefixed), 'list')[0];
+  assert.ok(!prefixed.slice(prefixedList.indentFrom, prefixedList.delimiters[0].to).includes('>'),
+    '多层引用前缀都不能被列表 widget 吞掉');
+  assert.equal(prefixedList.delimiters[0].to, prefixed.indexOf('item'));
+
+  const wide = '-   item';
+  const wideList = byKind(spansOf(wide), 'list')[0];
+  assert.equal(wideList.delimiters[0].to, wide.indexOf('item'), '标记后多个空格也必须算进分隔符');
+  assert.equal(wideList.indentFrom, 0);
+});
+
+test('任务项不重复出现标记：task 标记在 span 上，嵌套任务不算到外层项', () => {
+  const text = '- [ ] todo\n  - [x] inner\n- plain';
+  const lists = byKind(spansOf(text), 'list');
+  assert.deepEqual(lists.map((span) => span.task), [true, true, false]);
+  assert.equal(lists[2].ordered, false);
+  assert.equal(lists[2].number, null);
+});
+
+test('列表续行正文起点：惰性续行是 0，缩进续行跳过空白，引用里的续行跳过前缀', () => {
+  assert.equal(listLineBodyStart('lazy line'), 0, '惰性续行没有缩进，正文从行首开始');
+  assert.equal(listLineBodyStart('  second para'), 2);
+  assert.equal(listLineBodyStart('\tsecond'), 1);
+  assert.equal(listLineBodyStart('>   cont'), 4, '引用+列表的续行，行首是 > 不是空格');
+  assert.equal(listLineBodyStart('> >  deep'), 5, '多层引用前缀整体跳过');
+  assert.equal(listLineBodyStart('   '), 3, '纯空白行跳过整行空白（调用方会按空行丢掉）');
+  assert.equal(listLineBodyStart(''), 0);
+});
+
+test('列表渲染接线：休息态 widget 占位、续行占位与悬挂缩进同源，触及项还原源码', () => {
+  const component = readSource('MarkdownInlineEditor.jsx');
+  assert.match(component, /new ListMarkWidget\(layout, /);
+  assert.match(component, /new ListSpacerWidget\(padCss, /);
+  // 触及项不换标记；续行只在「未被触及的列表项」下占位，且按语法树 ListItem 范围取行。
+  assert.match(component, /span\.kind !== 'list' \|\| selectionTouchesSpan\(span, ranges\)/);
+  assert.match(component, /const rendered = !selectionTouchesSpan\(span, ranges\);/);
+  assert.match(component, /listLineBodyStart\(line\.text\)/);
+  // 首行与续行读同一个 CSS 变量：宽度同源，不依赖字体量出来的宽度。
+  assert.match(component, /--md-list-pad:\$\{padCss\};text-indent:calc\(-1 \* \$\{padCss\}\);/);
+  assert.match(component, /const TASK_LIST_PAD = 'var\(--md-task-slot\)';/);
+  assert.match(component, /return span\.task \? TASK_LIST_PAD : `\$\{listMarkerLayout\(span\)\.padEm\}em`;/);
+  // 空行、代码/表格/块公式行都不加占位；惰性续行没有可换的字符，只挂行内边距。
+  assert.match(component, /if \(!line\.text\.trim\(\)\) continue;/);
+  assert.match(component, /if \(bodyStart === 0\) \{/);
+  assert.match(component, /if \(!entry\.style\) entry\.style = listLazyLineStyle\(padCss\);/);
+  assert.match(component, /if \(overlapsReplaced\(from, to\) \|\| replacedAt\(from\)\) continue;/);
+  // 任务标记连同其后那一个空格一起换：一个槽位一个 widget，续行才能同列。
+  assert.match(component, /const end = text\[span\.to\] === ' ' \? span\.to \+ 1 : span\.to;/);
+
+  const css = readSource('inline-editor.css');
+  assert.match(css, /\.markdown-inline-editor \.md-list-marker \{/);
+  assert.match(css, /\.markdown-inline-editor \.md-list-mark--ordered \{/);
+  assert.match(css, /\.markdown-inline-editor \.md-list-spacer \{/);
+  assert.match(css, /\.markdown-inline-editor \.md-line-list \{\n  padding-left: var\(--md-list-pad, 0px\);/);
+  assert.match(css, /\.markdown-inline-editor \.md-line-list\.md-line-quote \{\n  padding-left: calc\(10px \+ var\(--md-list-pad, 0px\)\);/,
+    '引用里的列表叠加两段缩进，不覆盖引用自己的 10px');
+  assert.match(css, /--md-task-slot: calc\(1\.15em \+ 5px\);/);
+  assert.match(css, /\.markdown-inline-editor \.md-task-widget \{[^}]*width: var\(--md-task-slot, 1\.15em\);/s);
+});
+
+test('源码模式：Compartment 只重配装饰与行号，同 view 不重建、不写正文', () => {
+  const component = readSource('MarkdownInlineEditor.jsx');
+  assert.match(component, /sourceMode = false/, '源码模式是独立 prop，默认关闭');
+  assert.match(component, /const decorationsSlot = useRef\(new Compartment\(\)\)/);
+  assert.match(component, /const gutterSlot = useRef\(new Compartment\(\)\)/);
+  assert.match(component, /decorationsSlot\.current\.reconfigure\(decorationsFor\(sourceMode\)\)/);
+  assert.match(component, /gutterSlot\.current\.reconfigure\(gutterFor\(sourceMode, theme === 'dark'\)\)/);
+  assert.match(component, /editorGutter\(\), gutterTheme\(dark\)/, '源码模式挂上带行号的阅读型 gutter');
+  assert.match(component, /data-source-mode=\{sourceMode \? 'true' : 'false'\}/);
+  assert.equal((component.match(/new EditorView\(/g) || []).length, 1, '切模式绝不重建 EditorView');
+  const switchEffect = component.slice(
+    component.indexOf('// 只重配这两组扩展'),
+    component.indexOf('}, [sourceMode, theme]);'),
+  );
+  assert.ok(switchEffect.length > 0, '必须存在只随 sourceMode/theme 变化的重配 effect');
+  assert.doesNotMatch(switchEffect, /onChange|setError/, '切模式不能写正文、不能借机报错');
+  const css = readSource('inline-editor.css');
+  assert.match(css, /\[data-source-mode="true"\] \.cm-gutters \{/);
+  assert.match(css, /\[data-source-mode="true"\] \.cm-lineNumbers \.cm-gutterElement \{/);
 });

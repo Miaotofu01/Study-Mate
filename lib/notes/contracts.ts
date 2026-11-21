@@ -381,7 +381,8 @@ function checkOrigin(raw: unknown): { ok: true; value: Record<string, unknown> }
     const field = raw[key];
     if (key === 'kind' || key === 'mode' || key === 'name') {
       if (typeof field !== 'string') return { ok: false, message: `资源 origin.${key} 要是字符串。` };
-      value[key] = field.slice(0, 2000);
+      if (field.length > 2000) return { ok: false, message: `资源 origin.${key} 超过 2000 字符上限，拒绝截断。` };
+      value[key] = field;
     } else if (key === 'lastModified') {
       if (!Number.isSafeInteger(field) || (field as number) < 0) return { ok: false, message: '资源 origin.lastModified 非法。' };
       value[key] = field;

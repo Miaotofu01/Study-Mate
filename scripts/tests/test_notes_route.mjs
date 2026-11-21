@@ -364,3 +364,40 @@ test('POST 时数据根不是绝对路径 → 400 path-invalid', async () => {
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error.code, 'path-invalid');
 });
+
+/* ── #304 onCorrupt=skip 的 HTTP 契约 ─────────────────────────────────────── */
+
+test('#304 GET ?onCorrupt=skip 返回 corrupt 清单；普通 GET 仍 503；非法值 400', async () => {
+  const home = makeHome();
+  const good = await handleNotes(postJson({ operation: 'resource', resource: noteResource('ok'), expectedVersion: null }), home);
+  assert.equal(good.status, 200);
+  const bad = await handleNotes(postJson({
+    operation: 'resource',
+    resource: { id: 'bad', type: 'link', title: '坏链接', parent: 'notes', url: 'https://example.com', summary: '' },
+    expectedVersion: null,
+  }), home);
+  assert.equal(bad.status, 200, await bad.text());
+  fs.writeFileSync(path.join(notesRoot(home), 'resources', 'r-bad.json'), '{ not json');
+
+  const strict = await handleNotes(new Request(`${ORIGIN}${NOTES_PATH}`, { method: 'GET' }), home);
+  assert.equal(strict.status, 503);
+  const strictBody = await strict.json();
+  assert.equal(strictBody.ok, false);
+  assert.equal(strictBody.error.code, 'file-shape-unknown');
+
+  const skipped = await handleNotes(new Request(`${ORIGIN}${NOTES_PATH}?onCorrupt=skip`, { method: 'GET' }), home);
+  assert.equal(skipped.status, 200);
+  const body = await skipped.json();
+  assert.equal(body.ok, true);
+  assert.deepEqual(Object.keys(body.resources), ['ok']);
+  assert.equal(body.corrupt.length, 1);
+  assert.equal(body.corrupt[0].id, 'bad');
+  assert.equal(body.corrupt[0].kind, 'json');
+  assert.equal(body.corrupt[0].message, '资源文件已损坏，暂时无法载入。');
+  assert.equal(JSON.stringify(body).includes(home), false);
+
+  const invalid = await handleNotes(new Request(`${ORIGIN}${NOTES_PATH}?onCorrupt=nope`, { method: 'GET' }), home);
+  assert.equal(invalid.status, 400);
+  const invalidBody = await invalid.json();
+  assert.equal(invalidBody.error.code, 'body-invalid');
+});

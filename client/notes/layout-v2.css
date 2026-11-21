@@ -49,7 +49,7 @@
 .app-shell.v2 .side-panel {
   position: relative; z-index: 10; display: flex; flex: 0 0 auto; flex-direction: column;
   min-width: 0; min-height: 0; overflow: hidden; background: #fff;
-  border-color: #e7ebe8; transition: width 200ms ease;
+  border-color: #e7ebe8; transition: width var(--smb-motion, 200ms) ease;
 }
 .app-shell.v2 .left-panel { border-right: 1px solid #e7ebe8; }
 .app-shell.v2 .right-panel { border-left: 1px solid #e7ebe8; }
@@ -104,12 +104,12 @@ body:has(.app-shell.v2[data-resizing="true"]) { user-select: none; cursor: col-r
   min-width: 0; flex: 1; padding: 0; color: #39463f; border: 0; background: transparent; font-size: 13px; font-weight: 650;
 }
 .app-shell.v2 .document-scroll { min-height: 0; flex: 1; overflow: auto; padding: 28px 24px 64px; }
-.app-shell.v2 .document-content { width: min(100%, 860px); min-height: 100%; margin: 0 auto; color: #435149; font-size: 14px; line-height: 1.75; }
+.app-shell.v2 .document-content { width: min(100%, 860px); min-height: 100%; margin: 0 auto; color: #435149; font-size: var(--smb-fs-body, 14px); line-height: var(--smb-lh-body, 1.75); }
 .app-shell.v2 .document-content img, .app-shell.v2 .document-content iframe,
 .app-shell.v2 .document-content object { display: block; max-width: 100%; max-height: 72vh; margin: 14px auto; object-fit: contain; }
 .app-shell.v2 .document-editor-host { display: flex; min-height: 0; flex: 1; overflow: hidden; }
 .app-shell.v2 .editor-pane { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
-.app-shell.v2 .editor-pane .cm-editor { height: 100%; font-size: 13px; line-height: 1.7; }
+.app-shell.v2 .editor-pane .cm-editor { height: 100%; font-size: var(--smb-fs-body, 13px); line-height: var(--smb-lh-body, 1.7); }
 .app-shell.v2 .editor-pane .cm-scroller { overflow: auto; font-family: Consolas, "Cascadia Code", monospace; }
 .app-shell.v2 .editor-resize-hit { height: 6px; flex: 0 0 6px; cursor: row-resize; touch-action: none; background: #f4f6f4; }
 .app-shell.v2 .editor-resize-hit:hover { background: #dcebe5; }
@@ -121,11 +121,11 @@ body:has(.app-shell.v2[data-resizing="true"]) { user-select: none; cursor: col-r
 .app-shell.v2 .knowledge-card .card-body { cursor: grab; }
 .app-shell.v2 .knowledge-card.is-reading .card-body { cursor: auto; user-select: text; }
 .app-shell.v2 .knowledge-card .card-drag-handle { cursor: grab; }
-.app-shell.v2 .knowledge-card .node-actions { position: absolute; top: 5px; right: 5px; z-index: 14; display: flex; opacity: 0; transition: opacity .14s ease; }
+.app-shell.v2 .knowledge-card .node-actions { position: absolute; top: 5px; right: 5px; z-index: 14; display: flex; opacity: 0; transition: opacity var(--smb-motion, .14s) ease; }
 .app-shell.v2 .knowledge-card:hover .node-actions, .app-shell.v2 .knowledge-card.is-selected .node-actions,
 .app-shell.v2 .knowledge-card.selected .node-actions { opacity: 1; }
 .app-shell.v2 .text-node { position: relative; min-width: 100px; min-height: 38px; cursor: grab; }
-.app-shell.v2 .text-node-content { min-height: 1.5em; color: #39463f; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.app-shell.v2 .text-node-content { min-height: 1.5em; color: #39463f; font-size: var(--smb-fs-body, 14px); line-height: var(--smb-lh-body, 1.6); white-space: pre-wrap; overflow-wrap: anywhere; }
 .app-shell.v2 .text-node-editor { width: 100%; min-height: 48px; resize: none; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }
 .app-shell.v2 .canvas-stage.is-space-panning, .app-shell.v2 .canvas-stage.is-space-panning * { cursor: grabbing !important; }
 .app-shell.v2 .canvas-stage.is-space-panning .pan-capture-layer { position: absolute; inset: 0; z-index: 30; cursor: grab !important; }
@@ -173,7 +173,7 @@ body:has(.app-shell.v2[data-resizing="true"]) { user-select: none; cursor: col-r
   .app-shell.v2 .topbar .icon-button { width: 28px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .app-shell.v2 .side-panel, .app-shell.v2 .node-actions { transition-duration: .01ms !important; }
+  .app-shell.v2:not(.is-hosted) .side-panel, .app-shell.v2:not(.is-hosted) .node-actions { transition-duration: .01ms !important; }
 }
 /* 原生保存门禁只盖笔记工作区；外层学习品牌与本页恢复/导出操作仍可用。 */
 .app-shell.v2 .persistence-gate { position: absolute; inset: 42px 0 0; z-index: 80; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; background: #f6f7f9f2; color: #303745; text-align: center; pointer-events: auto; }
@@ -188,3 +188,33 @@ body:has(.app-shell.v2[data-resizing="true"]) { user-select: none; cursor: col-r
 .app-shell.v2[data-theme="dark"] .persistence-gate { background: #1b1e24f2; color: #e3e5ea; }
 .app-shell.v2[data-theme="dark"] .persistence-conflict { background: #302424; color: #f1c9c6; }
 @media (max-width: 699px) { .app-shell.v2 .persistence-actions { max-width: 45vw; overflow-x: auto; } }
+
+/* ── 资源树：行内重命名与更多菜单（#312；样式只在此追加，不改上面既有规则） ──
+   树行从单个 <button> 改成「标签按钮 + 更多按钮」并排的行容器（.tree-row 现在是 div），
+   高亮/hover/笔记本加粗等既有 .tree-row 规则按类名继续生效；菜单复用
+   ImportControls 的 .import-menu-items 成套样式（ui-v4.css，.app-shell.v4 下生效）。 */
+.app-shell.v2 .tree-row-label {
+  display: flex; min-width: 0; flex: 1; align-self: stretch; align-items: center; gap: 7px;
+  border: 0; background: none; color: inherit; text-align: left; padding: 0; cursor: pointer; font: inherit;
+}
+.app-shell.v2 .tree-row-label .tree-label { flex: 1; }
+.app-shell.v2 .tree-more {
+  flex: 0 0 auto; width: 22px; height: 22px; opacity: 0; color: #8b9891;
+  transition: opacity 120ms ease;
+}
+.app-shell.v2 .tree-row:hover .tree-more, .app-shell.v2 .tree-row:focus-within .tree-more,
+.app-shell.v2 .tree-more[aria-expanded="true"], .app-shell.v2 .tree-more:focus-visible,
+.app-shell.v2 .tree-more[aria-expanded="true"]:focus { opacity: 1; }
+.app-shell.v2 .tree-more:focus-visible { outline: 2px solid #72958a; outline-offset: -1px; }
+.app-shell.v2 .tree-row .tree-rename { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: center; gap: 7px; }
+.app-shell.v2 .tree-rename-input {
+  min-width: 0; flex: 1; min-height: 24px; padding: 1px 6px; border: 1px solid #72958a;
+  border-radius: 5px; background: #fff; color: #39463f; font: inherit; font-size: 11px;
+}
+.app-shell.v2 .tree-rename-input.is-invalid { border-color: #a04442; }
+.app-shell.v2 .tree-rename-input:focus-visible { outline: 2px solid #72958a; outline-offset: -1px; }
+.app-shell.v2 .tree-rename-error { display: block; flex-basis: 100%; color: #a04442; font-size: 11px; line-height: 1.4; }
+.app-shell.v2[data-theme="dark"] .tree-rename-input { border-color: #4c6a60; background: #22282b; color: #d7e0db; }
+.app-shell.v2[data-theme="dark"] .tree-rename-input.is-invalid { border-color: #c9807d; }
+.app-shell.v2[data-theme="dark"] .tree-rename-error { color: #d89895; }
+.app-shell.v2[data-theme="dark"] .tree-more { color: #94a39b; }

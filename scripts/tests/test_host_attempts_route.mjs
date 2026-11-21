@@ -382,3 +382,184 @@ test('整轮写入前后：题库与课件正文逐字节相等（作答绝不�
   assert.equal(fs.readdirSync(path.join(subjectDir, 'lessons')).filter((name) => name.endsWith('.quiz.json')).length, 1);
   assert.deepEqual(fs.readdirSync(attemptsDir), [`0001-${NODE}.json`], '作答只落在 attempts/ 一个文件里');
 });
+
+/* ── #213：主观题草稿（状态，不是作答事件）────────────────────────────── */
+
+test('#213 草稿：只更新顶层草稿，不 push 历史、不动上次结果、刷新读得回', async () => {
+  const { home, workspace, attemptsDir } = makeHome();
+  process.env.DSH_HOME = home;
+  const { route } = connect();
+
+  const first = await (await post(route, submission(workspace))).json();
+  const beforeOne = JSON.parse(JSON.stringify(first.attempts['题'][OBJECTIVE]));
+  const draftBody = {
+    subject: SUBJECT,
+    node: NODE,
+    questions: { [OPEN]: { 草稿: { 文本: '先写一段自己的话', 时: '' } } },
+    operationId: op('draft'),
+    expectedVersion: first.version,
+  };
+
+  const response = await post(route, draftBody);
+  assert.equal(response.status, 200);
+  const receipt = await response.json();
+  assert.equal(receipt.attempts['题'][OPEN], undefined, '草稿不建题条目（历史与上次结果都没有它）');
+  assert.deepEqual(receipt.attempts['题'][OBJECTIVE], beforeOne, '草稿不动已有题的历史与上次结果');
+  assert.equal(receipt.attempts['草稿'][OPEN]['文本'], '先写一段自己的话');
+  assert.match(receipt.attempts['草稿'][OPEN]['时'], /^\d{4}-\d{2}-\d{2}T/, '时由 Host 半盖章');
+
+  const file = path.join(attemptsDir, `0001-${NODE}.json`);
+  const bytes = fs.readFileSync(file);
+  const replay = await (await post(route, draftBody)).json();
+  assert.deepEqual(replay, receipt, '同一 operationId 重放回放同一份回执');
+  assert.deepEqual(fs.readFileSync(file), bytes, '重放不写第二遍');
+
+  // 刷新页面读的是 payload：草稿与作答历史分属两格
+  const refreshed = readLibrary({ workspace }).subjects[0].nodes[0];
+  assert.deepEqual(refreshed.attempts.drafts[OPEN], receipt.attempts['草稿'][OPEN], '刷新后草稿还在');
+  assert.equal(refreshed.attempts.questions[OPEN], undefined, '草稿不出现在作答历史里');
+});
+
+test('#213 草稿：键数到上限后按 时 驱逐最旧，本次写入那条一定留', async () => {
+  const { home, workspace, attemptsDir } = makeHome();
+  process.env.DSH_HOME = home;
+
+  // 先摆 200 条旧草稿（时从早到晚），再走真路由写第 201 条；驱逐方向才可判定。
+  fs.mkdirSync(attemptsDir, { recursive: true });
+  const file = path.join(attemptsDir, `0001-${NODE}.json`);
+  const seed = {
+    节点: NODE, 课件: `0001-${NODE}.md`, 最后写入: '2026-09-01T00:00:00.000Z', 题: {}, 草稿: {},
+  };
+  for (let i = 0; i < 200; i += 1) {
+    seed.草稿[`旧题#${i}`] = {
+      文本: `旧草稿 ${i}`,
+      时: new Date(Date.UTC(2026, 8, 1, 0, i)).toISOString(),
+    };
+  }
+  fs.writeFileSync(file, JSON.stringify(seed, null, 2) + '\n', 'utf8');
+
+  const { route } = connect();
+  const fresh = '新写的#1';
+  const response = await post(route, {
+    subject: SUBJECT,
+    node: NODE,
+    questions: { [fresh]: { 草稿: { 文本: '刚写的最新一条', 时: '' } } },
+    operationId: op('draft-prune'),
+    expectedVersion: attemptsVersion({ workspace, subject: SUBJECT, node: NODE }),
+  });
+  assert.equal(response.status, 200);
+  const receipt = await response.json();
+  const keys = Object.keys(receipt.attempts['草稿']);
+  assert.equal(keys.length, 200, '上限 200：写第 201 条时要驱逐而不是继续长');
+  assert.ok(keys.includes(fresh), '本次写入那条必须在');
+  assert.equal(keys.includes('旧题#0'), false, '按 时 最旧的那条被驱逐');
+  assert.ok(keys.includes('旧题#199'), '较新的旧草稿保留');
+  assert.equal(keys[0], '旧题#1', '驱逐只删键、不重排：留下的键保持原文件里的先后');
+  assert.equal(keys[keys.length - 1], fresh, '本次写入那条落在原来的位置（追加在末尾），不插到最前');
+  assert.equal(receipt.attempts['草稿'][fresh]['文本'], '刚写的最新一条');
+  assert.equal(receipt.attempts['题'][fresh], undefined, '驱逐只发生在草稿那一格，不建题条目');
+
+  const refreshed = readLibrary({ workspace }).subjects[0].nodes[0];
+  assert.equal(Object.keys(refreshed.attempts.drafts).length, 200, '刷新读回同一份');
+  assert.deepEqual(refreshed.attempts.drafts, receipt.attempts['草稿'], '读侧不再二次裁剪，盘上是什么就读什么');
+});
+
+test('#213 文本口径：预测与作答都原样落盘（只截断），只含空白的两边都不占键', async () => {
+  const { home, workspace } = makeHome();
+  process.env.DSH_HOME = home;
+  const { route } = connect();
+  const version = attemptsVersion({ workspace, subject: SUBJECT, node: NODE });
+
+  const prediction = '  4  \n';
+  const answer = '\n  第一行\n    缩进第二行\n';
+  const response = await post(route, {
+    subject: SUBJECT,
+    node: NODE,
+    questions: { [OPEN]: { 选: null, 对: false, 自评: '没答上', 预测: prediction, 作答: answer } },
+    operationId: op('text-raw'),
+    expectedVersion: version,
+  });
+  assert.equal(response.status, 200);
+  const receipt = await response.json();
+  const lastOne = receipt.attempts['题'][OPEN]['上次结果'];
+  assert.equal(lastOne['预测'], prediction, '预测原样落盘：首尾空格与换行不被 trim 掉');
+  assert.equal(lastOne['作答'], answer, '作答原样落盘：缩进与换行保留');
+
+  const blank = await post(route, {
+    subject: SUBJECT,
+    node: NODE,
+    questions: { [OPEN]: { 选: null, 对: true, 预测: '   \n', 作答: '\t\n ' } },
+    operationId: op('text-blank'),
+    expectedVersion: receipt.version,
+  });
+  assert.equal(blank.status, 200, '只含空白不算校验失败，只是不占键');
+  const blankReceipt = await blank.json();
+  const blankLast = blankReceipt.attempts['题'][OPEN]['上次结果'];
+  assert.equal('预测' in blankLast, false, '只含空白的预测不占键（空判据按 trim 后的值）');
+  assert.equal('作答' in blankLast, false, '只含空白的作答不占键（与预测同一口径）');
+});
+
+test('#213 草稿：文本进入幂等指纹（同 operationId 换文本要被拒）', async () => {
+  const { home, workspace } = makeHome();
+  process.env.DSH_HOME = home;
+  const { route } = connect();
+  const version = attemptsVersion({ workspace, subject: SUBJECT, node: NODE });
+
+  const body = (text) => ({
+    subject: SUBJECT,
+    node: NODE,
+    questions: { [OPEN]: { 草稿: { 文本: text, 时: '' } } },
+    operationId: 'same-operation-id',
+    expectedVersion: version,
+  });
+
+  const first = await post(route, body('第一版'));
+  assert.equal(first.status, 200);
+  const replay = await post(route, body('第一版'));
+  assert.equal(replay.status, 200, '文本一样：重放');
+  const changed = await post(route, body('第二版'));
+  assert.equal(changed.status, 409, '文本变了：同一个 operationId 不能当成重复提交吞掉');
+  const refused = await changed.json();
+  assert.equal(refused.error.code, 'operation-id-conflict');
+});
+
+test('#213 自评快照：作答/预测进历史与上次结果；超长文本截断而不是拒绝', async () => {
+  const { home, workspace } = makeHome();
+  process.env.DSH_HOME = home;
+  const { route } = connect();
+  const version = attemptsVersion({ workspace, subject: SUBJECT, node: NODE });
+  const longText = '答'.repeat(9000);
+
+  const response = await post(route, {
+    subject: SUBJECT,
+    node: NODE,
+    questions: { [OPEN]: { 选: null, 对: true, 自评: '答了一半', 作答: longText } },
+    operationId: op('snapshot'),
+    expectedVersion: version,
+  });
+  assert.equal(response.status, 200, '超长不拒绝（拒绝会让学生丢整段）');
+  const receipt = await response.json();
+  const one = receipt.attempts['题'][OPEN];
+  assert.equal(Array.from(one['作答历史'][0]['作答']).length, 8192, '历史条目的文本按码点截到上限');
+  assert.equal(Array.from(one['上次结果']['作答']).length, 8192, '上次结果同步带上同一段');
+  assert.equal(one['上次结果']['自评'], '答了一半');
+  assert.equal(one['上次结果']['对'], true);
+
+  const refreshed = readLibrary({ workspace }).subjects[0].nodes[0];
+  assert.equal(Array.from(refreshed.attempts.questions[OPEN]['上次结果']['作答']).length, 8192,
+    '刷新后仍读得回截断后的文本');
+
+  // 预测与作答走同一个 8192 口径：服务端不再只 trim 了。
+  const prediction = '😀'.repeat(9000);
+  const predicted = await post(route, {
+    subject: SUBJECT,
+    node: NODE,
+    questions: { [OPEN]: { 预测: prediction } },
+    operationId: op('snapshot-prediction'),
+    expectedVersion: receipt.version,
+  });
+  assert.equal(predicted.status, 200, '超长预测不拒绝');
+  const predictedReceipt = await predicted.json();
+  assert.equal(Array.from(predictedReceipt.attempts['题'][OPEN]['上次结果']['预测']).length, 8192,
+    '预测历史条目按码点截到上限');
+});

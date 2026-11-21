@@ -1064,3 +1064,97 @@ test('升级备份目录冲突/symlink/hardlink 拒绝覆盖或跟随，原库�
   }
 });
 
+
+/* ── #304 显式 onCorrupt=skip：只降级坏资源，不降级 layout/权限/整库预算 ───── */
+
+test('#304 onCorrupt=skip 返回坏资源清单，普通 GET 仍 fail closed', () => {
+  const home = makeHome();
+  const good = writeNotesResource({ home, resource: noteResource('ok', { title: '好笔记' }), expectedVersion: null });
+  assert.equal(good.ok, true);
+  const bad = writeNotesResource({
+    home,
+    resource: noteResource('bad', {
+      title: '坏笔记',
+      associations: [{ workspace: 'ws', subject: 'math', node: 'n-1', title: '数学' }],
+    }),
+    expectedVersion: null,
+  });
+  assert.equal(bad.ok, true);
+  const layout = {
+    folders: [
+      { id: 'notes', parent: null, name: '概念', kind: 'folder' },
+      { id: 'nb', parent: 'notes', name: '笔记本甲', kind: 'notebook' },
+    ],
+    nodes: [{
+      id: 'node-bad', type: 'knowledge', position: { x: 1, y: 2 },
+      style: { width: 300, height: 200 },
+      data: { contentId: 'bad', notebookId: 'nb' },
+    }],
+    edges: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  assert.equal(writeNotesLayout({ home, layout, expectedVersion: null }).ok, true);
+  // 让正文出现非法 UTF-8：头三行仍可提取 title/associations，整篇 normalize 必须失败。
+  fs.appendFileSync(path.join(notesRoot(home), 'resources', 'r-bad.md'), Buffer.from([0xff, 0xfe]));
+
+  const strict = readNotesStore({ home });
+  assert.equal(strict.ok, false);
+  assert.equal(strict.status, 503);
+  assert.equal(strict.code, 'file-shape-unknown');
+
+  const invalid = readNotesStore({ home, onCorrupt: 'nope' });
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.status, 400);
+  assert.equal(invalid.code, 'body-invalid');
+
+  const skipped = readNotesStore({ home, onCorrupt: 'skip' });
+  assert.equal(skipped.ok, true, JSON.stringify(skipped));
+  assert.deepEqual(Object.keys(skipped.value.resources), ['ok']);
+  assert.equal(skipped.value.corrupt.length, 1);
+  const entry = skipped.value.corrupt[0];
+  assert.equal(entry.id, 'bad');
+  assert.equal(entry.kind, 'md');
+  assert.equal(entry.title, '坏笔记');
+  assert.equal(entry.notebook, '笔记本甲');
+  assert.equal(entry.message, '资源文件已损坏，暂时无法载入。');
+  assert.equal(entry.associations.length, 1);
+  assert.equal(entry.associations[0].node, 'n-1');
+  // 通用文案不含路径 / 异常。
+  assert.equal(JSON.stringify(entry).includes(home), false);
+});
+
+test('#304 onCorrupt=skip 遇坏 layout 仍整库失败，不把 layout 当空', () => {
+  const home = makeHome();
+  assert.equal(writeNotesResource({ home, resource: noteResource('ok'), expectedVersion: null }).ok, true);
+  fs.writeFileSync(path.join(notesRoot(home), 'layout.json'), '{ not json');
+  const skipped = readNotesStore({ home, onCorrupt: 'skip' });
+  assert.equal(skipped.ok, false);
+  assert.equal(skipped.status, 503);
+  assert.equal(skipped.code, 'file-shape-unknown');
+});
+
+test('#304 onCorrupt=skip 也把单文件超限的字节计入 48 MiB 实际总量', () => {
+  const home = makeHome();
+  assert.equal(writeNotesResource({ home, resource: noteResource('good'), expectedVersion: null }).ok, true);
+  const resources = path.join(notesRoot(home), 'resources');
+  // 稀疏文件即可：stat.size 计入预算，读取上限会在 readFile 之前拒绝。
+  const oversize = 6 * 1024 * 1024 + 1;
+  for (let i = 0; i < 9; i += 1) {
+    const file = path.join(resources, `r-oversize-${i}.json`);
+    fs.writeFileSync(file, '');
+    fs.truncateSync(file, oversize);
+  }
+  const skipped = readNotesStore({ home, onCorrupt: 'skip' });
+  assert.equal(skipped.ok, false, '9 个超限文件合计超过 48 MiB 时不能再 skip');
+  assert.equal(skipped.status, 503);
+  assert.equal(skipped.code, 'file-shape-unknown');
+  assert.match(skipped.message, /48 MiB/);
+
+  // 单个超限文件（总量未越界）仍按坏资源降级，预算不应把 skip 整体禁掉。
+  for (let i = 1; i < 9; i += 1) fs.rmSync(path.join(resources, `r-oversize-${i}.json`));
+  const one = readNotesStore({ home, onCorrupt: 'skip' });
+  assert.equal(one.ok, true, JSON.stringify(one));
+  assert.deepEqual(Object.keys(one.value.resources), ['good']);
+  assert.equal(one.value.corrupt.length, 1);
+  assert.equal(one.value.corrupt[0].id, 'oversize-0');
+});

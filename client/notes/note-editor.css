@@ -15,12 +15,16 @@
   --accent-soft: var(--smb-raise, #eaf0f5);
   --accent: var(--smb-text-link, #205f91);
   --teal: var(--smb-text-link, #205f91);
+  /* #312 A5：笔记编辑/渲染面比宿主面深一档，宿主自身背景不变。
+     亮色从侧栏面 --smb-bg 往深混 6%；暗色钉深一档。编辑与只读渲染两态都盖这个面。 */
+  --ne-surface: var(--smb-bg, #f7f8fa);
+  --ne-surface: color-mix(in srgb, var(--smb-bg, #f7f8fa) 94%, #0d1210);
   display: flex;
   min-width: 0;
   min-height: 0;
   flex-direction: column;
   color: var(--text);
-  background: transparent;
+  background: var(--ne-surface);
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -32,11 +36,12 @@
   --text-strong: var(--smb-text, #edf0f3);
   --border: var(--smb-line-strong, #454f5a);
   --line: var(--smb-line-strong, #454f5a);
-  --code: var(--smb-raise, #252d36);
-  --code-gutter: var(--smb-bg, #252d36);
+  --code: #272727;
+  --code-gutter: #272727;
   --accent-soft: var(--smb-raise, #303e4c);
   --accent: var(--smb-text-link, #9ecdf3);
   --teal: var(--smb-text-link, #9ecdf3);
+  --ne-surface: #1b1b1b;
 }
 .note-editor > [role="toolbar"] {
   position: sticky;
@@ -44,6 +49,45 @@
   z-index: 2;
   flex: 0 0 auto;
 }
+.note-editor__actions {
+  display: flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  margin: 4px 0;
+}
+.note-editor__export {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.note-editor__export:hover { text-decoration: underline; }
+.note-editor__export:focus-visible { outline: 2px solid var(--accent); }
+.note-editor__export-icon { flex: 0 0 auto; }
+.notes-title-row { display: flex; align-items: center; gap: 6px; }
+.notes-title-row > input { flex: 1; min-width: 0; }
+.notes-title-row .note-editor__export-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.notes-title-row .note-editor__export-icon:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.note-editor__export-icon:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
 .note-editor .markdown-inline-editor,
 .note-editor .markdown-inline-editor:focus-within {
   min-width: 0;
@@ -66,7 +110,44 @@
   line-height: 1.6;
 }
 .note-editor.is-readonly .note-editor__preview { padding: 0; }
-.document-scroll.is-inline > .note-editor { width: 100%; height: 100%; flex: 1 1 auto; }
-.document-scroll.is-inline > .note-editor .markdown-inline-editor { min-height: 0; }
-.document-scroll.is-inline > .note-editor .cm-editor { height: 100%; }
-.document-scroll.is-inline > .note-editor .cm-scroller { overflow: auto; }
+.note-editor__panes { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; }
+.note-editor__panes.is-split { display: grid; grid-template-columns: minmax(0, var(--document-source-width, 50%)) 4px minmax(0, 1fr); }
+.note-editor__source { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; }
+.note-editor__source[hidden] { display: none; }
+.note-editor__panes > .note-editor__preview { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.note-editor__panes > .document-split-handle { position: relative; cursor: col-resize; touch-action: none; background: var(--border); }
+.note-editor__panes > .document-split-handle::before { content: ''; position: absolute; inset: 0 -3px; }
+.note-editor__panes > .document-split-handle:is(:hover, :focus-visible) { background: var(--accent); outline: 1px solid var(--accent); }
+.note-editor__split-tabs { display: flex; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+.note-editor__split-tabs button { padding: 3px 8px; border: 1px solid transparent; border-radius: 4px; color: var(--text); background: transparent; }
+.note-editor__split-tabs button[aria-pressed='true'] { border-color: var(--border); background: var(--accent-soft); }
+.app-shell .document-stage .document-mode-switch { flex: 0 0 auto; align-self: flex-start; margin: 5px 10px; }
+.app-shell .document-stage > .document-scroll.note-document-scroll { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.app-shell .right-panel .resource-detail.is-note-detail { flex: 1 1 auto; min-height: 0; gap: 0; overflow: hidden; padding: 0; }
+.resource-detail.is-note-detail > :not(.note-editor) { margin: 5px 10px; }
+.unsupported-note { margin: 12px; }
+.document-scroll.note-document-scroll > .note-editor,
+.resource-detail.is-note-detail > .note-editor { flex: 1 1 auto; width: 100%; overflow: hidden; }
+:is(.note-document-scroll, .resource-detail.is-note-detail) .note-editor .markdown-inline-editor { min-height: 0; }
+:is(.note-document-scroll, .resource-detail.is-note-detail) .note-editor .markdown-inline-editor__host,
+:is(.note-document-scroll, .resource-detail.is-note-detail) .note-editor .cm-editor { height: 100%; }
+:is(.note-document-scroll, .resource-detail.is-note-detail) .note-editor .cm-scroller,
+:is(.note-document-scroll, .resource-detail.is-note-detail) .note-editor.is-readonly .note-editor__preview { overflow: auto; }
+
+/* 恢复未保存草稿的提示：与错误/状态行同一版式，链接按钮与导出按钮同观感。 */
+.note-editor__status {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--smb-text-3, #5c6874);
+}
+.note-editor__link {
+  border: 0;
+  background: none;
+  padding: 0 0 0 6px;
+  font: inherit;
+  color: var(--smb-text-link, #205f91);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.note-editor__link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

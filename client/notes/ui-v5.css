@@ -24,7 +24,7 @@
 
 /* ── 1. 动画原语：与主题无关 ───────────────────────────────────────── */
 .app-shell.v5 {
-  --v5-dur: 200ms;
+  --v5-dur: var(--smb-motion, 200ms);
   --v5-rail-width: 32px;
   --v5-ease: cubic-bezier(.2, .7, .3, 1);
   /* 过渡时长倍率；减少动效时归零。不写 0s：过渡表里总有 time 项，不存在「无匹配属性」。 */
@@ -100,7 +100,7 @@
 /* ── 5. 折叠卡片：48px，只留页头（行内调节手柄在卡片外，无需改节点尺寸） ── */
 .app-shell.v5 .knowledge-card.is-collapsed {
   min-height: 48px; height: 48px;
-  transition: height var(--v5-dur, 200ms) var(--v5-ease, ease), box-shadow .15s ease, border-color .15s ease;
+  transition: height var(--v5-dur, 200ms) var(--v5-ease, ease), box-shadow var(--v5-dur, 150ms) ease, border-color var(--v5-dur, 150ms) ease;
 }
 .app-shell.v5 .knowledge-card.is-collapsed > .card-drag-handle { height: 100%; min-height: 0; border-bottom: 0; }
 .app-shell.v5 .knowledge-card.is-collapsed > .card-body { display: none; }
@@ -129,5 +129,5 @@
 
 /* ── 7. 真减动效：关位移，直接换终态，不强行播动画 ─────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .app-shell.v5 { --v5-motion: 0; }
+  .app-shell.v5:not(.is-hosted) { --v5-motion: 0; }
 }

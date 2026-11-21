@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Annotations",
-  "description": "一个课件的标注数据（ADR-0015，即 ADR-0004 的「新增而非改动」破例 + ADR-0010 的作答数据族扩员）：`<科目>/annotations/<NNNN>-<节点id>.json`，与课件一一对应。学生在课件页划选正文留下的高亮与注释只落在这里，**绝不写回 .md / .quiz.json**——课件是模型写的、下次重写会整段覆盖；题库的锚点对账也依赖逐字内容。这是 ADR-0004 冻结的例外，但破法是**只新增**（新目录 + 新 schema）：不改任何已有文件名与内容、旧工作区没有 annotations/ 照样能开、零迁移。**版本号不在文件里**：它是读写两侧各自按文件内容算出来的（`lib/annotations.ts` 的 `annotationsVersion`），写之前先报自己看到的那个值当 `expectedVersion`，对不上就拒绝并重读。**块切分只由阅读端的 parseBlocks 说了算**（ADR-0015）：Host 半写入时不重新解析课件、读回也不解析，只做字节存储 + 版本栅栏（`operationId` 幂等 + `expectedVersion` 冲突拒绝）；range 指向的块是否还在，由客户端渲染时按 resolved / stale / ambiguous / missing 四态对账，**不由写入前的 Host 判据负责**。",
+  "description": "一个课件的标注数据（ADR-0021，即 ADR-0004 的「新增而非改动」破例 + ADR-0010 的作答数据族扩员）：`<科目>/annotations/<NNNN>-<节点id>.json`，与课件一一对应。学生在课件页划选正文留下的高亮与注释只落在这里，**绝不写回 .md / .quiz.json**——课件是模型写的、下次重写会整段覆盖；题库的锚点对账也依赖逐字内容。这是 ADR-0004 冻结的例外，但破法是**只新增**（新目录 + 新 schema）：不改任何已有文件名与内容、旧工作区没有 annotations/ 照样能开、零迁移。**版本号不在文件里**：它是读写两侧各自按文件内容算出来的（`lib/annotations.ts` 的 `annotationsVersion`），写之前先报自己看到的那个值当 `expectedVersion`，对不上就拒绝并重读。**块切分只由阅读端的 parseBlocks 说了算**（ADR-0021）：Host 半写入时不重新解析课件、读回也不解析，只做字节存储 + 版本栅栏（`operationId` 幂等 + `expectedVersion` 冲突拒绝）；range 指向的块是否还在，由客户端渲染时按 resolved / stale / ambiguous / missing 四态对账，**不由写入前的 Host 判据负责**。",
   "type": "object",
   "required": [
     "节点",

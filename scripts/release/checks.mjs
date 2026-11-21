@@ -275,7 +275,7 @@ const groups = {
       // 「POST 落盘 → 另起一次读仍带得回上次选了 X」（跨请求 = 刷新页面那条）、
       // 冲突拒绝不写盘、主观题自评落盘、题库逐字不变。
       'scripts/tests/test_host_attempts_route.mjs',
-      // #225 ③ / ADR-0015：课件页标注的 Host 半——annotations/ 的落盘形状、独立幂等台账、
+      // #225 ③ / ADR-0021：课件页标注的 Host 半——annotations/ 的落盘形状、独立幂等台账、
       // expectedVersion 冲突拒绝并重读、全量替换（创建/编辑/删除/清空）、路径越界；
       // payload 的 node.annotations={present,version,items} 与监听域的 annotations 片；
       // 以及写入口 POST /api/studymate/annotations 的注册形状与状态码映射。
@@ -319,19 +319,30 @@ const groups = {
       'scripts/tests/test_notes_native_contract.mjs',
       // #268：独立笔记数据域、跨进程版本栅栏与原生自动保存（默认纯 Node，无浏览器前置）。
       'scripts/tests/test_notes_store.mjs',
+      'scripts/tests/test_notes_store_recovery.mjs',
       'scripts/tests/test_notes_route.mjs',
       'scripts/tests/test_notes_persistence.mjs',
+      // 同一标签页宿主的持久化会话（client/notes/persistence-session.js）：卸载交还租约而不
+      // dispose 控制器、重挂复用同一控制器与同一在途 GET、失败不复用、竞争租约 fail closed。
+      'scripts/tests/test_notes_persistence_session.mjs',
+      'scripts/tests/test_notes_serialization_cache.mjs',
       'scripts/tests/test_notes_curriculum.mjs',
       // #270 编辑交互后续：真实局部 Markdown 标记与原稿坐标格式命令。
       'scripts/tests/test_notes_inline_editor.mjs',
       'scripts/tests/test_notes_markdown_formatting.mjs',
+      // #312 三面共用 NoteEditor 的统一导出：标题 → 安全文件名（非法字符、Windows
+      // 保留名、末尾点空格、长度）与原稿逐字导出、对象 URL 回收（纯函数，Node 里跑）。
+      'scripts/tests/test_notes_note_export.mjs',
+      // #312 资源树纯逻辑层：单高亮互斥收敛、删除四层保护（根/回退目录/最后一本/
+      // 默认本/绑定本/非空计数）、名称与标题校验——模型与 UI 闸门共用同一函数。
+      'scripts/tests/test_notes_resource_tree.mjs',
       // #88 三栏几何：ADR-0011 的让位顺序（右栏先拿 / 左栏先让 / 中栏保底 420）与
       // 「并排装不下就把那一栏盖在正文上」的降级。同样是纯函数——「任何画布宽度下都
       // 有一栏打得开」是代数，浏览器里一条条试既慢又试不全。
       'scripts/tests/test_client_panes.mjs',
       // #76 阅读位置三级降级：lib/client.js 里那段纯数学内核（切源码标记求值，不需要浏览器）
       'scripts/tests/test_client_reading_position.mjs',
-      // #225 ③ / ADR-0015：课件页标注的锚点内核（STUDY_ANNOTATE_KERNEL 标记夹住，零 DOM）与
+      // #225 ③ / ADR-0021：课件页标注的锚点内核（STUDY_ANNOTATE_KERNEL 标记夹住，零 DOM）与
       // 渲染契约——parseBlocks 的绝对行号（含嵌套指令 body 的 baseLine）、块纯文本 + 哈希、
       // 四态判定（多匹配不静默取第一个）、失效重指、多选拼引用；渲染那半边用 client_harness 的
       // React 桩调真组件。真浏览器里划选、高亮覆盖层与刷新后仍在在 --browser 组的
@@ -436,7 +447,7 @@ const groups = {
       'scripts/tests/test_export_leak_guard.mjs',
       'scripts/tests/test_export_tool_task.mjs',
       'scripts/tests/test_export_cli.mjs',
-      // #225 ⑤ / ADR-0015：导出产物的**标注只读快照**——真导出后 data.js 里
+      // #225 ⑤ / ADR-0021：导出产物的**标注只读快照**——真导出后 data.js 里
       // `window.__STUDYMATE_EXPORT__.library.offline === true`、对应节点的 annotations 逐字
       // 带出（items / ranges 与盘上一致）；产物里 studymate-client.js 仍与 lib/client.js
       // 逐字相同（同一套渲染）、泄漏守卫干净；只读模式下列表/弹层的写入口不出现。
@@ -460,6 +471,8 @@ const groups = {
       // 客户端两个官方槽位、subject 自过滤、zh/en 字典与状态投影。
       'scripts/tests/test_host_status.mjs',
       'scripts/tests/test_client_plugin_page.mjs',
+      'scripts/tests/test_client_locale.mjs',
+      'scripts/tests/test_notes_locale.mjs',
     ],
   },
   '--static': {
@@ -496,18 +509,47 @@ const groups = {
       // #262：共享笔记组件的独立网页，Playwright 真交互；DSH 会话只用占位。
       'browser/notes_test.mjs',
       'browser/notes_brand_test.mjs',
+      'browser/locale_test.mjs',
+      'browser/notes_locale_test.mjs',
       // #268：真实临时 notes HTTP/数据域；独立页仍纯内存，不接真实会话。
       'browser/notes_persistence_test.mjs',
+      // #302 / ADR-0019：懒分块——学习首屏零分块请求、首开恰一次、往返保活、失败重试、
+      // 旧宿主（无 require.async）学习面照常且笔记明确失败不静默回退。
+      'browser/notes_lazy_chunk_test.mjs',
+      // #303：拖动/折叠只提交布局、隐藏面暂停轮询——真浏览器性能回归。
+      'browser/notes_performance_test.mjs',
       // #270：学习端节点笔记接线——空节点、默认本、左右同一原稿、拖动只改关联、
       // 软删除恢复、无界节点视图同分类、课程卡只读与精确跳回。真临时 HOME，不 seedDemo。
       'browser/notes_curriculum_test.mjs',
       // #270：共享局部编辑与单格式栏的原稿保真、安全、IME 与受控生命期。
       'browser/notes_live_editor_test.mjs',
       'browser/notes_inline_editor_test.mjs',
+      // #303：拖动不重序列化正文、隐藏面暂停轮询（checks 侧此前漏登，此处补上）。
+      'browser/notes_performance_test.mjs',
+      // #312：资源树行级菜单、重命名、删除保护与单高亮（esbuild 临时页挂真组件）。
+      'browser/notes_resource_tree_test.mjs',
+      // #312：资源树与画布/App 的接线回归（集成 hunk 与视图切换）。
+      'browser/notes_tree_wiring_test.mjs',
+      // #312：笔记面亮暗主题对比度与切换回归。
+      'browser/notes_theme_test.mjs',
+      // #312：隐藏面草稿保护——依赖 #303 的 becameVisible 立即核对语义，必须在
+      // 该语义合入后运行（隐藏期在途/失败/冲突重显不丢草稿、清洁重显立即核对）。
+      'browser/notes_persistence_hidden_draft_test.mjs',
+      // #312：导航卸载前后 pending/error 的真实可达状态——输入不串文件、不被误标草稿、
+      // 无未确认草稿时不误拦关闭页面。未确认草稿本身只在组件层 fixture 可构造。
+      'browser/notes_draft_navigation_test.mjs',
+      // #312：关掉 main 再挂回来——真 React 19（development，StrictMode 真双调 effect）+
+      // 假 transport：在途/debounce/失败/409 草稿与 layout 跨卸载保留，重挂不重发 GET、
+      // 不把默认相机写成草稿、两个 main 竞争时旧实例 fail closed。
+      'browser/notes_persistence_session_test.mjs',
+      // ADR-0019：真 dist 组合客户端 + 真 notes HTTP；宿主 main 整个卸载、同标签重进，
+      // 验笔记面/同篇文档/按篇文档模式、活动笔记本画布与学习课件位置的恢复，以及
+      // 保存请求在途时真卸载后的草稿恢复。品牌切换只用于切面，不作为退出替代。
+      'browser/notes_host_reentry_test.mjs',
       'browser/reading_test.mjs',
       'browser/reading_position_test.mjs',
       'browser/attempts_test.mjs',
-      // #225 ③ / ADR-0015：课件页标注的真浏览器验收——划选正文 → 浮层里写注释 → 高亮覆盖层与
+      // #225 ③ / ADR-0021：课件页标注的真浏览器验收——划选正文 → 浮层里写注释 → 高亮覆盖层与
       // 行内小标记出现 → 点开可读/可编辑/可删除；重新挂载（刷新）后从 payload 读回；原文改过后
       // 显式 stale、不贴到错位置。夹具与 attempts_test.mjs 同一套（真 lib/client.js + 假 HTTP 宿主）。
       'browser/annotations_test.mjs',

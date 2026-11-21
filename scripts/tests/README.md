@@ -6,7 +6,7 @@
 npm test
 ```
 
-需要 Node.js（支持范围看 `package.json` 的 `engines`）。**不需要 Python**：引擎随包发 TypeScript，`node` 直接跑 `.ts`（Node 原生类型擦除）。`npm ci` 按根锁文件装 devDependencies：类型门禁与客户端构建都要它们。默认门禁先构建单一客户端 `dist/client.js` 及许可证，再跑 Node 套件；前端依赖只参加构建，不成为 Host 运行时依赖。**各命令的前置以本文件为准**，别处只给指针：Actions 实际用 Node 24，只在 Ubuntu 上跑一次，不展开系统和运行时矩阵。默认检查只跑安装器、插件打包、引擎（数据层/内容层）、静态契约与发布逻辑，不安装真实 DSH、pnpm 或浏览器，不调用模型。
+需要 Node.js（支持范围看 `package.json` 的 `engines`）。**不需要 Python**：引擎随包发 TypeScript，`node` 直接跑 `.ts`（Node 原生类型擦除）。`npm ci` 按根锁文件装 devDependencies：类型门禁与客户端构建都要它们。默认门禁先构建客户端入口 `dist/client.js`、按需分块 `dist/client.notes.js` 及许可证，再跑 Node 套件；前端依赖只参加构建，不成为 Host 运行时依赖。**各命令的前置以本文件为准**，别处只给指针：Actions 实际用 Node 24，只在 Ubuntu 上跑一次，不展开系统和运行时矩阵。默认检查只跑安装器、插件打包、引擎（数据层/内容层）、静态契约与发布逻辑，不安装真实 DSH、pnpm 或浏览器，不调用模型。
 
 测试使用临时目录，不读写学生的 `workspace/`。
 
@@ -31,10 +31,10 @@ Git 装在其他位置时，用实际安装目录替换上面的路径。Node �
 | `npm run test:antigravity` | Antigravity 插件 ZIP、原生 agents、导出保护与重复构建 |
 | `npm run test:release` | 版本、changelog、重试和发布保护 |
 | `npm run test:static` | 技能调用面与提示词规则归属、词表与发布元数据、文档悬空引用、OpenAI 与 Antigravity skill 转换及 UI 元数据（`npm test` 已含这一层，这里可单独跑） |
-| `npm run test:notes:browser` | 构建共享网页并运行六套独立 Edge 回归：画布与占位会话、品牌切换、临时数据域持久化、学习节点联动、共享格式栏与局部编辑、底层编辑器。验证刷新和冲突保护、只读升级、真实灰色标记、原稿坐标和输入法、亮暗对比度、媒体边界及无操作零保存；不连接真实 DSH 或模型，前置见「浏览器套件与手动工具」 |
+| `npm run test:notes:browser` | 构建共享网页并运行无界笔记 Edge 回归，包括正式客户端懒分块、同标签卸载重进、持久化、四种文档视图和共享编辑器。具体范围见[浏览器套件与手动工具](#浏览器套件与手动工具)；只用临时夹具，不连接用户正在使用的 DSH 或模型 |
 | `npm run test:browser` | 阅读端与无界笔记的真实浏览器渲染测试（阅读端本体、阅读位置、作答落盘、监听推送、跑一次、导出产物、公式排版、四路由 × 三档视口、课件页正文与页头、问答会话与引用、课件页标注），浏览器二进制自动探测 |
 | `npm run test:dsh` | 真实 DSH 启动与 Web 预设，需要指定 DSH 包目录；native 安装下还验九个原生工具的注册、body 可调用（走真 dispatch）与越权抛，以及 #70 的引擎路径：`root` 指向已安装的包、`~/.dsh/studymate/engine/` 不再出现 |
-| `npm run test:dsh-contract` | **宿主契约守门**：拿真宿主自己的 schema 校验器（`dsh-tools` 的 `assertSupportedJsonSchema`）扫注册点上全部工具的 `parameters` 与 `output.schema`，并核对参考调用 `createWebhookSession` 的字段清单没漂，并逐行解析预设里的模块（宿主删掉的子路径必须带停用条件，`#244`）；附一条反证（已知不合规的 schema 必须报错）。同一个 `STUDYMATE_DSH_PACKAGE`，没设就跳过。指针与纪律在 [工程约束](../规范/工程约束.md) §三「宿主契约」 |
+| `npm run test:dsh-contract` | **宿主契约守门**：拿真宿主自己的 schema 校验器（`dsh-tools` 的 `assertSupportedJsonSchema`）扫注册点上全部工具的 `parameters` 与 `output.schema`，并核对参考调用 `createWebhookSession` 的字段清单没漂，并逐行解析预设里的模块（宿主删掉的子路径必须带停用条件，`#244`）；附一条反证（已知不合规的 schema 必须报错）。同一个 `STUDYMATE_DSH_PACKAGE`，没设就跳过。指针与纪律在 [工程约束](../../docs/规范/工程约束.md) §三「宿主契约」 |
 | `npm run test:dsh-cli` | 真实 DSH CLI 安装、更新、卸载，还需要 `pnpm` |
 
 提示词与文档契约、两个宿主的技能转换这一层（`--static`）**已并入 `npm test`**，CI 每次都会跑；保留为本地按需命令的只剩真实宿主（`test:dsh` / `test:dsh-cli`）与真实 Chrome（`test:browser`）——它们要外部环境，不适合当默认门禁。`scripts/release/checks.mjs` 显式列出各层套件——**显式的代价是新增套件会静默地永远不跑**，所以那里有一条覆盖断言：`scripts/tests/` 下的每个文件必须属于某个组（core / `--static` / `--browser`）、package.json 的按需入口（`test:dsh` 等），或在 `MANUAL_ONLY` 里明确登记为手动脚本。漏登记时跑门禁会直接报出文件名并以退出码 2 停下。
@@ -63,7 +63,11 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_notes_imports.mjs`、`test_notes_media.mjs` | 副本与引用身份、只读句柄重读/撤权、文件上限、静态 HTML/SVG/图片禁脚本与外网及像素/复杂度拒绝；测试字节现造现弃 |
 | `test_notes_editor_gutter.mjs` | 旧源码编辑器的行号位宽与连续选区纯契约；新共享正文的局部语法与格式命令由下列套件验收 |
 | `test_notes_inline_editor.mjs`、`test_notes_markdown_formatting.mjs` | Markdown 格式范围与真实标记、转义/代码隔离、原稿与编辑器坐标、混合换行保真、灰色/代码调色板；格式命令的局部事务、边界与安全链接 |
+| [test_notes_store_recovery.mjs](test_notes_store_recovery.mjs) | 真实进程在初始化 marker 发布前崩溃后的恢复、锁内孤儿临时文件清理、坏格式机读码与路径隐私、目录同步故障及升级备份保留、250 篇/48 MiB 边界、中文数据根与双进程同版本 CAS；只用临时数据域，默认 Node 门禁可达 |
 | `test_notes_native_contract.mjs` | 显式会话引用的坐标/去重/取消/资源世代与权限失效栅栏、宿主槽位注册；临时 bundle 在系统临时目录创建并清理，不连接真实 DSH/模型 |
+| `test_notes_serialization_cache.mjs` | #303 资源序列化缓存行为：同一资源对象连续 250 次提交只序列化/指纹一次，新对象身份（编辑/新建/导入/undo）重算且不原地改旧 DTO，`invalidate()`（load/applyBase/dispose）与序列化失败后的 `forget()` 语义；`--expose-gc` 时再验旧对象不强持 |
+| `test_notes_resource_tree.mjs` | #312 资源树纯逻辑层：单高亮互斥收敛与外部跟随、删除四层保护（根/initialParent 回退目录/最后一本笔记本/默认本/绑定本/非空计数含废纸篓与画布）、目录与文件名称校验（trim、代码点计长）、引用与已删资源不可改名 |
+| `test_notes_note_export.mjs` | #312 三面共用 NoteEditor 的统一导出：标题 → 安全文件名（非法字符、Windows 保留名、末尾点空格、长度）与原稿逐字导出、对象 URL 回收 |
 | `test_notes_curriculum.mjs`、`test_client_learning_notes.mjs` | 完整来源身份、关联换节点不搬原件、多科目默认本与相机/分区字段往返、两面共享状态和学习左右栏接线；纯阅读端导出不出现死笔记入口 |
 | `test_openai_plugin.mjs` | ZIP 用**独立读取器**解开后不依赖源码或 DSH 即可跑交互断点（read → update → answer）、没有 0 字节文件也没有 Python 文件；构建可重复，失败时保留已有产物 |
 | `test_preset_install.mjs` | 预设注册（`lib/preset.ts`，原 Python 安装助手的**行为移植**）：版本边界各自独立、补丁形态保留与幂等（注释、`!!js`、CRLF、流式列表）、暂存与 `--patch-output`、手动声明/越界 profile/坏清单/符号链接一律在写盘之前失败、`--bundle` 给 DSH 的 config 形状 |
@@ -79,9 +83,9 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_antigravity_plugin.mjs` | Antigravity 插件包含 5 个原生子代理与 12 个技能、无 0 字节文件、占用的输出目录不被清空、构建可重复 |
 | `scripts/release/release.test.mjs` | 版本计算、更新记录、历史 tag、PR 去重、制品校验与重试保护 |
 | `test_host_library_payload.mjs`、`test_host_reference_fence.mjs`、`test_host_path_boundary.mjs`、`test_host_yaml_workspace.mjs` | Host 半数据层（`lib/{workspace,library,assets,yaml,reference}.ts`）的特征化测试：payload 顶层与科目/节点形状、旧六档→三档、锚点四态、`operationId` 幂等重放、`expectedVersion` 冲突拒绝、路径越界、YAML 子集与工作区配置读取。数据在临时目录现造现弃，不碰真实工作区 |
-| `test_host_annotations.mjs`、`test_host_annotations_route.mjs` | 课件页标注的 Host 半（#225 ③ / ADR-0015）：`annotations/<NNNN>-<节点id>.json` 的落盘形状、**独立**的 `operationId` 幂等台账（重放不写第二遍）、`expectedVersion` 冲突拒绝并带回当前标注与版本号、全量替换语义（创建/编辑/删除/清空都靠一次写入）、路径越界拒绝、坏文件读侧不抛；payload 的 `node.annotations={present,version,items}` 与监听域 `annotations`；写入口 `POST /api/studymate/annotations` 的注册形状与 200/400/405/409/500 映射。数据在临时目录现造现弃 |
+| `test_host_annotations.mjs`、`test_host_annotations_route.mjs` | 课件页标注的 Host 半（#225 ③ / ADR-0021）：`annotations/<NNNN>-<节点id>.json` 的落盘形状、**独立**的 `operationId` 幂等台账（重放不写第二遍）、`expectedVersion` 冲突拒绝并带回当前标注与版本号、全量替换语义（创建/编辑/删除/清空都靠一次写入）、路径越界拒绝、坏文件读侧不抛；payload 的 `node.annotations={present,version,items}` 与监听域 `annotations`；写入口 `POST /api/studymate/annotations` 的注册形状与 200/400/405/409/500 映射。数据在临时目录现造现弃 |
 | `test_host_perf_budget.mjs` | **性能预算**（目标态规格 §10.3）：写成「相对工作区规模的比例」而不是绝对秒数——现造 16 课与 64 课两份工作区，数 `readLibrary()` 真的碰了几次文件系统（`readFileSync` / `readdirSync` / `statSync`…），断言 4 倍规模的工作量落在 `[3, 6]`（线性 ≈ 4、平方 ≈ 16、常数 ≈ 1）。数字是确定性的，不取挂钟——时间抖动在共享 CI 上只会变成假红 |
-| `test_host_route_envelope.mjs` | 阅读端 HTTP 路由的**错误信封**（`lib/route-envelope.ts`）：形状恒为 `{ ok:false, error:{ code, message } }`（`extra` 覆盖不掉这两个键）、`ROUTE_ERROR_CODES` 是唯一一份机读码词表（扫 `lib/**`、`bin/**` 的调用点，用了表外的码就红）、客户端只从 `error.code` / `error.message` 取值（`lib/client.js` 是手写 JS，不进 tsc）。契约的人读版在[工程约束](../规范/工程约束.md) §三 |
+| `test_host_route_envelope.mjs` | 阅读端 HTTP 路由的**错误信封**（`lib/route-envelope.ts`）：形状恒为 `{ ok:false, error:{ code, message } }`（`extra` 覆盖不掉这两个键）、`ROUTE_ERROR_CODES` 是唯一一份机读码词表（扫 `lib/**`、`bin/**` 的调用点，用了表外的码就红）、客户端只从 `error.code` / `error.message` 取值（`lib/client.js` 是手写 JS，不进 tsc）。契约的人读版在[工程约束](../../docs/规范/工程约束.md) §三 |
 | `test_host_paths.mjs` | 路径包含判据**本身**（`lib/paths.ts`）：reference 的读写、assets 的取址、导出的落点、实验命令的 cwd／可写范围／参数路径四处共用这一份，所以边界值直接钉住——同前缀的兄弟目录（`/a/bc` 不在 `/a/b` 里）、父目录与 `..`、`root` 带尾分隔符、软链指到边界之外、断链；并断言四个调用点都走这一份、谁也没再长出私有副本 |
 | `test_core_schema_subset.mjs` | JSON Schema 子集校验器（`lib/core/schema.ts`）：关键字枚举表与十份真 schema 对齐（新增关键字会红）、不支持的关键字不静默放行、逐个断言的 `type`/`required`/`additionalProperties`/`enum`/`const`/`pattern`/`minLength`/`minimum`/`minItems`/`format` |
 | `test_validators_curriculum.mjs` | 大纲校验（`validateCurriculum`）与带位置的 YAML 读取：DAG 无环、位次不倒挂、实验课前置非空、字段齐全、重复 id、悬空引用；行号是解析位置（夹具里放了逐字相同的**诱饵注释**，文本搜索会指错行）；并与 `lib/yaml.ts` 的值树逐路径对齐 |
@@ -99,7 +103,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_host_math_route.mjs` | 随包发的 KaTeX dist（#91）：CSS 里的 `url(fonts/…)` 与盘上的 `fonts/*.woff2` **双向**对账、版本与 `katex.min.js` 自报的一致、精确 MIME（不许兜 octet-stream）、取址判据（越界 / 软链逃逸 / 非投送类型都取不到）、路由形状（一条文件一条精确路由、全在 `/api/studymate/math/` 之内）|
 | `test_client_quiz_fields.mjs` | 主观题展开面板**按题型给字段**（#175）：判分要点（`criteria`）是共享字段——`预测验证`/`交付物` 带它就多「判分要点」那一块、`开放题` 照旧两块（参考答案 + 判分要点）、其余题型没写就不占一个只有标题的空档。同一套夹具（`client_harness.mjs`）把 `SubjectiveBody` 逐题型调起来；真浏览器里的右栏题库在 `--browser` 组的 `reading_routes_test.mjs` |
 | `test_client_related.mjs` | 「相关课件」（`::: related`）的链接**该往哪去**（#202）：外链与页内锚点保持原样（一个字不改），`<序号>-<节点id>` 的三种写法（裸的 / 带 `lessons/` 前缀 / 带 `.md`，序号补不补零都算同一课）认成本科目的另一课，其余（序号或 id 对不上、那一课还没有课件正文、跨科目）一律**不渲染成链接**只留文字——死链比不能点更坏。渲染那半边也在这里钉：站内那一支是 `<button data-node>`（没有 `href` / `target`，点了走既有的 `openLesson`），外链仍是 `target="_blank"` 的 `<a>`。判据是纯函数，渲染用 `client_harness.mjs` 的 React 桩调 `Block`；真浏览器里点一下在 `browser/related_links_test.mjs` |
-| `test_client_annotations.mjs` | 课件页标注的锚点内核与渲染契约（#225 ③ / ADR-0015）：`parseBlocks` 给每块记**绝对起始行**（含 `::: practice` / `tip` / `warn` / `note` 嵌套 body 的 baseLine 递归）、`Block`/`MathSpan` 根元素挂 `data-line`；块渲染纯文本 + FNV-1a 哈希；四态判定（先按行号 + kind + hash 对上 → resolved，行号在但 hash 变了 → stale，按 hash 唯一定位 → resolved 重定位，多个 → ambiguous，零个 → missing；多匹配不静默取第一个）；`reassignRange` 把失效标注重指到当前段落；多选标注拼一条引用；内核按 `STUDY_ANNOTATE_KERNEL_*` 标记切源码求值，**零 DOM**。DOM 侧只按同一口径把文本节点量成字符串喂进来，量不上就拒绝建标注。真浏览器里划选、高亮与刷新后仍在在 `browser/annotations_test.mjs` |
+| `test_client_annotations.mjs` | 课件页标注的锚点内核与渲染契约（#225 ③ / ADR-0021）：`parseBlocks` 给每块记**绝对起始行**（含 `::: practice` / `tip` / `warn` / `note` 嵌套 body 的 baseLine 递归）、`Block`/`MathSpan` 根元素挂 `data-line`；块渲染纯文本 + FNV-1a 哈希；四态判定（先按行号 + kind + hash 对上 → resolved，行号在但 hash 变了 → stale，按 hash 唯一定位 → resolved 重定位，多个 → ambiguous，零个 → missing；多匹配不静默取第一个）；`reassignRange` 把失效标注重指到当前段落；多选标注拼一条引用；内核按 `STUDY_ANNOTATE_KERNEL_*` 标记切源码求值，**零 DOM**。DOM 侧只按同一口径把文本节点量成字符串喂进来，量不上就拒绝建标注。真浏览器里划选、高亮与刷新后仍在在 `browser/annotations_test.mjs` |
 | `test_client_unreadable.mjs` | 一门科目的文件读不了时**只坏那一门**（#222）：主页点名是哪门科目、哪份文件第几行、原文是什么，好的科目照常列出来；多门读不了时报数量，没给重试回调就不硬塞按钮。数据侧按科目隔离（`unreadable`）在 `test_host_library_payload.mjs`；真机那份坏文件是 `curriculum.yaml` 里一个裸 `&`（YAML 锚点）|
 | `test_client_list.mjs` | 阅读端列表的**从属层级**：缩进 2 格 = 下一层（与服务端 `lib/core/format.ts` 的 `parseList` 同一条口径），子列表挂成 `item.children` 而不是另起一块；条目从字符串变成 `{ text, children, line }`（子项的行号也要算进嵌套指令的 `baseLine`——算漏了标注会贴到别的段上）；`blockPlainText` / `blockFragments` 按 DOM 顺序先序摊平、并仍兼容裸字符串条目（`::: resources` 那条老路径）；段落合并与「4 格不是一层」各有一条。末了一条**注入反证**：把挂子列表那条判据改成恒假，缩进那行必须落回正文段落 |
 | `test_client_typography.mjs` | 字号／行高的配对与取值纪律，以及**中文正文的段落排版**：首行缩进 2 字符、从属层级每级 2 字符（都写成 `em`，换字号档之后仍然是「两格」）、成段正文两端对齐、块内段落复位成不缩进不对齐——复位规则还断「写在正文规则**之后**」（写在前面就是同特异度下被盖掉的死声明） |
@@ -107,7 +111,7 @@ bash scripts/tests/run_tests.sh --browser  # 默认功能回归 + 浏览器测�
 | `test_export_leak_guard.mjs` | **泄漏守卫**（F11 / 规格 §8）：规则表逐条生效、真产物扫下来干净；**反证**——注入一个 Node 专用依赖之后构建期守卫必须失败（进程内 `exportGuardRun({inject})` 与命令行 `node scripts/release/export_guard.mjs --inject host.js` 各一条，都要非零退出）；第三方包装被改 / 壳里内容被换 / 阅读端本体被改，哈希核对逐个报出来；假阳性防线（`data.js` 载荷里的 require 调用是课件正文，不算泄漏） |
 | `test_export_tool_task.mjs` | 导出的**工具面与任务模型**：DSH 侧**不主动导出**（注册完一个任务都没有、一个产物都没写）、`studymate_export` 起 `durable` 的「导出」任务并**有上限地等**（等到给文件清单，等不到给下一步）、产物登记成绝对路径、阅读端那块板子上看得到且没有 owner、取消（排队中 → 当场已取消没有半成品；已完成 → 「取消来晚了」且已完成产物一律保留）、越权句柄被拒、入参坏形状当场说清 |
 | `test_export_cli.mjs` | 无头宿主的**命令行**（`bin/studymate.mjs export`，真子进程）：`--json` 一行结果、**没有参数也能跑**（工作区从当前目录/`$LEARN_WORKSPACE`/配置认出来 = 「课完默认导一份」）、课完再导一份是幂等的、`--subject` / `--out`、报错都是人话、帮助里有 export |
-| `test_export_annotations.mjs` | 导出产物的**标注只读快照**（#225 ⑤ / ADR-0015）：造含标注的临时工作区 → 真导出 → data.js 里 `library.offline === true`（离线页没有 Host 写通道，写请求一律 403），对应节点 `annotations` 逐字带出（present / version / items 与盘上一致）；产物里 `studymate-client.js` 仍与 `lib/client.js` 哈希逐字相同（同一套渲染，不是第二个渲染器）；泄漏守卫干净。只读模式下列表与高亮照常、编辑/删除/重指/提问入口不出现 |
+| `test_export_annotations.mjs` | 导出产物的**标注只读快照**（#225 ⑤ / ADR-0021）：造含标注的临时工作区 → 真导出 → data.js 里 `library.offline === true`（离线页没有 Host 写通道，写请求一律 403），对应节点 `annotations` 逐字带出（present / version / items 与盘上一致）；产物里 `studymate-client.js` 仍与 `lib/client.js` 哈希逐字相同（同一套渲染，不是第二个渲染器）；泄漏守卫干净。只读模式下列表与高亮照常、编辑/删除/重指/提问入口不出现 |
 | `test_tasks_model.mjs` | 任务模型（`lib/tasks/**`）：六态状态机（排队／运行／取消中／完成／失败／已取消）与转移表、状态查询不阻塞、等待有上限且超时给**下一步提示**、三种结局各一份回执、取消回执写清保留哪些已完成产物、销毁**先回执后删文件**（用「回执到手时文件还在」直接断言顺序）、owner 句柄越权被拒、五个 `studymate_task_*` 工具与 `GET /api/studymate/tasks` 的返回形状；**跨进程**那一节 spawn 夹具 `fixtures/tasks_producer.mjs`（进程 A 起 durable 任务并落盘 → 进程 B 重新加载后查得到、resume 得动） |
 
 ## 提示词规则归属
@@ -154,15 +158,8 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 
 `scripts/tests/browser/` 下是两套**骨架不同**的浏览器套件，别混着读：
 
-- **阅读端套件**（`test:browser` 组里的那些，下面列出的六份无界笔记套件除外）**都走同一个骨架** [browser/harness.mjs](browser/harness.mjs)：
-  探测本机浏览器 → 起 CDP → 收**控制台错误 / 页面错误（未捕获异常）/ 失败请求** → 每个场景出截图与 `summary.json`。
-  另收 `Network.requestWillBeSent` 进 `ctx.requests`（场景维度、不算问题）：断「零请求 / 发的是哪些」
-  的套件用它（`file://` 下 `performance.getEntriesByType('resource')` 返回空数组）。
-- **无界笔记套件** [browser/notes_test.mjs](browser/notes_test.mjs)（`npm run test:notes:browser`）是**例外**：
-  它自己用 Playwright 起一台独立 Edge（`channel: 'msedge'`、一次性 context），**不用** harness，也不复用它的
-  浏览器探测与产物格式。理由见该文件头：它要的浏览器（独立 Edge、一次性 context）与 harness 起的那台
-  （无头 Chrome + CDP）不是同一个，两边的控制台/请求收集也不共用。它的跳过与失败边界比阅读端套件更紧，
-  写在它自己的文件里。
+- **阅读端套件**走 [browser/harness.mjs](browser/harness.mjs)：探测本机浏览器 → 起 CDP → 收集控制台错误、页面错误和失败请求 → 每个场景出截图与 `summary.json`。另收 `Network.requestWillBeSent` 进 `ctx.requests`，供网络断言使用（`file://` 下的 Resource Timing 不提供这份数据）。
+- **无界笔记套件**（`npm run test:notes:browser`）不复用这个骨架。套件通过 Playwright 使用独立 Edge（`channel: 'msedge'`、一次性 context）：独立网页、组件夹具与正式客户端临时宿主分别覆盖不同层，不访问用户笔记或正在运行的 DSH。`test:browser` 也登记了两类套件；具体范围见下表。
 
 | 情况 | 阅读端套件（harness） | 无界笔记套件 |
 | --- | --- | --- |
@@ -174,13 +171,23 @@ Windows PowerShell 可用 `$env:STUDYMATE_DSH_PACKAGE = '<独立安装目录>/no
 
 | 文件 | 用途 |
 | --- | --- |
+| `browser/notes_test.mjs` | 独立网页中的画布、资源引用与独立复制、四种文档视图及窄屏双列、内存态刷新和占位会话 |
+| `browser/notes_host_reentry_test.mjs` | 正式客户端在临时宿主夹具中真实卸载并重挂 React 根：同标签恢复学习／笔记面、位置和逐篇文档模式，在途草稿保留，重进不重复请求懒分块；不连接正在运行的 DSH |
+| `browser/notes_persistence_session_test.mjs` | 真 React 重挂与受控 transport：验证待保存、在途、失败及冲突状态，显式丢弃、旧格式只读、相机恢复零误写和 StrictMode 租约 |
 | `browser/notes_brand_test.mjs` | 正式组合客户端的品牌双向切换：同一个学习面板、名称与自有图标互换、学习导航保留、笔记场景保活、隐藏面不接焦点和快捷键；独立 Edge + 隔离宿主夹具，不使用真实会话 |
 | `browser/notes_persistence_test.mjs` | 真客户端 + 临时 HOME 的保存、刷新、冲突、失败和格式1只读→取消/确认升级→逐字节备份；不碰个人笔记库 |
+| `browser/notes_lazy_chunk_test.mjs` | #302 懒分块（ADR-0019）：学习首屏零分块请求且课件页照常、首次打开笔记恰一次请求、往返保活不重拉不重挂、503 失败有明确错误态可重试、旧宿主没有 `require.async` 时学习面照常且笔记明确失败不静默回退；网络断言走真 HTTP 记录 |
+| `browser/notes_performance_test.mjs` | #303 笔记性能与隐藏面：拖动/折叠连续改布局时正文仍落盘但不再重序列化/散列资源；隐藏超过一个轮询周期不发外部 GET、重显立刻补读；隐藏的共享笔记仍能在学习页新建/编辑；零控制台/页面/外网错误 |
+| `browser/notes_resource_tree_test.mjs` | #312 侧栏资源树（esbuild 临时页挂真组件）：单高亮互斥与外部跟随、文件/目录行级更多菜单、行内重命名（含切换目标不丢值）、删除四层保护文案与二次确认、只读禁拖拽、菜单初始焦点；不碰共享 dist |
+| `browser/notes_tree_wiring_test.mjs` | #312 资源树与画布/App 的接线回归：集成回调（重命名/删除/画布计数）与视图切换 |
+| `browser/notes_theme_test.mjs` | #312 笔记面亮暗主题：对比度与切换回归 |
+| `browser/notes_persistence_hidden_draft_test.mjs` | #312 隐藏面草稿保护（依赖 #303 的重显立即核对语义）：隐藏期在途/失败/409 冲突草稿重显不丢、之后可明确恢复；隐藏零轮询、清洁重显立即核对且零写 |
 | `browser/notes_curriculum_test.mjs` | 十项节点笔记场景：空节点、显式默认本、原稿共享、关联拖动、未来默认、软删除恢复、节点树/课程引用卡、只读课件跳转、笔记本画布隔离与相机；学习左右笔记亮→暗→亮、渲染/局部灰色标记/链接框的实测 AA，光标、弹窗和主题切换不改写原稿 |
+| `browser/notes_draft_navigation_test.mjs` | 真实 dist 组合客户端的导航卸载回归：保存请求在途（pending）与保存失败（error）时继续输入，切到另一个文件后输入仍留在原文件、不串数据、不被误标为未保存草稿；没有未确认草稿时不误拦 beforeunload。未确认草稿的恢复与冲突锁定在组件层 `notes_live_editor_test.mjs` 覆盖 |
 | `browser/notes_live_editor_test.mjs` | 实际共享 NoteEditor 与单格式栏：选区保持、格式局部事务、真实灰色字符、原始坐标/混合换行、链接冻结与失效拒绝、只读/超限修复、StrictMode/受控输入法和快捷键；用临时页面和隔离 Edge |
 | `browser/notes_inline_editor_test.mjs` | 底层局部编辑器：真实分隔符显隐/直接编辑、原始字节与撤销、外部更新/空正文/输入法、GFM 表格/任务标记/公式/代码/图片占位、安全与亮暗对比度 |
 | `browser/attempts_test.mjs` | 作答落盘（#72）：把阅读端打进一个说 HTTP 的迷你宿主，真落盘到工作区文件 |
-| `browser/annotations_test.mjs` | 课件页标注（#225 ③ / ADR-0015）：真浏览器里挂真 `lib/client.js`，划选正文 → 浮层里写注释 → 高亮覆盖层与行内小标记出现、点开可读/可编辑/可删除；重新挂载（刷新）后从 payload 读回；课件原文改过之后显式 stale、不贴到错位置。夹具与 `attempts_test.mjs` 同一套 |
+| `browser/annotations_test.mjs` | 课件页标注（#225 ③ / ADR-0021）：真浏览器里挂真 `lib/client.js`，划选正文 → 浮层里写注释 → 高亮覆盖层与行内小标记出现、点开可读/可编辑/可删除；重新挂载（刷新）后从 payload 读回；课件原文改过之后显式 stale、不贴到错位置。夹具与 `attempts_test.mjs` 同一套 |
 | `browser/watch_push_test.mjs` | 真浏览器里「改文件 → 监听 → SSE → 页面自己更新（不刷新）」的端到端（#74） |
 | `browser/reading_test.mjs` | **阅读端本体**：把真的 `lib/client.js` 挂进夹具页，走「主页 → 科目页（路线图 aria-label + 视觉隐藏表格）→ 课件页（三栏、进度条、窄轨）」、动效四档与 `prefers-reduced-motion`、亮暗两套的**实测对比度**（含 color-mix 是否真解出来；探针是共用的 `fixtures/contrast-probe.mjs`） |
 | `browser/reading_routes_test.mjs` | **四路由 × 三档视口**（#86；紧档 #88）：今天学什么 / 科目主页 / 课件页 / 搜索四个面在宽档、窄档（800×900）与**紧档（700×900）**（真换 CSS 视口，`max-width: 900px` 的响应式规则真的执行，三条曾经的「死声明」被断言钉住）各取一次景，四个面 × 亮暗两套的实测对比度、动效四档与 `prefers-reduced-motion` 也在里面；另有一场按 1440/1100/900/776/700 扫三栏几何（点「题目」「节点」有没有反应、中栏保底、正文列占中栏多少）、一场取宽画布上**默认形态**的正文列。每档的 metrics 记着断点命中、栏形态（并排 / 盖在正文上）、窄轨实测宽与正文列溢出量。**紧档取的就是「并排装不下」那个态**：右栏在那一档是盖在正文上的抽屉，顶上写着为什么、一条「收起」回得去，题目与选项都在里头（#88 验收第 4 条）。**#90 加的**：主页第一屏那张卡点得进去、空目录 / 半份数据 / 零节点三份退化输入各自的「还没有」、搜索每条结果标出科目与节点且无断点长 URL 不撑破结果行（**#98 起按行级格子量**，并配一条反证——见上面「横向溢出判据」一节）。**#93 加的**：右栏题库的内部呈现——另造一份夹具（三种题型各一组、题干与选项里各一段没有断点的长 token、题库带着一次落盘的作答），三档各跑两场：题型徽标是贴字的标签（不是被弹性行拉成竖条的）、右栏 tab 的选中态是右栏专用的下划线（tab 条在内容上方、与内容同宽；紧档的抽屉形态下也一样）、上次作答的结果在右栏里看得见（切 tab / 就地作答之后都还在）、点正文里的题目标记那一组就是「当前」（换到下一课不跟过去）、右栏只出纵向滚动条（长 token 折行而不是被组卡片裁掉）。`-quiz-marked` 那一场把镜头停在「点过标记之后」，三档截图可判 |

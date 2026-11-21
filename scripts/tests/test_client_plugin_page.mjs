@@ -89,9 +89,10 @@ test('插件页：locale 注册 zh/en 两本基线与两个官方槽位', () => 
   const { ctx, registrations, injected } = fakeCtx({ locale: locale.service });
   loadClient().plugin.apply(ctx);
 
-  assert.deepEqual(locale.registered.map(item => item.namespace), [PAGE_NS]);
-  assert.deepEqual(Object.keys(locale.registered[0].dictionaries).sort(), ['en', 'zh']);
-  assert.deepEqual(injected, [['locale'], ['uiWorkspace']]);
+  const pageDictionaries = locale.registered.filter(item => item.namespace === PAGE_NS);
+  assert.equal(pageDictionaries.length, 1);
+  assert.deepEqual(Object.keys(pageDictionaries[0].dictionaries).sort(), ['en', 'zh']);
+  assert.deepEqual(injected.filter(names => !names.includes('sidebarRightTabs')), [['locale'], ['locale'], ['uiWorkspace']]);
 
   const byName = name => registrations.filter(item => item.entry.name === name);
   assert.deepEqual(byName('plugins.detail.section').map(item => ({
@@ -150,6 +151,21 @@ test('插件页：状态投影只带事实与计数，空态/错误态说人话'
   const failed = statusView({ ok: false }, t);
   assert.equal(failed.state, 'error');
   assert.equal(failed.lead, DICT_ZH.status_read_failed);
+
+  // 预设没注册上（#317）：比「还没配置」更靠前说，理由原样带出来——旧载荷没有这个字段，走上面的常规路径。
+  const unregistered = statusView({
+    ok: true, configured: false, initialized: false, workspace: '', source: '', mode: 'unknown',
+    registration: { ok: false, error: 'cordis.patch.yml:4:1: 流式集合缺少闭合的 "}"' },
+    today: '2026-11-07', subjects: [], unreadable: [], watch: { watching: false, backend: '未起' },
+  }, t);
+  assert.equal(unregistered.state, 'error');
+  assert.equal(unregistered.lead, DICT_ZH.status_lead_unregistered);
+  assert.equal(unregistered.note,
+    DICT_ZH.status_registration_failed.replace('{reason}', 'cordis.patch.yml:4:1: 流式集合缺少闭合的 "}"'));
+  assert.deepEqual(statusView({
+    ok: true, configured: false, initialized: false, workspace: '',
+    registration: { ok: true, error: '' }, subjects: [], unreadable: [], watch: { watching: false, backend: '未起' },
+  }, t).lead, DICT_ZH.status_lead_unconfigured);
 
   const unconfigured = statusView({
     ok: true, configured: false, initialized: false, workspace: '', source: '', mode: 'unknown',
@@ -362,7 +378,8 @@ test('插件页 i18n：两本字典键集一致、en 零 CJK、占位符一致�
     assert.deepEqual(placeholders(DICT_EN[key]), placeholders(DICT_ZH[key]),
       `${key} 两边的占位符不一致：zh=${DICT_ZH[key]} / en=${DICT_EN[key]}`);
   }
-  const used = new Set([...source.matchAll(/\bt\(\s*'([^']+)'/gu)].map(match => match[1]));
+  const pageSource = source.slice(source.indexOf('const DICT_ZH ='), source.indexOf('const TEST_HOOK ='));
+  const used = new Set([...pageSource.matchAll(/\bt\(\s*'([^']+)'/gu)].map(match => match[1]));
   assert.ok(used.size > 10, `没扫到几个文案 key（${used.size}），门可能失效了`);
   for (const key of used) {
     assert.equal(Object.prototype.hasOwnProperty.call(DICT_ZH, key), true, `用到的 key 没有定义：${key}`);

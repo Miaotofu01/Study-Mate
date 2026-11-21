@@ -141,7 +141,8 @@ try {
     await guarded('内页不再重复品牌图标/名称，外层品牌和工具栏仍在', async () => {
       assert.equal(await page.locator('.studymate-notes .brand-icon, .studymate-notes .brand-name').count(), 0);
       assert.equal(await page.locator('.smb-brand').count(), 1);
-      assert.equal(await page.locator('.studymate-notes button[aria-label="新建笔记"]').count(), 1);
+      assert.equal(await page.locator('.studymate-notes .left-panel .notes-create-trigger').count(), 1);
+      assert.equal(await page.locator('.studymate-notes button[aria-label="新建笔记"]').count(), 0);
       assert.equal(await page.locator('.studymate-notes .canvas-toolbar').count(), 1);
     });
 
@@ -157,7 +158,11 @@ try {
     await shot('02-notes-surface');
 
     await guarded('新建笔记切走再切回：同DOM且正文资源仍在', async () => {
-      await page.locator('.studymate-notes button[aria-label="新建笔记"]').click();
+      await page.locator('.studymate-notes .left-panel .panel-header .notes-create-trigger').click();
+      await page.locator('.studymate-notes [role="menu"][aria-label="新建资源"]').getByRole('menuitem', { name: '新建笔记', exact: true }).click();
+      const dialog = page.locator('[role=dialog][aria-label="新建笔记"]');
+      await dialog.getByRole('button', { name: '创建', exact: true }).click();
+      await dialog.waitFor({ state: 'detached', timeout: 8000 });
       await page.waitForFunction(() => [...document.querySelectorAll('.studymate-notes .tree-row')].some(row => row.textContent.includes('未命名.md')), null, { timeout: 8000 });
       await page.evaluate(() => { window.__notesElement = document.querySelector('.studymate-notes'); });
       await page.locator('[data-proto="brand-switch"]').click();
@@ -170,7 +175,7 @@ try {
     await shot('03-notes-after-roundtrip');
 
     await guarded('笔记前台快捷键 V/H 生效', async () => {
-      await page.locator('.studymate-notes .view-switch button', { hasText: '画布' }).click();
+      await page.locator('.studymate-notes .view-switch[aria-label="主视图"] button', { hasText: '画布' }).click();
       await page.keyboard.press('v');
       await page.waitForFunction(() => document.querySelector('.studymate-notes .canvas-toolbar button[aria-label="选择工具"]')?.classList.contains('active'));
       await page.keyboard.press('h');
@@ -194,12 +199,68 @@ try {
       assert.equal(await page.locator('.studymate-notes .canvas-toolbar button[aria-label="平移工具"]').evaluate(el => el.classList.contains('active')), true);
     });
 
-    await guarded('无界顶栏不放学习导航和动效；切回后工作台面包屑仍可用', async () => {
-      assert.equal(await page.locator('[data-proto="workspace-home"]').count(), 0);
-      assert.equal(await page.locator('.smb-crumbs, .smb-motionpick').count(), 0);
-      await page.locator('[data-proto="brand-switch"]').click();
+    const bar = page.locator('.smb-topbar');
+    const motion = bar.locator('.smb-motionpick select');
+    const font = bar.locator('.smb-fontpick select');
+    const switchBrand = () => bar.locator('[data-proto="brand-switch"]').click();
+
+    await guarded('无界的 Markdown 预览和编辑器响应字号，动效应用到实际控件', async () => {
+      const sample = page.locator('.studymate-notes .side-panel.left-panel');
+      const elapsed = () => sample.evaluate(el => Math.max(...getComputedStyle(el).transitionDuration.split(',').map(parseFloat)));
+      const durations = [];
+      for (const level of ['full', 'reduced', 'off', 'auto']) {
+        await motion.selectOption(level);
+        durations.push(await elapsed());
+      }
+      assert.ok(durations[0] > durations[1] && durations[1] > 0, JSON.stringify(durations));
+      assert.equal(durations[2], 0);
+      assert.equal(durations[3], durations[1], '系统减少动效时 auto 应走减弱档');
+
+      const assertSize = async (name, content) => {
+        const readSize = () => content.evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+        await font.selectOption('standard');
+        const standard = await readSize();
+        await font.selectOption('xlarge');
+        assert.ok(await readSize() > standard, `${name} 没应用特大字号`);
+      };
+      await assertSize('画布预览', page.locator('.studymate-notes #card-body-card-recall.markdown-preview'));
+      await page.locator('.studymate-notes button[aria-label="打开 未命名.md"]').dblclick();
+      await assertSize('文档编辑', page.locator('.studymate-notes .document-stage .cm-content'));
+    });
+
+    await guarded('宽档和窄档顶栏等高，两面共用字号和动效，搜索与导航只留在学习', async () => {
+      try {
+        await font.selectOption('xlarge');
+        await motion.selectOption('off');
+        for (const width of [VIEWPORT.width, 478]) {
+          await page.setViewportSize({ ...VIEWPORT, width });
+          const measure = () => bar.evaluate(el => ({
+            height: el.getBoundingClientRect().height,
+            overflow: el.scrollWidth - el.clientWidth,
+          }));
+          assert.equal(await bar.locator('.smb-crumbs, .smb-searchbtn').count(), 0);
+          const notesBox = await measure();
+          await switchBrand();
+          await waitSurface(page, 'learning');
+          const learningBox = await measure();
+          assert.equal(learningBox.height, notesBox.height, `${width}px：${JSON.stringify({ learningBox, notesBox })}`);
+          assert.ok(learningBox.overflow <= 1 && notesBox.overflow <= 1);
+          assert.equal(await font.inputValue(), 'xlarge');
+          assert.equal(await motion.inputValue(), 'off');
+          assert.equal(await bar.locator('.smb-searchbtn').count(), 1);
+          await switchBrand();
+          await waitSurface(page, 'notes');
+        }
+      } finally {
+        await page.setViewportSize(VIEWPORT);
+      }
+    });
+
+    await guarded('切回后工作台面包屑仍可用', async () => {
+      if (await surfaceVisible(page, 'notes')) await switchBrand();
       await waitSurface(page, 'learning');
-      assert.equal(await page.locator('.smb-motionpick select').count(), 1);
+      await font.selectOption('standard');
+      await motion.selectOption('auto');
       await page.locator('[data-proto="workspace-home"]').click();
       await waitSurface(page, 'learning');
       await page.locator('.smb-hero__title').waitFor({ timeout: 8000 });

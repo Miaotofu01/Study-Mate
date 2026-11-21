@@ -35,11 +35,12 @@ const BEGIN = '# BEGIN STUDYMATE LEARNING PRESET';
 const BUNDLE = '@yunmiao/studymate';
 
 /** 解析一份补丁文件。`!!js` 与 CordisLoader 同口径：读成它的标量原文。
-    生产代码（`PATCH_PARSE_OPTIONS`）还开了多行 plain / 引号标量：DSH 设置页与宿主写盘都会把长文本折行。 */
+    生产代码（`PATCH_PARSE_OPTIONS`）还开了多行 plain / 引号标量 / 跨行流式集合：DSH 设置页与宿主写盘
+   都会把长文本和模型清单折行。 */
 function parsed(file) {
   return parseYaml(fs.readFileSync(file, 'utf8'), {
     file, tags: 'scalar', blockScalars: true, documentMarkers: true, plainScalarContinuation: true,
-    quotedScalarContinuation: true,
+    quotedScalarContinuation: true, flowCollectionContinuation: true,
   });
 }
 
@@ -305,6 +306,37 @@ test('profile 补丁里的跨行双引号标量不挡注册（宿主按 80 列�
   const rows = parsed(f.patch);
   assert.equal(rows[0].config.hover.textZh,
     'Nov 4–15: Receive a daily free allowance. Subscribers enjoy higher quotas.');
+  assert.ok(rows.some((row) => row.insert?.[0]?.config?.id === 'learning'));
+});
+
+test('profile 补丁里的跨行流式集合不挡注册（#317：模型清单写成 `- {` 换行）', (t) => {
+  const f = fixture(t);
+  // 标准 YAML 的跨行 flow mapping；旧解析器在 `- {` 那一行就炸，插件于是整条跳过（预设不注册、
+  // config 不落盘），用户只看到一句 console.warn。
+  fs.writeFileSync(f.patch, [
+    '- id: llm-deepseek-account',
+    '  name: "@deepseek-ai/dsh-llm-deepseek-account"',
+    '  config:',
+    '    models:',
+    '      - {',
+    '          id: "openai/gpt-6-luna",',
+    '          name: "GPT-6 Luna",',
+    '          contextWindow: 1050000',
+    '        }',
+    '    enabled: true',
+    '',
+  ].join('\n'), 'utf8');
+  // 原生 bundle：不写 profile，但启动时必须读得动它。
+  const bundled = invoke(f, { version: null, bundle: true });
+  assert.equal(bundled.mode, 'bundle');
+  assert.equal(bundled.config.id, 'learning');
+  // 声明式：托管块要插到补丁末尾，整份文件仍要能解析。
+  const declared = invoke(f);
+  assert.equal(declared.mode, 'declarative');
+  const rows = parsed(f.patch);
+  assert.deepEqual(rows[0].config.models[0],
+    { id: 'openai/gpt-6-luna', name: 'GPT-6 Luna', contextWindow: 1050000 });
+  assert.equal(rows[0].config.enabled, true);
   assert.ok(rows.some((row) => row.insert?.[0]?.config?.id === 'learning'));
 });
 

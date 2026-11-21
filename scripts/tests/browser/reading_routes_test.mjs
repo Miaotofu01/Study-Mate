@@ -533,6 +533,8 @@ const HELPERS = `
 const HOME_PROBE = `(() => {
   ${HELPERS}
   const pbar = q('.smb-continue [role="progressbar"]');
+  const brand = box('.smb-topbar .smb-brand');
+  const tools = box('.smb-topbar__tools');
   return {
     width: window.innerWidth,
     breakpoint900: window.matchMedia('(max-width: 900px)').matches,
@@ -549,7 +551,7 @@ const HOME_PROBE = `(() => {
     layout: {
       wrapPaddingLeft: style('.smb-wrap', 'paddingLeft'),
       crumbMaxWidth: style('.smb-crumb', 'maxWidth'),
-      topbarWrap: style('.smb-topbar', 'flexWrap'),
+      topbarStacked: brand && tools ? tools.y >= brand.y + brand.h - 1 : null,
       continueBarWrap: style('.smb-continue__bar', 'flexWrap'),
       continueProgressWidth: style('.smb-continue__bar .smb-progressbar', 'width'),
       continueProgressBox: box('.smb-continue__bar .smb-progressbar'),
@@ -823,6 +825,9 @@ const CONTRAST_TARGETS = {
     ['.smb-chip', '主页·状态 chip'],
     ['.smb-crumb', '主页·面包屑'],
     ['.smb-motionpick .smb-select', '顶栏·动效档选择器'],
+    ['.smb-motionpick .smb-select option', '顶栏·动效档选项'],
+    ['.smb-fontpick .smb-select', '顶栏·字号档选择器'],
+    ['.smb-fontpick .smb-select option', '顶栏·字号档选项'],
   ],
   subject: [
     ['.smb-subhead__goal', '科目页·目标'],
@@ -980,7 +985,7 @@ try {
       // 两条响应式规则有没有真的落到计算样式与几何上——只看**关系**，不钉值
       const layout = seen.layout;
       check(`${tag} 壳那条规则（.smb-wrap / .smb-topbar / .smb-continue__bar）落到了计算样式上`,
-        layout.topbarWrap === (compact ? 'wrap' : 'nowrap')
+        layout.topbarStacked === compact
         && layout.continueBarWrap === (compact ? 'wrap' : 'nowrap'),
         JSON.stringify(layout));
       check(`${tag} 科目行那条规则（.smb-course）落到了几何上`,
@@ -1438,6 +1443,17 @@ try {
           for (const one of part) rows.push(Object.assign({ face: where }, one));
         };
         await measure('home');
+        const selectStyles = await ctx.evaluate(`Array.from(document.querySelectorAll('.smb-motionpick select, .smb-fontpick select'), select => ({
+          scheme: getComputedStyle(select).colorScheme,
+          backgrounds: Array.from(select.options, option => getComputedStyle(option).backgroundColor),
+        }))`);
+        check(`[${theme}·${viewport.key}] 原生选择器菜单跟随宿主明暗`,
+          selectStyles.length === 2 && selectStyles.every(({ scheme }) => scheme === theme), JSON.stringify(selectStyles));
+        // 原生弹层不铺父级 select 的背景；探针沿 DOM 合成背景时看不出这类遗漏。
+        check(`[${theme}·${viewport.key}] 原生选择器每个选项都有自己的背景`,
+          selectStyles.length === 2 && selectStyles.every(({ backgrounds }) => backgrounds.length > 0
+            && backgrounds.every(bg => bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)')),
+          JSON.stringify(selectStyles));
         await ctx.evaluate(OPEN_SUBJECT);
         await ctx.sleep(300);
         await measure('subject');
@@ -1665,17 +1681,17 @@ try {
         ['壳·.smb-wrap 的内边距', (one) => one.wrapPaddingLeft],
         ['壳·.smb-crumb 的宽度上限', (one) => one.crumbMaxWidth],
         ['壳·.smb-continue__bar 里进度条占满一行', (one) => one.continueProgressWidth],
-        ['壳·.smb-topbar 允许换行', (one) => one.topbarWrap],
+        ['壳·顶栏操作区移到第二行', (one) => one.topbarStacked],
         ['壳·.smb-continue__bar 允许换行', (one) => one.continueBarWrap],
         ['科目行·.smb-course 允许换行', (one) => one.courseWrap],
       ];
       const differing = declarations.filter(([, read]) => read(wide) !== read(narrow));
       const inert = declarations.filter(([, read]) => read(wide) === read(narrow));
 
-      check('壳那条规则真的执行了（顶栏与「接着上次」那一行在窄档允许换行）',
-        wide.topbarWrap === 'nowrap' && narrow.topbarWrap === 'wrap'
+      check('壳那条规则真的执行了（顶栏在窄档分行，「接着上次」允许换行）',
+        wide.topbarStacked === false && narrow.topbarStacked === true
         && wide.continueBarWrap === 'nowrap' && narrow.continueBarWrap === 'wrap',
-        `wide=${wide.topbarWrap}/${wide.continueBarWrap} narrow=${narrow.topbarWrap}/${narrow.continueBarWrap}`);
+        `wide=${wide.topbarStacked}/${wide.continueBarWrap} narrow=${narrow.topbarStacked}/${narrow.continueBarWrap}`);
       check('科目行那条规则真的执行了（换行，且右半截换到自己一行、占满一整行）',
         wide.courseWrap === 'nowrap' && narrow.courseWrap === 'wrap'
         && narrow.courseSide.y >= narrow.courseMain.y + narrow.courseMain.h - 1

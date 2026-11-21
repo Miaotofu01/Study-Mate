@@ -44,6 +44,43 @@ export function isMissingEdge(error) {
     && /(channel|msedge|Edge|executable)/i.test(text);
 }
 
+// 由各临时宿主页嵌入的同形加载器：分块成功缓存、失败不缓存，重试真的发请求。
+// 保持函数自包含，嵌入源码时不依赖 Node 或测试进程闭包。
+export function installNotesFixtureModuleLoader(modules, { asyncDisabled = false } = {}) {
+  let rootEntry;
+  const entries = Object.create(null);
+  const promises = Object.create(null);
+  window.__ModuleLoader__ = { load(entry) {
+    if (typeof entry?.chunk === 'string') entries[entry.chunk] = entry;
+    else rootEntry = entry;
+  } };
+  const require = name => {
+    if (Object.hasOwn(modules, name)) return modules[name];
+    throw new Error('夹具没有这个模块：' + name);
+  };
+  if (!asyncDisabled) require.async = spec => {
+    if (typeof spec !== 'string' || !spec.startsWith('./')) return Promise.reject(new Error('夹具 require.async 只认包内相对分块：' + spec));
+    const fileName = spec.slice(2);
+    if (!/^client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js$/.test(fileName)) return Promise.reject(new Error('夹具拒绝这个分块名：' + fileName));
+    if (!promises[fileName]) {
+      promises[fileName] = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = '/' + fileName;
+        const fail = error => { delete promises[fileName]; reject(error); };
+        script.onload = () => {
+          const entry = entries[fileName];
+          if (!entry) { fail(new Error('分块脚本没有登记：' + fileName)); return; }
+          try { resolve(entry.factory(require)); } catch (error) { fail(error); }
+        };
+        script.onerror = () => fail(new Error('分块脚本加载失败：' + fileName));
+        document.head.appendChild(script);
+      });
+    }
+    return promises[fileName];
+  };
+  return { require, get entry() { return rootEntry; }, get chunks() { return Object.keys(entries); } };
+}
+
 // 真 React 树，主面板/slot/service 形状同品牌回归。没有模型或真实用户会话。
 const HOST_SOURCE = `
 import React from 'react';
@@ -51,39 +88,68 @@ import * as ReactDOM from 'react-dom';
 import * as ReactDOMClient from 'react-dom/client';
 import * as jsxRuntime from 'react/jsx-runtime';
 const registrations = [];
+const cleanups = [];
+const own = task => { const off = task(); if (typeof off === 'function') cleanups.push(off); return off; };
 let layoutSelects = 0;
 const EMPTY = Object.freeze({byId:Object.freeze({}),order:Object.freeze([])});
 const services = {
   slots: {
-    inject(_name, task) { task(); return () => {}; },
-    register(spec, component) { registrations.push({spec,component}); return () => {}; },
+    inject(_name, task) { return own(task); },
+    register(spec, component) { const row = {spec,component}; registrations.push(row); return () => { const i = registrations.indexOf(row); if (i >= 0) registrations.splice(i, 1); }; },
   },
   sessions: {list:{subscribe(){return()=>{}},getSnapshot(){return EMPTY}}},
   inputTriggers:{registerSource(){return()=>{}}},
   conversation:{input:{for(){throw new Error('夹具没有显式会话')}}},
   layout:{selectPanel(){layoutSelects++}},
 };
+const moduleLoader = (${installNotesFixtureModuleLoader.toString()})({
+  react: React, 'react/jsx-runtime': jsxRuntime, 'react-dom': ReactDOM, 'react-dom/client': ReactDOMClient,
+}, { asyncDisabled: window.__disableChunkAsync });
+const localeDictionaries = new Map(), localeListeners = new Set(), localeInjections = [];
+let activeLocale = 'en', localeWrites = 0;
+const locale = {
+  register(ns, dict) { localeDictionaries.set(ns, dict); return () => localeDictionaries.delete(ns); },
+  bind: ns => (key, params = {}) => Object.entries(params).reduce(
+    (text, [name, value]) => text.split('{' + name + '}').join(String(value)),
+    localeDictionaries.get(ns)?.[activeLocale]?.[key] ?? localeDictionaries.get(ns)?.en?.[key] ?? key),
+  subscribe(fn) { localeListeners.add(fn); return () => localeListeners.delete(fn); },
+  setLocale() { localeWrites++; },
+};
+const mountLocale = item => {
+  const effects = [];
+  item.fn({ locale, effect(task) { const off = task(); if (typeof off === 'function') effects.push(off); return off; } });
+  item.off = () => { for (const off of effects.reverse()) off(); };
+};
+const localeProbe = {
+  provide(language) { activeLocale = language; services.locale = locale; for (const item of localeInjections) if (!item.off) mountLocale(item); },
+  remove() { delete services.locale; for (const item of localeInjections) { item.off?.(); item.off = null; } },
+  switchTo(language) { activeLocale = language; for (const fn of [...localeListeners]) fn(); },
+  get listeners() { return localeListeners.size; },
+  get dictionaries() { return localeDictionaries.size; },
+  get writes() { return localeWrites; },
+};
+if (window.__fixtureLocale) localeProbe.provide(window.__fixtureLocale);
 window.__probe = {
+  locale: localeProbe,
   get registrations(){return registrations.map(({spec})=>JSON.parse(JSON.stringify(spec)))},
+  get chunkRegistrations(){return moduleLoader.chunks},
   get layoutSelects(){return layoutSelects},
   applied:false,
 };
-window.__ModuleLoader__={load(entry){window.__entry=entry}};
 window.__start=()=>{
-  if(!window.__entry) throw new Error('组合产物没有登记模块');
-  const require=(name)=>{
-    if(name==='react')return React;
-    if(name==='react/jsx-runtime')return jsxRuntime;
-    if(name==='react-dom')return ReactDOM;
-    if(name==='react-dom/client')return ReactDOMClient;
-    throw new Error('夹具没有这个模块：'+name);
-  };
-  const cleanups=[];
-  window.__entry.factory(require).apply({
+  if(!moduleLoader.entry) throw new Error('组合产物没有登记模块');
+  const cleanup = moduleLoader.entry.factory(moduleLoader.require).apply({
     ...services,
     get(name){return services[name]},
-    effect(task){const cleanup=task();if(typeof cleanup==='function')cleanups.push(cleanup)},
+    effect: own,
+    inject(names, fn) {
+      if (!names.includes('locale')) return;
+      const item = {fn, off:null}; localeInjections.push(item);
+      if (services.locale) mountLocale(item);
+      cleanups.push(() => { item.off?.(); const i = localeInjections.indexOf(item); if (i >= 0) localeInjections.splice(i, 1); });
+    },
   });
+  if (typeof cleanup === 'function') cleanups.push(cleanup);
   window.__probe.applied=true;
   const main=registrations.find(x=>x.spec.name==='main');
   if(!main)throw new Error('组合产物没有登记 main');
@@ -94,7 +160,7 @@ window.__start=()=>{
 };
 `;
 
-async function writeBrowserHost(dir) {
+async function writeBrowserHost(dir, { asyncDisabled = false } = {}) {
   const esbuild = await import(pathToFileURL(rootRequire.resolve('esbuild')).href);
   await esbuild.build({
     absWorkingDir: ROOT,
@@ -103,7 +169,8 @@ async function writeBrowserHost(dir) {
     target: 'es2022', define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'silent',
   });
   fs.copyFileSync(path.join(ROOT, 'dist', 'client.js'), path.join(dir, 'client.js'));
-  fs.writeFileSync(path.join(dir, 'index.html'), `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>StudyMate notes persistence fixture</title><style>html,body,#root{height:100%;margin:0}body{background:#f6f7f9}</style></head><body><div id="root"></div><script src="/host.js"></script><script src="/client.js"></script><script>window.__start()</script></body></html>`);
+  fs.copyFileSync(path.join(ROOT, 'dist', 'client.notes.js'), path.join(dir, 'client.notes.js'));
+  fs.writeFileSync(path.join(dir, 'index.html'), `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>StudyMate notes persistence fixture</title><style>html,body,#root{height:100%;margin:0}body{background:#f6f7f9}</style></head><body><div id="root"></div><script>window.__disableChunkAsync=${JSON.stringify(asyncDisabled)}</script><script src="/host.js"></script><script src="/client.js"></script><script>window.__start()</script></body></html>`);
 }
 
 function requireOk(result) {
@@ -153,7 +220,7 @@ function safeStaticPath(dir, suffix) {
 }
 
 /** 每实例独立 HOME 与 localhost 端口；fault/delay 仅属于测试服务器，不进入产品。 */
-export async function startNotesHostFixture({ seedDemo = false, library = libraryPayload(), build = true } = {}) {
+export async function startNotesHostFixture({ seedDemo = false, library = libraryPayload(), build = true, asyncDisabled = false } = {}) {
   if (build) buildFormalNotesClient();
   const tempParent = path.resolve(os.tmpdir());
   const dir = fs.mkdtempSync(path.join(tempParent, 'studymate-notes-host-'));
@@ -161,12 +228,13 @@ export async function startNotesHostFixture({ seedDemo = false, library = librar
   fs.mkdirSync(home);
   let server;
   const requests = [];
+  const chunkRequests = [];
   const problems = [];
   const pendingReads = new Set();
   const pendingWrites = new Set();
   const pendingReadReplies = new Set();
   const controls = {
-    pauseReads: false, pauseWrites: false, pauseReadReplies: false, readFault: null, writeFault: null,
+    pauseReads: false, pauseWrites: false, pauseReadReplies: false, readFault: null, writeFault: null, chunkFailures: 0,
     releaseReads() { this.pauseReads = false; for (const release of pendingReads) release(); pendingReads.clear(); },
     releaseWrites() { this.pauseWrites = false; for (const release of pendingWrites) release(); pendingWrites.clear(); },
     releaseReadReplies() { this.pauseReadReplies = false; for (const release of pendingReadReplies) release(); pendingReadReplies.clear(); },
@@ -177,17 +245,30 @@ export async function startNotesHostFixture({ seedDemo = false, library = librar
     return controls[flag] ? new Promise(resolve => queue.add(resolve)) : undefined;
   };
   try {
-    await writeBrowserHost(dir);
+    await writeBrowserHost(dir, { asyncDisabled });
     if (seedDemo) seedNotesDemo(home);
     server = http.createServer(async (request, response) => {
       try {
         const url = new URL(request.url, 'http://127.0.0.1');
         const pathname = decodeURIComponent(url.pathname);
+        // 宿主按需拉的分块（client.*.js）：逐条记录 + 可注入一次失败（503），
+        // 验收断言用请求条数，不猜测浏览器缓存行为。
+        if (/^\/client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js$/.test(pathname)) {
+          const record = { path: pathname, status: null };
+          chunkRequests.push(record);
+          response.once('finish', () => { record.status = response.statusCode; });
+          if (controls.chunkFailures > 0) {
+            controls.chunkFailures -= 1;
+            response.writeHead(503, { 'content-type': 'text/plain' });
+            response.end('chunk failure injected by fixture');
+            return;
+          }
+        }
         if (pathname === NOTES_PATH) {
           const bytes = await requestBytes(request);
           let body = null;
           if (bytes.length) { try { body = JSON.parse(bytes.toString('utf8')); } catch { /* 真 route 判断 JSON */ } }
-          const record = { method: request.method, body, status: null };
+          const record = { method: request.method, url: request.url, body, status: null };
           requests.push(record);
           const kind = request.method === 'GET' ? 'read' : 'write';
           await waitIfPaused(kind);
@@ -236,7 +317,7 @@ export async function startNotesHostFixture({ seedDemo = false, library = librar
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     const origin = `http://127.0.0.1:${server.address().port}`;
     return {
-      dir, home, root: notesRoot(home), origin, server, controls, requests, problems,
+      dir, home, root: notesRoot(home), origin, server, controls, requests, chunkRequests, problems,
       read() { return requireOk(readNotesStore({ home })); },
       async close() {
         controls.releaseReads(); controls.releaseWrites(); controls.releaseReadReplies();

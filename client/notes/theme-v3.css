@@ -156,7 +156,7 @@
   .app-shell.v3 .document-scroll > .document-content { padding: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .app-shell.v3 .side-panel,.app-shell.v3 .panel-rail { transition-duration: .01ms !important; }
+  .app-shell.v3:not(.is-hosted) .side-panel,.app-shell.v3:not(.is-hosted) .panel-rail { transition-duration: .01ms !important; }
 }
 /* The ReactFlow dot grid remains enabled; use the same theme palette. */
 .app-shell.v3 .react-flow__background pattern circle { fill: var(--grid-dot); }
@@ -172,7 +172,7 @@
 .app-shell.v3[data-theme="dark"] .react-flow__minimap { background: var(--surface-raised) !important; }
 @media (max-width: 1099px) { .app-shell.v3 .right-panel.is-collapsed { box-shadow: none; } }
 @media (max-width: 699px) { .app-shell.v3 .left-panel.is-collapsed { box-shadow: none; } }
-@media (prefers-reduced-motion: reduce) { .app-shell.v3 *, .app-shell.v3 *::before, .app-shell.v3 *::after { scroll-behavior: auto !important; } }
+@media (prefers-reduced-motion: reduce) { .app-shell.v3:not(.is-hosted) *, .app-shell.v3:not(.is-hosted) *::before, .app-shell.v3:not(.is-hosted) *::after { scroll-behavior: auto !important; } }
 /* A viewport breakpoint change must not animate a panel between docked/overlay modes. */
 @media (max-width: 1099px), (min-width: 1100px) { .app-shell.v3[data-breakpoint-changing="true"] .side-panel { transition: none !important; } }
 @media (max-width: 699px), (min-width: 700px) { .app-shell.v3[data-breakpoint-changing="true"] .side-panel { transition: none !important; } }
@@ -206,7 +206,7 @@
 .app-shell.v3[data-theme="dark"] .button.danger:hover { background: #482d2c; }
 .app-shell.v3 .chat-composer .chat-composer-actions .send-button:disabled { color: var(--muted); background: var(--code); opacity: .7; }
 .app-shell.v3 .panel-rail button { pointer-events: auto; }
-.app-shell.v3 .side-panel { transition: width 200ms ease, flex-basis 200ms ease; }
+.app-shell.v3 .side-panel { transition: width var(--smb-motion, 200ms) ease, flex-basis var(--smb-motion, 200ms) ease; }
 .app-shell.v3[data-breakpoint-changing="true"] .side-panel { transition: none !important; }
 .app-shell.v3 .document-split-handle[aria-orientation="vertical"] { cursor: col-resize; }
 .app-shell.v3 .react-flow__minimap-mask { fill: var(--minimap-mask); }

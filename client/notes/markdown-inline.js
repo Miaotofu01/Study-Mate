@@ -223,6 +223,120 @@ const FORMAT_KINDS = Object.freeze({
 
 const HEADING_RE = /^(?:ATXHeading[1-6]|SetextHeading[1-2])$/;
 
+/* ── 列表项的渲染元数据（休息态用真的项目符号/编号，不靠正则在装饰层猜） ──────
+   列表项的 `kind` 仍是 `list`，分隔符仍是真实的 ListMark（+ 后续空格）；这里额外
+   给出休息态渲染要用的层级、序号与行首替换起点。活动态照旧只露出 `md-syntax`。
+
+   - 序号按 CommonMark 语义：同一 OrderdList 从首个 `3.` 这样的起始号开始递增，
+     源文件里后面写错的号码不参与显示；
+   - 层级只数包住它的 BulletList / OrderedList，引用里的列表从 1 起；
+   - 行首替换起点跳过 `> ` 引用前缀：引用标记的显隐仍归 quote span 管。 */
+
+const LIST_NODE_NAMES = ['BulletList', 'OrderedList'];
+const TASK_NODE_NAME = 'TaskMarker';
+
+/** 休息态列表缩进的一级宽度（em）与项目符号位宽（em）。 */
+export const LIST_INDENT_EM = 1.5;
+export const LIST_BULLET_EM = 1.4;
+
+/** 偏移所在行的行首（不含换行）。 */
+function lineStartBefore(source, offset) {
+  const index = source.lastIndexOf('\n', Math.max(0, offset - 1));
+  return index < 0 ? 0 : index + 1;
+}
+
+/**
+ * 列表项行首替换的起点：跳过引用前缀（`> ` 可有多层），把缩进留给列表 widget。
+ * `  > - item` 返回 `-` 的位置；`  - item` 返回行首；`> - item` 返回 `-`。
+ */
+function listPrefixStart(source, lineFrom, markFrom) {
+  const text = String(source ?? '');
+  let cursor = Math.max(0, lineFrom);
+  while (cursor < markFrom) {
+    let next = cursor;
+    while (next < markFrom && (text[next] === ' ' || text[next] === '\t')) next += 1;
+    if (next < markFrom && text[next] === '>') {
+      cursor = next + 1;
+      if (cursor < markFrom && text[cursor] === ' ') cursor += 1;
+      continue;
+    }
+    break;
+  }
+  return cursor;
+}
+
+/**
+ * 续行正文的起点：跳过行首空白与引用前缀（`> `/`>   ` 可有多层）。
+ * 惰性续行（`lazy line`）返回 0；`  lazy` 返回 2；`>   cont` 返回 4。
+ * 只按字符形状判断，不读语法树：调用方已经用 ListItem 节点范围锁定「这行属于该项」。
+ */
+export function listLineBodyStart(lineText) {
+  const text = String(lineText ?? '');
+  let cursor = 0;
+  while (cursor < text.length) {
+    if (text[cursor] === ' ' || text[cursor] === '\t') {
+      cursor += 1;
+      continue;
+    }
+    if (text[cursor] === '>') {
+      cursor += 1;
+      if (text[cursor] === ' ') cursor += 1;
+      continue;
+    }
+    break;
+  }
+  return cursor;
+}
+
+/** 列表项是否以 GFM 任务标记开头；不把嵌套列表里的任务算到外层。 */
+function itemStartsWithTask(node) {
+  const stack = [];
+  for (let child = node.firstChild; child; child = child.nextSibling) stack.push(child);
+  while (stack.length) {
+    const current = stack.pop();
+    if (current.name === TASK_NODE_NAME) return true;
+    if (LIST_NODE_NAMES.includes(current.name)) continue;
+    for (let child = current.firstChild; child; child = child.nextSibling) stack.push(child);
+  }
+  return false;
+}
+
+/** 列表项嵌套层级（1 起）：只数包含它的列表节点。 */
+function listItemDepth(node) {
+  let depth = 0;
+  for (let current = node.parent; current; current = current.parent) {
+    if (LIST_NODE_NAMES.includes(current.name)) depth += 1;
+  }
+  return Math.max(1, depth);
+}
+
+/**
+ * 列表标记的渲染版面：缩进、编号/符号位、正文起点（三者都以 em 计）。
+ * 编辑器里的行样式与 widget 共用这一份，免得两处各算一套。
+ */
+export function listMarkerLayout(span) {
+  const depth = Math.max(1, Math.trunc(Number(span?.depth) || 1));
+  const indentEm = (depth - 1) * LIST_INDENT_EM;
+  const ordered = Boolean(span?.ordered);
+  const rawNumber = Number(span?.number);
+  const number = Number.isFinite(rawNumber) ? Math.max(0, Math.trunc(rawNumber)) : 1;
+  const suffix = span?.suffix === ')' ? ')' : '.';
+  const label = ordered ? `${number}${suffix}` : '•';
+  // 数字位宽按字符数估算，三位数以上的编号不会压到正文。
+  const markEm = ordered ? Math.max(1.6, label.length * 0.62 + 0.45) : LIST_BULLET_EM;
+  return { ordered, label, indentEm, markEm, padEm: indentEm + markEm };
+}
+
+/**
+ * 列表标记后面的一段空白（CommonMark 允许 1–4 个空格；制表符也算）。
+ * 只用于 list 分隔符，让 `-   item` 的正文起点与 widget 宽度一致。
+ */
+function expandListSpace(range, source) {
+  let end = range.to;
+  while (end < source.length && (source[end] === ' ' || source[end] === '\t')) end += 1;
+  return end > range.from ? { from: range.from, to: end } : { ...range };
+}
+
 /** 每种格式正文的语义类名；浏览器断言就认这些。 */
 export const SPAN_CLASS = Object.freeze({
   strong: 'md-strong',
@@ -272,7 +386,11 @@ export function collectInlineSpans(tree, text = '') {
   const spans = [];
   if (!tree || typeof tree.iterate !== 'function') return spans;
 
-  const pushSpan = (kind, node, delimiters, content, block) => {
+  // 每个有序列表的起始号与已数到的项数；tree.iterate 按文档顺序进入，
+  // 所以同一父列表的 ListItem 依次自增，嵌套列表按自己的父节点单独计数。
+  const orderedGroups = new Map();
+
+  const pushSpan = (kind, node, delimiters, content, block, extra) => {
     spans.push({
       kind,
       from: node.from,
@@ -280,6 +398,7 @@ export function collectInlineSpans(tree, text = '') {
       content,
       delimiters: delimiters.filter((range) => range.to > range.from),
       block: Boolean(block),
+      ...(extra || {}),
     });
   };
 
@@ -292,7 +411,9 @@ export function collectInlineSpans(tree, text = '') {
         const prefix = lastMark ? expandSpace(lastMark, source) : null;
         const delimiters = prefix ? [prefix] : [];
         const from = prefix ? prefix.to : (lastMark ? lastMark.to : node.from);
-        pushSpan('heading', node, delimiters, { from, to: node.to }, true);
+        // ATXHeading1..6 / SetextHeading1..2：层级进 span，编辑器按层级上字号梯度。
+        const level = Number((/(?:ATXHeading|SetextHeading)([1-6])$/.exec(node.name) || [])[1] || 0);
+        pushSpan('heading', node, delimiters, { from, to: node.to }, true, level ? { level } : undefined);
         return;
       }
       const kind = FORMAT_KINDS[node.name];
@@ -332,9 +453,40 @@ export function collectInlineSpans(tree, text = '') {
       }
       if (kind === 'list' || kind === 'quote') {
         const mark = rawDelimiters[0];
-        const delimiters = mark ? [expandSpace(mark, source)] : [];
+        const delimiters = mark
+          ? [kind === 'list' ? expandListSpace(mark, source) : expandSpace(mark, source)]
+          : [];
         const from = delimiters.length ? delimiters[0].to : node.from;
-        pushSpan(kind, node, delimiters, { from, to: node.to }, false);
+        // 引用需要给整段的每一行挂边线；其源码标记的显隐仍由选区控制。
+        if (kind === 'quote') {
+          pushSpan(kind, node, delimiters, { from, to: node.to }, true);
+          return;
+        }
+        const parent = node.parent;
+        const ordered = Boolean(parent && parent.name === 'OrderedList');
+        let number = null;
+        if (ordered) {
+          const key = parent.from;
+          let group = orderedGroups.get(key);
+          if (!group) {
+            const head = /^(\d{1,9})[.)]/.exec(source.slice(parent.from, parent.from + 16));
+            group = { start: head ? Number(head[1]) : 1, used: 0 };
+            orderedGroups.set(key, group);
+          }
+          number = group.start + group.used;
+          group.used += 1;
+        }
+        const markFrom = mark ? mark.from : node.from;
+        // `1)` 与 `1.` 都是合法有序标记；休息态沿用文档里真实的那个收尾符，不擅自改写。
+        const orderedSuffix = mark && source[mark.to - 1] === ')' ? ')' : '.';
+        pushSpan('list', node, delimiters, { from, to: node.to }, false, {
+          ordered,
+          number,
+          suffix: ordered ? orderedSuffix : '',
+          depth: listItemDepth(node),
+          indentFrom: listPrefixStart(source, lineStartBefore(source, markFrom), markFrom),
+          task: itemStartsWithTask(node),
+        });
         return;
       }
       // strong / emphasis / strike / inline-code：正文夹在首尾分隔符之间。
@@ -349,6 +501,17 @@ export function collectInlineSpans(tree, text = '') {
 
 function expandSpace(range, source) {
   return source[range.to] === ' ' ? { from: range.from, to: range.to + 1 } : { ...range };
+}
+
+/**
+ * 围栏行信息串里的语言名（首 token，去掉尾部反引号）；没有信息串就返回空串。
+ * 编辑器休息态的语言角标与测试共用这一份判据。
+ */
+export function fenceLanguage(lineText) {
+  const match = /^\s*(`{3,}|~{3,})\s*(.*?)\s*$/.exec(String(lineText ?? ''));
+  const info = match ? match[2] : '';
+  if (!info) return '';
+  return info.split(/\s+/)[0].replace(/`+$/, '');
 }
 
 /**
@@ -384,7 +547,9 @@ export function collectDecorationRanges(tree, ranges = [], text = '') {
     const active = selectionTouchesSpan(span, ranges);
     const contentClass = SPAN_CLASS[span.kind];
     if (span.content && contentClass) {
-      marks.push({ from: span.content.from, to: span.content.to, classes: contentClass });
+      // 标题带层级：正文类之外追加 md-heading-N，字号梯度由模块 CSS 负责。
+      const classes = span.level ? `${contentClass} md-heading-${span.level}` : contentClass;
+      marks.push({ from: span.content.from, to: span.content.to, classes });
     }
     for (const delimiter of span.delimiters) {
       marks.push({

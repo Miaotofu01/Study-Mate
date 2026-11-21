@@ -124,7 +124,9 @@ async function record(name, body) {
   try {
     await body();
   } catch (error) {
-    check(`[${name}] 场景跑完（${error && error.message ? error.message.split('\n')[0] : '原因不明'}）`, false);
+    // 带上栈里第一处本文件的调用行：只报 "locator.click: Timeout" 时无法定位是哪一步。
+    const stack = String(error && error.stack || '').split('\n').find((line) => line.includes('notes_test.mjs')) || '';
+    check(`[${name}] 场景跑完（${error && error.message ? error.message.split('\n')[0] : '原因不明'}）`, false, stack.trim());
   }
 }
 
@@ -237,6 +239,36 @@ async function settle(page, ms = 260) {
   await page.waitForTimeout(ms);
 }
 
+/**
+ * 收起左栏并逐帧采样宽度。
+ *
+ * 不能先 `await locator.click()` 再固定等 90ms：Playwright 的点击本身可能消耗几十到上百毫秒，
+ * 固定等待从点击返回后才开始，采样点可能已经落在过渡结束后（实测 90ms 时宽度已是 0）。
+ * 这里把真实点击与 requestAnimationFrame 采样放进同一个 page.evaluate：点击后从第一帧开始记录，
+ * 直到宽度归零或超时。断言仍要求「出现过中间宽度」且「最终为 0」，不是放松成只看终态。
+ */
+async function collapseAndSample(page) {
+  return page.evaluate(async () => {
+    const panel = document.querySelector('.left-panel');
+    const button = document.querySelector('[aria-label="收起文件侧栏"]');
+    if (!panel || !button) throw new Error('找不到左栏或收起按钮');
+    const startWidth = panel.getBoundingClientRect().width;
+    const samples = [];
+    button.click();
+    const started = performance.now();
+    await new Promise((resolve) => {
+      const sample = () => {
+        const width = panel.getBoundingClientRect().width;
+        samples.push(width);
+        if (width === 0 || performance.now() - started > 450) resolve();
+        else requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    return { startWidth, samples, finalWidth: panel.getBoundingClientRect().width };
+  });
+}
+
 async function openPage(page, url) {
   await page.goto(url, { waitUntil: 'load' });
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 15000 });
@@ -296,6 +328,47 @@ async function ensureLeftOpen(page, open) {
     await button.first().click();
     await settle(page, 320);
   }
+}
+
+/**
+ * 左栏只有一个「新建」菜单：点开是 role=menu「新建资源」，三项顺序固定；选一项后弹
+ * 同名 dialog（role=dialog + aria-label 同名），填名称点「创建」。
+ * 笔记默认名「未命名.md」、正文为空；建完直接进文档并展开右栏。
+ * 独立 helper 留在本文件里，避免新增文件被静态覆盖器归错套件。
+ */
+const CREATE_LABEL = { notebook: '新建笔记本', folder: '新建文件夹', note: '新建笔记' };
+async function openCreateMenu(page) {
+  await ensureLeftOpen(page, true);
+  const trigger = page.locator('.left-panel .panel-header').getByRole('button', { name: '新建', exact: true });
+  await trigger.click();
+  await page.locator('[role="menu"][aria-label="新建资源"]').waitFor({ state: 'visible', timeout: 5000 });
+  return trigger;
+}
+async function createViaMenu(page, kind, name) {
+  const label = CREATE_LABEL[kind];
+  const trigger = await openCreateMenu(page);
+  await page.getByRole('menuitem', { name: label, exact: true }).click();
+  const dialog = page.locator(`[role=dialog][aria-label="${label}"]`);
+  await dialog.waitFor({ state: 'visible', timeout: 5000 });
+  assert.equal(await trigger.getAttribute('aria-expanded'), 'false', '菜单选完没有收起');
+  const fieldName = kind === 'notebook' ? '笔记本名称' : kind === 'folder' ? '文件夹名称' : '笔记名称';
+  const field = dialog.getByRole('textbox', { name: fieldName });
+  if (name !== undefined) await field.fill(name);
+  await dialog.getByRole('button', { name: '创建', exact: true }).click();
+  await dialog.waitFor({ state: 'detached', timeout: 5000 });
+  await settle(page, 360);
+  return dialog;
+}
+const createNote = (page, name) => createViaMenu(page, 'note', name);
+const createFolder = (page, name) => createViaMenu(page, 'folder', name);
+const createNotebook = (page, name) => createViaMenu(page, 'notebook', name);
+/** 文档标题是受控输入：Enter 或失焦才提交，fill 本身不再即改即存。 */
+async function renameTitle(page, name) {
+  const field = page.getByRole('textbox', { name: '文档标题' });
+  await field.fill(name);
+  await field.press('Enter');
+  await settle(page, 280);
+  return field;
 }
 
 // 高纵横比图片覆盖曾出现的折叠透明命中区；PNG 在临时目录现造，不依赖图片库。
@@ -685,31 +758,38 @@ try {
         await page.locator(LEFT_TOGGLE).click();
         await settle(page, 360);
         check('[右栏] 收起后宽度归零、aria-hidden', await right.evaluate((el) => el.getBoundingClientRect().width === 0 && el.getAttribute('aria-hidden') === 'true'));
-        await page.getByRole('button', { name: '新建笔记', exact: true }).click();
+        await createNote(page);
         await settle(page, 600);
         await page.locator('.document-scroll > .note-editor .markdown-inline-editor .cm-editor').waitFor({ state: 'visible', timeout: 8000 });
         const inlineLayout = await page.evaluate(() => {
           const row = document.querySelector('.document-toolbar')?.getBoundingClientRect();
+          const modes = document.querySelector('.document-mode-switch')?.getBoundingClientRect();
           const bar = document.querySelector('.md-format-toolbar')?.getBoundingClientRect();
           const note = document.querySelector('.document-scroll > .note-editor')?.getBoundingClientRect();
           const scroller = document.querySelector('.markdown-inline-editor .cm-scroller');
-          const names = ['编辑', '阅读', '分屏'];
+          const modeButtons = [...document.querySelectorAll('.document-mode-switch button')];
           return {
             scrollClass: document.querySelector('.document-scroll')?.className || '',
-            gap: row && bar ? bar.top - row.bottom : NaN,
+            modeGroups: document.querySelectorAll('.document-mode-switch[role=group][aria-label="文档视图模式"]').length,
+            modeLabels: modeButtons.map((el) => el.textContent.trim()),
+            pressed: modeButtons.filter((el) => el.getAttribute('aria-pressed') === 'true').map((el) => el.textContent.trim()),
+            editorMode: document.querySelector('.document-scroll > .note-editor')?.dataset.mode,
+            rowGap: row && modes ? modes.top - row.bottom : NaN,
+            gap: modes && bar ? bar.top - modes.bottom : NaN,
             barHeight: bar?.height || 0,
             noteHeight: note?.height || 0,
             scrollerHeight: scroller?.clientHeight || 0,
-            modeButtons: [...document.querySelectorAll('button')].filter((el) => names.includes((el.getAttribute('aria-label') || el.textContent || '').trim())).length,
             legacyPanes: document.querySelectorAll('.document-preview-pane, .document-source, .editor-pane, .editor-resize-hit, .cm-lineNumbers').length,
             previews: document.querySelectorAll('.document-stage .document-preview-pane, .document-stage .markdown-preview').length,
             toolbars: document.querySelectorAll('.md-format-toolbar').length,
             inlineEditors: document.querySelectorAll('.markdown-inline-editor .cm-editor').length,
+            titleValue: document.querySelector('input[aria-label="文档标题"]')?.value,
             visibleText: document.querySelector('.document-stage')?.innerText || '',
           };
         });
-        check('[编辑器] 新建笔记直接进入单一内联编辑器（没有编辑/阅读/分屏模式）', inlineLayout.scrollClass.includes('is-inline') && inlineLayout.modeButtons === 0 && inlineLayout.legacyPanes === 0 && inlineLayout.previews === 0, JSON.stringify(inlineLayout));
-        check('[编辑器] 文件标题行下只有一条格式栏，正文紧跟其后', inlineLayout.toolbars === 1 && inlineLayout.inlineEditors === 1 && inlineLayout.gap >= -1 && inlineLayout.gap < 4 && inlineLayout.barHeight <= 40, `gap=${inlineLayout.gap.toFixed(1)} bar=${inlineLayout.barHeight.toFixed(0)}`);
+        check('[编辑器] 新建笔记默认进入「渲染编辑」：文档视图模式一组四钮，只有它按下', inlineLayout.modeGroups === 1 && JSON.stringify(inlineLayout.modeLabels) === JSON.stringify(['预览', '编辑', '双列', '渲染编辑']) && JSON.stringify(inlineLayout.pressed) === JSON.stringify(['渲染编辑']) && inlineLayout.scrollClass.includes('is-inline') && inlineLayout.editorMode === 'inline', JSON.stringify(inlineLayout));
+        check('[编辑器] 默认名「未命名.md」、正文为空（旧「# 新笔记」占位已废弃）', inlineLayout.titleValue === '未命名.md' && (await rawEditorText(page)) === '', `title=${inlineLayout.titleValue}`);
+        check('[编辑器] 文件标题行下只有一条格式栏，正文紧跟其后', inlineLayout.toolbars === 1 && inlineLayout.inlineEditors === 1 && inlineLayout.legacyPanes === 0 && inlineLayout.previews === 0 && inlineLayout.rowGap >= -1 && inlineLayout.rowGap < 48 && inlineLayout.gap >= -1 && inlineLayout.gap < 8 && inlineLayout.barHeight <= 40, JSON.stringify(inlineLayout));
         check('[编辑器] 内联编辑器铺满文档区，不是旧的固定高小窗口', inlineLayout.noteHeight > 300 && inlineLayout.scrollerHeight > 220, `note=${inlineLayout.noteHeight.toFixed(0)} scroller=${inlineLayout.scrollerHeight}`);
         check('[编辑器] 标题行不再重复「Markdown 正文 / 即时编辑」字样', !/Markdown 正文|即时编辑/.test(inlineLayout.visibleText), inlineLayout.visibleText.slice(0, 120));
       });
@@ -740,13 +820,15 @@ try {
 
         const shell = await page.evaluate(() => ({
           scrollClass: document.querySelector('.document-scroll')?.className || '',
-          modeButtons: ['编辑', '阅读', '分屏'].filter((name) => [...document.querySelectorAll('button')].some((el) => (el.getAttribute('aria-label') || el.textContent || '').trim() === name)),
+          modeGroup: document.querySelectorAll('.document-mode-switch[role=group][aria-label="文档视图模式"]').length,
+          modeButtons: [...document.querySelectorAll('.document-mode-switch button')].map((el) => el.textContent.trim()),
+          legacyModes: ['阅读', '分屏'].filter((name) => [...document.querySelectorAll('button')].some((el) => (el.getAttribute('aria-label') || el.textContent || '').trim() === name)),
           legacy: document.querySelectorAll('.document-preview-pane, .document-source, .editor-pane, .editor-resize-hit, .cm-lineNumbers, .note-editor__modes, .note-editor__bar').length,
           toolbars: document.querySelectorAll('.md-format-toolbar').length,
           inlineEditors: document.querySelectorAll('.markdown-inline-editor .cm-editor').length,
           splitHandles: document.querySelectorAll('[role=separator][aria-label="调整编辑与预览宽度"]').length,
         }));
-        check('[编辑器] 只有单一内联编辑器：没有编辑/阅读/分屏模式、预览面板或行号', shell.scrollClass.includes('is-inline') && shell.modeButtons.length === 0 && shell.legacy === 0 && shell.splitHandles === 0 && shell.toolbars === 1 && shell.inlineEditors === 1, JSON.stringify(shell));
+        check('[编辑器] 模式只有文档组「文档视图模式」：没有阅读/分屏按钮、预览面板或行号', shell.modeGroup === 1 && JSON.stringify(shell.modeButtons) === JSON.stringify(['预览', '编辑', '双列', '渲染编辑']) && shell.legacyModes.length === 0 && shell.scrollClass.includes('is-inline') && shell.legacy === 0 && shell.splitHandles === 0 && shell.toolbars === 1 && shell.inlineEditors === 1, JSON.stringify(shell));
 
         const controls = await page.evaluate(() => ({
           labels: [...document.querySelectorAll('.md-format-toolbar button, .md-format-toolbar select')].map((el) => el.getAttribute('aria-label')).filter(Boolean),
@@ -768,10 +850,82 @@ try {
         check('[源码] 正文原文就在编辑器里，表格/代码/公式由同一份源码渲染', rawStart.includes('# 主动回忆') && rawStart.includes('**我的行动：**') && blocksStart.tables >= 1 && blocksStart.code >= 1 && blocksStart.katex >= 1 && blocksStart.tableText.includes('再读') && blocksStart.tableText.includes('主动回忆'), `${rawStart.slice(0, 70)} / ${JSON.stringify(blocksStart)}`);
         check('[无序列化] 没有另一份预览 DOM，打开正文不经过 HTML 序列化', (await page.locator('.document-scroll .markdown-preview, .document-scroll .document-preview-pane').count()) === 0);
         await title.fill('主动回忆（只改标题）');
+        await title.press('Enter');
         await settle(page, 240);
         check('[无序列化] 改文件标题不重写/重排正文源码', (await rawEditorText(page)) === rawStart);
         await title.fill('主动回忆：先想，再看');
+        await title.press('Enter');
         await settle(page, 200);
+        check('[标题] Enter 才提交改名（输入框里改完立刻生效会打断正文编辑）', (await title.inputValue()) === '主动回忆：先想，再看');
+
+        /* 四模式同稿：模式只换显示方式；同一份 Markdown、同一份草稿、同一份源码 DOM。 */
+        const rawBeforeModes = await rawEditorText(page);
+        const modeButton = (label) => page.locator('.document-mode-switch').getByRole('button', { name: label, exact: true });
+        const modeState = () => page.evaluate(() => ({
+          mode: document.querySelector('.document-scroll > .note-editor')?.dataset.mode,
+          sourceHidden: document.querySelector('.note-editor__source')?.hidden,
+          panes: document.querySelectorAll('.note-editor__panes.is-split').length,
+          handle: document.querySelectorAll('.document-split-handle').length,
+          preview: document.querySelectorAll('.note-editor__preview.markdown-preview').length,
+          previewText: document.querySelector('.note-editor__preview.markdown-preview')?.innerText || '',
+          toolbar: document.querySelectorAll('.md-format-toolbar').length,
+          pressed: [...document.querySelectorAll('.document-mode-switch button')].filter((el) => el.getAttribute('aria-pressed') === 'true').map((el) => el.textContent.trim()),
+        }));
+        await modeButton('预览').click();
+        await settle(page, 320);
+        let four = await modeState();
+        check('[模式] 「预览」只读渲染同一份草稿：编辑区收起、格式栏收起、没有第二份源码', four.mode === 'preview' && four.sourceHidden === true && four.preview === 1 && four.previewText.includes('我的行动') && four.toolbar === 0 && JSON.stringify(four.pressed) === JSON.stringify(['预览']), JSON.stringify(four));
+        await modeButton('编辑').click();
+        await settle(page, 320);
+        four = await modeState();
+        check('[模式] 「编辑」只留源码编辑区（无预览、无格式栏），正文还是那一份', four.mode === 'edit' && four.sourceHidden === false && four.preview === 0 && four.toolbar === 0 && JSON.stringify(four.pressed) === JSON.stringify(['编辑']), JSON.stringify(four));
+        // 「编辑」是纯源码模式：留一份基线，双列切回源码侧时跟它比（渲染编辑态 textContent
+        // 里表格是渲染后的文字，跨模式比会误判「正文变了」）。
+        const rawInEditMode = await rawEditorText(page);
+        await modeButton('双列').click();
+        await settle(page, 400);
+        // 双列在「可见宽度 < 540」时只显示一侧，顶上给「源码 / 预览」两钮。右栏开着时
+        // 1280 视口也可能落在窄侧，所以按实测 DOM 分支——两条路都要验，不能只测宽屏。
+        const splitNarrow = (await page.locator('.note-editor__split-tabs').count()) > 0;
+        four = await modeState();
+        if (splitNarrow) {
+          check('[模式] 「双列」窄时只显示一侧：源码在、顶上给「源码 / 预览」切换', four.mode === 'split' && four.sourceHidden === false && four.panes === 0 && four.handle === 0 && four.preview === 0 && four.toolbar === 0 && JSON.stringify(four.pressed) === JSON.stringify(['双列']), JSON.stringify(four));
+          const splitTabs = page.locator('.note-editor__split-tabs');
+          await splitTabs.getByRole('button', { name: '预览', exact: true }).click();
+          await settle(page, 300);
+          const toPreview = await page.evaluate(() => ({
+            sourceHidden: document.querySelector('.note-editor__source')?.hidden,
+            preview: document.querySelectorAll('.note-editor__preview.markdown-preview').length,
+            previewText: document.querySelector('.note-editor__preview.markdown-preview')?.innerText || '',
+            pressed: [...document.querySelectorAll('.note-editor__split-tabs button')].filter((el) => el.getAttribute('aria-pressed') === 'true').map((el) => el.textContent.trim()),
+          }));
+          check('[模式] 「双列」窄时切到预览侧：同一份草稿渲染，源码收起', toPreview.sourceHidden === true && toPreview.preview === 1 && toPreview.previewText.includes('我的行动') && JSON.stringify(toPreview.pressed) === JSON.stringify(['预览']), JSON.stringify(toPreview));
+          await splitTabs.getByRole('button', { name: '源码', exact: true }).click();
+          await settle(page, 280);
+          const backToSource = await page.evaluate(() => ({
+            sourceHidden: document.querySelector('.note-editor__source')?.hidden,
+            preview: document.querySelectorAll('.note-editor__preview.markdown-preview').length,
+            pressed: [...document.querySelectorAll('.note-editor__split-tabs button')].filter((el) => el.getAttribute('aria-pressed') === 'true').map((el) => el.textContent.trim()),
+          }));
+          const rawBackToSource = await rawEditorText(page);
+          check('[模式] 「双列」窄时切回源码侧，正文仍是同一份', backToSource.sourceHidden === false && backToSource.preview === 0 && JSON.stringify(backToSource.pressed) === JSON.stringify(['源码']) && rawBackToSource === rawInEditMode, JSON.stringify({ ...backToSource, rawEqual: rawBackToSource === rawInEditMode, now: rawBackToSource.slice(0, 80), edit: rawInEditMode.slice(0, 80) }));
+        } else {
+          check('[模式] 「双列」宽屏左右并排：同一份源码 + 同一份渲染，中间有可拖动分隔线', four.mode === 'split' && four.sourceHidden === false && four.panes === 1 && four.handle === 1 && four.preview === 1 && four.previewText.includes('我的行动') && four.toolbar === 0 && JSON.stringify(four.pressed) === JSON.stringify(['双列']), JSON.stringify(four));
+          const divider = page.getByRole('separator', { name: '调整编辑与预览宽度' });
+          const dividerBox = await divider.boundingBox();
+          if (dividerBox) {
+            await page.mouse.move(dividerBox.x + dividerBox.width / 2, dividerBox.y + 160);
+            await page.mouse.down();
+            await page.mouse.move(dividerBox.x + dividerBox.width / 2 + 60, dividerBox.y + 160, { steps: 8 });
+            await page.mouse.up();
+            await settle(page, 240);
+          }
+          check('[模式] 拖动分隔线只改两侧宽度，不改正文', (await divider.getAttribute('aria-valuenow')) !== null && (await rawEditorText(page)) === rawBeforeModes);
+        }
+        await modeButton('渲染编辑').click();
+        await settle(page, 320);
+        four = await modeState();
+        check('[模式] 回到「渲染编辑」：格式栏与内联源码都回来，仍是同一份草稿', four.mode === 'inline' && four.sourceHidden === false && four.preview === 0 && four.toolbar === 1 && JSON.stringify(four.pressed) === JSON.stringify(['渲染编辑']) && (await rawEditorText(page)) === rawBeforeModes, JSON.stringify(four));
 
         await clickEditorLine(page, '合上材料');
         let marks = await syntaxMarks(page);
@@ -1218,17 +1372,48 @@ try {
         await tree.getByRole('button', { name: /^打开 还没想明白的问题$/ }).click();
         await settle(page, 260);
         check('[资源树] 单击文件：右栏展开并预览这篇笔记', (await page.locator('.right-panel').evaluate((el) => el.getBoundingClientRect().width)) > 0 && (await page.locator('.resource-detail').innerText()).includes('还没想明白'));
+        const exportName = '导出当前 Markdown';
+        const resourceActions = page.locator('.resource-header-actions');
+        const resourceExport = resourceActions.getByRole('button', { name: exportName });
+        check('[导出] 右栏标题操作组有四个按钮，导出只显示图标且正文没有第二个入口',
+          await resourceActions.getByRole('button').count() === 4 && await resourceExport.innerText() === ''
+          && await page.locator('.resource-detail').getByRole('button', { name: exportName }).count() === 0);
+        const [exported] = await Promise.all([page.waitForEvent('download'), resourceExport.click()]);
+        check('[导出] 右栏图标下载当前笔记的 Markdown 文件',
+          exported.suggestedFilename().endsWith('.md') && fs.readFileSync(await exported.path(), 'utf8').includes('还没想明白'));
         await page.locator('.left-panel').getByRole('button', { name: /^打开 我的例子：从生活中找类比$/ }).dblclick();
         await settle(page, 500);
         check('[资源树] 双击文件直接打开发文档视图（视图切到「文档」）', (await page.getByRole('button', { name: '文档', exact: true }).getAttribute('aria-pressed')) === 'true');
         check('[资源树] 双击打开的那一篇就是编辑器里的那一篇', (await page.getByRole('textbox', { name: '文档标题' }).inputValue()) === '我的例子：从生活中找类比');
+        check('[导出] 文档视图的导出图标只出现在文档标题栏',
+          await page.locator('.document-toolbar').getByRole('button', { name: exportName }).isVisible()
+          && await page.locator('.document-scroll').getByRole('button', { name: exportName }).count() === 0);
         const before = await page.locator('.tree-row.tree-file').count();
-        await page.getByRole('button', { name: '新建笔记', exact: true }).click();
-        await settle(page, 400);
-        const titleBox = page.getByRole('textbox', { name: '文档标题' });
-        await titleBox.fill('树上添的笔记');
-        await settle(page, 260);
-        check('[资源树] 新建的笔记立刻出现在树上（标题跟着改）', (await page.getByRole('button', { name: '打开 树上添的笔记', exact: true }).count()) === 1 && (await page.locator('.tree-row.tree-file').count()) === before + 1);
+        const trigger = await openCreateMenu(page);
+        check('[新建] 左栏只剩一个「新建」菜单按钮，三项顺序是 笔记本 / 文件夹 / 笔记',
+          (await page.getByRole('button', { name: '新建笔记', exact: true }).count()) === 0
+          && (await page.locator('.left-panel .panel-header').getByRole('button', { name: '新建', exact: true }).count()) === 1
+          && JSON.stringify(await page.locator('[role="menu"][aria-label="新建资源"] [role="menuitem"]').allInnerTexts()) === JSON.stringify(['新建笔记本', '新建文件夹', '新建笔记'])
+          && (await trigger.getAttribute('aria-expanded')) === 'true');
+        await page.keyboard.press('Escape');
+        await settle(page, 180);
+        check('[新建] Esc 关掉菜单并把焦点还给「新建」', (await page.locator('[role="menu"][aria-label="新建资源"]').count()) === 0
+          && (await trigger.getAttribute('aria-expanded')) === 'false'
+          && (await page.evaluate(() => Boolean(document.activeElement?.classList.contains('notes-create-trigger')))));
+        await openCreateMenu(page);
+        await page.getByRole('menuitem', { name: '新建笔记', exact: true }).click();
+        const noteDialog = page.locator('[role=dialog][aria-label="新建笔记"]');
+        await noteDialog.waitFor({ state: 'visible' });
+        check('[新建] 笔记弹窗默认「未命名.md」，并说明新建位置', (await noteDialog.getByRole('textbox', { name: '笔记名称' }).inputValue()) === '未命名.md'
+          && /^新建位置：/.test((await noteDialog.locator('.notes-create-target').innerText()).trim()));
+        await noteDialog.getByRole('button', { name: '创建', exact: true }).click();
+        await noteDialog.waitFor({ state: 'detached' });
+        await settle(page, 500);
+        check('[新建] 建完直接进文档并展开右栏，正文为空', (await page.getByRole('button', { name: '文档', exact: true }).getAttribute('aria-pressed')) === 'true'
+          && (await page.locator('.right-panel').evaluate((el) => el.getBoundingClientRect().width)) > 0
+          && (await rawEditorText(page)) === '');
+        await renameTitle(page, '树上添的笔记.md');
+        check('[资源树] 新建的笔记立刻出现在树上（标题跟着改）', (await page.getByRole('button', { name: '打开 树上添的笔记.md', exact: true }).count()) === 1 && (await page.locator('.tree-row.tree-file').count()) === before + 1);
         await page.getByRole('textbox', { name: '搜索文件' }).fill('主动回忆');
         await settle(page, 300);
         const visible = await page.locator('.tree-row.tree-file').allInnerTexts();
@@ -1244,17 +1429,11 @@ try {
         check('[搜索] 没有匹配时给出「没有找到文档」', (await page.locator('.resource-tree .empty-state').innerText()).includes('没有找到'));
         await page.getByRole('textbox', { name: '搜索文件' }).fill('');
         await settle(page, 240);
-        await page.getByRole('button', { name: '新建文件夹', exact: true }).click();
-        const folder = page.locator('[role=dialog][aria-label="新建文件夹"]');
-        await folder.waitFor({ state: 'visible' });
-        await page.getByRole('textbox', { name: '文件夹名称' }).fill('复习');
-        await folder.getByRole('button', { name: '创建', exact: true }).click();
-        await settle(page, 300);
+        await createFolder(page, '复习');
         check('[资源树] 新建文件夹进树，名字对', (await page.getByRole('button', { name: '复习 文件夹', exact: true }).count()) === 1);
-        await page.getByRole('button', { name: '新建笔记', exact: true }).click();
-        await settle(page, 300);
-        await page.getByRole('textbox', { name: '文档标题' }).fill('复习里的笔记');
-        await settle(page, 260);
+        // 刚建的文件夹就是「当前选中位置」：笔记要落在它里面。
+        await createNote(page);
+        await renameTitle(page, '复习里的笔记.md');
         check('[资源树] 新建笔记落在当前选中的文件夹里', await page.evaluate(() => {
           const rows = [...document.querySelectorAll('.tree-row')];
           const folderIndex = rows.findIndex((row) => row.textContent.includes('复习'));
@@ -1264,6 +1443,84 @@ try {
       });
     } finally {
       await close('资源树：边标签与双击添加');
+    }
+  }
+
+  /* ─── 11b. 独立复制 Markdown：同目录副本，不复制画布；右栏笔记详情无留白 ── */
+  {
+    const { page, close } = await newPage();
+    try {
+      await openPage(page, baseUrl);
+      await record('复制 Markdown：同目录副本、不自动画布、右栏无留白', async () => {
+        const nodesBefore = await page.locator('.react-flow__node').count();
+        const filesBefore = await page.locator('.tree-row.tree-file').count();
+        await page.getByRole('button', { name: '打开 主动回忆：先想，再看', exact: true }).click();
+        await settle(page, 360);
+        const panelFit = await page.locator('.resource-detail.is-note-detail').evaluate((el) => {
+          const style = getComputedStyle(el);
+          const editor = el.querySelector('.note-editor');
+          const bar = el.querySelector('.course-association-bar');
+          if (!editor) return { ok: false, why: '右栏没有挂载 note-editor' };
+          const box = el.getBoundingClientRect(), edit = editor.getBoundingClientRect();
+          return {
+            ok: style.paddingTop === '0px' && style.paddingBottom === '0px' && style.rowGap === '0px'
+              && Math.abs(edit.width - el.clientWidth) <= 1
+              && Math.abs(box.bottom - edit.bottom) <= 1
+              && Boolean(bar) && bar.getBoundingClientRect().bottom <= edit.top + 1,
+            why: JSON.stringify({ paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, rowGap: style.rowGap, panel: [box.width, box.height], editor: [edit.width, edit.height], bottomGap: box.bottom - edit.bottom, bar: bar ? bar.getBoundingClientRect().height : null }),
+          };
+        });
+        check('[右栏] 笔记详情 padding/gap 归零，编辑器撑满宽度并吃到底部（无尾部留白）', panelFit.ok, panelFit.why);
+        await page.locator('[aria-label="主动回忆：先想，再看的更多操作"]').click();
+        const menu = page.locator('[role="menu"][aria-label="主动回忆：先想，再看 的文件操作"]');
+        await menu.waitFor({ state: 'visible', timeout: 5000 });
+        const itemLabels = (await menu.getByRole('menuitem').allInnerTexts()).map((text) => text.split('\n')[0].trim());
+        check('[菜单] 文件菜单依次是 重命名 / 复制 Markdown / 归档，归档是禁用占位',
+          JSON.stringify(itemLabels) === JSON.stringify(['重命名', '复制 Markdown', '归档'])
+          && (await menu.getByRole('menuitem', { name: /^归档/ }).getAttribute('aria-disabled')) === 'true'
+          && (await menu.getByRole('menuitem', { name: /^归档/ }).getAttribute('title')) === '归档尚未实现，先占位。',
+          JSON.stringify(itemLabels));
+        await menu.getByRole('menuitem', { name: /^复制 Markdown/ }).click();
+        await settle(page, 420);
+        check('[复制] 只提示同目录复制，不复制课程关联或画布卡片', (await page.locator('.toast').innerText()).includes('已在同目录复制 Markdown，未复制课程关联或画布卡片。'));
+        check('[复制] 副本以「（副本）.md」进树，画布不多出卡片', (await page.getByRole('button', { name: '打开 主动回忆：先想，再看（副本）.md', exact: true }).count()) === 1
+          && (await page.locator('.tree-row.tree-file').count()) === filesBefore + 1
+          && (await page.locator('.react-flow__node').count()) === nodesBefore);
+        check('[复制] 副本和原件在同一目录（同组、同缩进）', await page.evaluate(() => {
+          const rows = [...document.querySelectorAll('.tree-row.tree-file')];
+          const openOf = (title) => rows.find((row) => row.querySelector('.tree-file-open')?.getAttribute('aria-label') === '打开 ' + title);
+          const original = openOf('主动回忆：先想，再看');
+          const copy = openOf('主动回忆：先想，再看（副本）.md');
+          if (!original || !copy) return false;
+          return original.closest('[role="group"]') === copy.closest('[role="group"]') && original.style.paddingLeft === copy.style.paddingLeft;
+        }));
+        check('[复制] 右栏仍停在这篇笔记上（复制不改变当前选择）', (await page.locator('.right-panel').evaluate((el) => el.getBoundingClientRect().width)) > 0);
+      });
+    } finally {
+      await close('复制 Markdown：同目录副本、不自动画布、右栏无留白');
+    }
+  }
+
+  /* ─── 11c. 左树拖到画布：只引用同一原件，不弹导入模式 ─────────────── */
+  {
+    const { page, close } = await newPage();
+    try {
+      await openPage(page, baseUrl);
+      await record('左树拖入画布：只引用同一原件', async () => {
+        check('[拖入] 画布提示写明「从左树拖入即引用同一原件；外部文件可选导入方式」', (await page.locator('.canvas-drop-hint').innerText()).includes('从左树拖入即引用同一原件'));
+        const nodesBefore = await page.locator('.react-flow__node').count();
+        const filesBefore = await page.locator('.tree-row.tree-file').count();
+        const row = page.locator('.tree-row.tree-file').filter({ hasText: '还没想明白的问题' }).first();
+        await row.dragTo(page.locator('.canvas-stage'), { targetPosition: { x: 820, y: 520 } });
+        await settle(page, 520);
+        check('[拖入] 不弹「选择导入模式」：资源数不变，画布节点 +1（引用同一原件）',
+          (await page.locator('[role=dialog][aria-label="选择导入模式"]').count()) === 0
+          && (await page.locator('.tree-row.tree-file').count()) === filesBefore
+          && (await page.locator('.react-flow__node').count()) === nodesBefore + 1);
+        check('[拖入] 新卡就是被拖的那一篇，点开右栏可编辑同一份原件', (await page.locator('.react-flow__node').filter({ hasText: '还没想明白的问题' }).count()) >= 1);
+      });
+    } finally {
+      await close('左树拖入画布：只引用同一原件');
     }
   }
 
@@ -1289,12 +1546,13 @@ try {
         check(`[动效] 首帧主题为 ${scheme}（不先切换到亮色）`, motion.theme === scheme);
         check('[动效] 默认（未要求减少动效）侧栏宽度有 200ms 过渡', motion.panelDuration.split(',').some((part) => part.trim() === '0.2s'), motion.panelDuration);
         check('[动效] --v5-motion 是 1（动效没有被关掉）', motion.motion === '1', motion.motion);
-        await animated.page.getByRole('button', { name: '收起文件侧栏', exact: true }).click();
-        await animated.page.waitForTimeout(90);
-        const midway = await animated.page.locator('.left-panel').evaluate((el) => el.getBoundingClientRect().width);
-        await settle(animated.page, 420);
-        const done = await animated.page.locator('.left-panel').evaluate((el) => el.getBoundingClientRect().width);
-        check('[动效] 收起是滑出去的过渡（中途宽度在两端之间），不是瞬间跳变', midway > 0 && midway < 264 && done === 0, `${midway.toFixed(0)} → ${done}`);
+        const collapse = await collapseAndSample(animated.page);
+        const midway = collapse.samples.find((width) => width > 0 && width < collapse.startWidth);
+        check('[动效] 收起是滑出去的过渡（中途宽度在两端之间），不是瞬间跳变', midway !== undefined && collapse.finalWidth === 0, `${midway === undefined ? 0 : midway.toFixed(0)} → ${collapse.finalWidth.toFixed(0)}（采样 ${collapse.samples.length} 帧）`);
+        await animated.page.waitForFunction(() => {
+          const rail = document.querySelector('.panel-rail--left');
+          return rail !== null && Math.abs(rail.getBoundingClientRect().width - 32) < 1.5;
+        }, null, { timeout: 1200 });
         const rail = await animated.page.locator('.panel-rail--left').evaluate((el) => el.getBoundingClientRect().width);
         check('[动效] 收起后窄轨回到 32px，开合状态可见', Math.abs(rail - 32) < 1.5, String(rail));
       });
@@ -1340,8 +1598,12 @@ try {
             return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
           });
           check(`[点阵] ${scheme} 模式实际点色与画布对比度达标`, gridRatio >= (scheme === 'light' ? 3 : 2.5), `${gridRatio}:1`);
-          await page.getByRole('button', { name: '新建笔记', exact: true }).click();
+          await createNote(page);
           await settle(page, 500);
+          const themedEditor = page.locator('.document-scroll .markdown-inline-editor .cm-content');
+          await themedEditor.click();
+          await page.keyboard.insertText('# 主题对照\n\n正文一行。\n');
+          await settle(page, 260);
           const rows = await page.evaluate(CONTRAST_PROBE + '(' + JSON.stringify([
             ['.prototype-badge', '顶栏状态徽标'],
             ['.document-title, .document-toolbar input', '文档标题'],
@@ -1401,16 +1663,22 @@ try {
           }
           // 窄屏刚才把左栏收起了；先经窄轨把文件栏展开，再新建，最后仍把文件栏收起，
           // 这样格式栏量的是真实文档宽度，而不是被浮层压住的状态。
-          const newNote = page.getByRole('button', { name: '新建笔记', exact: true });
+          const newNote = page.locator('.left-panel .panel-header').getByRole('button', { name: '新建', exact: true });
           if (!(await newNote.isVisible().catch(() => false))) {
             await page.getByRole('button', { name: '展开文件侧栏', exact: true }).click();
             await settle(page, 240);
           }
-          await newNote.click();
+          await createNote(page);
           await settle(page, 520);
           const collapseLeft = page.getByRole('button', { name: '收起文件侧栏', exact: true });
           if (await collapseLeft.isVisible().catch(() => false)) await collapseLeft.click();
-          await settle(page, 240);
+          // 浮层收起有过渡：等左栏真的 aria-hidden 再点模式按钮，否则停在上面的左栏会截住点击。
+          await page.waitForFunction(() => {
+            const panel = document.querySelector('.left-panel');
+            if (!panel) return true;
+            return panel.getAttribute('aria-hidden') === 'true' || panel.getBoundingClientRect().width === 0;
+          }, null, { timeout: 8000 }).catch(() => {});
+          await settle(page, 360);
           const narrowDoc = await page.evaluate(() => {
             const bar = document.querySelector('.md-format-toolbar');
             const note = document.querySelector('.document-scroll > .note-editor');
@@ -1422,6 +1690,61 @@ try {
           });
           check(`[窄屏 ${width}] 文档视图同样不横向溢出`, narrowDoc.noPageOverflow);
           check(`[窄屏 ${width}] 格式栏在窄侧栏里保持单行且在正文宽度内`, Boolean(narrowDoc.bar) && narrowDoc.bar.height <= 40 && narrowDoc.bar.fits && narrowDoc.noteWidth > 0, JSON.stringify(narrowDoc));
+          // 双列窄侧：panes 宽度 < 540 时只显示一侧，顶上换成「源码 / 预览」两钮。
+          // 阈值量的是编辑器自己的可见宽度（右栏开着时视口很宽也可能落在窄侧），
+          // 所以按实测 panes.clientWidth 判分支，宽/窄两条路都要断言到。
+          // 窄屏下右栏也是叠在文档上的浮层：先经顶栏按钮把它收起，否则它会截住模式按钮的点击。
+          const collapseRight = page.getByRole('button', { name: '收起右侧栏', exact: true });
+          if (await collapseRight.isVisible().catch(() => false)) await collapseRight.click();
+          await page.waitForFunction(() => {
+            const panel = document.querySelector('#right-panel');
+            return !panel || panel.getAttribute('aria-hidden') === 'true' || panel.getBoundingClientRect().width === 0;
+          }, null, { timeout: 8000 }).catch(() => {});
+          await settle(page, 320);
+          await page.locator('.document-mode-switch').getByRole('button', { name: '双列', exact: true }).click();
+          await settle(page, 480);
+          const narrowSplit = await page.evaluate(() => {
+            const panes = document.querySelector('.document-scroll > .note-editor .note-editor__panes');
+            return {
+              mode: document.querySelector('.document-scroll > .note-editor')?.dataset.mode,
+              tabs: [...document.querySelectorAll('.note-editor__split-tabs button')].map((el) => el.textContent.trim()),
+              panes: document.querySelectorAll('.note-editor__panes.is-split').length,
+              panesWidth: panes ? panes.clientWidth : 0,
+              handle: document.querySelectorAll('.document-split-handle').length,
+              sourceHidden: document.querySelector('.note-editor__source')?.hidden,
+              preview: document.querySelectorAll('.note-editor__preview.markdown-preview').length,
+              ends: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
+            };
+          });
+          const stageWidth = await page.locator('.document-stage').evaluate((el) => el.getBoundingClientRect().width);
+          const expectNarrow = narrowSplit.panesWidth < 540;
+          const isNarrowDom = narrowSplit.tabs.length === 2;
+          check(`[窄屏 ${width}] 双列按可见宽度选布局（<540 单侧 / ≥540 并排）`, narrowSplit.mode === 'split' && isNarrowDom === expectNarrow, JSON.stringify({ ...narrowSplit, stageWidth }));
+          if (isNarrowDom) {
+            check(`[窄屏 ${width}] 双列窄时只显示一侧，顶上给「源码 / 预览」切换`, narrowSplit.mode === 'split'
+              && JSON.stringify(narrowSplit.tabs) === JSON.stringify(['源码', '预览']) && narrowSplit.panes === 0
+              && narrowSplit.handle === 0 && narrowSplit.sourceHidden === false && narrowSplit.preview === 0
+              && narrowSplit.ends <= 1, JSON.stringify({ ...narrowSplit, stageWidth }));
+            const tabs = page.locator('.note-editor__split-tabs');
+            await tabs.getByRole('button', { name: '预览', exact: true }).click();
+            await settle(page, 300);
+            const toPreview = await page.evaluate(() => ({
+              sourceHidden: document.querySelector('.note-editor__source')?.hidden,
+              preview: document.querySelectorAll('.note-editor__preview.markdown-preview').length,
+              pressed: [...document.querySelectorAll('.note-editor__split-tabs button')].filter((el) => el.getAttribute('aria-pressed') === 'true').map((el) => el.textContent.trim()),
+            }));
+            check(`[窄屏 ${width}] 点「预览」切到渲染侧（同一份草稿）`, toPreview.sourceHidden === true && toPreview.preview === 1 && JSON.stringify(toPreview.pressed) === JSON.stringify(['预览']), JSON.stringify(toPreview));
+            await tabs.getByRole('button', { name: '源码', exact: true }).click();
+            await settle(page, 280);
+            const backToSource = await page.evaluate(() => ({
+              sourceHidden: document.querySelector('.note-editor__source')?.hidden,
+              preview: document.querySelectorAll('.note-editor__preview.markdown-preview').length,
+              pressed: [...document.querySelectorAll('.note-editor__split-tabs button')].filter((el) => el.getAttribute('aria-pressed') === 'true').map((el) => el.textContent.trim()),
+            }));
+            check(`[窄屏 ${width}] 点「源码」切回编辑侧，仍然只有一份正文`, backToSource.sourceHidden === false && backToSource.preview === 0 && JSON.stringify(backToSource.pressed) === JSON.stringify(['源码']), JSON.stringify(backToSource));
+          } else {
+            check(`[窄屏 ${width}] 双列够宽时仍是左右并排 + 可拖分隔线`, narrowSplit.mode === 'split' && narrowSplit.panes === 1 && narrowSplit.handle === 1 && JSON.stringify(narrowSplit.tabs) === '[]' && narrowSplit.ends <= 1, JSON.stringify({ ...narrowSplit, stageWidth }));
+          }
           await shot(page, `narrow-${width}`);
         });
       } finally {
@@ -1436,7 +1759,7 @@ try {
     try {
       await openPage(page, baseUrl);
       await record('占位对话：引用与禁用发送', async () => {
-        await page.getByRole('button', { name: '新建笔记', exact: true }).click();
+        await createNote(page);
         await settle(page, 500);
         const chat = page.locator('[data-testid=chat-drop-zone]');
         await chat.waitFor({ state: 'visible', timeout: 8000 });
@@ -1465,7 +1788,7 @@ try {
         await page.getByRole('button', { name: '发送（未连接）', exact: true }).click({ force: true });
         await settle(page, 260);
         check('[对话] 禁用状态下点发送不产生任何请求，也不清草稿', (await page.getByRole('textbox', { name: 'AI 对话草稿' }).inputValue()) === '这段草稿只留在本页');
-        await page.getByRole('button', { name: '新建笔记', exact: true }).click();
+        await createNote(page);
         await settle(page, 420);
         check('[对话] 换成另一篇笔记：引用与草稿还留着（页面自己的状态，不接会话）', (await page.locator('.quote-chip').count()) === 1 && (await page.getByRole('textbox', { name: 'AI 对话草稿' }).inputValue()) === '这段草稿只留在本页');
         await shot(page, 'chat-placeholder');
@@ -1481,17 +1804,16 @@ try {
     try {
       await openPage(page, baseUrl);
       await record('恢复示例与刷新重置', async () => {
-        await page.getByRole('button', { name: '新建笔记', exact: true }).click();
+        await createNote(page, '会被冲掉的笔记');
         await settle(page, 420);
-        await page.getByRole('textbox', { name: '文档标题' }).fill('会被冲掉的笔记');
-        await settle(page, 240);
+        check('[新建] 名称不带扩展名时自动补 .md', (await page.getByRole('textbox', { name: '文档标题' }).inputValue()) === '会被冲掉的笔记.md');
         await page.getByRole('button', { name: '恢复示例', exact: true }).click();
         const dialog = page.locator('[role=dialog][aria-label="恢复示例？"]');
         await dialog.waitFor({ state: 'visible' });
         check('[恢复] 弹窗先说清楚会清掉什么、不能撤销', (await dialog.innerText()).includes('不能撤销'));
         await dialog.getByRole('button', { name: '取消', exact: true }).click();
         await settle(page, 200);
-        check('[恢复] 取消什么都不动：那篇笔记还在', (await page.getByRole('button', { name: '打开 会被冲掉的笔记', exact: true }).count()) === 1);
+        check('[恢复] 取消什么都不动：那篇笔记还在', (await page.getByRole('button', { name: '打开 会被冲掉的笔记.md', exact: true }).count()) === 1);
         await page.getByRole('button', { name: '恢复示例', exact: true }).click();
         await page.locator('[role=dialog][aria-label="恢复示例？"]').getByRole('button', { name: '确认恢复', exact: true }).click();
         await settle(page, 900);
@@ -1501,7 +1823,7 @@ try {
           labels: await page.locator('.relation-label').count(),
           labelsText: await page.locator('.relation-label').allInnerTexts(),
         };
-        check('[恢复] 确认后回到示例：新笔记没了', (await page.getByRole('button', { name: '打开 会被冲掉的笔记', exact: true }).count()) === 0);
+        check('[恢复] 确认后回到示例：新笔记没了', (await page.getByRole('button', { name: '打开 会被冲掉的笔记.md', exact: true }).count()) === 0);
         check('[恢复] 画布回到 4 张卡 / 3 条线 / 3 个标签', afterReset.nodes === 4 && afterReset.edges === 3 && afterReset.labels === 3, JSON.stringify(afterReset));
         const titleFits = await page.locator('.react-flow__node[data-id="card-connections"] .card-title-row h3').evaluate((el) => el.textContent.trim());
         check('[恢复] 恢复出来的是示例本身（卡片标题回到「连接，先于堆积」）', titleFits === '连接，先于堆积', titleFits);
@@ -1509,8 +1831,9 @@ try {
         await page.locator('[role=dialog][aria-label="恢复示例？"]').getByRole('button', { name: '确认恢复', exact: true }).click();
         await settle(page, 500);
         check('[恢复] 右栏回到收起、视图回到画布', (await page.locator('.right-panel').evaluate((el) => el.getBoundingClientRect().width)) === 0 && (await page.getByRole('button', { name: '画布', exact: true }).getAttribute('aria-pressed')) === 'true');
-        await page.getByRole('button', { name: '新建笔记', exact: true }).click();
+        await createNote(page);
         await settle(page, 420);
+        check('[新建] 刷新前那篇默认名笔记确实在树上', (await page.getByRole('button', { name: '打开 未命名.md', exact: true }).count()) === 1);
         await page.reload({ waitUntil: 'load' });
         await page.locator('.app-shell').waitFor({ state: 'visible' });
         await settle(page, 600);
