@@ -31,6 +31,10 @@
    跨行的**引号**标量同理（`quotedScalarContinuation`）：宿主任何一次保存配置都会用 `yaml` 库
    默认的 80 列重排整份文件，长的双引号字符串（如 `textZh: "…"`）就被折成两行。
 
+   跨行的**流式集合**同理（`flowCollectionContinuation`）：同一份重排会把长的列表项折成
+   `- {` 起头、几行之后才闭合的写法（issue #317 的 `cordis.patch.yml`）。YAML 的流式集合里
+   换行只是分隔空白，这么写是合法的；本解析器以前只按单行读，于是整条补丁读不动。
+
    这几类构造还会**交叉**：DSH 设置页的 graph-memory 三项写成 `!!js >-`（标签 + 块标量），
    所以「带标签的块标量」也按同一条路读——先剥标签认出块头，正文读完再按 `tags` 的口径取值，
    与 `!!js` 的单行值一致。组合与单开都只走显式开启，默认仍报错。
@@ -63,6 +67,12 @@ export interface YamlParseOptions {
    * `lineWidth: 80`，长的双引号字符串会被折到下一行；省略＝见到跨行引号报错。
    */
   quotedScalarContinuation?: boolean;
+  /**
+   * 允许跨行的流式集合（`[` / `{` 到下面几行才闭合）。同一份 80 列重排会把长的列表项折成
+   * `- {` 起头、几行后才 `}` 的写法；省略＝见到跨行流式集合报错。
+   * 学习文件仍按默认关闭：那边宁可炸，也不要静默把结构读歪。
+   */
+  flowCollectionContinuation?: boolean;
   /** 允许**一对**文档标记（开头的 `---`、结尾的 `...`）；省略＝见到就报错（一个文件只解析一个文档）。 */
   documentMarkers?: boolean;
 }
@@ -73,6 +83,7 @@ function tagsMode(): YamlTags | undefined { return active.tags; }
 function blockScalarsEnabled(): boolean { return active.blockScalars === true; }
 function plainScalarContinuationEnabled(): boolean { return active.plainScalarContinuation === true; }
 function quotedScalarContinuationEnabled(): boolean { return active.quotedScalarContinuation === true; }
+function flowCollectionContinuationEnabled(): boolean { return active.flowCollectionContinuation === true; }
 
 /** 这一次解析的**原始行**（含空行与整行注释，行尾的 \r 已归一）。块标量要按原文取，
     而下面的行索引刻意丢掉了空行与注释行，所以这里单独留一份。 */
@@ -555,9 +566,140 @@ function readBlockScalar(header: SourceLine, headerText: string, parentIndent: n
   return { value, next: index + 1 };
 }
 
+/** 流式集合里的分隔空白。折行之后空行在逻辑行里留下的是换行，而 YAML 里换行也只是分隔空白。 */
 function skipFlowSpace(text: string, i: number): number {
-  while (i < text.length && (text[i] === ' ' || text[i] === '\t')) i++;
+  while (i < text.length && (text[i] === ' ' || text[i] === '\t' || text[i] === '\n')) i++;
   return i;
+}
+
+/** 跨行流式集合收敛成的一行：`text` 到闭括号为止；`rest` 是闭括号之后、仍在闭合那一行上的原文。 */
+interface FoldedFlow {
+  text: string;
+  rest: string;
+  /** 闭括号所在的行（1 起）。跨行时不是起始行，报错与跳行都要用它。 */
+  closeLine: SourcePosition;
+  /** `rest` 第一个字符的列号（1 起；跨行时相对闭合行的原文，单行时相对值本身）。 */
+  restColumn: number;
+}
+
+/**
+ * 把跨行的流式集合收敛成一行逻辑行。YAML 的流式集合里换行只是分隔空白，折行口径与
+ * `readQuoted` 的跨行标量一致：行尾空白去掉、续行行首空白去掉、单次换行折成一个空格、
+ * 中间每个空行折成一个换行；双引号里行尾的 `\` 转义掉这个换行；引号外、行首或空白后的
+ * `#` 到行尾是注释（丢掉）。括号深度归零就停：闭合那一行剩下的原文交回去，让调用方按
+ * 「流式集合后面还有多余内容」报错，不能静默吞掉。
+ *
+ * 只在 `flowCollectionContinuation` 打开时被块上下文的值用到；整篇文档就是一个流式集合
+ * （`misconceptions.yaml` 的裸 `[]`）时无条件用它——那条路本来就允许跨行，只是以前按行
+ * 粗暴拼接，跨行的引号标量会被错折。
+ */
+function foldFlowLines(first: string, line: SourceLine, column: number, file: string): FoldedFlow {
+  const open = first[0];
+  const close = open === '[' ? ']' : open === '{' ? '}' : '';
+  if (close === '') fail(file, line, column, line.raw, '内部错误：foldFlowLines 只接受以 [ 或 { 开头的值');
+  let out = '';
+  // out 里最后一个「不是原文空白」的字符之后的位置：折行时只裁未转义的行尾空白
+  let keep = 0;
+  let depth = 0;
+  let quote: '' | '"' | "'" = '';
+  // 双引号里这一行以 `\` 结尾：换行被转义掉，不补空格、也不去行尾空白
+  let escapedBreak = false;
+  let cur: SourcePosition = line;
+  let chunk = first;
+  let i = 0;
+  for (;;) {
+    if (i >= chunk.length) {
+      const escaped = escapedBreak;
+      if (!escaped) out = out.slice(0, keep);
+      escapedBreak = false;
+      // 往下找第一行非空行；中间的空行各折成一个换行（PyYAML 的流式标量折行规则）
+      let blanks = 0;
+      let index = cur.line; // cur.line 是 1 起，下一行的 0 起下标就是它
+      for (; index < sourceLines.length; index++) {
+        if (sourceLines[index].trim() !== '') break;
+        blanks++;
+      }
+      if (index >= sourceLines.length) {
+        fail(file, line, column, line.raw, `流式集合缺少闭合的 "${close}"`);
+      }
+      if (blanks > 0) out += '\n'.repeat(blanks);
+      else if (!escaped) out += ' ';
+      keep = out.length;
+      cur = { line: index + 1, raw: sourceLines[index] };
+      chunk = cur.raw;
+      i = 0;
+      while (i < chunk.length && (chunk[i] === ' ' || chunk[i] === '\t')) i++;
+      continue;
+    }
+    const ch = chunk[i];
+    if (quote === '"') {
+      if (ch === '\\' && i + 1 >= chunk.length) {
+        // 行尾的反斜杠转义掉换行：连反斜杠带换行一起丢掉，下一行的行首空白也不留
+        escapedBreak = true;
+        i++;
+        continue;
+      }
+      if (ch === '\\') {
+        // 转义对是内容：`\ `（转义空格）折行时不能被当成行尾空白裁掉
+        out += ch + (chunk[i + 1] ?? '');
+        keep = out.length;
+        i += 2;
+        continue;
+      }
+      out += ch;
+      if (ch === '"') quote = '';
+      if (ch !== ' ' && ch !== '\t') keep = out.length;
+      i++;
+      continue;
+    }
+    if (quote === "'") {
+      out += ch;
+      if (ch === "'") {
+        if (chunk[i + 1] === "'") {
+          out += "'";
+          keep = out.length;
+          i += 2;
+          continue;
+        }
+        quote = '';
+      }
+      if (ch !== ' ' && ch !== '\t') keep = out.length;
+      i++;
+      continue;
+    }
+    if (ch === '#' && (i === 0 || chunk[i - 1] === ' ' || chunk[i - 1] === '\t')) {
+      i = chunk.length; // 注释到行尾：丢掉，换行仍按折行处理
+      continue;
+    }
+    if (ch === '[' || ch === '{') {
+      depth++;
+      out += ch;
+      keep = out.length;
+      i++;
+      continue;
+    }
+    if (ch === ']' || ch === '}') {
+      depth--;
+      out += ch;
+      keep = out.length;
+      i++;
+      if (depth === 0) {
+        return { text: out, rest: chunk.slice(i), closeLine: { line: cur.line, raw: cur.raw }, restColumn: i + 1 };
+      }
+      if (depth < 0) fail(file, cur, i, cur.raw, `流式集合里出现了意外的 "${ch}"`);
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      keep = out.length;
+      i++;
+      continue;
+    }
+    out += ch;
+    if (ch !== ' ' && ch !== '\t') keep = out.length;
+    i++;
+  }
 }
 
 /**
@@ -655,6 +797,17 @@ function parseInlineValue(
   }
   const ch = text[0];
   if (ch === '[' || ch === '{') {
+    // 只有块上下文的调用方（传了 end）接得住跨行：先折成一行再按单行解析，
+    // end.line 回填闭合那一行，调用方据此跳过被吃掉的行。
+    if (flowCollectionContinuationEnabled() && end !== undefined) {
+      const folded = foldFlowLines(text, line, column, file);
+      const rest = pyStrip(stripComment(folded.rest));
+      if (rest !== '') {
+        fail(file, folded.closeLine, folded.restColumn, folded.closeLine.raw, `流式集合后面还有多余内容：${rest}`);
+      }
+      end.line = folded.closeLine.line;
+      return parseFlowCollection(folded.text, 0, line, file).value;
+    }
     const flow = parseFlowCollection(text, 0, line, file);
     const rest = pyStrip(stripComment(text.slice(flow.next)));
     if (rest !== '') fail(file, line, flow.next + 1, line.raw, `流式集合后面还有多余内容：${rest}`);
@@ -885,6 +1038,11 @@ function parseChild(lines: SourceLine[], i: number, parentIndent: number, file: 
         next: firstLineAtOrAfter(lines, i + 1, block.next),
       };
     }
+    // 孩子就是以 `[` / `{` 起头的流式集合（`key:` 换行后 `  {…}` 再换行才闭合）：跨行要交给
+    // 行内值那条路折叠。
+    if (findKeyColon(line.content) < 0 && flowCollectionContinuationEnabled() && (text[0] === '[' || text[0] === '{')) {
+      return readInlineValue(lines, i, text, line.indent + 1, file);
+    }
     // 关闭续行时保持老路（交给 parseMapping 报「既不是 key: value」）；
     // 打开后续行才可能是「孩子就是一个标量续行」，例如 `key:\n  第一行\n  第二行`。
     if (findKeyColon(line.content) < 0 && plainScalarContinuationEnabled()) {
@@ -908,7 +1066,8 @@ function parseChild(lines: SourceLine[], i: number, parentIndent: number, file: 
  *
  * @param {string} text 文件全文
  * @param {YamlParseOptions} [options] 出错信息里要写的文件名；以及两份 cordis 配置才需要的
- *        `tags` / `blockScalars` / `plainScalarContinuation`（默认关闭，见文件头那段说明）
+ *        `tags` / `blockScalars` / `plainScalarContinuation` / `quotedScalarContinuation` /
+ *        `flowCollectionContinuation`（默认关闭，见文件头那段说明）
  * @returns {unknown} 映射、序列或标量；空文档返回 null
  */
 export function parseYaml(text: string, options: YamlParseOptions = {}): unknown {
@@ -929,11 +1088,18 @@ export function parseYaml(text: string, options: YamlParseOptions = {}): unknown
       // 整个文档就是一个流式集合或标量，例如 misconceptions.yaml 里的裸 `[]`。
       const head = pyStrip(stripComment(first.content));
       if (head.startsWith('[') || head.startsWith('{')) {
-        // 流式集合可以跨行（`[# 注释\n]\n`）。行尾注释先按行去掉，剩下的并成一行再解析——
-        // 这样「注释里有个 ]」不会把闭合判错。
-        let joined = head;
-        for (let k = 1; k < lines.length; k++) joined += ` ${pyStrip(stripComment(lines[k].content))}`;
-        return parseInlineValue(joined, first, first.indent + 1, file);
+        // 流式集合可以跨行（`[# 注释\n]\n`）。按 YAML 的折行规则收敛成一行再解析：行尾注释在
+        // 折行里丢掉，「注释里有个 ]」不会把闭合判错，跨行的引号标量也不会被错折。
+        const folded = foldFlowLines(head, first, first.indent + 1, file);
+        const rest = pyStrip(stripComment(folded.rest));
+        if (rest !== '') {
+          fail(file, folded.closeLine, folded.restColumn, folded.closeLine.raw, `流式集合后面还有多余内容：${rest}`);
+        }
+        // 闭合之后还有结构（`]\nfoo: bar`）就是多出来的内容：以前靠整篇拼接碰巧能报错，
+        // 折行之后要自己看。
+        const after = lines.find((one) => one.line > folded.closeLine.line);
+        if (after) fail(file, after, after.indent + 1, after.raw, `流式集合后面还有多余内容：${after.content}`);
+        return parseInlineValue(folded.text, first, first.indent + 1, file);
       }
       if (lines.length > 1) {
         // 整个文档就是一个多行 plain 标量（YAML 把续行折进同一个标量）。DSH 配置的
