@@ -306,6 +306,10 @@ const groups = {
       // 面包屑宽度按全角字算）。
       'scripts/tests/test_client_tokens.mjs',
       'scripts/tests/test_client_typography.mjs',
+      // 正文的**从属层级**（列表嵌套）：缩进 2 格 = 下一层，子列表挂在 `item.children` 上，
+      // 与 `lib/core/format.ts` 的 `parseList` 同一条口径。文本摊平按 DOM 顺序（标注锚点靠它）、
+      // 裸字符串条目仍兼容（`::: resources` 那条老路径），另有一条关掉判据的注入反证。
+      'scripts/tests/test_client_list.mjs',
       'scripts/tests/test_client_pure.mjs',
       // #262：正式客户端单入口、CSS/许可/React 边界；笔记核心契约不依赖浏览器或真宿主。
       'scripts/tests/test_client_bundle.mjs',
