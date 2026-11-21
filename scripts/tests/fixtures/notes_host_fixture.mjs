@@ -88,12 +88,14 @@ import * as ReactDOM from 'react-dom';
 import * as ReactDOMClient from 'react-dom/client';
 import * as jsxRuntime from 'react/jsx-runtime';
 const registrations = [];
+const cleanups = [];
+const own = task => { const off = task(); if (typeof off === 'function') cleanups.push(off); return off; };
 let layoutSelects = 0;
 const EMPTY = Object.freeze({byId:Object.freeze({}),order:Object.freeze([])});
 const services = {
   slots: {
-    inject(_name, task) { task(); return () => {}; },
-    register(spec, component) { registrations.push({spec,component}); return () => {}; },
+    inject(_name, task) { return own(task); },
+    register(spec, component) { const row = {spec,component}; registrations.push(row); return () => { const i = registrations.indexOf(row); if (i >= 0) registrations.splice(i, 1); }; },
   },
   sessions: {list:{subscribe(){return()=>{}},getSnapshot(){return EMPTY}}},
   inputTriggers:{registerSource(){return()=>{}}},
@@ -103,7 +105,32 @@ const services = {
 const moduleLoader = (${installNotesFixtureModuleLoader.toString()})({
   react: React, 'react/jsx-runtime': jsxRuntime, 'react-dom': ReactDOM, 'react-dom/client': ReactDOMClient,
 }, { asyncDisabled: window.__disableChunkAsync });
+const localeDictionaries = new Map(), localeListeners = new Set(), localeInjections = [];
+let activeLocale = 'en', localeWrites = 0;
+const locale = {
+  register(ns, dict) { localeDictionaries.set(ns, dict); return () => localeDictionaries.delete(ns); },
+  bind: ns => (key, params = {}) => Object.entries(params).reduce(
+    (text, [name, value]) => text.split('{' + name + '}').join(String(value)),
+    localeDictionaries.get(ns)?.[activeLocale]?.[key] ?? localeDictionaries.get(ns)?.en?.[key] ?? key),
+  subscribe(fn) { localeListeners.add(fn); return () => localeListeners.delete(fn); },
+  setLocale() { localeWrites++; },
+};
+const mountLocale = item => {
+  const effects = [];
+  item.fn({ locale, effect(task) { const off = task(); if (typeof off === 'function') effects.push(off); return off; } });
+  item.off = () => { for (const off of effects.reverse()) off(); };
+};
+const localeProbe = {
+  provide(language) { activeLocale = language; services.locale = locale; for (const item of localeInjections) if (!item.off) mountLocale(item); },
+  remove() { delete services.locale; for (const item of localeInjections) { item.off?.(); item.off = null; } },
+  switchTo(language) { activeLocale = language; for (const fn of [...localeListeners]) fn(); },
+  get listeners() { return localeListeners.size; },
+  get dictionaries() { return localeDictionaries.size; },
+  get writes() { return localeWrites; },
+};
+if (window.__fixtureLocale) localeProbe.provide(window.__fixtureLocale);
 window.__probe = {
+  locale: localeProbe,
   get registrations(){return registrations.map(({spec})=>JSON.parse(JSON.stringify(spec)))},
   get chunkRegistrations(){return moduleLoader.chunks},
   get layoutSelects(){return layoutSelects},
@@ -111,12 +138,18 @@ window.__probe = {
 };
 window.__start=()=>{
   if(!moduleLoader.entry) throw new Error('组合产物没有登记模块');
-  const cleanups=[];
-  moduleLoader.entry.factory(moduleLoader.require).apply({
+  const cleanup = moduleLoader.entry.factory(moduleLoader.require).apply({
     ...services,
     get(name){return services[name]},
-    effect(task){const cleanup=task();if(typeof cleanup==='function')cleanups.push(cleanup)},
+    effect: own,
+    inject(names, fn) {
+      if (!names.includes('locale')) return;
+      const item = {fn, off:null}; localeInjections.push(item);
+      if (services.locale) mountLocale(item);
+      cleanups.push(() => { item.off?.(); const i = localeInjections.indexOf(item); if (i >= 0) localeInjections.splice(i, 1); });
+    },
   });
+  if (typeof cleanup === 'function') cleanups.push(cleanup);
   window.__probe.applied=true;
   const main=registrations.find(x=>x.spec.name==='main');
   if(!main)throw new Error('组合产物没有登记 main');
@@ -235,7 +268,7 @@ export async function startNotesHostFixture({ seedDemo = false, library = librar
           const bytes = await requestBytes(request);
           let body = null;
           if (bytes.length) { try { body = JSON.parse(bytes.toString('utf8')); } catch { /* 真 route 判断 JSON */ } }
-          const record = { method: request.method, body, status: null };
+          const record = { method: request.method, url: request.url, body, status: null };
           requests.push(record);
           const kind = request.method === 'GET' ? 'read' : 'write';
           await waitIfPaused(kind);

@@ -296,10 +296,16 @@
   border: 0;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .md-format-toolbar__button,
+.md-format-toolbar__button,
+.md-format-toolbar__menu-item,
+.md-format-toolbar__action {
+  transition: background-color var(--smb-motion, 120ms) ease, color var(--smb-motion, 120ms) ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell:not(.is-hosted) :is(.md-format-toolbar__button,
   .md-format-toolbar__menu-item,
-  .md-format-toolbar__action {
-    transition: background-color 120ms ease, color 120ms ease;
+  .md-format-toolbar__action) {
+    transition: none;
   }
 }

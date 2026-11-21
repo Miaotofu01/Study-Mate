@@ -3,6 +3,7 @@ import App from '../App.jsx'
 import { resolveFileReference } from '../imports.js'
 import { isMarkdownResource } from '../note-types.js'
 import { createNotesPersistenceSession } from '../persistence-session.js'
+import { registerNotesLocale } from '../locale.js'
 
 // 资料库属于当前宿主档位；同一网页里的新 main 重用保存队列，课程工作区只隔离视图。
 const persistenceSession = createNotesPersistenceSession({ label: 'notes-main' })
@@ -297,7 +298,7 @@ export function NativeChatPanel({
     {selectedReference && selectedReference.sessionId === selectedId && <div className="studymate-native-chat__body" key={selectedId} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       {!ready && <p role="status">正在打开所选会话…</p>}
       {ready && <hostKit.SessionProvider session={reference}>
-        {hostKit.renderSlot(CHAT_SLOT, {})}
+        {hostKit.renderSlot(hostKit.chatSlot ?? CHAT_SLOT, {})}
       </hostKit.SessionProvider>}
     </div>}
     {!selectedId && <p className="studymate-native-chat__empty">请选择已有会话后开始对话。引用只会进入草稿；是否发送由你在原生输入框中确认。</p>}
@@ -318,8 +319,9 @@ export function EmbeddedConversation({ renderFactorySlot }) {
 // 409 冲突时抛 {code:'version-conflict', current, version}，供控制器停在 CONFLICT。
 function createNotesPersistenceAdapter() {
   const BASE = '/api/studymate/notes'
-  async function request(body) {
-    const res = await fetch(BASE, {
+  async function request(body, options = {}) {
+    const url = options.skipCorrupt ? `${BASE}?onCorrupt=skip` : BASE
+    const res = await fetch(url, {
       method: body ? 'POST' : 'GET',
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       credentials: 'same-origin', cache: 'no-store',
@@ -341,7 +343,7 @@ function createNotesPersistenceAdapter() {
     return json
   }
   return {
-    async loadStore() { return request(null) },
+    async loadStore(options = {}) { return request(null, options) },
     async upgradeStore() { return request({ operation: 'upgrade' }) },
     async saveResource(resource, expectedVersion) {
       const result = await request({ operation: 'resource', resource, expectedVersion: expectedVersion ?? null })
@@ -355,7 +357,7 @@ function createNotesPersistenceAdapter() {
 }
 
 export function NativeMainPanel(props) {
-  const { renderSlot, SessionProvider, renderFactorySlot, active = true } = props
+  const { renderSlot, SessionProvider, renderFactorySlot, chatSlot = CHAT_SLOT, active = true } = props
   const services = hostServices ?? EMPTY
   const [hostTheme, setHostTheme] = useState(() => document.body.hasAttribute('data-ds-dark-theme') ? 'dark' : 'light')
   useEffect(() => {
@@ -376,11 +378,12 @@ export function NativeMainPanel(props) {
     SessionProvider,
     renderSlot,
     renderFactorySlot,
-  }), [services, SessionProvider, renderSlot, renderFactorySlot])
+    chatSlot,
+  }), [services, SessionProvider, renderSlot, renderFactorySlot, chatSlot])
   const BoundChatPanel = useCallback(chatProps => <NativeChatPanel {...chatProps} hostKit={hostKit} />, [hostKit])
 
   return <div className="studymate-notes">
-    <App ChatComponent={BoundChatPanel} hostTheme={hostTheme} onResourcesChange={updateResourceCache} active={active} persistence={persistence} persistenceSession={persistenceSession} viewMemory={props.viewMemory} workspaceBridge={props.workspaceBridge} courseLibrary={props.courseLibrary} onNavigateCourse={props.onNavigateCourse} renderCourse={props.renderCourse} />
+    <App ChatComponent={BoundChatPanel} hostTheme={hostTheme} onResourcesChange={updateResourceCache} active={active} persistenceSession={persistenceSession} viewMemory={props.viewMemory} scopedShortcuts={props.scopedShortcuts} getMotionScale={props.getMotionScale} persistence={persistence} workspaceBridge={props.workspaceBridge} courseLibrary={props.courseLibrary} onNavigateCourse={props.onNavigateCourse} renderCourse={props.renderCourse} />
   </div>
 }
 
@@ -393,6 +396,7 @@ export { PanelIcon } from './panel-icon.jsx'
 export function createClientModule() {
   const inputTriggers = ['slots', 'sessions', 'inputTriggers', 'conversation']
   function apply(ctx) {
+    registerNotesLocale(ctx)
     const slots = ctx.get('slots')
     const sessions = ctx.get('sessions')
     const inputTriggers = ctx.get('inputTriggers')
@@ -405,9 +409,10 @@ export function createClientModule() {
 
     const source = resourceReferenceSource()
     ctx.effect(() => inputTriggers.registerSource(source), 'StudyMate: resource reference trigger')
-    ctx.effect(() => slots.inject(CHAT_SLOT, () => slots.register({ name: CHAT_SLOT }, ConversationSessionSlot)), 'StudyMate: embedded native conversation')
-    // 无界笔记**不再**登记自己的 main / sidebar.panellist：它是学习主面板里的第二个面，
-    // 由学习那颗 main children 声明带走它的会话座位（见 lib/client.js 的注册段）。
+    // 只填学习入口声明的子槽，不登记独立的主面板或侧栏项。
+    for (const name of [CHAT_SLOT, `${CHAT_SLOT}.rightbar`]) {
+      ctx.effect(() => slots.inject(name, () => slots.register({ name }, ConversationSessionSlot)), `StudyMate: embedded native conversation (${name})`)
+    }
   }
   return { inject: inputTriggers, apply }
 }

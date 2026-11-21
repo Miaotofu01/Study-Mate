@@ -8,9 +8,10 @@ import { formatMarkdown } from './markdown-formatting.js';
 import { downloadNoteMarkdown } from './note-export.js';
 import { Download } from 'lucide-react';
 import './note-editor.css';
+import { useNotesLocale, nt } from './locale.js';
 
-const OVERSIZE_MESSAGE = '正文最多 128 Ki 字符；原稿已保留，请先缩短正文再编辑。';
-const SAVE_ERROR = '这次修改未提交，编辑中的草稿仍在。请重试保存。';
+const OVERSIZE_MESSAGE = 'oversize';
+const SAVE_ERROR = 'save_error';
 
 // 切资源、切画布/文档、聊天面板或学习节点都会把编辑器卸载，本地草稿随 state 一起消失。
 // 这里在内存里留一份「离开时还没被父级确认的草稿」：不写文件、不落盘，回到同一文件时
@@ -107,7 +108,9 @@ export default function NoteEditor(props) {
   return <NoteDocument key={props.resource?.id || 'empty-note'} {...props} />;
 }
 
-function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', label = 'Markdown 正文', exportTarget, mode = 'inline' }) {
+function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', label: suppliedLabel, exportTarget, mode = 'inline' }) {
+  useNotesLocale();
+  const label = suppliedLabel ?? nt('markdown');
   const [splitSide, setSplitSide] = useState('source');
   const [splitWidth, setSplitWidth] = useState(50);
   const [narrowSplit, setNarrowSplit] = useState(false);
@@ -262,7 +265,7 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
       // its original selection, but cannot apply it to a changed document.
       const current = api.read();
       if (popupSnapshot && popupSnapshot.text !== current.text) {
-        setError('打开链接框后正文已更新。请重新选择文字并打开链接框；本次未改动原稿。');
+        setError('stale_link');
         return;
       }
       const edit = formatMarkdown(popupSnapshot || current, command, value);
@@ -272,13 +275,13 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
         return;
       }
       if (api.edit(edit) === false) {
-        setError('格式修改未应用；原稿保留，请检查正文长度与可编辑状态。');
+        setError('format_refused');
         return;
       }
       setError('');
       setSelection(api.read());
     } catch (cause) {
-      setError(cause?.message || '格式修改未应用，原稿仍在。');
+      setError(cause?.message ? { message: cause.message } : 'format_error');
     }
   }, [readOnly, oversize]);
 
@@ -337,7 +340,7 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
       runCommand(key === 'b' ? 'bold' : 'italic');
     } else if (key === 'k') {
       event.preventDefault(); event.stopPropagation();
-      rootRef.current?.querySelector('[aria-label="链接"]')?.click();
+      rootRef.current?.querySelector('[data-command="link"]')?.click();
     } else if (key === 'z' || key === 'y') {
       event.preventDefault(); event.stopPropagation();
       runCommand(key === 'y' || event.shiftKey ? 'redo' : 'undo');
@@ -353,12 +356,16 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
     exportTarget,
   );
 
+  // error 可能是词典键（'oversize'/'save_error'/'stale_link'…）、动态句子或 { message } 对象；
+  // 统一在这里翻译成可渲染文本，词典没有的键原样返回，不影响动态消息。
+  const errorText = error == null ? '' : typeof error === 'string' ? nt(error) : String(error.message ?? error);
+
   // 只读与「外部新版 vs 未保存草稿」冲突共用这一屏：没有编辑器就没有写入路径，
   // 冲突期间不可能再用旧草稿覆盖新版本。解冲突只能由用户显式点「载入文件版本」。
   if (locked && !readOnlySource) return <section className="note-editor is-readonly" data-theme={theme} data-conflict={conflict ? '1' : undefined} aria-label={label} data-testid="note-editor">
     {exportButton}
     {conflict && <div className="note-editor__actions"><button type="button" className="note-editor__export" onClick={loadExternalVersion} aria-label="载入文件版本" title="放弃本地草稿，改为显示文件里的版本">载入文件版本（放弃本地草稿）</button></div>}
-    {error && <p className="note-editor__error" role="alert">{error}</p>}
+    {error && <p className="note-editor__error" role="alert">{errorText}</p>}
     {conflict && <p className="note-editor__error" role="alert">文件已在外部更新；这里保留你尚未保存的草稿（未写入文件）。为避免覆盖新版本，编辑已暂停。</p>}
     {unconfirmed && <p className="note-editor__error" role="status">当前显示的是尚未保存的本地草稿，未写入文件。</p>}
     {olderDrafts.length > 0 && <p className="note-editor__status" role="status">还有 {olderDrafts.length} 份更早的未保存草稿没有写入文件。
@@ -380,7 +387,7 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
       <button type="button" className="note-editor__link" onClick={exportOlderDrafts}>导出更早的草稿</button>
       <button type="button" className="note-editor__link" onClick={dropOlderDrafts}>丢弃这些旧草稿</button>
     </p>}
-    {oversize && <p className="note-editor__error" role="alert">{OVERSIZE_MESSAGE}</p>}
+    {oversize && <p className="note-editor__error" role="alert">{nt(OVERSIZE_MESSAGE)}</p>}
     {split && narrowSplit && <div className="note-editor__split-tabs" role="group" aria-label="双列可见侧">
       <button type="button" aria-pressed={splitSide === 'source'} onClick={() => setSplitSide('source')}>源码</button>
       <button type="button" aria-pressed={splitSide === 'preview'} onClick={() => setSplitSide('preview')}>预览</button>
@@ -407,7 +414,7 @@ function NoteDocument({ resource, onChange, readOnly = false, theme = 'light', l
         }} />}
       {showPreview && <div className="note-editor__preview markdown-preview"><MarkdownPreview>{draft}</MarkdownPreview></div>}
     </div>
-    {error && !oversize && <p className="note-editor__error" role="alert">{error}</p>}
+    {error && !oversize && <p className="note-editor__error" role="alert">{errorText}</p>}
   </section>;
 }
 

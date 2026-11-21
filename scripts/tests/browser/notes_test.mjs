@@ -239,6 +239,36 @@ async function settle(page, ms = 260) {
   await page.waitForTimeout(ms);
 }
 
+/**
+ * 收起左栏并逐帧采样宽度。
+ *
+ * 不能先 `await locator.click()` 再固定等 90ms：Playwright 的点击本身可能消耗几十到上百毫秒，
+ * 固定等待从点击返回后才开始，采样点可能已经落在过渡结束后（实测 90ms 时宽度已是 0）。
+ * 这里把真实点击与 requestAnimationFrame 采样放进同一个 page.evaluate：点击后从第一帧开始记录，
+ * 直到宽度归零或超时。断言仍要求「出现过中间宽度」且「最终为 0」，不是放松成只看终态。
+ */
+async function collapseAndSample(page) {
+  return page.evaluate(async () => {
+    const panel = document.querySelector('.left-panel');
+    const button = document.querySelector('[aria-label="收起文件侧栏"]');
+    if (!panel || !button) throw new Error('找不到左栏或收起按钮');
+    const startWidth = panel.getBoundingClientRect().width;
+    const samples = [];
+    button.click();
+    const started = performance.now();
+    await new Promise((resolve) => {
+      const sample = () => {
+        const width = panel.getBoundingClientRect().width;
+        samples.push(width);
+        if (width === 0 || performance.now() - started > 450) resolve();
+        else requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    return { startWidth, samples, finalWidth: panel.getBoundingClientRect().width };
+  });
+}
+
 async function openPage(page, url) {
   await page.goto(url, { waitUntil: 'load' });
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 15000 });
@@ -1516,12 +1546,13 @@ try {
         check(`[动效] 首帧主题为 ${scheme}（不先切换到亮色）`, motion.theme === scheme);
         check('[动效] 默认（未要求减少动效）侧栏宽度有 200ms 过渡', motion.panelDuration.split(',').some((part) => part.trim() === '0.2s'), motion.panelDuration);
         check('[动效] --v5-motion 是 1（动效没有被关掉）', motion.motion === '1', motion.motion);
-        await animated.page.getByRole('button', { name: '收起文件侧栏', exact: true }).click();
-        await animated.page.waitForTimeout(90);
-        const midway = await animated.page.locator('.left-panel').evaluate((el) => el.getBoundingClientRect().width);
-        await settle(animated.page, 420);
-        const done = await animated.page.locator('.left-panel').evaluate((el) => el.getBoundingClientRect().width);
-        check('[动效] 收起是滑出去的过渡（中途宽度在两端之间），不是瞬间跳变', midway > 0 && midway < 264 && done === 0, `${midway.toFixed(0)} → ${done}`);
+        const collapse = await collapseAndSample(animated.page);
+        const midway = collapse.samples.find((width) => width > 0 && width < collapse.startWidth);
+        check('[动效] 收起是滑出去的过渡（中途宽度在两端之间），不是瞬间跳变', midway !== undefined && collapse.finalWidth === 0, `${midway === undefined ? 0 : midway.toFixed(0)} → ${collapse.finalWidth.toFixed(0)}（采样 ${collapse.samples.length} 帧）`);
+        await animated.page.waitForFunction(() => {
+          const rail = document.querySelector('.panel-rail--left');
+          return rail !== null && Math.abs(rail.getBoundingClientRect().width - 32) < 1.5;
+        }, null, { timeout: 1200 });
         const rail = await animated.page.locator('.panel-rail--left').evaluate((el) => el.getBoundingClientRect().width);
         check('[动效] 收起后窄轨回到 32px，开合状态可见', Math.abs(rail - 32) < 1.5, String(rail));
       });

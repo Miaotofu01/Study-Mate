@@ -5,6 +5,10 @@
 // 租约（不 dispose、不清链、不取消在途），重挂复用同一控制器——已接受但未落盘的编辑
 // （pending/inflight/error/conflict，含 layout）因此不会随卸载消失。没有会话时保持原来
 // 的「每挂载一个控制器、卸载即 dispose」语义（独立预览与既有套件不受影响）。
+//
+// 坏资源（corrupt）清单与载入基线同源：服务端 fail closed 的 GET 自动降级重试一次
+// （只对 file-shape-unknown），降级快照的 corrupt 清单记在会话 store 上、随 loaded 一起
+// 跨租约存续；本租约只做 React 状态镜像。重挂恢复时不重发 GET，横幅直接按会话清单复原。
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   hydrateStore, rehydrateMediaResource, serializeLayout, fingerprintOf, SaveState,
@@ -14,6 +18,7 @@ import {
   acquireNotesPersistenceStore, releaseNotesPersistenceStore,
   startPersistenceLoad, claimPersistenceLoad, commitPersistenceBase,
 } from './persistence-session.js';
+import { nt } from './locale.js';
 export { SaveState };
 
 const DEFAULT_CAMERA = Object.freeze({ x: 0, y: 0, zoom: 1 });
@@ -32,6 +37,7 @@ export default function useNotesPersistence({
   const [loadState, setLoadState] = useState(isNative ? 'loading' : 'ready');
   const [loadError, setLoadError] = useState(null);
   const [saveStatus, setSaveStatus] = useState({});
+  const [corrupt, setCorrupt] = useState([]);
   const [restoreRevision, setRestoreRevision] = useState(0);
   const stateRef = useRef(loadState);
   const mountedRef = useRef(false);
@@ -132,6 +138,10 @@ export default function useNotesPersistence({
     const store = storeRef.current, lease = leaseRef.current;
     if (!store || !isLive(lease)) return;
     const { layoutChanged, viewport } = commitPersistenceBase(store, snapshot, { initial });
+    // 坏资源清单与基线同源：降级载入的快照带清单，正常快照为空数组。记在会话 store 上
+    // （跟 loaded 一样跨租约存续），React 状态由本租约镜像公布。
+    store.corrupt = snapshot.corrupt || [];
+    setCorrupt(store.corrupt);
     // 与基线一起公布会话状态，给 viewport 尚在恢复期间接管的新租约。
     // 本面板自己的编辑门禁仍保持关闭，直到相机恢复完。
     if (initial) {
@@ -150,11 +160,19 @@ export default function useNotesPersistence({
   }, [setResources, setFolders, setScene, updateStatus, isLive, applyViewport]);
 
   // GET + 安全清理 + 空库初始化；显式 reload 先 suspendAndWait：客户端 abort 不能回滚已到达服务端的写入。
-  const fetchSnapshot = useCallback(async ({ suspend = false } = {}) => {
+  // 普通 GET 遇坏资源时服务端 fail closed；自动重试一次显式降级，让用户至少能读到其余笔记。
+  // 只有 file-shape-unknown 才重试；权限/layout/身份问题仍然整页报错。
+  const fetchSnapshot = useCallback(async ({ suspend = false, skipCorrupt = false } = {}) => {
     const transport = persistence;
     if (!transport) throw new Error('缺少持久化适配器。');
     if (suspend) await storeRef.current?.controller.suspendAndWait();
-    const raw = await transport.loadStore();
+    let raw;
+    try {
+      raw = await transport.loadStore(skipCorrupt ? { skipCorrupt: true } : {});
+    } catch (error) {
+      if (skipCorrupt || error?.code !== 'file-shape-unknown') throw error;
+      raw = await transport.loadStore({ skipCorrupt: true });
+    }
     const snapshot = await prepare(raw, null);
     if (snapshot.missingLayout && !snapshot.requiresUpgrade) {
       // 空库只初始化目录结构/空画布，加载门禁内完成；不 seed 任何演示资源。
@@ -164,15 +182,15 @@ export default function useNotesPersistence({
     return snapshot;
   }, [persistence, prepare]);
 
-  const load = useCallback(async ({ confirmDiscard = false } = {}) => {
+  const load = useCallback(async ({ confirmDiscard = false, skipCorrupt = false } = {}) => {
     const store = storeRef.current, lease = leaseRef.current;
     if (!isNative || !store || !isLive(lease)) return false;
     const controller = store.controller;
     const dirty = controller.isDirty() || Object.keys(store.validationErrors).length > 0;
-    if (confirmDiscard && dirty && !window.confirm('这会放弃本页全部未保存的草稿并重新载入文件版本。请先导出需要保留的内容。继续吗？')) return false;
+    if (confirmDiscard && dirty && !window.confirm(nt('discard_confirm'))) return false;
     transition('loading');
     try {
-      const op = startPersistenceLoad(store, { run: () => fetchSnapshot({ suspend: true }), fresh: true, discardDrafts: true });
+      const op = startPersistenceLoad(store, { run: () => fetchSnapshot({ suspend: true, skipCorrupt }), fresh: true, discardDrafts: true });
       const snapshot = await op.promise;
       if (!isLive(lease) || !claimPersistenceLoad(store, lease, op.id)) return false;
       controller.clear();
@@ -209,6 +227,7 @@ export default function useNotesPersistence({
     if (nextScene) setScene(nextScene);
     setRestoreRevision(value => value + 1);
     setSaveStatus(store.statuses());
+    setCorrupt(store.corrupt || []);
     restoredViewportRef.current = store.restoredViewport;
     // 相机还原完成前保持载入门禁：否则捕获 effect 会把默认相机写成 layout 草稿。
     await applyViewport(store.lastViewport);
@@ -230,7 +249,8 @@ export default function useNotesPersistence({
     const revision = store.editRevision, generation = store.loadGeneration;
     const wasActive = store.runtime.active;
     try {
-      const raw = await persistence.loadStore();
+      // 基线已是降级快照时继续用降级读；否则普通 GET fail closed 会把干净轮询变成整页报错。
+      const raw = await persistence.loadStore(store.corrupt?.length ? { skipCorrupt: true } : {});
       const snapshot = await prepare(raw, store.loaded);
       // GET/媒体解码期间的输入也必须守住：新草稿、面被隐藏、卸载、代际变化都不许 applyBase。
       if (!isLive(lease) || store.runtime.active === false || !wasActive || generation !== store.loadGeneration
@@ -468,7 +488,7 @@ export default function useNotesPersistence({
   const upgradeStore = useCallback(async () => {
     const store = storeRef.current;
     if (stateRef.current !== 'upgrade' || !store) return false;
-    if (!window.confirm('将先备份旧笔记库，再升级为支持课程关联的新格式。升级后旧版客户端不能再写入此库。继续吗？')) return false;
+    if (!window.confirm(nt('upgrade_confirm'))) return false;
     transition('loading');
     try {
       await store.controller.suspendAndWait();
@@ -485,6 +505,6 @@ export default function useNotesPersistence({
     canEdit: !isNative || (loadState === 'ready' && !leaseRef.current?.revoked),
     loadState, loadError, saveStatus, conflictKeys,
     markEdit, saveResource: submitResource, saveLayout: submitLayout, saveViewport,
-    resolveConflict, retryAll, reloadStore: load, exportDrafts, restoreRevision, restoredViewportRef, upgradeStore,
+    corrupt, resolveConflict, retryAll, reloadStore: load, exportDrafts, restoreRevision, restoredViewportRef, upgradeStore,
   };
 }

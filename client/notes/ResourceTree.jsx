@@ -6,6 +6,7 @@ import {
   canRenameResource, validateFolderName, validateFileTitle, FOLDER_NAME_MAX, FILE_TITLE_MAX,
 } from './resource-tree-model.js';
 import { isUnsupportedNote } from './note-types.js';
+import { useNotesLocale } from './locale.js';
 import './resource-tree-menu.css';
 
 const icons = { note: FileText, course: BookOpen, link: Link2, image: Image, svg: FileCode, html: FileCode };
@@ -58,6 +59,7 @@ export default function ResourceTree({
   canEdit = true, onRenameFolder, onDeleteFolder, onRenameResource, hasCanvasContent,
   onCopyMarkdown, canCopyMarkdown, onManageNotebook, getNotebookBindingLabel, onPickEntry,
 }) {
+  const t = useNotesLocale();
   const [closed, setClosed] = useState(new Set());
   const query = search.trim().toLocaleLowerCase();
   const matches = (resource) => !resource.trashed && (!query || (resource.title + ' ' + (resource.markdown || resource.summary || '')).toLocaleLowerCase().includes(query));
@@ -363,7 +365,7 @@ export default function ResourceTree({
     return <div key={folder.id} role="treeitem" aria-expanded={!!open} aria-level={depth + 1}>
       <div className={'tree-row' + (folderActive(folder.id) ? ' is-active' : '') + (folder.kind === 'notebook' ? ' is-notebook' : '')}
         style={{ paddingLeft: 8 + depth * 16 }}>
-        {renameField('folder', folder.id, '重命名 ' + folder.name) || <button className="tree-row-label" aria-label={folder.name + ' 文件夹'} onClick={() => {
+        {renameField('folder', folder.id, t('rename_named', { name: folder.name })) || <button className="tree-row-label" aria-label={t('folder', { name: folder.name })} onClick={() => {
           pickFolder(folder.id);
           onFolderSelect(folder.id);
           reportPick('folder', folder.id);
@@ -375,20 +377,20 @@ export default function ResourceTree({
         {renderMoreButton({ kind: 'folder', id: folder.id }, folder.name)}
       </div>
       {open && <div role="group">
-        {folder.kind === 'notebook' && <button className="tree-row tree-canvas" style={{ paddingLeft: 24 + (depth + 1) * 16 }} onClick={() => { onCanvas(folder.id); reportPick('folder', folder.id); }} aria-label={'打开' + folder.name + '画布'}><LayoutGrid size={15} /><span className="tree-label">画布</span></button>}
+        {folder.kind === 'notebook' && <button className="tree-row tree-canvas" style={{ paddingLeft: 24 + (depth + 1) * 16 }} onClick={() => { onCanvas(folder.id); reportPick('folder', folder.id); }} aria-label={t('open_canvas', { name: folder.name })}><LayoutGrid size={15} /><span className="tree-label">{t('canvas')}</span></button>}
         {children.map((child) => renderFolder(child, depth + 1))}
         {files.map((resource) => {
           const IconForFile = icons[resource.type] || FileText;
           return <div className={'tree-row tree-file' + (fileActive(resource.id) ? ' is-active' : '')} key={resource.id} style={{ paddingLeft: 24 + (depth + 1) * 16 }}
             role="treeitem" aria-level={depth + 2} draggable={canEdit} onDragStart={(event) => { event.dataTransfer.setData('application/studymate-resource', resource.id); event.dataTransfer.effectAllowed = 'copy'; }}>
-            {renameField('file', resource.id, '重命名 ' + resource.title) || <button className="tree-file-open" aria-label={'打开 ' + resource.title} onClick={() => { pickFile(resource.id); onSelect(resource.id); reportPick('file', resource.id); }} onDoubleClick={() => onOpenDocument(resource.id)}><IconForFile size={15} className="tree-icon" /><span className="tree-label">{resource.title || '未命名.md'}</span></button>}
+            {renameField('file', resource.id, t('rename_named', { name: resource.title })) || <button className="tree-file-open" aria-label={t('open', { name: resource.title })} onClick={() => { pickFile(resource.id); onSelect(resource.id); reportPick('file', resource.id); }} onDoubleClick={() => onOpenDocument(resource.id)}><IconForFile size={15} className="tree-icon" /><span className="tree-label">{resource.title || t('untitled')}</span></button>}
             {isUnsupportedNote(resource) && <span className="tree-binding" title="改回支持的 Markdown 扩展名可恢复">不支持的文件类型</span>}
-            {resource.origin && <span className="resource-origin-badge" data-origin={resource.origin.mode === 'reference' ? 'link' : 'local'} title={resource.origin.mode === 'reference' ? '只读文件引用，不写回原件' : '独立副本，修改不影响来源'}>{resource.origin.mode === 'reference' ? '引用' : '副本'}</span>}
-            {renderMoreButton({ kind: 'file', id: resource.id }, resource.title || '未命名.md')}
+            {resource.origin && <span className="resource-origin-badge" data-origin={resource.origin.mode === 'reference' ? 'link' : 'local'} title={t(resource.origin.mode === 'reference' ? 'reference_hint' : 'copy_hint')}>{t(resource.origin.mode === 'reference' ? 'reference' : 'copy')}</span>}
+            {renderMoreButton({ kind: 'file', id: resource.id }, resource.title || t('untitled'))}
           </div>;
         })}
       </div>}
     </div>;
   };
-  return <div ref={rootRef} className="resource-tree" role="tree" aria-label="文件层级" onPointerDownCapture={flushRename}>{folders.filter((folder) => !folder.parent).map((folder) => renderFolder(folder, 0))}{query && !Object.values(resources).some(matches) && <div className="empty-state">没有找到文档</div>}{menu && createPortal(renderMenu(), portalHost())}</div>;
+  return <div ref={rootRef} className="resource-tree" role="tree" aria-label={t('hierarchy')} onPointerDownCapture={flushRename}>{folders.filter((folder) => !folder.parent).map((folder) => renderFolder(folder, 0))}{query && !Object.values(resources).some(matches) && <div className="empty-state">{t('no_documents')}</div>}{menu && createPortal(renderMenu(), portalHost())}</div>;
 }

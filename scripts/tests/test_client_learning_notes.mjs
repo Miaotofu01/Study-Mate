@@ -202,7 +202,7 @@ test('没有 notesContext 的纯旧用法：右栏只有题目/问答，没有�
   assert.equal(findByProp(top, 'data-proto', 'brand-home').length, 1);
 });
 
-test('无界顶栏不渲染学习工作台与动效，学习顶栏保持两者', () => {
+test('无界顶栏不渲染学习工作台；字号/动效两面共用，学习顶栏另有搜索与面包屑', () => {
   const props = { view: 'lesson', subject, node: lessonNode, onToggleSurface: () => {},
     onWorkspace: () => {}, onSubject: () => {}, onSearch: () => {}, motion: 'reduced', onMotion: () => {} };
   const learning = renderElement(TopBar, { ...props, surface: 'learning' });
@@ -215,8 +215,19 @@ test('无界顶栏不渲染学习工作台与动效，学习顶栏保持两者',
     if (Array.isArray(node)) return node.flatMap(motionNodes);
     return [...(typeof node.type === 'function' && node.props?.level === 'reduced' ? [node] : []), ...motionNodes(node.children)];
   };
+  // 动效/字号两面共用是 #327 的设计（notes_brand_test「两面共用字号和动效」同口径）：
+  // 7f950a3 的合并曾把产品误改回「无界面隐藏」，浏览器套件不在默认门禁里所以当时没暴露。
+  // 这里按恢复后的产品断言：两个面都渲染动效选择器；搜索按钮只留在学习面。
+  const searchButtons = node => {
+    if (!node || typeof node !== 'object') return [];
+    if (Array.isArray(node)) return node.flatMap(searchButtons);
+    const className = typeof node.props?.className === 'string' ? node.props.className : '';
+    return [...(/smb-searchbtn/.test(className) ? [node] : []), ...searchButtons(node.children)];
+  };
   assert.equal(motionNodes(learning).length, 1);
-  assert.equal(motionNodes(notes).length, 0);
+  assert.equal(motionNodes(notes).length, 1);
+  assert.equal(searchButtons(learning).length, 1);
+  assert.equal(searchButtons(notes).length, 0);
 });
 
 /* ── 3. 左栏平级切换 ──────────────────────────────────────────────────── */
@@ -299,7 +310,7 @@ test('左栏选中笔记走「打开」而不是开关：右栏已停在笔记�
 
 test('笔记面在前台时，学习面的搜索快捷键让路（隐藏面不吃键）', () => {
   const source = fs.readFileSync(CLIENT_PATH, 'utf8');
-  assert.match(source, /if \(surface !== 'learning'\) return;\s*if \(\(event\.metaKey/);
+  assert.match(source, /if \(surface !== 'learning' \|\| event\.defaultPrevented\) return;\s*if \(\(event\.metaKey/);
 });
 
 /* ── 5. 无界里的只读课程卡 ─────────────────────────────────────────────── */

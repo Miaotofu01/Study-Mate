@@ -18,16 +18,18 @@ import CourseReference from './CourseReference.jsx';
 import { NodeNotebookTree, NotesStatus } from './LearningNotes.jsx';
 import { CourseAssociationBar, NotebookBindingsForm, NoteAssociationsForm, notebookBindingLabel } from './CourseRelations.jsx';
 import { createNotesWorkspace, sameSubject, sameCourse, courseRef, normalizeCourseRef, associateNote, notebookOf, ownedNote, resolveCourse } from './curriculum.js';
+import { corruptMessage } from './corrupt.js';
+import { useNotesLocale, nt } from './locale.js';
 import './layout-v2.css';
 import './components-v2.css';
 import './theme-v3.css';
 import './ui-v4.css';
 import './ui-v5.css';
 
-const DOCUMENT_MODES = [['preview', '预览'], ['edit', '编辑'], ['split', '双列'], ['inline', '渲染编辑']];
+const DOCUMENT_MODES = [['preview', 'document_mode_preview'], ['edit', 'document_mode_edit'], ['split', 'document_mode_split'], ['inline', 'document_mode_inline']];
 
 const uid = (prefix) => prefix + '-' + crypto.randomUUID();
-const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const standaloneMotionScale = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1;
 function folderPath(folders, id) {
   const names = [], seen = new Set();
   while (id && !seen.has(id)) {
@@ -51,6 +53,7 @@ const nodeForResource = (id, resource, x, y, width = 310, height = 255) => resou
   : (({ dragHandle, ...node }) => node)(card(id, resource.id, x, y, width, height));
 
 function ResizeBar({ side, value, onChange, onResizing }) {
+  useNotesLocale();
   const min = side === 'left' ? 200 : 270;
   const max = () => Math.max(min, Math.min(side === 'left' ? 480 : 600, window.innerWidth - 140));
   const start = (event) => {
@@ -61,10 +64,11 @@ function ResizeBar({ side, value, onChange, onResizing }) {
     const end = () => { onResizing(false); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end); window.removeEventListener('blur', end); };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end); window.addEventListener('blur', end);
   };
-  return <div className="panel-resize-hit" role="separator" aria-label={side === 'left' ? '调整左侧栏宽度' : '调整右侧栏宽度'} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max()} aria-valuenow={Math.round(value)} tabIndex={0} onPointerDown={start}
+  return <div className="panel-resize-hit" role="separator" aria-label={nt(side === 'left' ? 'resize_left' : 'resize_right')} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max()} aria-valuenow={Math.round(value)} tabIndex={0} onPointerDown={start}
     onKeyDown={(event) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); onChange(event.key === 'Home' ? min : event.key === 'End' ? max() : clamp(value + (event.key === 'ArrowRight' ? 16 : -16) * (side === 'left' ? 1 : -1), min, max())); } }} />;
 }
 function Modal({ title, onClose, children, className = '' }) {
+  useNotesLocale();
   const ref = useRef(null);
   useEffect(() => {
     const previous = document.activeElement;
@@ -74,18 +78,19 @@ function Modal({ title, onClose, children, className = '' }) {
     const el = ref.current; el.addEventListener('keydown', onKey);
     return () => { el.removeEventListener('keydown', onKey); previous?.focus?.(); };
   }, []);
-  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section ref={ref} className={"modal " + className} role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><h2>{title}</h2><button className="icon-button" aria-label="关闭弹窗" onClick={onClose}><X size={18} /></button></div>{children}</section></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section ref={ref} className={"modal " + className} role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><h2>{title}</h2><button className="icon-button" aria-label={nt('close_dialog')} onClick={onClose}><X size={18} /></button></div>{children}</section></div>;
 }
 
-const CREATE_ENTRIES = [['notebook', '新建笔记本', NotebookPen], ['folder', '新建文件夹', FolderPlus], ['note', '新建笔记', FileText]];
+const CREATE_ENTRIES = [['notebook', 'new_notebook', NotebookPen], ['folder', 'new_folder', FolderPlus], ['note', 'new_note', FileText]];
 function CreateMenu({ disabled, onChoose }) {
+  useNotesLocale();
   const [open, setOpen] = useState(false);
   const trigger = useRef(null), menu = useRef(null);
   useEffect(() => { if (open && !disabled) menu.current?.querySelector('button')?.focus(); }, [open, disabled]);
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
   return <div className="notes-create-control" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
-    <button ref={trigger} className="button ghost notes-create-trigger" type="button" disabled={disabled} aria-expanded={open && !disabled} aria-haspopup="menu" onClick={() => setOpen(!open)}>新建 <ChevronDown size={13} aria-hidden="true" /></button>
-    {open && !disabled && <div ref={menu} className="import-menu-items notes-create-menu" role="menu" aria-label="新建资源" onKeyDown={event => {
+    <button ref={trigger} className="button ghost notes-create-trigger" type="button" disabled={disabled} aria-expanded={open && !disabled} aria-haspopup="menu" onClick={() => setOpen(!open)}>{nt('new')} <ChevronDown size={13} aria-hidden="true" /></button>
+    {open && !disabled && <div ref={menu} className="import-menu-items notes-create-menu" role="menu" aria-label={nt('new_resource')} onKeyDown={event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); }
       else if (['ArrowUp','ArrowDown','Home','End'].includes(event.key)) {
         const items = [...event.currentTarget.querySelectorAll('button')], index = items.indexOf(document.activeElement);
@@ -93,25 +98,27 @@ function CreateMenu({ disabled, onChoose }) {
         items[event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
       }
     }}>
-      {CREATE_ENTRIES.map(([kind, text, Icon]) => <button key={kind} type="button" role="menuitem" onClick={() => { trigger.current?.focus(); setOpen(false); onChoose(kind); }}><Icon size={15} aria-hidden="true" />{text}</button>)}
+      {CREATE_ENTRIES.map(([kind, labelKey, Icon]) => <button key={kind} type="button" role="menuitem" onClick={() => { trigger.current?.focus(); setOpen(false); onChoose(kind); }}><Icon size={15} aria-hidden="true" />{nt(labelKey)}</button>)}
     </div>}
   </div>;
 }
 
 function PersistenceBadge({ status, loadState }) {
+  useNotesLocale();
   // 汇总所有 key 的保存状态：任一 conflict → 冲突；任一 error → 失败；任一 saving/pending → 保存中；否则已保存
   const values = Object.values(status || {})
-  let kind = 'saved', label = '已保存'
-  if (loadState === 'loading') { kind = 'loading'; label = '正在载入…'; }
-  else if (loadState === 'error') { kind = 'error'; label = '载入失败'; }
-  else if (values.some((s) => s.state === SaveState.CONFLICT)) { kind = 'conflict'; label = '冲突' }
-  else if (values.some((s) => s.state === SaveState.ERROR)) { kind = 'error'; label = '保存失败' }
-  else if (values.some((s) => s.state === SaveState.SAVING)) { kind = 'saving'; label = '保存中…' }
-  else if (values.some((s) => s.state === SaveState.PENDING)) { kind = 'pending'; label = '未保存' }
-  return <span className="prototype-badge persistence-badge" data-state={kind} role="status">{label}</span>
+  let kind = 'saved', label = 'saved'
+  if (loadState === 'loading') { kind = 'loading'; label = 'loading'; }
+  else if (loadState === 'error') { kind = 'error'; label = 'load_failed'; }
+  else if (values.some((s) => s.state === SaveState.CONFLICT)) { kind = 'conflict'; label = 'conflict' }
+  else if (values.some((s) => s.state === SaveState.ERROR)) { kind = 'error'; label = 'save_failed' }
+  else if (values.some((s) => s.state === SaveState.SAVING)) { kind = 'saving'; label = 'saving' }
+  else if (values.some((s) => s.state === SaveState.PENDING)) { kind = 'pending'; label = 'pending' }
+  return <span className="prototype-badge persistence-badge" data-state={kind} role="status">{nt(label)}</span>
 }
 
-function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, persistence = null, persistenceSession, viewMemory, workspaceBridge = null, courseLibrary = null, onNavigateCourse, renderCourse }) {
+function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, scopedShortcuts = false, getMotionScale = standaloneMotionScale, persistence = null, persistenceSession, viewMemory, workspaceBridge = null, courseLibrary = null, onNavigateCourse, renderCourse }) {
+  useNotesLocale();
   const localBridge = useRef(null); if (!localBridge.current) localBridge.current = createNotesWorkspace();
   const shared = workspaceBridge || localBridge.current;
   const [treeMode, setTreeMode] = useState(viewMemory?.treeMode || 'files');
@@ -136,7 +143,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   const foldersRef = useRef(folders); foldersRef.current = folders;
   const legacyNotebook = folders.find(folder => folder.kind === 'notebook')?.id;
   const nodeScope = node => node.data.notebookId || legacyNotebook;
-  const visibleNodes = scene.nodes.filter(node => nodeScope(node) === activeNotebook && !resources[node.data.contentId]?.trashed);
+  const visibleNodes = scene.nodes.filter(node => nodeScope(node) === activeNotebook && (!node.data.contentId || resources[node.data.contentId]) && !resources[node.data.contentId]?.trashed);
   const visibleIds = new Set(visibleNodes.map(node => node.id));
   const visibleEdges = scene.edges.filter(edge => visibleIds.has(edge.source) && visibleIds.has(edge.target));
   const [selectedFolder, setSelectedFolder] = useState(viewMemory?.selectedFolder || 'notes');
@@ -415,7 +422,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   };
   const selectResource = (id) => { setCurrentId(id); setEditingNode(null); if (view === 'canvas') setRightOpen(true); void refreshResource(id); };
   const openDocument = (id) => { if (!resources[id]) return; setCurrentId(id); setView('document'); setRightOpen(true); setEditingNode(null); setEditingEdge(null); void refreshResource(id); };
-  const fit = () => flow.fitView({ padding: 0.2, duration: reducedMotion() ? 0 : 220, maxZoom: 1.25 });
+  const fit = () => flow.fitView({ padding: 0.2, duration: 220 * getMotionScale(), maxZoom: 1.25 });
   // 初始适应画布要等所有节点都量到尺寸：文本节点比卡片晚一帧，过早 fitView 会把它留在屏幕外。
   const initialized = useNodesInitialized();
   const didInitialFit = useRef(false);
@@ -430,7 +437,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   const placeResource = (id, position) => {
     if (!notesPersistence.canEdit) return;
     const existing = sceneRef.current.nodes.find((node) => node.data.contentId === id && nodeScope(node) === activeNotebook);
-    if (existing) { if (view === 'canvas') flow.setCenter(existing.position.x + (existing.width || existing.style?.width || 300) / 2, existing.position.y + 130, { zoom: 1, duration: reducedMotion() ? 0 : 220 }); else setView('canvas'); announce('已定位画布中的卡片'); return; }
+    if (existing) { if (view === 'canvas') flow.setCenter(existing.position.x + (existing.width || existing.style?.width || 300) / 2, existing.position.y + 130, { zoom: 1, duration: 220 * getMotionScale() }); else setView('canvas'); announce('已定位画布中的卡片'); return; }
     if (sceneRef.current.nodes.length >= 120) { announce('此体验版最多放置 120 个节点'); return; }
     const point = position || (view === 'canvas' ? center() : { x: 420, y: 240 });
     const resource = resourcesRef.current[id];
@@ -502,7 +509,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
     // 按 1/Delete/空格都会落到隐藏笔记上。
     if (!active || !notesPersistence.canEdit) return undefined;
     const keyDown = (event) => {
-      if (modal) return;
+      if (modal || (scopedShortcuts && !root.current?.contains(event.target instanceof Node ? event.target : null))) return;
       if (event.code === 'Space' && view === 'canvas') { setSpace(true); if (!editable(event.target)) event.preventDefault(); return; }
       if (editable(event.target)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); restore(event.shiftKey ? 'redo' : 'undo'); }
@@ -516,7 +523,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
     const blur = () => setSpace(false);
     window.addEventListener('keydown', keyDown, true); window.addEventListener('keyup', keyUp, true); window.addEventListener('blur', blur);
     return () => { window.removeEventListener('keydown', keyDown, true); window.removeEventListener('keyup', keyUp, true); window.removeEventListener('blur', blur); };
-  }, [active, modal, view, restore, deleteSelection, notesPersistence.canEdit]);
+  }, [active, scopedShortcuts, modal, view, restore, deleteSelection, notesPersistence.canEdit]);
   const forcedPan = (event) => {
     if (event.button !== 0) return;
     event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);
@@ -685,40 +692,41 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
   const associationBar = current?.type === 'note' && <CourseAssociationBar resource={current} library={courseLibrary}
     onNavigate={onNavigateCourse} onManage={() => manageAssociation(current.id)} canEdit={notesPersistence.canEdit && currentMarkdown && ownedNote(current)} />;
   const ctx = { resources, openDocument, editingNode, setEditingNode, editingEdge, setEditingEdge, checkpoint, updateNodeText, commitEdgeLabel, toggleCardCollapsed, navigateCourse: onNavigateCourse, courseLibrary };
-  const documentBody = current?.courseRef ? <CourseReference key={current.id} resource={current} library={courseLibrary} renderCourse={renderCourse} onNavigate={onNavigateCourse} canEdit={notesPersistence.canEdit} onChange={patch => updateResource(current.id, patch)} /> : currentMarkdown ? <NoteEditor key={current.id} resource={current} theme={theme} mode={documentMode} exportTarget={documentActions} onChange={markdown => updateResource(current.id, { markdown })} readOnly={referenceReadOnly || !notesPersistence.canEdit || !active} /> : isUnsupportedNote(current) ? <p className="unsupported-note" role="status">不支持的文件类型。改回支持的 Markdown 扩展名可恢复编辑，原内容仍保留。</p> : <div className="document-preview-pane">{current && ['image', 'svg', 'html'].includes(current.type) ? <div className="document-content"><MediaRenderer resource={current} className="media-preview document-media" /></div>
-    : <div className="document-content"><h1>{current?.title}</h1><p>{current?.summary}</p>{current?.type === 'link' && <a href={current.url} target="_blank" rel="noopener noreferrer">打开网页</a>}</div>}</div>;
+  const documentBody = current?.courseRef ? <CourseReference key={current.id} resource={current} library={courseLibrary} renderCourse={renderCourse} onNavigate={onNavigateCourse} canEdit={notesPersistence.canEdit} onChange={patch => updateResource(current.id, patch)} /> : currentMarkdown ? <NoteEditor key={current.id} resource={current} theme={theme} mode={documentMode} exportTarget={documentActions} onChange={markdown => updateResource(current.id, { markdown })} readOnly={referenceReadOnly || !notesPersistence.canEdit || !active} /> : isUnsupportedNote(current) ? <p className="unsupported-note" role="status">{nt('unsupported_note')}</p> : <div className="document-preview-pane">{current && ['image', 'svg', 'html'].includes(current.type) ? <div className="document-content"><MediaRenderer resource={current} className="media-preview document-media" /></div>
+    : <div className="document-content"><h1>{current?.title}</h1><p>{current?.summary}</p>{current?.type === 'link' && <a href={current.url} target="_blank" rel="noopener noreferrer">{nt('open_web')}</a>}</div>}</div>;
 
   return <BoardContext.Provider value={ctx}><div ref={root} className={"app-shell v2 v3 v4 v5" + (hostTheme ? " is-hosted" : "")} data-theme={theme} data-resizing={resizing} style={{ '--v2-left-width': leftWidth + 'px', '--v2-right-width': rightWidth + 'px', '--v5-keep-left': leftWidth + 'px', '--v5-keep-right': rightWidth + 'px' }}>
-    {notesPersistence.isNative && notesPersistence.loadState === 'loading' && <div className="persistence-gate" role="status"><p>正在载入笔记数据…</p></div>}
-    {notesPersistence.isNative && notesPersistence.loadState === 'error' && <div className="persistence-gate persistence-gate--error" role="alert"><p>笔记数据载入失败。未覆盖已有文件。</p><p>{notesPersistence.loadError?.message}</p><button className="button ghost" onClick={() => notesPersistence.reloadStore({ confirmDiscard: true })}>重试载入</button></div>}
+    {notesPersistence.isNative && notesPersistence.loadState === 'loading' && <div className="persistence-gate" role="status"><p>{nt('loading_data')}</p></div>}
+    {notesPersistence.isNative && notesPersistence.loadState === 'error' && <div className="persistence-gate persistence-gate--error" role="alert"><p>{nt('load_data_error')}</p><p>{notesPersistence.loadError?.message}</p><button className="button ghost" onClick={() => notesPersistence.reloadStore({ confirmDiscard: true })}>{nt('reload')}</button><button className="button ghost" onClick={() => notesPersistence.reloadStore({ confirmDiscard: true, skipCorrupt: true })}>{nt('load_rest')}</button></div>}
     {notesPersistence.isNative && notesPersistence.loadState === 'upgrade' && <div className="persistence-gate"><NotesStatus state={notesPersistence} dispatch={(name, ...args) => commands[name]?.(...args)} /></div>}
-    {notesPersistence.isNative && notesPersistence.conflictKeys.length > 0 && <div className="persistence-conflict" role="alert"><p>文件版本已改变。本地最新草稿仍保留，不会自动覆盖文件。</p><button className="button ghost" onClick={() => { if (window.confirm('保留本地最新草稿，并针对刚看到的文件版本重试保存？若文件再次改变，仍会停止并提示冲突。')) notesPersistence.conflictKeys.forEach(key => notesPersistence.resolveConflict(key, { discard: false })); }}>保留本地并重试保存</button></div>}
+    {notesPersistence.isNative && notesPersistence.corrupt.length > 0 && <div className="persistence-corrupt-list" role="status">{notesPersistence.corrupt.map(entry => <div className="persistence-corrupt" key={entry.id}>{corruptMessage(entry, courseLibrary, folders, scene)}</div>)}</div>}
+    {notesPersistence.isNative && notesPersistence.conflictKeys.length > 0 && <div className="persistence-conflict" role="alert"><p>{nt('conflict_data')}</p><button className="button ghost" onClick={() => { if (window.confirm(nt('retry_confirm'))) notesPersistence.conflictKeys.forEach(key => notesPersistence.resolveConflict(key, { discard: false })); }}>{nt('keep_retry')}</button></div>}
     <header className="topbar">
-      <div className="view-switch" aria-label="主视图"><button className={view === 'canvas' ? 'is-active' : ''} aria-pressed={view === 'canvas'} onClick={() => { setView('canvas'); setEditingNode(null); }}><LayoutDashboard size={13} />画布</button><button className={view === 'document' ? 'is-active' : ''} aria-pressed={view === 'document'} onClick={() => openDocument(current?.id)}><FileText size={13} />文档</button></div>
+      <div className="view-switch" aria-label={nt('main_view')}><button className={view === 'canvas' ? 'is-active' : ''} aria-pressed={view === 'canvas'} onClick={() => { setView('canvas'); setEditingNode(null); }}><LayoutDashboard size={13} />{nt('canvas')}</button><button className={view === 'document' ? 'is-active' : ''} aria-pressed={view === 'document'} onClick={() => openDocument(current?.id)}><FileText size={13} />{nt('document')}</button></div>
       <span className="topbar-spacer" />{notesPersistence.isNative && <div className="persistence-actions">
-        {Object.values(notesPersistence.saveStatus).some(state => state.state === SaveState.ERROR) && <button className="button ghost" onClick={notesPersistence.retryAll}>重试保存</button>}
+        {Object.values(notesPersistence.saveStatus).some(state => state.state === SaveState.ERROR) && <button className="button ghost" onClick={notesPersistence.retryAll}>{nt('retry_save')}</button>}
         {/* 草稿恢复按钮只在真实失败态出现（ERROR/CONFLICT 稳定存在直到解决）；
             普通 dirty（在途保存/未落盘草稿）不再让这两个按钮闪现——那条路只由
             PersistenceBadge 如实显示。恢复路径仍完整：失败可导出/重试/重载，冲突另有
-            482 行的冲突条与「保留本地并重试」。 */}
-        {Object.values(notesPersistence.saveStatus).some(state => state.state === SaveState.ERROR || state.state === SaveState.CONFLICT) && <><button className="button ghost" onClick={() => { const blob = new Blob([JSON.stringify(notesPersistence.exportDrafts(), null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'studymate-notes-draft.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }}>导出本地草稿</button><button className="button ghost" onClick={() => notesPersistence.reloadStore({ confirmDiscard: true })}>放弃本地，重新载入</button></>}
+            冲突条与「保留本地并重试」。 */}
+        {Object.values(notesPersistence.saveStatus).some(state => state.state === SaveState.ERROR || state.state === SaveState.CONFLICT) && <><button className="button ghost" onClick={() => { const blob = new Blob([JSON.stringify(notesPersistence.exportDrafts(), null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'studymate-notes-draft.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }}>{nt('export_drafts')}</button><button className="button ghost" onClick={() => notesPersistence.reloadStore({ confirmDiscard: true })}>{nt('discard_local')}</button></>}
       </div>}{notesPersistence.isNative
         ? <PersistenceBadge status={notesPersistence.saveStatus} loadState={notesPersistence.loadState} />
         : <span className="prototype-badge">开发中 · 刷新重置</span>}
       <button className="icon-button theme-switch" aria-label={theme === 'dark' ? '切换浅色模式' : '切换暗色模式'} title={theme === 'dark' ? '当前：暗色模式（覆盖仅本页，刷新后跟宿主）' : '当前：浅色模式（覆盖仅本页，刷新后跟宿主）'} onClick={() => setThemeOverride(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>
       <button className="icon-button" aria-label="操作说明" title="操作说明" onClick={() => setModal('help')}><HelpCircle size={17} /></button>{!notesPersistence.isNative && <button className="icon-button" aria-label="恢复示例" title="恢复示例" onClick={() => setModal('reset')}><RotateCcw size={16} /></button>}
-      <button className="icon-button topbar-panel-toggle" aria-label={rightOpen ? '收起右侧栏' : '展开右侧栏'} title={rightOpen ? '收起右侧栏' : '展开右侧栏'} aria-expanded={rightOpen} aria-controls="right-panel" onClick={() => setRightOpen((value) => !value)}>{rightOpen ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>
+      <button className="icon-button topbar-panel-toggle" aria-label={nt(rightOpen ? 'close_right' : 'open_right')} title={nt(rightOpen ? 'close_right' : 'open_right')} aria-expanded={rightOpen} aria-controls="right-panel" onClick={() => setRightOpen((value) => !value)}>{rightOpen ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>
     </header>
     <div className="workspace" ref={workspaceRef}>
       <aside className={'side-panel left-panel' + (!leftOpen ? ' is-collapsed' : '')} style={{ width: leftOpen ? leftWidth : 0 }} inert={!leftOpen ? true : undefined} aria-hidden={!leftOpen}>
-        <div className="panel-inner"><div className="panel-header"><span className="panel-title">文件</span><div className="panel-actions"><ImportControls onChooseMode={beginImport} getPortalHost={getPortalHost} /><CreateMenu disabled={!notesPersistence.canEdit} onChoose={beginCreate} /><button className="icon-button" aria-label="收起文件侧栏" title="收起文件侧栏" onClick={() => setLeftOpen(false)}><PanelLeftClose size={17} /></button></div></div>
-          <div className="tree-tools"><input className="tree-search" aria-label="搜索文件" placeholder="搜索" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
-          <div className="view-switch" aria-label="笔记目录视图"><button className={treeMode === 'files' ? 'is-active' : ''} aria-pressed={treeMode === 'files'} onClick={() => setTreeMode('files')}>资源视图</button><button className={treeMode === 'nodes' ? 'is-active' : ''} aria-pressed={treeMode === 'nodes'} onClick={() => setTreeMode('nodes')}>节点视图</button></div>
+        <div className="panel-inner"><div className="panel-header"><span className="panel-title">{nt('files')}</span><div className="panel-actions"><ImportControls onChooseMode={beginImport} getPortalHost={getPortalHost} /><CreateMenu disabled={!notesPersistence.canEdit} onChoose={beginCreate} /><button className="icon-button" aria-label={nt('close_files')} title={nt('close_files')} onClick={() => setLeftOpen(false)}><PanelLeftClose size={17} /></button></div></div>
+          <div className="tree-tools"><input className="tree-search" aria-label={nt('search_files')} placeholder={nt('search')} value={search} onChange={(event) => setSearch(event.target.value)} /></div>
+          <div className="view-switch" aria-label={nt('directory_view')}><button className={treeMode === 'files' ? 'is-active' : ''} aria-pressed={treeMode === 'files'} onClick={() => setTreeMode('files')}>{nt('resources_view')}</button><button className={treeMode === 'nodes' ? 'is-active' : ''} aria-pressed={treeMode === 'nodes'} onClick={() => setTreeMode('nodes')}>{nt('nodes_view')}</button></div>
           {treeMode === 'nodes' ? <NodeNotebookTree bridge={shared} library={courseLibrary} search={search} onCanvas={switchNotebook} onSelect={view === 'document' ? openDocument : selectResource} onPickEntry={setPickedEntry} onManageNotebook={manageNotebook} /> : <ResourceTree folders={folders} resources={resources} search={search} selectedId={current?.id} selectedFolder={selectedFolder} onFolderSelect={setSelectedFolder} onSelect={view === 'document' ? openDocument : selectResource} onOpenDocument={openDocument} onCanvas={switchNotebook} canEdit={notesPersistence.canEdit} onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameResource={renameResource} hasCanvasContent={hasCanvasContent} onPickEntry={setPickedEntry} onManageNotebook={manageNotebook} getNotebookBindingLabel={book => notebookBindingLabel(book, courseLibrary)} onCopyMarkdown={copyMarkdown} canCopyMarkdown={canCopyMarkdown} />}
 
         </div>{leftOpen && <ResizeBar side="left" value={leftWidth} onChange={setLeftWidth} onResizing={setResizing} />}
       </aside>
-      <div className={'panel-rail panel-rail--left' + (leftOpen ? ' is-hidden' : '')} aria-hidden={leftOpen} inert={leftOpen ? true : undefined}><button className="icon-button" aria-label="展开文件侧栏" title="展开文件侧栏" onClick={() => setLeftOpen(true)}><PanelLeftOpen size={18} /></button></div>
+      <div className={'panel-rail panel-rail--left' + (leftOpen ? ' is-hidden' : '')} aria-hidden={leftOpen} inert={leftOpen ? true : undefined}><button className="icon-button" aria-label={nt('open_files')} title={nt('open_files')} onClick={() => setLeftOpen(true)}><PanelLeftOpen size={18} /></button></div>
       <main className="main-stage">
         <section ref={stage} className={'canvas-stage' + (space ? ' is-space-panning' : '') + (dropActive ? ' is-drop-target' : '')} style={view !== 'canvas' ? { position: 'absolute', inset: 0, visibility: 'hidden', pointerEvents: 'none' } : undefined} aria-hidden={view !== 'canvas'} inert={view !== 'canvas' ? true : undefined} onDragOver={(event) => { if ([...event.dataTransfer.types].some((type) => ['application/studymate-resource', 'application/studymate-course', 'Files'].includes(type))) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDropActive(true); } }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setDropActive(false); }} onDrop={drop}>
           <ReactFlow nodes={visibleNodes.map((node) => ({ ...node, type: resources[node.data.contentId]?.type === 'link' ? 'text' : node.type, draggable: !space && node.id !== editingNode }))} edges={visibleEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
@@ -734,37 +742,37 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
           </ReactFlow>
           {space && <div ref={panLayer} className="pan-capture-layer" data-testid="space-pan-layer" onPointerDown={forcedPan} />}
           <div className={'canvas-drop-hint' + (dropActive ? ' is-active' : '')}>从左树拖入即引用同一原件；外部文件可选导入方式</div>
-          <div className="canvas-toolbar" role="toolbar" aria-label="画布工具"><button className={'icon-button' + (tool === 'select' ? ' active' : '')} aria-label="选择工具" title="选择 V" onClick={() => setTool('select')}><MousePointer2 size={17} /></button><button className={'icon-button' + (tool === 'hand' ? ' active' : '')} aria-label="平移工具" title="平移 H / 按住空格" onClick={() => setTool('hand')}><Hand size={17} /></button><i />
-            <button className="icon-button" aria-label="添加纯内容节点" title="纯内容节点" disabled={!notesPersistence.canEdit} onClick={addText}><Type size={18} /></button><i />
-            <button className="icon-button" aria-label="撤销画板操作" title="撤销" disabled={!history.current.past.length} onClick={() => restore('undo')}><Undo2 size={17} /></button><button className="icon-button" aria-label="重做画板操作" title="重做" disabled={!history.current.future.length} onClick={() => restore('redo')}><Redo2 size={17} /></button><i />
-            <button className="icon-button" aria-label="缩小画布" onClick={() => flow.zoomOut({ duration: reducedMotion() ? 0 : 140 })}><ZoomOut size={17} /></button><span className="zoom-label">{Math.round(zoom * 100)}%</span><button className="icon-button" aria-label="放大画布" onClick={() => flow.zoomIn({ duration: reducedMotion() ? 0 : 140 })}><ZoomIn size={17} /></button><button className="icon-button" aria-label="适应全部卡片" title="适应画布 1" onClick={fit}><Maximize size={17} /></button>
+          <div className="canvas-toolbar" role="toolbar" aria-label={nt('canvas_tools')}><button className={'icon-button' + (tool === 'select' ? ' active' : '')} aria-label={nt('select_tool')} title={nt('select_shortcut')} onClick={() => setTool('select')}><MousePointer2 size={17} /></button><button className={'icon-button' + (tool === 'hand' ? ' active' : '')} aria-label={nt('pan_tool')} title={nt('pan_shortcut')} onClick={() => setTool('hand')}><Hand size={17} /></button><i />
+            <button className="icon-button" aria-label={nt('add_text')} title={nt('text_node')} disabled={!notesPersistence.canEdit} onClick={addText}><Type size={18} /></button><i />
+            <button className="icon-button" aria-label={nt('undo_canvas')} title={nt('undo')} disabled={!history.current.past.length} onClick={() => restore('undo')}><Undo2 size={17} /></button><button className="icon-button" aria-label={nt('redo_canvas')} title={nt('redo')} disabled={!history.current.future.length} onClick={() => restore('redo')}><Redo2 size={17} /></button><i />
+            <button className="icon-button" aria-label={nt('zoom_out')} onClick={() => flow.zoomOut({ duration: 140 * getMotionScale() })}><ZoomOut size={17} /></button><span className="zoom-label">{Math.round(zoom * 100)}%</span><button className="icon-button" aria-label={nt('zoom_in')} onClick={() => flow.zoomIn({ duration: 140 * getMotionScale() })}><ZoomIn size={17} /></button><button className="icon-button" aria-label={nt('fit')} title={nt('fit_shortcut')} onClick={fit}><Maximize size={17} /></button>
           </div>
         </section>
-        {view === 'document' && <section className="document-stage"><div className="document-toolbar" ref={setDocumentActions}>{current?.type === 'note' && !referenceReadOnly ? <NoteTitleInput resource={current} label="文档标题" onRename={renameResource} disabled={!notesPersistence.canEdit} /> : <span className="document-title">{current?.title}</span>}
-        </div>{associationBar}{currentMarkdown && <div className="editor-mode-switch document-mode-switch" role="group" aria-label="文档视图模式">{DOCUMENT_MODES.map(([mode, label]) => <button key={mode} type="button" className={documentMode === mode ? 'is-active' : ''} aria-pressed={documentMode === mode} onClick={() => setDocumentModes(previous => ({ ...previous, [current.id]: mode }))}>{label}</button>)}</div>}
+        {view === 'document' && <section className="document-stage"><div className="document-toolbar" ref={setDocumentActions}>{current?.type === 'note' && !referenceReadOnly ? <NoteTitleInput resource={current} label={nt('document_title')} onRename={renameResource} disabled={!notesPersistence.canEdit} /> : <span className="document-title">{current?.title}</span>}
+        </div>{associationBar}{currentMarkdown && <div className="editor-mode-switch document-mode-switch" role="group" aria-label={nt('document_view_mode')}>{DOCUMENT_MODES.map(([mode, labelKey]) => <button key={mode} type="button" className={documentMode === mode ? 'is-active' : ''} aria-pressed={documentMode === mode} onClick={() => setDocumentModes(previous => ({ ...previous, [current.id]: mode }))}>{nt(labelKey)}</button>)}</div>}
           <div className={'document-scroll is-' + documentMode + (currentMarkdown ? ' note-document-scroll' : '')}>{documentBody}</div></section>}
       </main>
       <aside id="right-panel" className={'side-panel right-panel' + (!rightOpen ? ' is-collapsed' : '')} style={{ width: rightOpen ? rightWidth : 0 }} inert={!rightOpen ? true : undefined} aria-hidden={!rightOpen}><div className="panel-inner">
-        <div className="panel-header resource-header"><span className="panel-title resource-header-title" title={current?.title}>{view === 'document' ? 'AI 对话' : current?.title || '文件'}</span>
+        <div className="panel-header resource-header"><span className="panel-title resource-header-title" title={current?.title}>{view === 'document' ? nt('chat') : current?.title || nt('files')}</span>
           {view === 'canvas' && <div className="resource-header-actions" ref={setResourceActions}>
-            <button className="icon-button" disabled={!current} aria-label={currentCard ? '定位节点' : '放到画布'} title={currentCard ? '定位节点' : '放到画布'} onClick={() => placeResource(current.id)}>{currentCard ? <LocateFixed size={16} /> : <Plus size={16} />}</button>
-            <button className="icon-button" disabled={!current} aria-label="打开文档" title="打开文档" onClick={() => openDocument(current.id)}><FileText size={16} /></button>
-            <button className="icon-button danger" disabled={!currentCard} title="删除节点，保留文件" aria-label="移出画布" onClick={removeCurrentCard}><Trash2 size={16} /></button>
+            <button className="icon-button" disabled={!current} aria-label={nt(currentCard ? 'locate' : 'place')} title={nt(currentCard ? 'locate' : 'place')} onClick={() => placeResource(current.id)}>{currentCard ? <LocateFixed size={16} /> : <Plus size={16} />}</button>
+            <button className="icon-button" disabled={!current} aria-label={nt('open_document')} title={nt('open_document')} onClick={() => openDocument(current.id)}><FileText size={16} /></button>
+            <button className="icon-button danger" disabled={!currentCard} title={nt('remove_node_hint')} aria-label={nt('remove_canvas')} onClick={removeCurrentCard}><Trash2 size={16} /></button>
           </div>}
         </div>
         {view === 'document' ? <ChatComponent resources={resources} currentId={current?.id} quoteIds={quoteIds} onQuote={quote} onRemoveQuote={(id) => setQuoteIds((previous) => previous.filter((value) => value !== id))} draft={chatDraft} onDraftChange={setChatDraft} />
           : <div className={'resource-detail panel-body' + (currentMarkdown ? ' is-note-detail' : '')}>
             {associationBar}
             {originDescription(current) && <div className="resource-origin-badge" data-origin={current.referenceError ? 'missing' : referenceReadOnly ? 'link' : 'local'}>{originDescription(current)}</div>}
-            {referenceReadOnly && <button className="button ghost" onClick={() => refreshResource(current.id)}><RefreshCw size={13} />重新读取引用</button>}
-            {referenceReadOnly && notesPersistence.isNative && <button className="button ghost" onClick={() => relinkFileReference(current.id)}><FileText size={13} />重新关联文件</button>}
+            {referenceReadOnly && <button className="button ghost" onClick={() => refreshResource(current.id)}><RefreshCw size={13} />{nt('reread')}</button>}
+            {referenceReadOnly && notesPersistence.isNative && <button className="button ghost" onClick={() => relinkFileReference(current.id)}><FileText size={13} />{nt('relink_file')}</button>}
             {current?.referenceError && <p className="validation-error" role="alert">{current.referenceError}</p>}
-            {current?.courseRef ? <CourseReference key={current.id} resource={current} library={courseLibrary} renderCourse={renderCourse} onNavigate={onNavigateCourse} canEdit={notesPersistence.canEdit} onChange={patch => updateResource(current.id, patch)} /> : currentMarkdown ? <NoteEditor key={current.id} resource={current} theme={theme} exportTarget={resourceActions} readOnly={referenceReadOnly || !notesPersistence.canEdit || !active || !rightOpen} onChange={markdown => updateResource(current.id, { markdown })} /> : isUnsupportedNote(current) ? <p className="unsupported-note" role="status">不支持的文件类型。改回支持的 Markdown 扩展名可恢复编辑，原内容仍保留。</p> : current && ['image', 'svg', 'html'].includes(current.type) ? <MediaRenderer resource={current} className="media-preview" /> : <><h2>{current?.title}</h2><p>{current?.summary}</p>{current?.type === 'link' && <a href={current.url} target="_blank" rel="noopener noreferrer">打开网页</a>}</>}
+            {current?.courseRef ? <CourseReference key={current.id} resource={current} library={courseLibrary} renderCourse={renderCourse} onNavigate={onNavigateCourse} canEdit={notesPersistence.canEdit} onChange={patch => updateResource(current.id, patch)} /> : currentMarkdown ? <NoteEditor key={current.id} resource={current} theme={theme} exportTarget={resourceActions} readOnly={referenceReadOnly || !notesPersistence.canEdit || !active || !rightOpen} onChange={markdown => updateResource(current.id, { markdown })} /> : isUnsupportedNote(current) ? <p className="unsupported-note" role="status">{nt('unsupported_note')}</p> : current && ['image', 'svg', 'html'].includes(current.type) ? <MediaRenderer resource={current} className="media-preview" /> : <><h2>{current?.title}</h2><p>{current?.summary}</p>{current?.type === 'link' && <a href={current.url} target="_blank" rel="noopener noreferrer">{nt('open_web')}</a>}</>}
           </div>}
         </div>{rightOpen && <ResizeBar side="right" value={rightWidth} onChange={setRightWidth} onResizing={setResizing} />}
       </aside>
     </div>
-    <input type="file" ref={fileInput} hidden multiple accept={IMPORT_FILE_ACCEPT} aria-label="导入笔记与静态媒体" onChange={importFiles} />
+    <input type="file" ref={fileInput} hidden multiple accept={IMPORT_FILE_ACCEPT} aria-label={nt('import_files')} onChange={importFiles} />
     {notice && <div className="toast" role="status">{notice}</div>}
     {modal === 'help' && <Modal title="操作说明" className="help-modal" onClose={() => setModal(null)}><div className="help-dialog">
       <div className="help-sections"><section><h3>画布与关系</h3><ul><li>拖动卡片移动；双击后阅读选字或编辑纯内容节点。网页链接本身就是一个文本节点。</li><li>按住空格拖动，随时平移；保持空格时滚轮也可缩放。</li><li>拖动圆形连接点建立关系；双击连线可写说明，说明可以为空，空说明不显示标签。</li><li>点阵与节点使用同一套画布坐标，缩放时一起放大缩小，相对间距不变。</li></ul></section>
@@ -777,11 +785,11 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
         {[['空格 + 拖动', '强制平移画布'], ['滚轮 / 空格 + 滚轮', '缩放画布（卡内滚动除外）'], ['H / V', '平移 / 选择工具'], ['1', '适应全部节点'], ['Shift + 点击', '多选节点'], ['Delete / Backspace', '删除所选节点/连线，保留文件'], ['Ctrl / ⌘ + Z', '撤销当前焦点所属的操作'], ['Ctrl / ⌘ + Shift + Z', '重做'], ['Esc', '退出编辑 / 关闭弹窗'], ['Ctrl / ⌘ + Enter', '提交纯内容节点编辑'], ['行号点击 / 拖动', '选择整行 / 连续多行']].map(([key, action]) => <tr key={key}><td><kbd>{key}</kbd></td><td>{action}</td></tr>)}
       </tbody></table></div></div></Modal>}
     {!notesPersistence.isNative && modal === 'reset' && <Modal title="恢复示例？" onClose={() => setModal(null)}><p>会清除本页的编辑、导入文件与草稿，不能撤销。</p><div className="modal-actions"><button className="button ghost" onClick={() => setModal(null)}>取消</button><button className="button primary" onClick={reset}>确认恢复</button></div></Modal>}
-    {modal === 'create' && createAt && <Modal title={CREATE_ENTRIES.find(([kind]) => kind === createAt.kind)?.[1]} onClose={() => setModal(null)}><form onSubmit={finishCreate}>
-      <p className="notes-create-target">新建位置：{folderPath(folders, createAt.parent)}</p>
-      <label>名称<input className="text-input" aria-label={createAt.kind === 'notebook' ? '笔记本名称' : createAt.kind === 'folder' ? '文件夹名称' : '笔记名称'} value={folderName} maxLength={createAt.kind === 'note' ? 160 : 80} onChange={event => setFolderName(event.target.value)} /></label>
+    {modal === 'create' && createAt && <Modal title={nt(CREATE_ENTRIES.find(([kind]) => kind === createAt.kind)?.[1])} onClose={() => setModal(null)}><form onSubmit={finishCreate}>
+      <p className="notes-create-target">{nt('create_target', { path: folderPath(folders, createAt.parent) })}</p>
+      <label>{nt('name')}<input className="text-input" aria-label={nt(createAt.kind === 'notebook' ? 'notebook_name' : createAt.kind === 'folder' ? 'folder_name' : 'note_name')} value={folderName} maxLength={createAt.kind === 'note' ? 160 : 80} onChange={event => setFolderName(event.target.value)} /></label>
       {formError && <p className="validation-error" role="alert">{formError}</p>}
-      <div className="modal-actions"><button className="button primary" disabled={!folderName.trim()} type="submit">创建</button></div>
+      <div className="modal-actions"><button className="button primary" disabled={!folderName.trim()} type="submit">{nt('create')}</button></div>
     </form></Modal>}
     {modal === 'notebook-bindings' && <Modal title="课程绑定" onClose={() => setModal(null)}>{managedBook
       ? <NotebookBindingsForm key={manageAt} book={managedBook} folders={folders} library={courseLibrary} canEdit={notesPersistence.canEdit}
@@ -791,10 +799,10 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, per
       ? <NoteAssociationsForm key={manageAt} resource={managedNote} library={courseLibrary} canEdit={notesPersistence.canEdit && isMarkdownResource(managedNote)}
           onAssociate={ref => commands.associate(manageAt, ref)} onRemove={ref => commands.removeAssociation(manageAt, ref)} />
       : <p role="status">笔记已不可用。</p>}</Modal>}
-    {modal === 'link' && <Modal title="添加网页" onClose={() => setModal(null)}><form onSubmit={(event) => { event.preventDefault(); try { const url = new URL(linkUrl); if (!['http:', 'https:'].includes(url.protocol)) throw new Error('仅支持 HTTP 或 HTTPS 地址'); if (Object.keys(resources).length >= 250) throw new Error('资源数量已达上限'); if (!notesPersistence.markEdit()) return; const id = uid('link'); setResources((previous) => ({ ...previous, [id]: { id, type: 'link', title: linkTitle.trim() || url.hostname, url: url.href, summary: '网页引用', parent: selectedFolder || 'references' } })); setCurrentId(id); setModal(null); announce('已添加网页引用，不抓取网页正文'); } catch (error) { setFormError(error.message); } }}><label>标题<input className="text-input" aria-label="网页标题" value={linkTitle} maxLength={160} onChange={(event) => setLinkTitle(event.target.value)} /></label><label>地址<input className="text-input" aria-label="网页地址" value={linkUrl} maxLength={2048} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://" /></label>{formError && <p className="validation-error" role="alert">{formError}</p>}<div className="modal-actions"><button className="button primary" type="submit">添加</button></div></form></Modal>}
-    {modal === 'reference-source' && <Modal title="添加引用" onClose={() => setModal(null)}><div className="import-mode-dialog"><p>保留原件关联，不写回原文件。请选择引用来源。</p><div className="import-mode-options"><button className="button ghost" onClick={() => chooseFiles('reference')}><FileText size={16} />选择本地文件</button><button className="button ghost" onClick={() => setModal('link')}><Link2 size={16} />添加网页引用</button></div><p className="muted">原型仍仅在本页保留引用；浏览器不支持文件句柄时会明确提示。</p></div></Modal>}
-    {modal === 'drop-mode' && pendingImport && <Modal title="选择导入模式" className="import-choice-modal" onClose={() => { setPendingImport(null); setModal(null); }}><div className="import-mode-dialog"><p>{pendingImport.entries.length + ' 个外部文件'}</p><div className="import-mode-options" role="group" aria-label="副本或引用"><button className="import-mode-option" aria-label="以副本模式导入" onClick={() => applyDropMode('copy')}><Copy size={20} /><span><strong>副本</strong><small>创建独立内容，后续修改不影响来源</small></span></button><button className="import-mode-option" aria-label="以引用模式导入" onClick={() => applyDropMode('reference')}><Link2 size={20} /><span><strong>引用</strong><small>{'只读关联原文件；不支持文件句柄时仅保留本次文件'}</small></span></button></div><p className="muted">所有预览继续经过相同的大小、像素与静态安全检查。</p></div></Modal>}
-    {modal === 'import-error' && <Modal title="部分文件未导入" onClose={() => setModal(null)}><p className="validation-error import-error" role="alert">{formError}</p></Modal>}
+    {modal === 'link' && <Modal title={nt('add_web')} onClose={() => setModal(null)}><form onSubmit={(event) => { event.preventDefault(); try { const url = new URL(linkUrl); if (!['http:', 'https:'].includes(url.protocol)) throw new Error('仅支持 HTTP 或 HTTPS 地址'); if (Object.keys(resources).length >= 250) throw new Error('资源数量已达上限'); if (!notesPersistence.markEdit()) return; const id = uid('link'); setResources((previous) => ({ ...previous, [id]: { id, type: 'link', title: linkTitle.trim() || url.hostname, url: url.href, summary: '网页引用', parent: selectedFolder || 'references' } })); setCurrentId(id); setModal(null); announce('已添加网页引用，不抓取网页正文'); } catch (error) { setFormError(error.message); } }}><label>{nt('heading')}<input className="text-input" aria-label={nt('web_title')} value={linkTitle} maxLength={160} onChange={(event) => setLinkTitle(event.target.value)} /></label><label>{nt('address')}<input className="text-input" aria-label={nt('web_address')} value={linkUrl} maxLength={2048} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://" /></label>{formError && <p className="validation-error" role="alert">{formError}</p>}<div className="modal-actions"><button className="button primary" type="submit">{nt('add')}</button></div></form></Modal>}
+    {modal === 'reference-source' && <Modal title={nt('add_reference')} onClose={() => setModal(null)}><div className="import-mode-dialog"><p>{nt('choose_reference')}</p><div className="import-mode-options"><button className="button ghost" onClick={() => chooseFiles('reference')}><FileText size={16} />{nt('choose_file')}</button><button className="button ghost" onClick={() => setModal('link')}><Link2 size={16} />{nt('add_web_reference')}</button></div><p className="muted">{nt('reference_lifetime')}</p></div></Modal>}
+    {modal === 'drop-mode' && pendingImport && <Modal title={nt('choose_import')} className="import-choice-modal" onClose={() => { setPendingImport(null); setModal(null); }}><div className="import-mode-dialog"><p>{nt('external_files', { n: pendingImport.entries.length })}</p><div className="import-mode-options" role="group" aria-label={nt('copy_or_reference')}><button className="import-mode-option" aria-label={nt('import_copy')} onClick={() => applyDropMode('copy')}><Copy size={20} /><span><strong>{nt('copy')}</strong><small>{nt('independent_copy')}</small></span></button><button className="import-mode-option" aria-label={nt('import_reference')} onClick={() => applyDropMode('reference')}><Link2 size={20} /><span><strong>{nt('reference')}</strong><small>{nt('readonly_original')}</small></span></button></div><p className="muted">{nt('import_checks')}</p></div></Modal>}
+    {modal === 'import-error' && <Modal title={nt('partial_import')} onClose={() => setModal(null)}><p className="validation-error import-error" role="alert">{formError}</p></Modal>}
   </div></BoardContext.Provider>;
 }
 export default function App({ ChatComponent = ChatPanel, ...props }) { return <ReactFlowProvider><Board ChatComponent={ChatComponent} {...props} /></ReactFlowProvider>; }
