@@ -17,9 +17,10 @@ import {
 
 import { activeFormatState, normalizeHttpHref } from './markdown-formatting.js';
 import './markdown-toolbar.css';
+import { useNotesLocale } from './locale.js';
 
 const HEADING_OPTIONS = [
-  { value: '0', label: '正文' },
+  { value: '0', label: 'body' },
   { value: '1', label: 'H1' },
   { value: '2', label: 'H2' },
   { value: '3', label: 'H3' },
@@ -73,6 +74,7 @@ function MenuButton({ label, command, disabled, onPress, children }) {
 }
 
 export default function MarkdownFormatToolbar({ onCommand, disabled = false, selection }) {
+  const nt = useNotesLocale();
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkDraft, setLinkDraft] = useState({ href: '', text: '' });
@@ -182,12 +184,12 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
     if (disabled) return;
     const href = normalizeHttpHref(linkDraft.href);
     if (!href) {
-      setLinkError('请输入以 http:// 或 https:// 开头的有效地址。');
+      setLinkError('invalid_url');
       return;
     }
     const text = linkDraft.text;
     if (text.includes(']') || /[\r\n]/.test(text) || /(^|[^\\])(\\\\)*\\$/.test(text)) {
-      setLinkError('链接文字不能包含 ]、换行，也不能以单个反斜杠结尾。');
+      setLinkError('invalid_link_text');
       return;
     }
     const unchangedHref = active.link && normalizeHttpHref(active.linkHref) === href;
@@ -241,30 +243,30 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
       ref={rootRef}
       className="md-format-toolbar"
       role="toolbar"
-      aria-label="Markdown 格式"
+      aria-label={nt('format')}
       aria-disabled={disabled || undefined}
       onKeyDown={onToolbarKeyDown}
     >
       <label className="md-format-toolbar__heading">
-        <span className="md-format-toolbar__sr-only">标题</span>
+        <span className="md-format-toolbar__sr-only">{nt('heading')}</span>
         <select
           className="md-format-toolbar__select"
-          aria-label="标题"
+          aria-label={nt('heading')}
           value={String(active.heading)}
           disabled={disabled}
           onChange={(event) => emit('heading', Number(event.target.value))}
         >
           {HEADING_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
+            <option key={option.value} value={option.value}>{option.value === '0' ? nt(option.label) : option.label}</option>
           ))}
         </select>
       </label>
 
       <span className="md-format-toolbar__divider" aria-hidden="true" />
 
-      <span className="md-format-toolbar__group" role="group" aria-label="行内格式">
+      <span className="md-format-toolbar__group" role="group" aria-label={nt('inline')}>
         <FormatButton
-          label="粗体"
+          label={nt('bold')}
           command="bold"
           disabled={disabled}
           active={active.bold}
@@ -273,7 +275,7 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
           <Bold size={16} strokeWidth={1.8} aria-hidden="true" />
         </FormatButton>
         <FormatButton
-          label="斜体"
+          label={nt('italic')}
           command="italic"
           disabled={disabled}
           active={active.italic}
@@ -282,7 +284,7 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
           <Italic size={16} strokeWidth={1.8} aria-hidden="true" />
         </FormatButton>
         <FormatButton
-          label="删除线"
+          label={nt('strike')}
           command="strike"
           disabled={disabled}
           active={active.strike}
@@ -291,7 +293,7 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
           <Strikethrough size={16} strokeWidth={1.8} aria-hidden="true" />
         </FormatButton>
         <FormatButton
-          label="行内代码"
+          label={nt('inline_code')}
           command="inline-code"
           disabled={disabled}
           active={active.inlineCode}
@@ -303,11 +305,11 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
           ref={linkButtonRef}
           type="button"
           className="md-format-toolbar__button"
-          aria-label="链接"
+          aria-label={nt('link')}
           aria-haspopup="dialog"
           aria-expanded={linkOpen}
           aria-controls={linkOpen ? linkDialogId : undefined}
-          title="链接"
+          title={nt('link')}
           disabled={disabled}
           data-command="link"
           onMouseDown={(event) => event.preventDefault()}
@@ -319,9 +321,9 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
 
       <span className="md-format-toolbar__divider" aria-hidden="true" />
 
-      <span className="md-format-toolbar__group" role="group" aria-label="段落格式">
+      <span className="md-format-toolbar__group" role="group" aria-label={nt('paragraph')}>
         <FormatButton
-          label="无序列表"
+          label={nt('bullet_list')}
           command="bullet-list"
           disabled={disabled}
           active={active.bulletList}
@@ -330,7 +332,7 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
           <List size={16} strokeWidth={1.8} aria-hidden="true" />
         </FormatButton>
         <FormatButton
-          label="有序列表"
+          label={nt('ordered_list')}
           command="ordered-list"
           disabled={disabled}
           active={active.orderedList}
@@ -339,7 +341,7 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
           <ListOrdered size={16} strokeWidth={1.8} aria-hidden="true" />
         </FormatButton>
         <FormatButton
-          label="引用"
+          label={nt('quote')}
           command="quote"
           disabled={disabled}
           active={active.quote}
@@ -354,11 +356,11 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
           ref={overflowButtonRef}
           type="button"
           className="md-format-toolbar__button"
-          aria-label="更多格式"
+          aria-label={nt('more')}
           aria-haspopup="menu"
           aria-expanded={overflowOpen}
           aria-controls={overflowOpen ? overflowMenuId : undefined}
-          title="更多格式"
+          title={nt('more')}
           disabled={disabled}
           data-command="more"
           onMouseDown={(event) => event.preventDefault()}
@@ -371,11 +373,11 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
             id={overflowMenuId}
             className="md-format-toolbar__menu"
             role="menu"
-            aria-label="更多格式"
+            aria-label={nt('more')}
             onKeyDown={onMenuKeyDown}
           >
             <MenuButton
-              label="代码块"
+              label={nt('code_block')}
               command="code-block"
               disabled={disabled}
               onPress={() => { closeOverflow(true); emit('code-block'); }}
@@ -383,7 +385,7 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
               <Code2 size={15} strokeWidth={1.8} aria-hidden="true" />
             </MenuButton>
             <MenuButton
-              label="表格"
+              label={nt('table')}
               command="table"
               disabled={disabled}
               onPress={() => { closeOverflow(true); emit('table'); }}
@@ -392,7 +394,7 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
             </MenuButton>
             <span className="md-format-toolbar__menu-separator" role="separator" aria-hidden="true" />
             <MenuButton
-              label="撤销"
+              label={nt('undo')}
               command="undo"
               disabled={disabled}
               onPress={() => { closeOverflow(true); emit('undo'); }}
@@ -400,7 +402,7 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
               <Undo2 size={15} strokeWidth={1.8} aria-hidden="true" />
             </MenuButton>
             <MenuButton
-              label="重做"
+              label={nt('redo')}
               command="redo"
               disabled={disabled}
               onPress={() => { closeOverflow(true); emit('redo'); }}
@@ -421,9 +423,9 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
           aria-labelledby={dialogTitleId}
           onSubmit={submitLink}
         >
-          <h2 id={dialogTitleId} className="md-format-toolbar__sr-only">插入链接</h2>
+          <h2 id={dialogTitleId} className="md-format-toolbar__sr-only">{nt('insert_link')}</h2>
           <label className="md-format-toolbar__field">
-            <span>链接地址</span>
+            <span>{nt('link_address')}</span>
             <input
               ref={hrefInputRef}
               type="text"
@@ -439,12 +441,12 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
             />
           </label>
           <label className="md-format-toolbar__field">
-            <span>链接文字（可选）</span>
+            <span>{nt('link_text')}</span>
             <input
               type="text"
               autoComplete="off"
               spellCheck={false}
-              placeholder={active.link ? active.linkText : '留空则保持原文'}
+              placeholder={active.link ? active.linkText : nt('keep_text')}
               value={linkDraft.text}
               onChange={(event) => {
                 setLinkError('');
@@ -452,7 +454,7 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
               }}
             />
           </label>
-          {linkError && <p className="md-format-toolbar__error" role="alert">{linkError}</p>}
+          {linkError && <p className="md-format-toolbar__error" role="alert">{nt(linkError)}</p>}
           <div className="md-format-toolbar__actions">
             <button
               type="button"
@@ -460,10 +462,10 @@ export default function MarkdownFormatToolbar({ onCommand, disabled = false, sel
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => closeLink(true)}
             >
-              取消
+              {nt('cancel')}
             </button>
             <button type="submit" className="md-format-toolbar__action is-primary" disabled={disabled}>
-              应用链接
+              {nt('apply_link')}
             </button>
           </div>
         </form>
