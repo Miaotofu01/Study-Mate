@@ -89,9 +89,10 @@ test('插件页：locale 注册 zh/en 两本基线与两个官方槽位', () => 
   const { ctx, registrations, injected } = fakeCtx({ locale: locale.service });
   loadClient().plugin.apply(ctx);
 
-  assert.deepEqual(locale.registered.map(item => item.namespace), [PAGE_NS]);
-  assert.deepEqual(Object.keys(locale.registered[0].dictionaries).sort(), ['en', 'zh']);
-  assert.deepEqual(injected.filter(names => !names.includes('sidebarRightTabs')), [['locale'], ['uiWorkspace']]);
+  const pageDictionaries = locale.registered.filter(item => item.namespace === PAGE_NS);
+  assert.equal(pageDictionaries.length, 1);
+  assert.deepEqual(Object.keys(pageDictionaries[0].dictionaries).sort(), ['en', 'zh']);
+  assert.deepEqual(injected.filter(names => !names.includes('sidebarRightTabs')), [['locale'], ['locale'], ['uiWorkspace']]);
 
   const byName = name => registrations.filter(item => item.entry.name === name);
   assert.deepEqual(byName('plugins.detail.section').map(item => ({

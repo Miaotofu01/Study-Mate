@@ -6,6 +6,7 @@ import {
 } from './persistence.js';
 import { readMediaFile } from './media.js';
 import { createResourceSerializer } from './resource-serialization-cache.js';
+import { nt } from './locale.js';
 export { SaveState };
 
 const DEFAULT_CAMERA = Object.freeze({ x: 0, y: 0, zoom: 1 });
@@ -136,7 +137,7 @@ export default function useNotesPersistence({
     const controller = controllerRef.current;
     if (!isNative || !controller || !mountedRef.current) return false;
     const dirty = controller.isDirty() || Object.keys(validationErrors.current).length > 0;
-    if (confirmDiscard && dirty && !window.confirm('这会放弃本页全部未保存的草稿并重新载入文件版本。请先导出需要保留的内容。继续吗？')) return false;
+    if (confirmDiscard && dirty && !window.confirm(nt('discard_confirm'))) return false;
     const token = ++generation.current;
     transition('loading');
     try {
@@ -333,7 +334,7 @@ export default function useNotesPersistence({
   }, []);
 
   const upgradeStore = useCallback(async () => {
-    if (stateRef.current !== 'upgrade' || !window.confirm('将先备份旧笔记库，再升级为支持课程关联的新格式。升级后旧版客户端不能再写入此库。继续吗？')) return false;
+    if (stateRef.current !== 'upgrade' || !window.confirm(nt('upgrade_confirm'))) return false;
     transition('loading');
     try {
       await controllerRef.current?.suspendAndWait();

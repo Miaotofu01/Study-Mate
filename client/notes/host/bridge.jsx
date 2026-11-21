@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import App from '../App.jsx'
 import { resolveFileReference } from '../imports.js'
+import { registerNotesLocale } from '../locale.js'
 
 export const CHAT_SLOT = 'studymate.notes.session'
 export const REFERENCE_SOURCE = 'studymate-notes-resource'
@@ -390,6 +391,7 @@ export { PanelIcon } from './panel-icon.jsx'
 export function createClientModule() {
   const inputTriggers = ['slots', 'sessions', 'inputTriggers', 'conversation']
   function apply(ctx) {
+    registerNotesLocale(ctx)
     const slots = ctx.get('slots')
     const sessions = ctx.get('sessions')
     const inputTriggers = ctx.get('inputTriggers')

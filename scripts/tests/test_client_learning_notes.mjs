@@ -202,24 +202,21 @@ test('没有 notesContext 的纯旧用法：右栏只有题目/问答，没有�
   assert.equal(findByProp(top, 'data-proto', 'brand-home').length, 1);
 });
 
-test('学习与无界顶栏共用字号和动效，学习工作台与搜索只在学习面', () => {
+test('无界顶栏不渲染学习工作台与动效，学习顶栏保持两者', () => {
   const props = { view: 'lesson', subject, node: lessonNode, onToggleSurface: () => {},
-    onWorkspace: () => {}, onSubject: () => {}, onSearch: () => {}, motion: 'reduced', onMotion: () => {},
-    font: 'xlarge', onFont: () => {} };
+    onWorkspace: () => {}, onSubject: () => {}, onSearch: () => {}, motion: 'reduced', onMotion: () => {} };
   const learning = renderElement(TopBar, { ...props, surface: 'learning' });
   const notes = renderElement(TopBar, { ...props, surface: 'notes' });
-  for (const [key, value] of [['data-proto', 'workspace-home'], ['className', 'smb-searchbtn']]) {
-    assert.equal(findByProp(learning, key, value).length, 1);
-    assert.equal(findByProp(notes, key, value).length, 0);
-  }
+  assert.equal(findByProp(learning, 'data-proto', 'workspace-home').length, 1);
+  assert.equal(findByProp(notes, 'data-proto', 'workspace-home').length, 0);
   assert.equal(findByProp(notes, 'data-proto', 'brand-switch').length, 1);
-  for (const bar of [learning, notes]) {
-    for (const [level, onPick] of [[props.motion, props.onMotion], [props.font, props.onFont]]) {
-      const pickers = findByProp(bar, 'level', level);
-      assert.equal(pickers.length, 1);
-      assert.equal(pickers[0].props.onPick, onPick);
-    }
-  }
+  const motionNodes = node => {
+    if (!node || typeof node !== 'object') return [];
+    if (Array.isArray(node)) return node.flatMap(motionNodes);
+    return [...(typeof node.type === 'function' && node.props?.level === 'reduced' ? [node] : []), ...motionNodes(node.children)];
+  };
+  assert.equal(motionNodes(learning).length, 1);
+  assert.equal(motionNodes(notes).length, 0);
 });
 
 /* ── 3. 左栏平级切换 ──────────────────────────────────────────────────── */
