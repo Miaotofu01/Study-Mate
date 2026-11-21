@@ -82,7 +82,11 @@ try {
     await switchTo('zh');
     await switchTo('en');
     assert.equal(await page.locator('.smb-center__body').innerText(), content);
-    assert.equal(await page.locator('.smb-center__body').evaluate(el => el.scrollTop), top);
+    // 滚动** survives**＝没有被打回顶部；精确相等不在这条契约里——语言切换重渲染时
+    // 浏览器的滚动锚定（overflow-anchor）保的是锚点元素，scrollTop 允许小漂移
+    // （阅读位置的恢复本身也是 section → offset → progress 的三级近似，见 #76）。
+    const afterSwitch = await page.locator('.smb-center__body').evaluate(el => el.scrollTop);
+    assert.ok(Math.abs(afterSwitch - top) <= 32, `滚动位置漂出容差：切换前 ${top}，切换后 ${afterSwitch}`);
     assert.equal(await page.evaluate(() => window.__readerElement === document.querySelector('.smb-center__body')), true);
     assert.equal(JSON.stringify(library), originalLibrary);
   });
@@ -100,7 +104,9 @@ try {
     assert.deepEqual(await page.locator('.smb-refcourse__body .smb-sec-block').allTextContents(), content);
   });
   await check('unsaved notes dialog survives locale removal/rearrival without writes', async () => {
-    await page.getByRole('button', { name: 'New folder', exact: true }).click();
+    // #320 后左栏只有一个「新建」菜单：点开菜单再选文件夹项（与 notes_locale_test 同款路径）。
+    await page.locator('.notes-create-trigger').click();
+    await page.getByRole('menuitem', { name: 'New folder', exact: true }).click();
     const input = page.locator('.modal input');
     await input.fill('未保存的文件夹 draft');
     await input.evaluate(el => { window.__draftElement = el; });
