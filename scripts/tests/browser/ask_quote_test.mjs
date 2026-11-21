@@ -174,7 +174,16 @@ function buildFixture(dir, payload) {
     calls: [], reply: null,
     create: function (body) {
       window.__HOST.seq += 1;
-      var id = 'qa-fixture-' + window.__HOST.seq;
+      // 会话 id **整个套件跑程**唯一，不只本页唯一：#241 的记忆表（studymate.ask.sessions.v1）
+      // 会把 id 带过页面边界，真宿主也绝不会重发用过的 id。每页都从 1 重数的话，「新对话」
+      // 建出来的 id 会跟记忆表指着的那条撞车——setSessionId 认成「就是当前这条」，retain/
+      // release 全都不动，看上去就像按钮没反应。localStorage 跨页存活，正好当这个计数器。
+      var n = window.__HOST.seq;
+      try {
+        n = Number(window.localStorage.getItem('studymate.fixture.sessionSeq') || 0) + 1;
+        window.localStorage.setItem('studymate.fixture.sessionSeq', String(n));
+      } catch (error) { /* localStorage 不给用就退回本页序号（夹具自己兜底） */ }
+      var id = 'qa-fixture-' + n;
       // 夹具镜像宿主那条路由的拼法（「答疑 · 科目 · 节点」，缺哪节少写哪节）
       var title = ['答疑', String(body.subject || '').trim(), String(body.node || '').trim()]
         .filter(function (part) { return part !== ''; }).join(' · ');
@@ -732,14 +741,23 @@ try {
   /* ── 三、「新对话」建新的并换过去；「上一段会话」只列答疑会话 ────────────── */
   await session.scene('ask-session-switch', async (ctx) => {
     await openLesson(ctx);
-    await openAskTab(ctx);
-    const first = await ctx.evaluate(SESSION_PROBE);
-
-    // 单子里先塞两条别的：一条答疑（较早）、一条学习会话（更新的）——只有前者该出现
+    // 先把这页的棋局立起来，再开面板。记忆表指着「上一页留下」的那条（场景一建、#241 记下的
+    // qa-fixture-1）：面板一挂先问记忆表，不会在这页再建一条；而真宿主里那条会话还活在列表
+    // 里（会话落磁盘，不随页面消失），所以把它也种进列表——updated_at 压到最旧，让「新对话」
+    // 建出来的那条排最前。另种两条别的：一条答疑（较早）、一条学习会话（更新）——单子里只有
+    // 前者该出现。记忆表也照 #241 的键名写上：这条场景自给自足，不依赖前面场景留在
+    // localStorage 里的余烬（哪天键名换了，列表里那条照样把面板引到 qa-fixture-1）。
     await ctx.evaluate(seedRows([
+      { id: 'qa-fixture-1', title: '答疑 · 演示科目 · 变量', displayTitle: '不计旧', updatedAt: 50, blank: false, running: false, retainedBy: {} },
       { id: 'qa-older', title: '答疑 · 演示科目 · 变量', displayTitle: '不计较', updatedAt: 100, blank: false, running: false, retainedBy: {} },
       { id: 'learn-1', title: '学习 · 演示科目 · 变量', displayTitle: '学习 · 演示科目 · 变量', updatedAt: 999, blank: false, running: false, retainedBy: {} },
     ]));
+    await ctx.evaluate(`(() => {
+      try { localStorage.setItem('studymate.ask.sessions.v1',
+        JSON.stringify({ '答疑 · 演示科目 · 变量': 'qa-fixture-1' })); } catch (error) { /* 存不下退回标题认 */ }
+    })()`);
+    await openAskTab(ctx);
+    const first = await ctx.evaluate(SESSION_PROBE);
 
     await ctx.evaluate(CLICK_NEW);
     await ctx.sleep(600);
@@ -783,7 +801,9 @@ try {
 
 /* ── 四、真刷新：会话在磁盘上，回来还是那一条 ──────────────────────────────
    用 `Page.addScriptToEvaluateOnNewDocument` 提前把「列表里有一条答疑会话」塞进去：它就是
-   「上一次打开留下的那条会话」。真刷新之后面板该认得出它，而不是又建一条。 */
+   「上一次打开留下的那条会话」。真刷新之后面板该认得出它，而不是又建一条。
+   面板认它有两条路（#241 的记忆表 → 标题前缀认快照）；这条场景专验第二条，记忆表在
+   场景里清掉，不然它先命中、标题那条路永远验不着。 */
 try {
   await session.inject(`window.__HOST_SEED = { rows: [
     { id: 'qa-persisted', title: '答疑 · 演示科目 · 变量', displayTitle: '不计题', updatedAt: 5, blank: false, running: false, retainedBy: {} },
@@ -791,6 +811,11 @@ try {
   ] };`);
   await session.scene('ask-session-reload', async (ctx) => {
     await openLesson(ctx);
+    // #241 的记忆表比标题投影更早命中，不清掉它这条永远走不到「标题前缀认」那半——上一段
+    // 场景点过的会话还躺在记忆里，面板会照记忆 retain，压根不看这份种子列表。清掉演的是
+    // 「换了浏览器，本地没记忆，宿主磁盘上会话还在」——正是标题前缀那条机制存在的场景。
+    // 要赶在面板挂出来之前清：面板一挂就读。
+    await ctx.evaluate(`(() => { try { localStorage.removeItem('studymate.ask.sessions.v1'); } catch (error) { /* 没有就算了 */ } })()`);
     await openAskTab(ctx);
     const seen = await ctx.evaluate(SESSION_PROBE);
     check('[刷新] 页面重开之后认出了最近那条答疑会话，没有再建一条',
