@@ -50,8 +50,13 @@ function loadInternals() {
   sandbox.__studymate_client_internals = (value) => { internals = value; };
   vm.runInNewContext(SOURCE, vm.createContext(sandbox), { filename: 'lib/client.js' });
   assert.ok(spec && typeof spec.factory === 'function', '插件没有调 window.__ModuleLoader__.load({factory})');
+  /**
+   * 渲染层调用过的元素。`createElement` 只记不画（这一层没有 DOM）——「空条目被跳过」
+   * 那条判据要靠它数 `<li>` 的个数，否则就只剩一句「没抛」可断。
+   */
+  const elements = [];
   const react = {
-    createElement: () => null,
+    createElement: (type, props, ...kids) => { elements.push({ type, props, kids }); return null; },
     Fragment: Symbol('react.fragment'),
     // 渲染边界（RenderBoundary）是 `class extends React.Component`，工厂物化时就要这个基类。
     // 这一层没有 DOM、边界一次也跑不到，给一个最小同形物即可。
@@ -73,11 +78,13 @@ function loadInternals() {
   assert.deepEqual(requested, ['react'], '宿主只冻结 react 一个模块');
   assert.ok(internals, '工厂没有挂 __studymate_client_internals——parseBlocks 要在那里外露');
   assert.equal(typeof internals.parseBlocks, 'function', 'parseBlocks 没有外露，这一层就没法单测了');
+  assert.equal(typeof internals.Block, 'function', 'Block 没有外露，「空条目不炸」那条判据就断不了');
+  internals.elements = elements;
   return internals;
 }
 
 const client = loadInternals();
-const { parseBlocks, blockPlainText, blockFragments, inlinePlainText } = client;
+const { parseBlocks, blockPlainText, blockFragments, inlinePlainText, Block } = client;
 
 /** 方便：把一段 markdown 解析成块。 */
 const parse = (markdown) => parseBlocks(markdown.split('\n'));
@@ -191,6 +198,37 @@ test('检索串里两级条目都搜得到，命中的仍是这一块', () => {
   assert.deepEqual(flat, ['甲关键词', '乙关键词'],
     `子项也要进检索串：${JSON.stringify(flat)}`);
   assert.ok(Array.from(fragments).every((one) => one.label === '正文'), '命中的都还是这一块');
+});
+
+test('同一层换了标记就另起一个列表（与服务端 parseList 的首项锁定同口径）', () => {
+  // 服务端 `parseList` 用 `marker = ordered ? ORDERED_RE : UL_RE` 锁住本层的标记，
+  // 层内出现另一种标记就收手、由外层再切一个块。阅读端不锁的话，`- 甲` 紧跟 `1. 乙`
+  // （中间没有空行）会并成一个无序列表——同一份课件，两端的块边界与标注锚点都不一样。
+  const blocks = parse('- 无序一\n1. 有序一\n');
+  assert.equal(blocks.length, 2, `应该切成两个列表块：${JSON.stringify(blocks)}`);
+  assert.equal(blocks[0].type, 'list');
+  assert.equal(blocks[0].ordered, false);
+  assert.deepEqual(plain(blocks[0].items.map((item) => item.text)), ['无序一']);
+  assert.equal(blocks[1].type, 'list');
+  assert.equal(blocks[1].ordered, true);
+  assert.deepEqual(plain(blocks[1].items.map((item) => item.text)), ['有序一']);
+});
+
+test('同一层一种标记连着写，仍然是一个列表（锁定不许把正常情况切断）', () => {
+  const blocks = parse('- 甲\n- 乙\n- 丙\n');
+  assert.equal(blocks.length, 1, `同一种标记不该被切碎：${JSON.stringify(blocks)}`);
+  assert.deepEqual(plain(blocks[0].items.map((item) => item.text)), ['甲', '乙', '丙']);
+});
+
+test('条目里夹着空值：渲染跳过去不抛，检索串里也不留 null', () => {
+  // `::: resources` 的老数据与外部喂进来的块可能缺项（null / undefined）。这一版之前
+  // `renderItems` 先读 `item.text`、后判空，null 会在渲染里抛 TypeError，整页白屏。
+  const block = { type: 'list', ordered: false, items: [null, { text: '甲', children: null }, '乙', undefined] };
+  assert.doesNotThrow(() => Block({ block }), '渲染层遇到空条目不该抛');
+  const lis = client.elements.filter((element) => element.type === 'li');
+  assert.equal(lis.length, 2, `两个真条目照样渲染，空的那两条跳过：${JSON.stringify(lis.map((one) => one.kids))}`);
+  const flat = Array.from(blockFragments(block, ''), (one) => one.text);
+  assert.deepEqual(flat, ['甲', '乙'], `检索串里不留空值：${JSON.stringify(flat)}`);
 });
 
 test('连续的行仍然合并成一个段落（这条不许被顺手改坏）', () => {

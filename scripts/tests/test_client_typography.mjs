@@ -235,7 +235,10 @@ test('首行缩进是 2 个字符，写成 em 不写 px', () => {
 test('从属层级每级缩进 2 个字符，且只有一个出处', () => {
   assert.equal(tokenValue('--smb-indent-step'), '2em',
     `每级缩进要正好两个字（2em）：现在是 ${tokenValue('--smb-indent-step')}`);
-  const listRules = RULES.filter((rule) => /\.smb-doc (ul|ol)/.test(rule.selector));
+  // 选择器要连「挂在 <li> 里的子列表」一起收：`.smb-doc li > ul` 也在这条判据管的范围里，
+  // 只写 `/\.smb-doc (ul|ol)/` 会让 `li >` 那一层溜过去——将来谁在那里手写一个 px 缩进，
+  // 门禁不会红。`\s+` 容忍换行/缩进，`li\s*>\s*` 覆盖组合器的任意空白写法。
+  const listRules = RULES.filter((rule) => /\.smb-doc\s+(?:li\s*>\s*)?(?:ul|ol)\b/.test(rule.selector));
   assert.ok(listRules.length >= 1, '找不到 .smb-doc ul / ol 的规则');
   const bad = [];
   for (const rule of listRules) {
@@ -261,7 +264,8 @@ test('块内的段落被拉回「不缩进、不对齐」，且这条复位写�
     && decl(rule, 'text-indent') === '0' && decl(rule, 'text-align') === 'left');
   assert.ok(reset, '找不到「块内段落不缩进」那条复位规则（.smb-doc li p / .smb-note p …）');
   const selectors = reset.selector.replace(/\s+/g, ' ');
-  for (const needed of ['.smb-note p', '.smb-practice p', '.smb-goal', '.smb-hero__eyebrow']) {
+  for (const needed of ['.smb-note p', '.smb-practice p', '.smb-goal', '.smb-hero__eyebrow',
+    '.smb-code__caption', '.smb-annot-popover p']) {
     assert.ok(selectors.includes(needed),
       `复位规则里少了 ${needed}——它里面的字会跟着正文首行缩进：${selectors}`);
   }
