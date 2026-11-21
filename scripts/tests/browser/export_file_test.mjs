@@ -66,6 +66,58 @@ function check(label, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : `  — ${detail}`}`);
 }
 
+/* ── 顶栏收起：导出页（真 React）上补两条夹具页证明不了的事 ──────────────
+   夹具页用 fixtures/mini-react.js，每次 setState 整树重建 DOM、节点身份保不住，
+   所以「收起后焦点仍在同一个按钮上」只能在真 React 的导出页验（这里是学生拿到的产物本身）。
+   顺带把导出页的刷新持久化、以及 localStorage 抛错时退化为默认展开也放在这里。 */
+
+const TOPBAR_PROBE = `(() => {
+  const q = (sel) => document.querySelector(sel);
+  const cs = (el) => (el ? getComputedStyle(el) : null);
+  const head = q('.smb-topbar');
+  const root = q('.smb-root');
+  const toggle = q('.smb-topbar__toggle');
+  const box = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };
+  };
+  const headBox = box(head);
+  return {
+    root: root ? (root.getAttribute('data-topbar') || 'expanded') : 'missing',
+    head: headBox,
+    toggle: box(toggle),
+    expanded: toggle ? toggle.getAttribute('aria-expanded') : null,
+    label: toggle ? toggle.getAttribute('aria-label') : null,
+    focused: document.activeElement === toggle,
+    connected: !!(toggle && toggle.isConnected),
+    tag: toggle ? toggle.getAttribute('data-probe') : null,
+    contentTop: q('.smb-lesson') ? Math.round(q('.smb-lesson').getBoundingClientRect().top) : null,
+    contentBelow: !!(headBox && q('.smb-lesson'))
+      && Math.abs(q('.smb-lesson').getBoundingClientRect().top - headBox.top - headBox.height) <= 1,
+    oneRow: head ? Array.from(head.children).filter((el) => cs(el).display !== 'none')
+      .every((el) => {
+        const b = el.getBoundingClientRect();
+        const h = head.getBoundingClientRect();
+        return b.top >= h.top - 1 && b.bottom <= h.bottom + 1;
+      }) : false,
+  };
+})()`;
+
+async function clickAt(x, y) {
+  const base = { x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 };
+  await session.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...base });
+  await session.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...base });
+  await session.sleep(80);
+}
+
+async function pressEnter() {
+  const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
+  await session.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key, text: '\r', unmodifiedText: '\r' });
+  await session.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+  await session.sleep(60);
+}
+
 /* ── 前提三：真浏览器（找不到就跳过）──────────────────────────────────── */
 
 const session = await openSession({ suite: 'export-file', width: 1400, height: 900 });
@@ -295,6 +347,80 @@ try {
     check('library 那条接口由页面就地作答', JSON.stringify(seen.librarySubjects) === JSON.stringify(['demo', 'extra']),
       JSON.stringify(seen.librarySubjects));
     return seen;
+  });
+
+  /* 顶栏收起/展开：真 React 下焦点不丢 + 导出页刷新保持 */
+  await session.scene('export-topbar', async (ctx) => {
+    await ctx.navigate(entry, { settle: 1600 });
+    // 先清掉上一次跑剩的镜像，再重新加载（挂载时 effect 会把默认态写回去）
+    await ctx.evaluate(`localStorage.removeItem('studymate.topbar.v1')`);
+    await ctx.navigate(entry, { settle: 1600 });
+    await ctx.evaluate(`document.querySelectorAll('[data-proto="nav-subject"]')[0].click()`);
+    await ctx.sleep(450);
+    await ctx.evaluate(`document.querySelectorAll('[data-proto="open-node"]')[0].click()`);
+    await ctx.sleep(700);
+    await ctx.evaluate(`document.querySelector('.smb-topbar__toggle').setAttribute('data-probe', 'keep')`);
+
+    const open = await ctx.evaluate(TOPBAR_PROBE);
+    check('导出页顶栏默认展开：按钮 aria-expanded=true、顶栏高于细条',
+      open.root === 'expanded' && open.expanded === 'true' && open.label === '收起顶栏'
+      && !!open.head && open.head.height > 20 && open.oneRow,
+      JSON.stringify(open));
+
+    // 真鼠标点按钮（mousedown 会让它聚焦），收起后焦点应当还在同一个节点上
+    await clickAt(open.toggle.left + open.toggle.width / 2, open.toggle.top + open.toggle.height / 2);
+    await session.sleep(380);
+    const mini = await ctx.evaluate(TOPBAR_PROBE);
+    check('导出页点一下收起：顶栏 14px、aria=false',
+      mini.root === 'mini' && !!mini.head && Math.abs(mini.head.height - 14) <= 1 && mini.expanded === 'false',
+      JSON.stringify(mini));
+    check('收起后焦点仍在同一个按钮上（真 React 不换节点：还是那个 data-probe=keep 的元素）',
+      mini.focused && mini.connected && mini.tag === 'keep', JSON.stringify(mini));
+    check('收起后正文紧贴细条下沿（内容随之上移）',
+      mini.contentTop === null || mini.contentBelow, JSON.stringify({ top: mini.contentTop, head: mini.head }));
+
+    // 焦点还在按钮上，直接 Enter 展开
+    await pressEnter();
+    await session.sleep(380);
+    const back = await ctx.evaluate(TOPBAR_PROBE);
+    check('焦点没丢、Enter 就能展开（aria 翻回 true、高度回到原样）',
+      back.focused && back.connected && back.expanded === 'true'
+      && !!back.head && Math.abs(back.head.height - open.head.height) <= 1,
+      JSON.stringify(back));
+    check('展开后顶栏又是一行', back.oneRow, JSON.stringify(back));
+
+    // 收起 → 刷新 → 仍是收起（导出页也保持）
+    await ctx.evaluate(`document.querySelector('.smb-topbar__toggle').click()`);
+    await session.sleep(350);
+    await ctx.navigate(entry, { settle: 1600 });
+    const persisted = await ctx.evaluate(TOPBAR_PROBE);
+    check('导出页刷新后保持收起态（高度 14px、aria=false）',
+      persisted.root === 'mini' && !!persisted.head && Math.abs(persisted.head.height - 14) <= 1
+      && persisted.expanded === 'false', JSON.stringify(persisted));
+    return { open, mini, back, persisted };
+  });
+
+  /* localStorage 抛错（有些宿主/隐私模式会这样）：退化为默认展开、不报错，手动开关仍可用。
+     放在最后一场：inject 装上的 getter 对之后每个新文档都生效。 */
+  await session.inject(`(() => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() { throw new DOMException('该环境禁用了 localStorage', 'SecurityError'); },
+    });
+  })();`);
+  await session.scene('export-topbar-storage-denied', async (ctx) => {
+    await ctx.navigate(entry, { settle: 1600 });
+    const seen = await ctx.evaluate(TOPBAR_PROBE);
+    check('localStorage 抛错时页面照常挂起来、顶栏退化为默认展开（不报错）',
+      seen.root === 'expanded' && seen.expanded === 'true' && !!seen.toggle
+      && !!seen.head && seen.head.height > 20, JSON.stringify(seen));
+    await clickAt(seen.toggle.left + 6, seen.toggle.top + 7);
+    await session.sleep(380);
+    const mini = await ctx.evaluate(TOPBAR_PROBE);
+    check('localStorage 抛错只是不持久化：手动收起仍然可用（14px、aria=false）',
+      mini.root === 'mini' && !!mini.head && Math.abs(mini.head.height - 14) <= 1 && mini.expanded === 'false',
+      JSON.stringify(mini));
+    return { seen, mini };
   });
 } finally {
   const problems = await session.finish(path.join(process.cwd(), '.shots', 'export-file'));

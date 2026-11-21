@@ -161,6 +161,38 @@ test('CSS 里的四档与 fontTokens 一一对应（不是两份真相）', () =
   }
 });
 
+/* ── 顶栏收起────────────────────────────────────────────────── */
+
+const { TOPBAR_MINI_HEIGHT, readTopbarMini } = PURE;
+
+/** 取某条选择器的声明块（CSS 是从源码现抠的，这里也只按字面找）。 */
+function cssRule(selector) {
+  const literal = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(literal + '\\s*\\{([\\s\\S]*?)\\}').exec(CSS);
+}
+
+test('顶栏收起：脚本里的高度与 CSS 收起块对得上（不是两份真相）', () => {
+  assert.equal(TOPBAR_MINI_HEIGHT, 14);
+  const mini = cssRule('.smb-root[data-topbar="mini"] .smb-topbar');
+  assert.ok(mini, 'CSS 里没有 .smb-root[data-topbar="mini"] .smb-topbar——壳上的状态切了没反应');
+  const height = /max-height:\s*([0-9.]+)px/.exec(mini[1]);
+  assert.ok(height, '收起态没有 max-height——量不到那条细条');
+  assert.equal(Number(height[1]), TOPBAR_MINI_HEIGHT, '收起态的高度与脚本常量对不上');
+  // 基础规则必须走 --smb-motion 过渡（否则动效四档管不住顶栏）
+  const base = cssRule('.smb-topbar');
+  assert.ok(/transition:[^;]*max-height[^;]*var\(--smb-motion\)/.test(base[1]), '顶栏收起没有走 --smb-motion');
+  // 细条本身得是那个按钮：通栏、高度写死（含它自己的下边框）
+  const strip = cssRule('.smb-root[data-topbar="mini"] .smb-topbar__toggle');
+  assert.ok(strip, 'CSS 里没有细条上那个按钮的规则——整条可点就落空了');
+  assert.ok(/flex:\s*1/.test(strip[1]), '细条上的按钮没有铺满整条');
+  assert.equal(Number(/height:\s*([0-9.]+)px/.exec(strip[1])[1]), TOPBAR_MINI_HEIGHT, '细条按钮的高度与收起态不一致');
+});
+
+test('顶栏收起：localStorage 读不到时默认展开、不抛（file:// 导出页的兜底）', () => {
+  // vm 里的 window 没有 localStorage：readTopbarMini 必须自己吞掉这个错
+  assert.equal(readTopbarMini(), false);
+});
+
 /* ── 首次引导定位几何 ──────────────────────────────────────────────────── */
 
 const rect = (left, top, width, height) => ({ left, top, width, height });

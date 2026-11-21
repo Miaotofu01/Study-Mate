@@ -979,8 +979,10 @@ try {
         seen.breakpoint900 === compact, String(seen.breakpoint900));
       // 两条响应式规则有没有真的落到计算样式与几何上——只看**关系**，不钉值
       const layout = seen.layout;
-      check(`${tag} 壳那条规则（.smb-wrap / .smb-topbar / .smb-continue__bar）落到了计算样式上`,
-        layout.topbarWrap === (compact ? 'wrap' : 'nowrap')
+      // 顶栏两档都是 nowrap（顶栏收起/展开那条票把它改成了恒一行，见 topbar_test.mjs）；
+      // 窄档只让「接着上次」那一行折行。
+      check(`${tag} 壳那条规则（.smb-wrap / .smb-continue__bar）落到了计算样式上，顶栏宽窄都是一行`,
+        layout.topbarWrap === 'nowrap'
         && layout.continueBarWrap === (compact ? 'wrap' : 'nowrap'),
         JSON.stringify(layout));
       check(`${tag} 科目行那条规则（.smb-course）落到了几何上`,
@@ -1665,15 +1667,14 @@ try {
         ['壳·.smb-wrap 的内边距', (one) => one.wrapPaddingLeft],
         ['壳·.smb-crumb 的宽度上限', (one) => one.crumbMaxWidth],
         ['壳·.smb-continue__bar 里进度条占满一行', (one) => one.continueProgressWidth],
-        ['壳·.smb-topbar 允许换行', (one) => one.topbarWrap],
         ['壳·.smb-continue__bar 允许换行', (one) => one.continueBarWrap],
         ['科目行·.smb-course 允许换行', (one) => one.courseWrap],
       ];
       const differing = declarations.filter(([, read]) => read(wide) !== read(narrow));
       const inert = declarations.filter(([, read]) => read(wide) === read(narrow));
 
-      check('壳那条规则真的执行了（顶栏与「接着上次」那一行在窄档允许换行）',
-        wide.topbarWrap === 'nowrap' && narrow.topbarWrap === 'wrap'
+      check('壳那条规则真的执行了（「接着上次」那一行在窄档允许换行；顶栏两档都不换行）',
+        wide.topbarWrap === 'nowrap' && narrow.topbarWrap === 'nowrap'
         && wide.continueBarWrap === 'nowrap' && narrow.continueBarWrap === 'wrap',
         `wide=${wide.topbarWrap}/${wide.continueBarWrap} narrow=${narrow.topbarWrap}/${narrow.continueBarWrap}`);
       check('科目行那条规则真的执行了（换行，且右半截换到自己一行、占满一整行）',

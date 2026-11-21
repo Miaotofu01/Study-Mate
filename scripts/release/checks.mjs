@@ -558,6 +558,12 @@ const groups = {
       // （test_client_related.mjs），这一条钉的是**点下去之后**：这一页换成那一课、地址一字不变
       // （没开新窗口）、写错的那一条点不动。夹具与 reading_routes_test 同一套。
       'browser/related_links_test.mjs',
+      // 顶栏的手动收起/展开：宽档一行 + 右侧图标按钮、点一下收成 14px 细条（整条可点）、
+      // aria-expanded 双向翻转、键盘 Tab/Enter 可达、刷新后保持；窄档（720 / 390）恒一行、
+      // 隐藏字号/动效两个偏好控件、面包屑仍按 12em 省略、没有横向滚动条；动效关掉时不走过渡。
+      // 「收起后焦点仍在同一个按钮上」不在这一条验（mini-react 整树重建，保不住节点身份），
+      // 那条与导出页持久化一起放在 export_file_test.mjs 的真 React 导出页上。
+      'browser/topbar_test.mjs',
     ],
   },
 };
