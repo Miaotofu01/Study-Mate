@@ -198,3 +198,82 @@ test('面包屑的宽度上限按全角字算（em），不按 ch', () => {
     && decl(rule, 'text-overflow') === 'ellipsis' && decl(rule, 'white-space') === 'nowrap');
   assert.ok(ellipsis, '面包屑的省略要靠 text-overflow: ellipsis + white-space: nowrap，这两条别丢');
 });
+
+/* ── 中文正文的段落缩进与对齐 ──────────────────────────────────────────────
+   为什么值得会失败的测试：这一层坏了**全都「看着还成」**。
+     · 首行缩进退化成 px，字号一换档（顶栏四档）就不是「两格」了，短一截或长一截；
+     · 从属层级各写各的，二级比一级还窄，读者反而看不出谁是谁的下级；
+     · 复位规则漏掉一类容器，提示卡与列表项里的字跟着正文一起缩进，层级叠成三级；
+     · 复位规则写在 `.smb-doc p` **前面**——同特异度下后写的赢，那几条从来没生效过。
+   这四条都是**取值与位置**，静态读 CSS 就读得出来，所以断在这里，不靠人看截图。
+   取值口径（首行 2 字符、每级 2 字符）的出处写在 `lib/client.js` 的 token 块里：
+   Word 的 `firstLineChars="200"` 与列表族 `left="360"/"720"/"1080"` 指向同一个数。 */
+
+/** 取一条 token 的字面值（没有这个 token 直接判失败——它是缩进的唯一落点）。 */
+function tokenValue(name) {
+  const entry = TOKENS.get(name);
+  assert.ok(entry, `token ${name} 没了（中文正文缩进的唯一落点）`);
+  return String(entry.fallback ?? '').trim();
+}
+
+/** 按选择器取**最后一条**基础规则（同选择器写了两遍时，后写的那条才是生效的）。 */
+function lastRule(selector) {
+  const found = RULES.filter((rule) => !rule.media && rule.selector === selector);
+  return found.length ? found[found.length - 1] : null;
+}
+
+test('首行缩进是 2 个字符，写成 em 不写 px', () => {
+  const value = tokenValue('--smb-indent-first');
+  assert.equal(value, '2em',
+    `首行缩进要正好两个字（2em）：现在是 ${value}。写 px 只在某一个字号下对，换档之后就不是两格了`);
+  const rule = lastRule('.smb-doc p');
+  assert.ok(rule, '找不到 .smb-doc p 这条规则（正文段落的唯一落点）');
+  assert.equal(decl(rule, 'text-indent'), 'var(--smb-indent-first)',
+    `正文段落要引 --smb-indent-first，不要就地写数字：现在是 ${decl(rule, 'text-indent')}`);
+});
+
+test('从属层级每级缩进 2 个字符，且只有一个出处', () => {
+  assert.equal(tokenValue('--smb-indent-step'), '2em',
+    `每级缩进要正好两个字（2em）：现在是 ${tokenValue('--smb-indent-step')}`);
+  // 选择器要连「挂在 <li> 里的子列表」一起收：`.smb-doc li > ul` 也在这条判据管的范围里，
+  // 只写 `/\.smb-doc (ul|ol)/` 会让 `li >` 那一层溜过去——将来谁在那里手写一个 px 缩进，
+  // 门禁不会红。`\s+` 容忍换行/缩进，`li\s*>\s*` 覆盖组合器的任意空白写法。
+  const listRules = RULES.filter((rule) => /\.smb-doc\s+(?:li\s*>\s*)?(?:ul|ol)\b/.test(rule.selector));
+  assert.ok(listRules.length >= 1, '找不到 .smb-doc ul / ol 的规则');
+  const bad = [];
+  for (const rule of listRules) {
+    const value = decl(rule, 'padding-left');
+    if (value === null) continue;               // 只调 margin 的那几条（li > ul）不算
+    if (value !== 'var(--smb-indent-step)') bad.push(`${rule.selector} → padding-left: ${value}`);
+  }
+  assert.deepEqual(bad, [],
+    `列表的层级缩进只许引 --smb-indent-step（原来那处写死 1.4em，与「一级两个字」对不上）：\n  ${bad.join('\n  ')}`);
+});
+
+test('成段正文两端对齐', () => {
+  const rule = lastRule('.smb-doc p');
+  assert.ok(rule, '找不到 .smb-doc p 这条规则（正文段落的唯一落点）');
+  assert.equal(decl(rule, 'text-align'), 'justify',
+    `中文正文右边缘要齐平（行尾不参差）：现在是 ${decl(rule, 'text-align')}`);
+});
+
+test('块内的段落被拉回「不缩进、不对齐」，且这条复位写在正文规则之后', () => {
+  // 反向判据：没有这一条，提示卡与列表项里的字会跟着正文一起首行缩进——容器自己的边框/边距
+  // 上再叠两格，层级反而看不出来；两端对齐在短句上还会拉出难看的字间距。
+  const reset = RULES.find((rule) => !rule.media
+    && decl(rule, 'text-indent') === '0' && decl(rule, 'text-align') === 'left');
+  assert.ok(reset, '找不到「块内段落不缩进」那条复位规则（.smb-doc li p / .smb-note p …）');
+  const selectors = reset.selector.replace(/\s+/g, ' ');
+  for (const needed of ['.smb-note p', '.smb-practice p', '.smb-goal', '.smb-hero__eyebrow',
+    '.smb-code__caption', '.smb-annot-popover p']) {
+    assert.ok(selectors.includes(needed),
+      `复位规则里少了 ${needed}——它里面的字会跟着正文首行缩进：${selectors}`);
+  }
+  // 位置即语义：复位规则必须写在 `.smb-doc p` 之后。写在前面的话同特异度下被后者盖掉，
+  // 那几条声明等于没写（这正是「看着有、其实没生效」的那种坏法）。
+  const base = lastRule('.smb-doc p');
+  assert.ok(base, '找不到 .smb-doc p 这条规则');
+  assert.ok(reset.at > base.at,
+    `复位规则写在正文规则之前（复位在 ${reset.at}，正文在 ${base.at}）——同特异度下后者赢，它是死声明`);
+});
+
