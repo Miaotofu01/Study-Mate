@@ -745,16 +745,20 @@ try {
     // qa-fixture-1）：面板一挂先问记忆表，不会在这页再建一条；而真宿主里那条会话还活在列表
     // 里（会话落磁盘，不随页面消失），所以把它也种进列表——updated_at 压到最旧，让「新对话」
     // 建出来的那条排最前。另种两条别的：一条答疑（较早）、一条学习会话（更新）——单子里只有
-    // 前者该出现。记忆表也照 #241 的键名写上：这条场景自给自足，不依赖前面场景留在
-    // localStorage 里的余烬（哪天键名换了，列表里那条照样把面板引到 qa-fixture-1）。
+    // 前者该出现。记忆表与种子会话对应的计数器也一起立起来：这条场景自给自足，不依赖前面
+    // 场景留在 localStorage 里的余烬（哪天键名换了，列表里那条照样把面板引到 qa-fixture-1；
+    // 计数器置成 '1'，点「新对话」才会稳稳产出 qa-fixture-2）。
     await ctx.evaluate(seedRows([
       { id: 'qa-fixture-1', title: '答疑 · 演示科目 · 变量', displayTitle: '不计旧', updatedAt: 50, blank: false, running: false, retainedBy: {} },
       { id: 'qa-older', title: '答疑 · 演示科目 · 变量', displayTitle: '不计较', updatedAt: 100, blank: false, running: false, retainedBy: {} },
       { id: 'learn-1', title: '学习 · 演示科目 · 变量', displayTitle: '学习 · 演示科目 · 变量', updatedAt: 999, blank: false, running: false, retainedBy: {} },
     ]));
     await ctx.evaluate(`(() => {
-      try { localStorage.setItem('studymate.ask.sessions.v1',
-        JSON.stringify({ '答疑 · 演示科目 · 变量': 'qa-fixture-1' })); } catch (error) { /* 存不下退回标题认 */ }
+      try {
+        localStorage.setItem('studymate.ask.sessions.v1',
+          JSON.stringify({ '答疑 · 演示科目 · 变量': 'qa-fixture-1' }));
+        localStorage.setItem('studymate.fixture.sessionSeq', '1');
+      } catch (error) { /* 存不下退回标题认 */ }
     })()`);
     await openAskTab(ctx);
     const first = await ctx.evaluate(SESSION_PROBE);
