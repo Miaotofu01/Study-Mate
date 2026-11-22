@@ -89,19 +89,20 @@ function isDirectory(directory: string): boolean {
 }
 
 /**
- * 工作区**内容**指纹：每个条目的「相对目录 + 名字 + 类型 + mtime」拼成一份。
- * 只有内容真的变了（条目集变化、mtime 前进）指纹才会变——访问时间（atime）与
+ * 工作区**内容**指纹：每个条目的「相对目录 + 条目集 + 类型 + mtime + 文件大小（不含 atime）」拼成一份。
+ * 只有内容真的变了（条目集变化、mtime 前进、文件大小变化）指纹才会变——访问时间（atime）与
  * 属性变化不进来。为什么要它：Windows 的 libuv `fs.watch` 订阅了
  * `FILE_NOTIFY_CHANGE_LAST_ACCESS | ATTRIBUTES`，**我们自己读盘**（`readLibrary`
  * 枚举科目目录、sync() 重扫目录集合）也会触发事件——监听器把「自己读」当成「别人改」，
  * 推一条通知出去，页面静默重取，重取又是一次读……新工作区上这是必现的一条幽灵通知。
  * 指纹不变的批次一律不发布：噪音在引擎层被吸收，通知与重取只认真的内容变化。
- * 代价（顺带说明，不是漏洞）：改内容又原样保 mtime 的写法（备份/同步工具）会被漏报，
- * 直到下一次正常写入；这是相对「每次读盘都推一轮」明确更划算的取舍。
+ * 代价（顺带说明，不是漏洞）：改内容又原样保 mtime 且文件大小也巧合不变的写法（备份/同步工具）
+ * 会被漏报，直到下一次正常写入；这是相对「每次读盘都推一轮」明确更划算的取舍。
  */
 function contentFingerprint(root: string, maxDepth: number, limit: number): string | null {
   const directories = collectDirectories(root, maxDepth, limit);
   if (directories === null) return null;
+  directories.sort();
   const parts: string[] = [];
   for (const directory of directories) {
     parts.push(path.relative(root, directory) || '.');
@@ -111,12 +112,18 @@ function contentFingerprint(root: string, maxDepth: number, limit: number): stri
     } catch {
       continue;
     }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const entry of entries) {
       let mtimeMs = -1;
+      let size = -1;
       try {
-        mtimeMs = fs.statSync(path.join(directory, entry.name), { throwIfNoEntry: false })?.mtimeMs ?? -1;
+        const stat = fs.statSync(path.join(directory, entry.name), { throwIfNoEntry: false });
+        if (stat) {
+          mtimeMs = stat.mtimeMs;
+          size = entry.isDirectory() ? 0 : stat.size;
+        }
       } catch { /* 条目在扫的瞬间没了：记 -1，下一条事件会带来真实状态 */ }
-      parts.push(`${entry.name}${entry.isDirectory() ? '/' : ''}:${mtimeMs}`);
+      parts.push(`${entry.name}${entry.isDirectory() ? '/' : ''}:${mtimeMs}:${size}`);
     }
   }
   return parts.join('\u0000');
