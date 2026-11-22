@@ -177,3 +177,87 @@ test('删目录之后观察者自己摘掉：Windows 上不会空转（真后端
   assert.ok(batches.length - settled <= 2,
     `删掉目录后不该继续冒事件：${batches.length - settled} 条`);
 });
+
+test('读回声/属性噪音：磁盘内容未变时触发回调，去抖后不推通知', async (t) => {
+  const { workspace, lessons } = makeWorkspace(t);
+  const triggers = new Map();
+  const debounceMs = 40;
+  const { watch, batches } = await start(workspace, {
+    debounceMs,
+    backend: 'probe',
+    observe: async (directory, changed) => {
+      triggers.set(directory, changed);
+      return async () => {};
+    },
+  });
+  t.after(() => watch.close());
+
+  const trigger = triggers.get(lessons);
+  assert.equal(typeof trigger, 'function', '假后端要抓到 lessons/ 的回调');
+  trigger();
+  await sleep(debounceMs + 100);
+  assert.equal(batches.length, 0, '磁盘内容未变时不应发布通知');
+});
+
+test('同刻度 mtime 不变但文件字节长度变化：指纹仍能识别并推送一条通知', async (t) => {
+  const { workspace, lessons } = makeWorkspace(t);
+  const target = path.join(lessons, '0001-var.md');
+  const fixedSec = 1_700_000_000;
+  fs.writeFileSync(target, '1234');
+  fs.utimesSync(target, fixedSec, fixedSec);
+  const before = fs.statSync(target);
+  assert.equal(before.size, 4);
+
+  const triggers = new Map();
+  const debounceMs = 40;
+  const { watch, batches } = await start(workspace, {
+    debounceMs,
+    backend: 'probe',
+    observe: async (directory, changed) => {
+      triggers.set(directory, changed);
+      return async () => {};
+    },
+  });
+  t.after(() => watch.close());
+
+  fs.writeFileSync(target, '12345678901234567890');
+  fs.utimesSync(target, fixedSec, fixedSec);
+  const after = fs.statSync(target);
+  assert.equal(after.mtimeMs, before.mtimeMs, '测试前置：mtime 保持同一整秒不变');
+  assert.equal(after.size, 20, '测试前置：字节长度由 4B 改为 20B');
+
+  const trigger = triggers.get(lessons);
+  assert.equal(typeof trigger, 'function', '假后端要抓到 lessons/ 的回调');
+  trigger();
+  await waitFor(() => batches.length >= 1, '同刻度 mtime 不变但字节长度变化应发布通知');
+  await sleep(debounceMs + 60);
+  assert.equal(batches.length, 1);
+});
+
+test('建观察者窗口内的真实写入不漏报：启动前取基线，返回后触发回调能收到通知', async (t) => {
+  const { workspace, lessons } = makeWorkspace(t);
+  const triggers = new Map();
+  let wroteInWindow = false;
+  const debounceMs = 40;
+  const { watch, batches } = await start(workspace, {
+    debounceMs,
+    backend: 'probe',
+    observe: async (directory, changed) => {
+      triggers.set(directory, changed);
+      if (directory === lessons && !wroteInWindow) {
+        wroteInWindow = true;
+        fs.writeFileSync(path.join(lessons, '0002-window.md'), '# 窗口内写入\n');
+      }
+      return async () => {};
+    },
+  });
+  t.after(() => watch.close());
+
+  assert.equal(wroteInWindow, true, '假 observe 回调体内应已写入新文件');
+  const trigger = triggers.get(lessons);
+  assert.equal(typeof trigger, 'function', '假后端要抓到 lessons/ 的回调');
+  trigger();
+  await waitFor(() => batches.length >= 1, '建观察者窗口内的写入不应被当成基线漏报');
+  await sleep(debounceMs + 60);
+  assert.equal(batches.length, 1);
+});
