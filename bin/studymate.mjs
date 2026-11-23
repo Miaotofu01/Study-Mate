@@ -40,7 +40,7 @@ https://github.com/Miaotofu01/Study-Mate/releases/latest/download/studymate-open
 其余情况优先沿用上次安装的 profile，首次默认 web；都可用 --profile 覆盖。
 桌面端装在非默认目录时，用 --dsh "<安装目录>/resources/runtime/cli/bin/dsh.cmd" 指定。
 默认由安装器管理；已添加 DSH 原生插件时，可用 --mode native 显式切换。
-需要 Node.js ^22.19.0 或 >=24、dsh >=0.1.5-rc.2。
+需要 Node.js >=24.0.0、dsh >=0.1.5-rc.2。
 安装器不会安装或升级 dsh，也不会重启正在运行的会话。
 
 更新使用相同的 install 命令，沿用已有学习工作区。
@@ -191,9 +191,9 @@ export function supportsDsh(value) {
 }
 
 function checkDependencies({ explicit } = {}) {
-  const [major, minor] = process.versions.node.split('.').map(Number);
-  if (!(major >= 24 || (major === 22 && minor >= 19))) {
-    throw new Error('需要 Node.js ^22.19.0 或 >=24，请先升级 Node.js。');
+  const [major] = process.versions.node.split('.').map(Number);
+  if (!(major >= 24)) {
+    throw new Error('需要 Node.js >=24.0.0，请先升级 Node.js。');
   }
   const dsh = findDsh({ explicit });
   if (!dsh.version) {

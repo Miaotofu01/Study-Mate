@@ -318,7 +318,7 @@ function adaptAntigravityController(body) {
   result = replaceRequired(
     result,
     /^5\. \*\*报告 \+ 给下一步[^\n]+/m,
-    '5. **简短衔接并执行**：简要说明恢复位置或新课程轮廓；用户已确认开始时直接推进对应步骤，用户只要大纲时交付大纲。展示根主页 `<LEARN_WORKSPACE>/index.html` 的可点击超链接，供浏览器直接打开。',
+    '5. **简短衔接并执行**：简要说明恢复位置或新课程轮廓；用户已确认开始时直接推进对应步骤，用户只要大纲时交付大纲。读课件的主入口是 `[StudyMate Reader](sidecar://studymate/reader/)` 原生侧栏面板（一次 1 个 pill）；需要离线副本时再给导出的 `index.html` 可点击超链接。',
     'opening handoff'
   );
 
@@ -444,8 +444,12 @@ export function adaptAntigravitySkill(content, name) {
     );
     adaptedBody = adaptedBody.replaceAll('~/.dsh/studymate-config.yaml', '宿主的全局工作区配置')
       .replaceAll('<WS>', '<LEARN_WORKSPACE>');
-    adaptedBody = adaptedBody.replace('`goal` 先跟学生确认', '`goal` 以学生明确指令为准，有歧义才澄清');
-    adaptedBody = adaptedBody.replace('`current` 变了先跟学生确认', '`current` 按学生明确选择更新，有歧义才澄清');
+    adaptedBody = replaceRequired(
+      adaptedBody,
+      /`current` 变了先跟学生确认/,
+      '`current` 按学生明确选择更新，有歧义才澄清',
+      'record-keeping current anchor'
+    );
     adaptedBody += `\n\n${AGY_RECORD_CONTINUITY}`;
   }
 

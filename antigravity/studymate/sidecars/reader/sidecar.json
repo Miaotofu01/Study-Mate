@@ -1,0 +1,18 @@
+{
+  "display_name": "StudyMate Reader",
+  "description": "StudyMate 交互式学习面板：直接在 Antigravity 侧栏阅读课件、做题判分写回 attempts/、标注与笔记、运行实验及一键向当前 Antigravity 对话提问",
+  "command": "node",
+  "args": ["main.mjs"],
+  "restart_policy": "always",
+  "has_web_ui": true,
+  "ui_config": {
+    "display_name": "StudyMate Reader",
+    "views": [
+      {
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
+        "path": "/",
+        "title": "StudyMate Reader"
+      }
+    ]
+  }
+}
