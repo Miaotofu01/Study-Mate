@@ -50,6 +50,7 @@ test('状态：没配置 → configured=false / subjects 为空 / 来源为空',
   assert.deepEqual(status.subjects, []);
   assert.deepEqual(status.unreadable, []);
   assert.equal(typeof status.watch.watching, 'boolean');
+  assert.deepEqual(status.registration, { ok: true, error: '' });
   assert.equal(status.generated_at, '2026-11-07T10:00:00.000Z');
 });
 
@@ -154,6 +155,43 @@ test('状态：拆除只清自己接的那一份——晚到的那次不该被�
   disposeSecond();
   assert.equal(resolveWorkspace(), installed);
   assert.equal(resolveWorkspaceSource(), 'installer-config');
+});
+
+test('状态：预设注册失败的事实原样透出（#317），状态本身仍是读成功', t => {
+  tempHome(t);
+  const error = 'cordis.patch.yml:4:1: 流式集合缺少闭合的 "}"';
+  const status = buildStatus({ profile: 'web', registration: { ok: false, error } });
+  // 注册失败不影响本载荷的 ok：工作区就是没配置，这是事实，不是读盘错误。
+  assert.equal(status.ok, true);
+  assert.deepEqual(status.registration, { ok: false, error });
+});
+
+test('状态路由：启动失败的原因随注册状态一起回给页面', async t => {
+  const home = tempHome(t);
+  const workspace = path.join(home, '学习资料');
+  fs.mkdirSync(workspace, { recursive: true });
+  writeSubject(workspace, 'demo');
+  writeConfig(workspace);
+
+  const routes = [];
+  const ctx = {
+    inject(names, handler) {
+      handler({
+        connection: { fetch: { register: (route) => { routes.push(route); return () => {}; } } },
+        effect: (fn) => { const dispose = fn(); return dispose; },
+      });
+    },
+  };
+  registerStatusRoute(ctx, {
+    profile: 'web',
+    registration: { ok: false, error: 'cordis.patch.yml:4:1: 流式集合缺少闭合的 "}"' },
+  });
+  const response = await routes[0].fetch(new Request('http://localhost/api/studymate/status'));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.registration, { ok: false, error: 'cordis.patch.yml:4:1: 流式集合缺少闭合的 "}"' });
+  // 状态卡其余字段照常：预设没注册上不代表工作区读不了。
+  assert.equal(body.subjects.length, 1);
 });
 
 test('状态路由：GET 恒 200，形状与 buildStatus 一致', async t => {

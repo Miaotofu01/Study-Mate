@@ -142,6 +142,7 @@ try {
   });
 
   await scenario('旧宿主没有 require.async：学习面照常，笔记明确失败、不静默回退、零请求', async ({ fixture, page }) => {
+    await page.addInitScript(() => { window.__fixtureLocale = 'en'; });
     await page.goto(fixture.origin, { waitUntil: 'domcontentloaded' });
     await page.locator('[data-proto="brand-switch"]').waitFor({ state: 'visible', timeout: 15000 });
     await delay(300);
@@ -150,6 +151,12 @@ try {
     const gate = page.locator('.studymate-notes-chunk-gate[role="alert"]');
     await gate.waitFor({ timeout: 15000 });
     assert.ok((await gate.innerText()).includes('require.async 缺失'), '旧宿主能力缺失要有明确文案');
+    assert.ok((await gate.innerText()).includes('Unbounded notes could not be loaded'));
+    assert.equal(await gate.getByRole('button').innerText(), 'Retry');
+    await page.evaluate(() => window.__probe.locale.switchTo('zh'));
+    await gate.getByRole('button', { name: '重试', exact: true }).waitFor();
+    assert.ok((await gate.innerText()).includes('无界笔记加载失败'));
+    assert.equal(await page.evaluate(() => window.__probe.locale.writes), 0);
     assert.equal(fixture.chunkRequests.length, 0, '没有 require.async 还试图拉分块');
     // 学习面完全不受影响：切回学习、进课件页照常。
     await page.locator('[data-proto="brand-switch"]').click();

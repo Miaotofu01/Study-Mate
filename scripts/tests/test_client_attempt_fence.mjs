@@ -19,7 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { clientInternals, viewText, CLIENT_PATH } from './fixtures/client_harness.mjs';
+import { clientInternals, viewText, findByProp, CLIENT_PATH } from './fixtures/client_harness.mjs';
 
 const I = clientInternals();
 const SOURCE = fs.readFileSync(CLIENT_PATH, 'utf8');
@@ -362,4 +362,270 @@ test('页面里不再有「只在内存里作答」的说法，落盘状态是�
   const info = render(new Map([[KEY0, local({ pending: 0, note: { bad: false, text: '别处刚改过这份作答数据，已按最新版本重记了一次。' } })]]));
   assert.match(info, /已记进作答数据（本题库文件不动）/);
   assert.match(info, /已按最新版本重记了一次/);
+});
+
+
+/* ── #213：主观题草稿（状态，不是作答事件）────────────────────────────── */
+
+/** 本地草稿条目（与 recordDraft 的乐观更新同形）。 */
+function draft(text, extra = {}) {
+  return Object.assign({ text, at: '', seq: 0, pending: 0, dirty: false, retry: 0 }, extra);
+}
+
+test('#213：只带草稿的 job 走草稿通道，不带 选/对/自评/作答', () => {
+  const job = I.attemptJob({
+    subject: 'demo', node: NODE, stateKey: KEY1, patch: {}, seq: 5, expectedVersion: 'v1',
+    draft: { text: '写一半', at: '2026-09-24T13:05:00.000Z' },
+  });
+  assert.equal(job.kind, 'draft');
+  assert.equal(job.questionId, '每层各管一段#1');
+  assert.deepEqual(job.patch, { 草稿: { 文本: '写一半', 时: '2026-09-24T13:05:00.000Z' } });
+});
+
+test('#213：自评快照的 作答/预测 进 patch；空文本不占键', () => {
+  const text = I.attemptJob({
+    subject: 'demo', node: NODE, stateKey: KEY1, seq: 1, expectedVersion: 'v1',
+    patch: { chosen: null, correct: true, self: '答了一半', text: '我写的' },
+  });
+  assert.deepEqual(text.patch, { 选: null, 对: true, 自评: '答了一半', 错因: undefined, 作答: '我写的' });
+
+  const predict = I.attemptJob({
+    subject: 'demo', node: NODE, stateKey: KEY1, seq: 2, expectedVersion: 'v1',
+    patch: { chosen: null, correct: false, self: '没答上', prediction: '我预测是 4' },
+  });
+  assert.equal(predict.patch['预测'], '我预测是 4');
+  assert.equal('作答' in predict.patch, false, '预测验证不重复造 作答');
+
+  const empty = I.attemptJob({
+    subject: 'demo', node: NODE, stateKey: KEY1, seq: 3, expectedVersion: 'v1',
+    patch: { chosen: null, correct: false, self: '没答上', text: '' },
+  });
+  assert.equal('作答' in empty.patch, false, '空文本不占键（旧回执形状不变）');
+});
+
+test('#213：读盘时 作答/预测 条件回填，旧数据形状不变', () => {
+  const old = I.attemptFromDisk(last(2, false, { 错因: '记错了' }));
+  assert.deepEqual(old, {
+    at: '2026-09-24T13:05:00.000Z', chosen: 2, correct: false, self: undefined,
+    reason: '记错了', lab: undefined, seq: 0, pending: 0,
+  }, '没有文本的旧条目不多出键');
+  const full = I.attemptFromDisk(last(null, true, { 自评: '答了一半', 作答: '文本', 预测: '预测' }));
+  assert.equal(full.text, '文本');
+  assert.equal(full.prediction, '预测');
+  assert.equal(full.self, '答了一半');
+});
+
+test('#213：payload 的草稿落成独立 Map（不进 attempts Map）', () => {
+  const node = {
+    id: NODE,
+    attempts: {
+      present: true, version: 'v1', questions: {},
+      drafts: { '每层各管一段#1': { 文本: '草稿正文', 时: '2026-09-24T13:05:00.000Z' } },
+    },
+  };
+  const drafts = I.draftsFromPayload(node);
+  assert.deepEqual([...drafts.keys()], [KEY1]);
+  assert.equal(drafts.get(KEY1).text, '草稿正文');
+  assert.equal(drafts.get(KEY1).dirty, false);
+  assert.equal(I.attemptsFromPayload(node).size, 0, '草稿不伪造作答条目');
+  assert.equal(I.draftsFromPayload({ id: NODE, attempts: { present: false, drafts: {} } }).size, 0);
+});
+
+test('#213 竞态：刚打完、防抖还没触发的脏字，不许被读盘回来的草稿覆盖', () => {
+  const typing = new Map([[KEY1, draft('正在打的字', { dirty: true, seq: 3 })]]);
+  const disk = new Map([[KEY1, draft('盘上的旧草稿', { at: '2026-09-24T11:00:00.000Z' })]]);
+  const kept = I.mergeNodeDrafts(typing, NODE, disk, 9);
+  assert.equal(kept.get(KEY1).text, '正在打的字', 'dirty 本地优先（这正是两个标签页会吞字的窗口）');
+
+  const flying = new Map([[KEY1, draft('写了一半', { pending: 1, seq: 2 })]]);
+  assert.equal(I.mergeNodeDrafts(flying, NODE, disk, 9).get(KEY1).text, '写了一半', '在飞的写入也不许被盖');
+
+  const clean = new Map([[KEY1, draft('旧本地', { seq: 0 })]]);
+  const replaced = I.mergeNodeDrafts(clean, NODE, disk, 9);
+  assert.equal(replaced.get(KEY1).text, '盘上的旧草稿', '没有本地改动时以文件为真相');
+  assert.equal(replaced.get(KEY1).at, '2026-09-24T11:00:00.000Z');
+});
+
+test('#213：草稿回执结算——保存期间又打的字仍是 dirty，不会被回执吞掉', () => {
+  const jobs = new Map([[KEY1, draft('保存时那一版', { pending: 1, seq: 4 })]]);
+  const saved = { 文本: '保存时那一版', 时: '2026-09-24T13:05:00.000Z' };
+  const settled = I.settleDraft(jobs, { stateKey: KEY1, draftText: '保存时那一版' }, saved);
+  assert.equal(settled.get(KEY1).pending, 0);
+  assert.equal(settled.get(KEY1).at, saved.时);
+  assert.equal(settled.get(KEY1).dirty, false, '回执与当前文本一致：干净了');
+
+  const raced = I.settleDraft(jobs, { stateKey: KEY1, draftText: '更早那一版' }, saved);
+  assert.equal(raced.get(KEY1).text, '保存时那一版', '回执不覆盖输入框里更新的字');
+  assert.equal(raced.get(KEY1).dirty, true, '更新过就还得再写一次');
+});
+
+test('#213：文本上限按码点截断（粘贴 10 万字不拒绝、不裂开代理对）', () => {
+  assert.equal(I.ANSWER_TEXT_MAX, 8192);
+  assert.equal(Array.from(I.capAnswerText('答'.repeat(9000))).length, 8192);
+  const emoji = '😀'.repeat(9000);
+  const capped = I.capAnswerText(emoji);
+  assert.equal(Array.from(capped).length, 8192);
+  assert.equal(capped, '😀'.repeat(8192), '不把代理对切成半个字符');
+  assert.equal(I.capAnswerText('短文本'), '短文本');
+});
+
+test('#213：受控输入框——值从状态来、显示上次作答时间、失焦立即 flush', () => {
+  let typed = null;
+  let blurred = 0;
+  let asked = 0;
+  const node = I.SubjectiveBody({
+    item: { q: '为什么？' }, kind: '开放题', open: false, setOpen: () => {},
+    self: null, onSelf: () => {}, lab: null,
+    value: '已经写的', lastAt: '2026-09-24T13:05:00',
+    onInput: (next) => { typed = next; }, onBlur: () => { blurred += 1; }, onAsk: () => { asked += 1; },
+  });
+  const ta = findByProp(node, 'data-proto', 'subjective-answer')[0];
+  assert.equal(ta.props.value, '已经写的');
+  assert.equal(ta.props.defaultValue, undefined, '受控：不是 defaultValue（重挂载不会回退到空）');
+  ta.props.onChange({ target: { value: '新写的' } });
+  assert.equal(typed, '新写的');
+  ta.props.onBlur();
+  assert.equal(blurred, 1, 'blur 立即 flush（关页丢最后一段不兜，但这一下能兜）');
+
+  assert.match(viewText(findByProp(node, 'data-proto', 'answer-time')[0]), /上次作答：09-24 13:05/);
+  const ask = findByProp(node, 'data-proto', 'ask-with-answer')[0];
+  assert.equal(ask.props.disabled, false);
+  ask.props.onClick();
+  assert.equal(asked, 1);
+});
+
+test('#213：空输入时「带进答疑」不可点；预测验证区分「你写的」与「课件里的」', () => {
+  const empty = I.SubjectiveBody({
+    item: { q: '?' }, kind: '开放题', open: false, setOpen: () => {}, self: null, onSelf: () => {},
+    lab: null, value: '', onAsk: () => {},
+  });
+  assert.equal(findByProp(empty, 'data-proto', 'ask-with-answer')[0].props.disabled, true);
+  assert.equal(findByProp(empty, 'data-proto', 'answer-time').length, 0, '没落过盘就不编一个时间');
+
+  const predict = I.SubjectiveBody({
+    item: { q: '先预测', 预测: '课件作者的预测', 比对: '实测' }, kind: '预测验证',
+    open: true, setOpen: () => {}, self: null, onSelf: () => {}, lab: null,
+    value: '我上次写的', savedPrediction: '上一次自评时的预测',
+  });
+  assert.match(viewText(findByProp(predict, 'data-proto', 'saved-prediction')[0]), /你当时写的预测：上一次自评时的预测/);
+  assert.match(viewText(predict), /课件里写的预测（不是你上面写的）/);
+});
+
+test('#213：带进答疑的引用文本 = 题干 + 我的作答；lesson 锚点随课件文件名', () => {
+  const open = I.answerQuoteFor({ q: '为什么？' }, '开放题', '因为……', '0001-net.layers.md');
+  assert.deepEqual(open, {
+    text: '为什么？\n我的作答：因为……',
+    anchor: { lesson: '0001-net.layers.md', section: '', sectionTitle: '' },
+  });
+  assert.match(I.answerQuoteFor({ q: '先预测' }, '预测验证', '4', 'l.md').text, /我的预测：4/);
+  assert.match(I.answerQuoteFor({}, '开放题', 'x', 'l.md').text, /^（题干缺失）\n我的作答：x$/);
+});
+
+test('#213：8192 按码点判定——5000 个 emoji（UTF-16 长度 10000）原样返回', () => {
+  const emoji = '😀'.repeat(5000);
+  assert.equal(emoji.length, 10000, '按 UTF-16 码元数是 10000，会被旧判定误当成超长');
+  assert.equal(Array.from(emoji).length, 5000);
+  assert.equal(I.capAnswerText(emoji), emoji, '码点数没到上限：一个字都不动');
+  assert.equal(Array.from(I.capAnswerText('😀'.repeat(8193))).length, 8192, '8193 个码点截到 8192');
+});
+
+test('#213：已写字数按码点计数，不按 UTF-16 码元', () => {
+  const body = I.SubjectiveBody({
+    item: { q: '先写一段', answer: '参考' }, kind: '开放题', open: false, setOpen: () => {},
+    self: null, onSelf: () => {}, lab: null, value: '😀'.repeat(5000),
+  });
+  assert.match(viewText(body), /已写 5000 字/, '5000 个 emoji 不能被显示成 10000 字');
+});
+
+test('#213：空草稿是墓碑——清空就是空，时刻仍回落到历史快照', () => {
+  const payload = {
+    id: NODE,
+    attempts: {
+      present: true, version: 'v1', questions: {},
+      drafts: { '每层各管一段#1': { 文本: '', 时: '2026-09-24T14:00:00.000Z' } },
+    },
+  };
+  const drafts = I.draftsFromPayload(payload);
+  assert.equal(drafts.size, 1, '空文本仍留下墓碑条目（区分「清空」与「没有草稿」）');
+  assert.equal(drafts.get(KEY1).text, '', '墓碑的文本是空串，不是历史文本');
+  assert.equal(
+    I.draftsFromPayload({ id: NODE, attempts: { drafts: { '每层各管一段#1': { 文本: '   ', 时: '' } } } }).get(KEY1).text,
+    '',
+    '只含空白也按空串收',
+  );
+
+  const previous = new Map([[KEY1, {
+    at: '2026-09-24T13:05:00', chosen: null, correct: true, self: '答了一半',
+    text: '上次写下的快照', seq: 0, pending: 0,
+  }]]);
+  const rendered = I.Question({
+    item: { q: '为什么？', answer: '参考' }, index: 1, node: { id: NODE }, subject: { slug: 'demo' },
+    stateKey: KEY1, chosen: null, self: null, attempts: previous, drafts,
+    record: () => {}, onChoose: () => {}, onSelf: () => {},
+  });
+  // SubjectiveBody 是函数组件元素，findByProp 不展开；按它拿到的 lastAt 找到这一层再看 value。
+  const body = findByProp(rendered, 'lastAt', '2026-09-24T13:05:00')[0];
+  assert.ok(body, 'Question 把快照时刻传给了输入框');
+  assert.equal(body.props.value, '', '清空后输入框为空，即使历史里有作答文本');
+  assert.match(viewText(rendered), /上次作答：09-24 13:05/, '时刻仍取快照的，不是清空那一刻（14:00）');
+
+  const fallback = I.Question({
+    item: { q: '为什么？', answer: '参考' }, index: 1, node: { id: NODE }, subject: { slug: 'demo' },
+    stateKey: KEY1, chosen: null, self: null, attempts: previous, drafts: new Map(),
+    record: () => {}, onChoose: () => {}, onSelf: () => {},
+  });
+  const fallbackBody = findByProp(fallback, 'lastAt', '2026-09-24T13:05:00')[0];
+  assert.equal(fallbackBody.props.value, '上次写下的快照', '根本没有草稿条目时才回落到历史快照');
+});
+
+test('#213 竞态：草稿 409 重发同一份 patch，回执不吞本地 dirty 字，下一笔带本地文本', async () => {
+  const send = makeSend();
+  let drafts = new Map([[KEY1, draft('本地最新', { dirty: true, pending: 1, seq: 5 })]]);
+  const writer = I.createAttemptWriter({
+    send: send.send,
+    onApplied: (job, body) => {
+      const saved = body.attempts && body.attempts.草稿 && body.attempts.草稿[job.questionId];
+      drafts = I.settleDraft(drafts, job, saved);
+    },
+    onRefused: (job, body, retrying) => {
+      // 与 StudyMateApp 同形：草稿在 retrying 时直接 return，不拿回执盖本地
+      if (!retrying) drafts = I.settleDraft(drafts, job, null);
+    },
+  });
+  const job = I.attemptJob({
+    subject: 'demo', node: NODE, stateKey: KEY1, patch: {}, seq: 5, expectedVersion: 'v0',
+    draft: { text: '提交时那一版', at: '2026-09-24T13:03:00' },
+  });
+  writer.push(job);
+  send.reply(0, 409, {
+    ok: false, status: 409,
+    error: { code: 'version-conflict', message: '作答数据已经变了：版本号对不上，这次不写（请按当前内容重来）' },
+    version: 'v9',
+    attempts: {
+      节点: NODE, 课件: '0001-' + NODE + '.md', 最后写入: '2026-09-24T13:04:00.000Z', 题: {},
+      草稿: { '每层各管一段#1': { 文本: '盘上别处的版本', 时: '2026-09-24T13:02:00.000Z' } },
+    },
+  });
+  await tick();
+
+  assert.equal(send.calls.length, 2, '409 之后自动重来一次');
+  assert.equal(send.calls[1].expectedVersion, 'v9', '重来用回执带回的版本号');
+  assert.equal(send.calls[1].operationId, job.operationId, '同一个幂等键');
+  assert.deepEqual(send.calls[1].questions, send.calls[0].questions, '重发同一份 patch，不被盘上内容改写');
+  assert.equal(drafts.get(KEY1).text, '本地最新', '409 回执没把本地 dirty 字盖成盘上版本');
+  assert.equal(drafts.get(KEY1).dirty, true, '本地还有没落盘的改动');
+
+  const okBody = receipt('v10', NODE, {});
+  okBody.attempts.草稿 = { [job.questionId]: { 文本: '提交时那一版', 时: '2026-09-24T13:06:00.000Z' } };
+  send.reply(1, 200, okBody);
+  await tick();
+  assert.equal(drafts.get(KEY1).at, '2026-09-24T13:06:00.000Z', '回执的 时 被采纳');
+  assert.equal(drafts.get(KEY1).text, '本地最新', '保存期间又打的字还在');
+  assert.equal(drafts.get(KEY1).dirty, true, '盘上存的是旧一版：还得再写一次');
+
+  writer.push(I.attemptJob({
+    subject: 'demo', node: NODE, stateKey: KEY1, patch: {}, seq: 6, expectedVersion: 'v10',
+    draft: { text: drafts.get(KEY1).text, at: '2026-09-24T13:06:00.000Z' },
+  }));
+  assert.equal(send.calls[2].questions[job.questionId]['草稿']['文本'], '本地最新', '下一笔重发带的是本地文本');
 });

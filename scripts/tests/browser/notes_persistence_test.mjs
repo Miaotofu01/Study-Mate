@@ -37,9 +37,25 @@ async function body(page, text) {
   await editor.click();
   await page.keyboard.press('Control+A'); await page.keyboard.insertText(text);
 }
-async function createNote(page, fixture, text) {
+// 左栏只有一个「新建」菜单（菜单项 role=menuitem 同名弹窗）；独立 helper 留在本文件，
+// 避免新增文件被静态覆盖器归错套件。
+async function createResource(page, kind, name) {
+  const label = kind === 'note' ? '新建笔记' : kind === 'folder' ? '新建文件夹' : '新建笔记本';
+  await notes(page).locator('.left-panel .panel-header').getByRole('button', { name: '新建', exact: true }).click();
+  await notes(page).getByRole('menuitem', { name: label, exact: true }).click();
+  const dialog = page.locator(`[role=dialog][aria-label="${label}"]`);
+  await dialog.waitFor({ state: 'visible', timeout: 5000 });
+  if (name !== undefined) {
+    const fieldName = kind === 'note' ? '笔记名称' : kind === 'folder' ? '文件夹名称' : '笔记本名称';
+    await dialog.getByRole('textbox', { name: fieldName }).fill(name);
+  }
+  await dialog.getByRole('button', { name: '创建', exact: true }).click();
+  await dialog.waitFor({ state: 'detached', timeout: 5000 });
+  await delay(120);
+}
+async function createNote(page, fixture, text, name) {
   const before = new Set(Object.keys(fixture.read().resources));
-  await notes(page).getByRole('button', { name: '新建笔记', exact: true }).click();
+  await createResource(page, 'note', name);
   await body(page, text);
   await until(() => Object.values(fixture.read().resources).some(r => !before.has(r.id) && r.markdown === text), '新笔记没有真实保存');
   await saved(page);
@@ -129,7 +145,7 @@ async function assertUpgradeReadOnly(page, fixture, label) {
   const { button } = await upgradeGate(page);
   await delay(400);
   assert.equal(await notes(page).locator('.workspace').evaluate(element => element.inert), true, label + '：工作区未只读');
-  assert.equal(await notes(page).locator('.left-panel').getByRole('button', { name: '新建笔记', exact: true }).isDisabled(), true, label + '：新建笔记未禁用');
+  assert.equal(await notes(page).locator('.left-panel .notes-create-trigger').isDisabled(), true, label + '：新建菜单未禁用');
   // 旧 v1 只读走安全 Preview：实际没有内联编辑器/CodeMirror/格式工具栏，而不只是少了某个模式按钮。
   assert.equal(await notes(page).locator('.note-editor .markdown-inline-editor').count(), 0, label + '：只读旧库仍挂载内联编辑器');
   assert.equal(await notes(page).locator('.note-editor .cm-content').count(), 0, label + '：只读旧库仍挂载 CodeMirror');
@@ -211,7 +227,7 @@ try {
     fixture.controls.pauseReads = true;
     await enterNotes(page, fixture.origin);
     await notes(page).locator('.persistence-gate').waitFor();
-    assert.equal(await notes(page).getByRole('button', { name: '新建笔记', exact: true }).isDisabled(), true);
+    assert.equal(await notes(page).locator('.left-panel .notes-create-trigger').isDisabled(), true);
     assert.notEqual(await notes(page).locator('.persistence-badge').getAttribute('data-state'), 'saved');
     await page.keyboard.press('n'); await page.keyboard.press('3'); await delay(150);
     assert.equal(await notes(page).locator('.tree-file').count(), 0);
@@ -235,9 +251,7 @@ try {
     const version = fixture.read().resourceVersions[id];
     const mdFile = path.join(fixture.root, 'resources', `r-${id}.md`);
     assert.ok(fs.readFileSync(mdFile, 'utf8').endsWith(text));
-    await notes(page).getByRole('button', { name: '新建文件夹', exact: true }).click();
-    await page.getByRole('textbox', { name: '文件夹名称', exact: true }).fill('恢复后的文件夹');
-    await page.getByRole('dialog').getByRole('button', { name: '创建', exact: true }).click();
+    await createResource(page, 'folder', '恢复后的文件夹');
     await until(() => fixture.read().layout.folders.some(f => f.name === '恢复后的文件夹'), '目录未保存');
     await notes(page).locator('.view-switch').getByRole('button', { name: '画布', exact: true }).click();
     await openRight(page); await notes(page).getByRole('button', { name: '放到画布', exact: true }).click();
@@ -266,6 +280,100 @@ try {
     assert.equal(await notes(page).locator('.knowledge-card.is-collapsed').count(), 1);
     assert.equal(await notes(page).locator('.text-node-content', { hasText: 'TEXT-NODE-PERSISTS' }).count(), 1);
     await page.screenshot({ path: path.join(OUT, 'native-restored.png'), animations: 'disabled' });
+  });
+
+  await scenario('改名扩展名：普通改名保留 .md；换后缀先确认，取消还原；不认识的后缀只读封口', async ({ fixture, page }) => {
+    await enterNotes(page, fixture.origin); await ready(page);
+    const text = '# EXTENSION-CANARY\n\n正文原样保留。\n';
+    const id = await createNote(page, fixture, text, '扩展名探针.md');
+    const title = () => notes(page).getByRole('textbox', { name: '文档标题' });
+    assert.equal(await title().inputValue(), '扩展名探针.md');
+
+    // 普通改名：名字里仍带 .md，后缀没变，不弹确认，直接落盘。
+    let confirms = 0;
+    const onDialog = dialog => { confirms += 1; dialog.accept(); };
+    page.on('dialog', onDialog);
+    await title().fill('扩展名探针（改名）.md');
+    await title().press('Enter');
+    await until(() => fixture.read().resources[id]?.title === '扩展名探针（改名）.md', '普通改名没有落盘');
+    assert.equal(confirms, 0, '后缀没变却弹了扩展名确认');
+    await saved(page);
+
+    // 换后缀：先取消 —— 标题还原、文件不动。
+    page.off('dialog', onDialog);
+    let cancelPrompt = '';
+    page.once('dialog', dialog => { cancelPrompt = dialog.message(); dialog.dismiss(); });
+    await title().fill('扩展名探针.txt');
+    await title().press('Enter');
+    await delay(250);
+    assert.ok(cancelPrompt.includes('更改扩展名可能导致文件无法识别'), '换后缀没有先确认：' + cancelPrompt);
+    assert.equal(fixture.read().resources[id].title, '扩展名探针（改名）.md', '取消确认后标题仍被改掉');
+    assert.equal(await title().inputValue(), '扩展名探针（改名）.md', '取消确认后输入框没有还原');
+
+    // 确认换成 .txt：仍是 Markdown，正文继续可编辑。
+    page.once('dialog', dialog => dialog.accept());
+    await title().fill('扩展名探针.txt');
+    await title().press('Enter');
+    await until(() => fixture.read().resources[id]?.title === '扩展名探针.txt', '确认后 .txt 没有落盘');
+    await until(async () => (await inlineEditor(page).innerText()).includes('EXTENSION-CANARY'), '.txt 仍应可编辑');
+    await saved(page);
+
+    // 换成不认识的后缀：确认后只改名，正文进只读封口，内容不丢。
+    page.once('dialog', dialog => dialog.accept());
+    await title().fill('扩展名探针.png');
+    await title().press('Enter');
+    await until(() => fixture.read().resources[id]?.title === '扩展名探针.png', '确认后不认识的后缀没有落盘');
+    await saved(page);
+    assert.equal(await notes(page).locator('.document-scroll .unsupported-note[role="status"]').count(), 1, '不支持的扩展名没有只读说明');
+    assert.equal(await notes(page).locator('.document-scroll .markdown-inline-editor').count(), 0, '不支持的扩展名仍挂着编辑器');
+    assert.equal(await notes(page).locator('.document-scroll .md-format-toolbar').count(), 0, '不支持的扩展名仍有格式栏');
+    assert.equal(await notes(page).locator('.document-stage .document-mode-switch').count(), 0, '不支持的扩展名仍显示文档视图模式');
+    assert.equal(fixture.read().resources[id].markdown, text, '封口时正文被改写');
+
+    // 改回 .md：再确认一次，编辑器与原文都回来。
+    page.once('dialog', dialog => dialog.accept());
+    await title().fill('扩展名探针.md');
+    await title().press('Enter');
+    await until(async () => (await inlineEditor(page).innerText()).includes('EXTENSION-CANARY'), '改回 .md 后正文没有回来');
+    assert.equal(fixture.read().resources[id].markdown, text);
+    await saved(page);
+  });
+
+  await scenario('⋯ 复制 Markdown：同目录副本、不复制关联与画布，刷新仍在', async ({ fixture, page, reload }) => {
+    await enterNotes(page, fixture.origin); await ready(page);
+    const text = '# COPY-SOURCE-CANARY\n\n被复制的正文。\n';
+    const sourceId = await createNote(page, fixture, text, '复制源.md');
+    await notes(page).locator('.view-switch').getByRole('button', { name: '画布', exact: true }).click();
+    await openRight(page);
+    await saved(page);
+    assert.equal(Object.keys(fixture.read().resources).length, 1);
+
+    await notes(page).locator('[aria-label="复制源.md的更多操作"]').click();
+    const menu = page.locator('[role="menu"][aria-label="复制源.md 的文件操作"]');
+    await menu.waitFor({ state: 'visible', timeout: 5000 });
+    const items = (await menu.getByRole('menuitem').allInnerTexts()).map(text => text.split('\n')[0].trim());
+    assert.deepEqual(items, ['重命名', '复制 Markdown', '归档'], '文件菜单项顺序/占位不对：' + JSON.stringify(items));
+    await menu.getByRole('menuitem', { name: /^复制 Markdown/ }).click();
+    let copyId = null;
+    await until(() => {
+      const found = Object.values(fixture.read().resources).find(r => r.id !== sourceId && r.title === '复制源（副本）.md');
+      if (found) copyId = found.id;
+      return Boolean(found);
+    }, '同目录副本没有落盘');
+    await saved(page);
+    const copy = fixture.read().resources[copyId];
+    assert.equal(copy.markdown, text, '副本正文与原件不一致');
+    assert.equal(copy.parent, fixture.read().resources[sourceId].parent, '副本没有落在与原件相同的目录');
+    assert.ok(copy.parent, '副本落到了根上（原件在笔记本里）');
+    assert.equal(fixture.read().layout.nodes.filter(node => node.data?.contentId === copyId).length, 0, '复制自动加了画布卡片');
+    assert.equal(copy.associations, undefined, '副本凭空得到了课程关联');
+    assert.equal(copy.origin?.mode, 'copy', '副本没有记录来源');
+    // 刷新后副本仍在同目录，正文不变。
+    await reload(); await saved(page);
+    const persisted = fixture.read().resources[copyId];
+    assert.equal(persisted?.title, '复制源（副本）.md');
+    assert.equal(persisted.markdown, text);
+    assert.equal(persisted.parent, fixture.read().resources[sourceId].parent);
   });
 
   await scenario('保存失败仍收最新草稿，可导出、明确重试后真实保存', async ({ fixture, page, expectHttp }) => {
@@ -403,7 +511,7 @@ try {
     seed(fixture, { id: 'bad-image', type: 'image', title: 'bad.png', mime: 'image/png', src: 'data:image/png;base64,AAAA', bytes: 3, width: 1, height: 1 });
     await enterNotes(page, fixture.origin);
     await notes(page).locator('.persistence-gate--error').waitFor({ timeout: 15000 });
-    assert.equal(await notes(page).getByRole('button', { name: '新建笔记', exact: true }).isDisabled(), true);
+    assert.equal(await notes(page).locator('.left-panel .notes-create-trigger').isDisabled(), true);
     assert.equal(await notes(page).locator('img[src="data:image/png;base64,AAAA"]').count(), 0);
     assert.equal(fixture.requests.some(r => r.method === 'POST'), false);
   });
@@ -423,7 +531,9 @@ try {
   await scenario('独立网页继续内存：新笔记刷新消失，零notes API且没有存储域', async ({ fixture, page }) => {
     await page.goto(fixture.origin + '/preview/', { waitUntil: 'domcontentloaded' });
     await notes(page).locator('.react-flow').waitFor({ timeout: 15000 });
-    await notes(page).getByRole('button', { name: '新建笔记', exact: true }).click();
+    await notes(page).locator('.left-panel .panel-header').getByRole('button', { name: '新建', exact: true }).click();
+    await notes(page).getByRole('menuitem', { name: '新建笔记', exact: true }).click();
+    await page.locator('[role=dialog][aria-label="新建笔记"]').getByRole('button', { name: '创建', exact: true }).click();
     await body(page, '# MEMORY-ONLY-PREVIEW\n');
     assert.equal(fixture.requests.length, 0);
     assert.equal(fs.existsSync(fixture.root), false);
@@ -482,6 +592,85 @@ try {
     assert.equal(fs.readFileSync(store.markerPath).equals(upgradedMarker), true, '重复 reload 重写了 marker');
   });
 
+  // #4：上限按钮必须在 markEdit 前被拒绝，不能再留下持久假脏。
+  await scenario('节点达上限拒绝不写脏：无离开提示、外部更新可见', async ({ fixture, page }) => {
+    const nodes = Array.from({ length: 120 }, (_, i) => ({
+      id: 'cap-node-' + String(i).padStart(3, '0'), type: 'text',
+      position: { x: (i % 12) * 40, y: Math.floor(i / 12) * 30 },
+      style: { width: 40, height: 30 }, data: { text: '' },
+    }));
+    const layout = { folders: structuredClone(DEMO_FOLDERS), nodes, edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+    const written = writeNotesLayout({ home: fixture.home, layout, expectedVersion: null });
+    assert.equal(written.ok, true, JSON.stringify(written));
+    const capResource = { id: 'cap-note', type: 'note', title: 'CAP笔记.md', markdown: '# CAP-BASE\n' };
+    const resourceWritten = writeNotesResource({ home: fixture.home, resource: { ...capResource, parent: 'notes' }, expectedVersion: null });
+    assert.equal(resourceWritten.ok, true, JSON.stringify(resourceWritten));
+
+    await enterNotes(page, fixture.origin); await ready(page); await saved(page);
+    assert.equal(await notes(page).getByRole('button', { name: '添加纯内容节点', exact: true }).isDisabled(), false);
+
+    const dirty = () => page.evaluate(() => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(await dirty(), false, '基线就已经假脏');
+    await notes(page).getByRole('button', { name: '添加纯内容节点', exact: true }).click();
+    await notes(page).locator('.toast').filter({ hasText: '此体验版最多放置 120 个节点' }).waitFor({ timeout: 5000 });
+    assert.equal(await dirty(), false, '节点达上限被拒后仍留下假脏（beforeunload 被拦截）');
+    assert.equal(fixture.read().layout.nodes.length, 120, '上限被拒却改写了布局');
+    assert.equal(Object.keys(fixture.read().resources).length, 1, '上限被拒却新增了资源');
+
+    // 清洁状态下外部修改应被 focus 触发的轮询带入内存；假脏时 checkExternal 会被 isDirty 短路。
+    await notes(page).locator('.tree-file-open').first().click();
+    await inlineEditor(page).waitFor({ state: 'visible', timeout: 12000 });
+    const postsBeforePoll = fixture.requests.filter(r => r.method === 'POST').length;
+    externalMarkdown(fixture, capResource.id, '# CAP-EXTERNAL-CANARY\n\n上限按钮拒绝后仍应看见外部更新。\n');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await until(async () => (await inlineEditor(page).innerText()).includes('CAP-EXTERNAL-CANARY'), '外部更新没有进入内存，拒绝后可能仍假脏');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await delay(500);
+    assert.equal(fixture.requests.filter(r => r.method === 'POST').length, postsBeforePoll, '外部版本检测覆盖了原文');
+  });
+
+  await scenario('资源达上限拒绝不写脏：无离开提示、外部更新可见', async ({ fixture, page }) => {
+    for (let i = 0; i < 250; i++) {
+      const id = 'cap-res-' + String(i).padStart(3, '0');
+      const written = writeNotesResource({
+        home: fixture.home,
+        resource: { id, type: 'note', title: `CAP ${i}.md`, markdown: `# CAP ${i}\n`, parent: 'notes' },
+        expectedVersion: null,
+      });
+      assert.equal(written.ok, true, `seed 第 ${i} 篇失败：${JSON.stringify(written)}`);
+    }
+    await enterNotes(page, fixture.origin); await ready(page); await saved(page);
+    assert.equal(await notes(page).locator('.left-panel .notes-create-trigger').isDisabled(), false);
+
+    const dirty = () => page.evaluate(() => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(await dirty(), false, '基线就已经假脏');
+    await notes(page).locator('.left-panel .notes-create-trigger').click();
+    await notes(page).getByRole('menuitem', { name: '新建笔记', exact: true }).click();
+    const capDialog = page.locator('[role=dialog][aria-label="新建笔记"]');
+    await capDialog.getByRole('button', { name: '创建', exact: true }).click();
+    await capDialog.getByRole('alert').filter({ hasText: '最多保留 250 个资源' }).waitFor({ timeout: 5000 });
+    assert.equal(await dirty(), false, '资源达上限被拒后仍留下假脏（beforeunload 被拦截）');
+    assert.equal(Object.keys(fixture.read().resources).length, 250, '上限被拒却新增了资源');
+    await page.keyboard.press('Escape');
+    await delay(200);
+
+    await notes(page).locator('.tree-file-open').first().click();
+    await inlineEditor(page).waitFor({ state: 'visible', timeout: 12000 });
+    const postsBeforePoll = fixture.requests.filter(r => r.method === 'POST').length;
+    externalMarkdown(fixture, 'cap-res-000', '# CAP-RESOURCE-EXTERNAL-CANARY\n\n资源上限拒绝后仍应看见外部更新。\n');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await until(async () => (await inlineEditor(page).innerText()).includes('CAP-RESOURCE-EXTERNAL-CANARY'), '外部更新没有进入内存，拒绝后可能仍假脏');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await delay(500);
+    assert.equal(fixture.requests.filter(r => r.method === 'POST').length, postsBeforePoll, '外部版本检测覆盖了原文');
+  });
+
   await scenario('旧v1无layout库升级前不初始化：只读、0 POST、无layout、无锁', async ({ fixture, page }) => {
     const store = makeV1Store(fixture, { withLayout: false });
     await enterNotes(page, fixture.origin);
@@ -489,6 +678,57 @@ try {
     assertOriginalBytes(store);
     assert.equal(fs.existsSync(path.join(fixture.root, 'layout.json')), false, '只读阶段自动初始化了 layout');
   });
+  await scenario('#304 坏资源自动只读降级：逐条横幅、好资源可用，修好后横幅消失', async ({ fixture, page, reload, expectHttp }) => {
+    expectHttp(503);
+    const good = { id: 'good-note', type: 'note', title: '好笔记', parent: 'notes', owner: '我', markdown: '# 好\n\n可以编辑。\n' };
+    const bad = { id: 'bad-note', type: 'note', title: '坏笔记', parent: 'notes', owner: '我', markdown: '# 坏\n\n这段会坏。\n' };
+    assert.equal(writeNotesResource({ home: fixture.home, resource: good, expectedVersion: null }).ok, true);
+    assert.equal(writeNotesResource({ home: fixture.home, resource: bad, expectedVersion: null }).ok, true);
+    const layout = {
+      folders: structuredClone(DEMO_FOLDERS),
+      nodes: [
+        { id: 'node-good', type: 'knowledge', position: { x: 80, y: 70 }, style: { width: 420, height: 300 }, data: { contentId: 'good-note', notebookId: 'book' } },
+        { id: 'node-bad', type: 'knowledge', position: { x: 560, y: 70 }, style: { width: 420, height: 300 }, data: { contentId: 'bad-note', notebookId: 'book' } },
+      ],
+      edges: [], viewport: { x: 0, y: 0, zoom: 1 },
+    };
+    assert.equal(writeNotesLayout({ home: fixture.home, layout, expectedVersion: null }).ok, true);
+    // 头三行保留，正文追加非法 UTF-8：严格 GET 必须 503，客户端应自动重试 skip。
+    fs.appendFileSync(path.join(fixture.root, 'resources', 'r-bad-note.md'), Buffer.from([0xff, 0xfe]));
+
+    await enterNotes(page, fixture.origin);
+    await ready(page);
+    assert.ok(fixture.requests.some(r => r.status === 503), '第一次严格 GET 应 503');
+    assert.ok(fixture.requests.some(r => r.method === 'GET' && r.url?.includes('onCorrupt=skip')), '应自动重试 skip');
+    const banner = notes(page).locator('.persistence-corrupt');
+    await banner.waitFor({ timeout: 15000 });
+    assert.equal(await banner.count(), 1);
+    assert.match(await banner.first().innerText(), /笔记本「学习与理解」中的资源「坏笔记」的文件已损坏，未载入。/);
+    // 坏卡不应进画布，好卡仍应在画布；随后好笔记仍可打开编辑。
+    assert.equal(await notes(page).locator('.react-flow__node[data-id="node-bad"]').count(), 0, '坏资源不应生成画布节点');
+    assert.equal(await notes(page).locator('.react-flow__node[data-id="node-good"]').count(), 1, '好资源应保留画布节点');
+    await notes(page).locator('.tree-file', { hasText: '好笔记' }).click();
+    await inlineEditor(page).waitFor({ state: 'visible', timeout: 12000 });
+    // #320 后左栏新建入口是「新建」菜单：降级载入后门禁仍是开的（菜单可点、
+    // 里面仍有「新建笔记」项），语义与旧直开按钮的 isDisabled 断言一致。
+    const createTrigger = notes(page).locator('.notes-create-trigger');
+    await createTrigger.waitFor({ timeout: 12000 });
+    assert.equal(await createTrigger.isDisabled(), false);
+    await createTrigger.click();
+    await notes(page).getByRole('menuitem', { name: '新建笔记', exact: true }).waitFor({ timeout: 8000 });
+    await page.keyboard.press('Escape');
+
+    // 修好文件再进入：严格 GET 成功，skip 不再出现，横幅消失，坏资源重新出现。
+    const beforeRepair = fixture.requests.length;
+    externalMarkdown(fixture, 'bad-note', '# 已修好\n\n现在可以载入。\n');
+    await reload();
+    await notes(page).locator('.tree-file', { hasText: '坏笔记' }).waitFor({ timeout: 15000 });
+    assert.equal(await notes(page).locator('.persistence-corrupt').count(), 0);
+    const repairReads = fixture.requests.slice(beforeRepair).filter(r => r.method === 'GET');
+    assert.ok(repairReads.length > 0, '修好后应重新读取');
+    assert.equal(repairReads.some(r => r.url?.includes('onCorrupt=skip')), false, '修好后不应再带 onCorrupt=skip');
+  });
+
 } finally {
   await browser.close();
   fs.writeFileSync(path.join(OUT, 'persistence-browser-report.json'), JSON.stringify({ checks: results.length, failures: results.filter(r => !r.ok).length, results }, null, 2));

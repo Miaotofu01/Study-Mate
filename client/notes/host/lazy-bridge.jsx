@@ -14,6 +14,7 @@
 import React from 'react'
 import { PanelIcon } from './panel-icon.jsx'
 import { createNotesWorkspace } from '../curriculum.js'
+import { createLocaleScope } from './locale.js'
 
 // 与 client/notes/host/bridge.jsx 的 CHAT_SLOT 必须逐字一致；分块物化时做运行时
 // 相等校验（漂移即失败），scripts/tests/test_client_bundle.mjs 再静态钉住两处字面量。
@@ -158,8 +159,10 @@ function createNotesChunkLoader({ require }) {
 
 // 懒包装组件：挂载即触发一次加载（用户动作），ready 才渲染真组件。
 // props 原样透传给分块里的真组件；占位与失败态内联自绘，不依赖任何笔记 CSS。
-function makeNotesGate(loader, label) {
+function makeNotesGate(loader, label, locale) {
   const Gate = props => {
+    React.useSyncExternalStore(locale.subscribe, locale.getSnapshot, locale.getSnapshot)
+    const t = locale.t
     const phase = React.useSyncExternalStore(loader.subscribe, loader.getSnapshot, loader.getSnapshot)
     React.useEffect(() => {
       loader.load()
@@ -171,11 +174,11 @@ function makeNotesGate(loader, label) {
     if (phase === PHASE_FAILED) {
       const detail = loader.getError()
       return React.createElement('div', { className: 'studymate-notes-chunk-gate', style: GATE_STYLE, role: 'alert' },
-        React.createElement('p', { style: GATE_TEXT_STYLE }, detail ? `无界笔记加载失败：${detail}` : '无界笔记加载失败'),
-        React.createElement('button', { type: 'button', 'data-proto': 'notes-chunk-retry', style: GATE_BUTTON_STYLE, onClick: () => loader.retry() }, '重试'))
+        React.createElement('p', { style: GATE_TEXT_STYLE }, detail ? t('failed_detail', { detail }) : t('failed')),
+        React.createElement('button', { type: 'button', 'data-proto': 'notes-chunk-retry', style: GATE_BUTTON_STYLE, onClick: () => loader.retry() }, t('retry')))
     }
     return React.createElement('div', { className: 'studymate-notes-chunk-gate', style: GATE_STYLE, role: 'status' },
-      React.createElement('p', { style: GATE_TEXT_STYLE }, '无界笔记正在加载…'))
+      React.createElement('p', { style: GATE_TEXT_STYLE }, t('loading')))
   }
   Gate.displayName = `StudyMateNotesLazy:${label}`
   return Gate
@@ -186,17 +189,21 @@ function makeNotesGate(loader, label) {
 // 加 injectServices 与 attach(ctx)。
 export function createNotesEntry({ require }) {
   const loader = createNotesChunkLoader({ require })
+  const locale = createLocaleScope('@yunmiao/studymate/notes-loading', {
+    zh: { loading: '无界笔记正在加载…', failed: '无界笔记加载失败', failed_detail: '无界笔记加载失败：{detail}', retry: '重试' },
+    en: { loading: 'Loading unbounded notes…', failed: 'Unbounded notes could not be loaded', failed_detail: 'Unbounded notes could not be loaded: {detail}', retry: 'Retry' },
+  })
   return {
     options: {
-      NativeMainPanel: makeNotesGate(loader, 'NativeMainPanel'),
+      NativeMainPanel: makeNotesGate(loader, 'NativeMainPanel', locale),
       PanelIcon,
       CHAT_SLOT: CHUNK_CHAT_SLOT,
       createNotesWorkspace,
-      LearningNotesTree: makeNotesGate(loader, 'LearningNotesTree'),
-      LearningNotesPanel: makeNotesGate(loader, 'LearningNotesPanel'),
+      LearningNotesTree: makeNotesGate(loader, 'LearningNotesTree', locale),
+      LearningNotesPanel: makeNotesGate(loader, 'LearningNotesPanel', locale),
     },
     injectServices: [...NOTES_SERVICES],
-    attach: loader.attach,
+    attach(ctx) { locale.attach(ctx); return loader.attach(ctx) },
   }
 }
 

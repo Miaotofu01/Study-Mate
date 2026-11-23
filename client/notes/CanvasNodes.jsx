@@ -3,6 +3,7 @@ import { Handle, Position, NodeResizer, BaseEdge, EdgeLabelRenderer, getBezierPa
 import { Check, ChevronDown, ChevronRight, FileText, BookOpen, Link2, Image, FileCode } from 'lucide-react';
 import { BoardContext } from './BoardContext.js';
 import MarkdownPreview from './MarkdownPreview.jsx';
+import { isMarkdownResource } from './note-types.js';
 import MediaRenderer from './MediaRenderer.jsx';
 import { resolveCourse } from './curriculum.js';
 
@@ -88,7 +89,7 @@ export const KnowledgeCard = memo(function KnowledgeCard({ id, data, selected })
           onClick={(event) => { event.stopPropagation(); toggle(); }}>{collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}</button>
       </header>
       {!collapsed && <div id={'card-body-' + id} className="card-body markdown-preview nowheel" onWheelCapture={(event) => event.stopPropagation()}>
-        {resource.type === 'note' ? <MarkdownPreview compact>{resource.markdown}</MarkdownPreview>
+        {resource.type === 'note' ? (isMarkdownResource(resource) ? <MarkdownPreview compact>{resource.markdown}</MarkdownPreview> : <p>不支持的文件类型</p>)
           : ['image', 'svg', 'html'].includes(resource.type) ? <MediaRenderer resource={resource} className="media-preview" />
           : <><p>{resource.summary}</p>{resource.type === 'link' && (safeHttpUrl(resource.url)
             ? <a className="card-link nodrag nopan" href={safeHttpUrl(resource.url)} target="_blank" rel="noopener noreferrer"><Link2 size={12} /> {hostOf(safeHttpUrl(resource.url))}</a>

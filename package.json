@@ -25,6 +25,7 @@
       "inject": [
         "@deepseek-ai/dsh-client-ui-layout",
         "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-input-trigger",
         "@deepseek-ai/dsh-api-session-controller",
@@ -64,7 +65,7 @@
     "build:notes:preview": "vite build --config prototypes/unbounded-notes/vite.config.js",
     "dev:notes": "vite --config prototypes/unbounded-notes/vite.config.js --host 127.0.0.1 --port 4178 --strictPort",
     "preview:notes": "vite preview --config prototypes/unbounded-notes/vite.config.js --host 127.0.0.1 --port 4178 --strictPort",
-    "test:notes:browser": "npm run build:notes:preview && node scripts/tests/browser/notes_test.mjs && node scripts/tests/browser/notes_brand_test.mjs && node scripts/tests/browser/notes_persistence_test.mjs && node scripts/tests/browser/notes_lazy_chunk_test.mjs && node scripts/tests/browser/notes_performance_test.mjs && node scripts/tests/browser/notes_curriculum_test.mjs && node scripts/tests/browser/notes_live_editor_test.mjs && node scripts/tests/browser/notes_inline_editor_test.mjs",
+    "test:notes:browser": "npm run build:notes:preview && node scripts/tests/browser/notes_test.mjs && node scripts/tests/browser/notes_brand_test.mjs && node scripts/tests/browser/notes_persistence_test.mjs && node scripts/tests/browser/notes_lazy_chunk_test.mjs && node scripts/tests/browser/notes_performance_test.mjs && node scripts/tests/browser/notes_resource_tree_test.mjs && node scripts/tests/browser/notes_tree_wiring_test.mjs && node scripts/tests/browser/notes_theme_test.mjs && node scripts/tests/browser/notes_curriculum_test.mjs && node scripts/tests/browser/notes_live_editor_test.mjs && node scripts/tests/browser/notes_inline_editor_test.mjs && node scripts/tests/browser/notes_persistence_hidden_draft_test.mjs && node scripts/tests/browser/notes_draft_navigation_test.mjs && node scripts/tests/browser/notes_persistence_session_test.mjs && node scripts/tests/browser/notes_host_reentry_test.mjs",
     "prepack": "npm run build:client",
     "test": "npm run build:client && npm run test:types && npm run test:installer && npm run test:openai && npm run test:antigravity && node scripts/release/checks.mjs && npm run test:static",
     "test:types": "node scripts/release/typecheck.mjs",

@@ -89,6 +89,47 @@ function isDirectory(directory: string): boolean {
 }
 
 /**
+ * 工作区**内容**指纹：每个条目的「相对目录 + 条目集 + 类型 + mtime + 文件大小（不含 atime）」拼成一份。
+ * 只有内容真的变了（条目集变化、mtime 前进、文件大小变化）指纹才会变——访问时间（atime）与
+ * 属性变化不进来。为什么要它：Windows 的 libuv `fs.watch` 订阅了
+ * `FILE_NOTIFY_CHANGE_LAST_ACCESS | ATTRIBUTES`，**我们自己读盘**（`readLibrary`
+ * 枚举科目目录、sync() 重扫目录集合）也会触发事件——监听器把「自己读」当成「别人改」，
+ * 推一条通知出去，页面静默重取，重取又是一次读……新工作区上这是必现的一条幽灵通知。
+ * 指纹不变的批次一律不发布：噪音在引擎层被吸收，通知与重取只认真的内容变化。
+ * 代价（顺带说明，不是漏洞）：改内容又原样保 mtime 且文件大小也巧合不变的写法（备份/同步工具）
+ * 会被漏报，直到下一次正常写入；这是相对「每次读盘都推一轮」明确更划算的取舍。
+ */
+function contentFingerprint(root: string, maxDepth: number, limit: number): string | null {
+  const directories = collectDirectories(root, maxDepth, limit);
+  if (directories === null) return null;
+  directories.sort();
+  const parts: string[] = [];
+  for (const directory of directories) {
+    parts.push(path.relative(root, directory) || '.');
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      let mtimeMs = -1;
+      let size = -1;
+      try {
+        const stat = fs.statSync(path.join(directory, entry.name), { throwIfNoEntry: false });
+        if (stat) {
+          mtimeMs = stat.mtimeMs;
+          size = entry.isDirectory() ? 0 : stat.size;
+        }
+      } catch { /* 条目在扫的瞬间没了：记 -1，下一条事件会带来真实状态 */ }
+      parts.push(`${entry.name}${entry.isDirectory() ? '/' : ''}:${mtimeMs}:${size}`);
+    }
+  }
+  return parts.join('\u0000');
+}
+
+/**
  * 收集要观察的目录（含 root 自己）。
  * 读不动某一层就跳过那一层——**不抛异常**：读盘失败不该让监听整体失效。
  * 返回 `null` 表示连 root 都读不了（调用方保留现有集合，别把观察者全摘了）。
@@ -162,6 +203,9 @@ export async function startTreeWatch(options: TreeWatchOptions): Promise<TreeWat
   let closed = false;
   let syncing = false;
   let resync = false;
+  // 内容指纹基线：**在建观察者之前**取——取晚了的话，「起监听的这段窗口里的真写入」会被
+  // 当成基线的一部分而漏报。读不动工作区时保持 null：null 的语义是「不知道 → 照常发布」。
+  let fingerprint = contentFingerprint(workspace, maxDepth, limit);
 
   const problem = (message: string): void => { onProblem?.(message); };
 
@@ -231,6 +275,16 @@ export async function startTreeWatch(options: TreeWatchOptions): Promise<TreeWat
     const directories = [...pending];
     pending.clear();
     if (closed || directories.length === 0) return;
+    // 内容指纹没动 = 这一批只是读回声/属性噪音（我们自己或系统读盘），不发布也不重扫。
+    // 读不动工作区（null）时照旧发布：删除/权限这类真变化宁可推出去。
+    const current = contentFingerprint(workspace, maxDepth, limit);
+    if (current === null) {
+      problem('扫不了工作区，这一批事件按原样发布');
+    } else if (current === fingerprint) {
+      return;
+    } else {
+      fingerprint = current;
+    }
     // 先通知（页面尽快更新），再补目录集合（新建的目录要挂上观察者，下一条才看得见）
     try { onChanged(directories); } catch (error) {
       problem(`变更回调抛了：${error instanceof Error ? error.message : String(error)}`);

@@ -229,3 +229,40 @@ test('activeFormatState：标题、列表、引用、强调、行内代码与链
   assert.equal(activeFormatState('1. x', 3, 3).orderedList, true);
   assert.equal(activeFormatState('```\n# x\n```', 5, 5).heading, 0);
 });
+
+/* ── #312 A4：光标在粗体内部再点粗体必须解包而不是嵌套 ───────────────────── */
+
+test('A4 粗体 toggle：折叠光标在粗体正文内再点粗体，解包且不产生嵌套', () => {
+  const text = 'plain **加粗段** tail';
+  const inner = text.indexOf('加粗段') + 1;
+  const result = assertFormat(text, inner, inner, 'bold', undefined, 'plain 加粗段 tail');
+  const applied = applyChanges(text, result.changes);
+  assert.ok(!applied.includes('****'), `解包后不允许残留嵌套星号：${JSON.stringify(applied)}`);
+  assert.ok(!applied.includes('**'), `解包后不应还有成对星号：${JSON.stringify(applied)}`);
+});
+
+test('A4 粗体 toggle：光标停在星号分隔符内部也在粗体 span 里，解包', () => {
+  assertFormat('**加粗**', 2, 2, 'bold', undefined, '加粗');
+  assertFormat('**加粗**', 5, 5, 'bold', undefined, '加粗');
+});
+
+test('A4 粗体 toggle：光标在内层斜体里点粗体，只解包外层粗体', () => {
+  const text = '**外部 *内部* 尾**';
+  const inner = text.indexOf('内部') + 1;
+  assertFormat(text, inner, inner, 'bold', undefined, '外部 *内部* 尾');
+});
+
+test('A4 粗体 toggle：引用里的粗体正文同样解包', () => {
+  assertFormat('> **引号粗体**', 5, 5, 'bold', undefined, '> 引号粗体');
+});
+
+test('A4 边界契约：光标在粗体边界之外时 active=false，点击插入紧邻新对（不是解包）', () => {
+  assert.equal(activeFormatState('**b**', 0, 0).bold, false);
+  assert.equal(activeFormatState('**b**', 5, 5).bold, false);
+  const before = format('**b**', 0, 0, 'bold');
+  assert.ok(before, '边界外点击仍应返回结果');
+  assert.equal(applyChanges('**b**', before.changes), '******b**');
+  const after = format('**b**', 5, 5, 'bold');
+  assert.ok(after);
+  assert.equal(applyChanges('**b**', after.changes), '**b******');
+});

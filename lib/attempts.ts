@@ -39,6 +39,13 @@ export interface AttemptEntry {
   /** 学生先写下的预测（预测+验证题；#77 起与实测一起落盘，供当场回顾对照） */
   预测?: string;
   /**
+   * 学生主观题（开放题 / 交付物）的作答文本快照。
+   *
+   * 只在**自评、跑一次**这类离散动作落进历史；边打字边存的草稿在顶层 `草稿` 里，不进这里。
+   * 预测验证题的文本写 `预测`（题库本来就把它定义成学生写的），不重复造字段。
+   */
+  作答?: string;
+  /**
    * 一次**代跑**的事实（#77 的第三轨：Host 半在学生本机上代跑测试命令）。
    *
    * 这里刻意是 `unknown` 而不是某个具体类型：作答数据是**派生记录**（ADR-0007），不该为了
@@ -58,6 +65,20 @@ export interface QuestionAttempts {
   上次结果: AttemptEntry;
 }
 
+/**
+ * 一道主观题的**草稿**（还没被自评/代跑快照进历史的那份文本）。
+ *
+ * 草稿是**状态**，不是一次作答事件：它有正文、有最近一次落盘时刻，但没有「对/错」。
+ * 因此它放在文件顶层、按题 id 索引，不挂在 `QuestionAttempts` 上——否则第一次自评之前的
+ * 草稿就没有 `上次结果` 可挂，会把可空性扩散到整条读路径（ADR-0021 的零迁移口径）。
+ */
+export interface AttemptDraft {
+  /** 学生正在写/写过的正文（写入侧按 TEXT_MAX 截断，不拒绝） */
+  文本: string;
+  /** 最近一次草稿落盘的时刻（ISO 8601） */
+  时: string;
+}
+
 /** 一份作答数据文件的内容。 */
 export interface AttemptsData {
   /** 节点 id */
@@ -70,6 +91,11 @@ export interface AttemptsData {
   最后写入: string;
   /** 题 id → 这道题的作答记录 */
   题: Record<string, QuestionAttempts>;
+  /**
+   * 题 id → 主观题草稿。**不进 `作答历史`、不改 `上次结果`**：它只服务「刷新/切 tab 后
+   * 输入框里的字还在」，不参与「上一次作答的结果」那条同源约定。
+   */
+  草稿?: Record<string, AttemptDraft>;
 }
 
 /** 读一份作答数据：没有文件返回 null（**不是**空对象——「没作答过」与「读不到」要分得开）。 */
@@ -110,6 +136,12 @@ const QUESTIONS_MAX = 200;
 
 /** 一道题最多记多少条历史：回顾只用得上最近几条，留太多等于让文件无界增长。 */
 const HISTORY_MAX = 50;
+
+/** 草稿键上限：草稿只增不回收会把文件拖成无界；写侧按 `时` 驱逐最旧的，不设 TTL。 */
+const DRAFT_MAX = 200;
+
+/** 主观题文本（草稿与历史快照同一上限）：粘贴十万字进来的，写入侧截断而不是拒绝——拒绝会让人丢整段。 */
+const TEXT_MAX = 8192;
 
 /** 落盘缩进：与 `.quiz.json` 一致（题库是 indent=2 手写风格，作答数据跟着走，diff 才好读）。 */
 const JSON_INDENT = 2;
@@ -225,13 +257,28 @@ function toAttemptsData(value: unknown, nodeId: string, lessonName: string): Att
       ),
     };
   }
-  return {
+  const drafts: Record<string, AttemptDraft> = {};
+  if (typeof raw['草稿'] === 'object' && raw['草稿'] !== null && !Array.isArray(raw['草稿'])) {
+    for (const [id, entry] of Object.entries(raw['草稿'] as Record<string, unknown>)) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
+      const item = entry as Record<string, unknown>;
+      if (typeof item['文本'] !== 'string') continue;
+      drafts[id] = {
+        文本: item['文本'],
+        时: typeof item['时'] === 'string' ? item['时'] : '',
+      };
+    }
+  }
+  const data: AttemptsData = {
     节点: typeof raw['节点'] === 'string' ? raw['节点'] : nodeId,
     课件: typeof raw['课件'] === 'string' ? raw['课件'] : lessonName,
     幂等键: typeof raw['幂等键'] === 'string' ? raw['幂等键'] : undefined,
     最后写入: typeof raw['最后写入'] === 'string' ? raw['最后写入'] : '',
     题: out,
   };
+  // 空对象不落进去：旧文件读回来还是旧形状，深比较（与旧套件）不用为「多了一个空草稿」改
+  if (Object.keys(drafts).length > 0) data.草稿 = drafts;
+  return data;
 }
 
 /** 历史里的一条：认不出的值一律退回安全默认（宁可少显示一条，也不要给界面一个错的值）。 */
@@ -245,6 +292,7 @@ function normalizeEntry(value: Record<string, unknown>): AttemptEntry {
   if (typeof value['自评'] === 'string') entry.自评 = value['自评'];
   if (typeof value['错因'] === 'string') entry.错因 = value['错因'];
   if (typeof value['预测'] === 'string') entry.预测 = value['预测'];
+  if (typeof value['作答'] === 'string') entry.作答 = value['作答'];
   // 代跑的事实原样带出去（界面要照它显示真实输出）；不是对象就当没有这一条
   const ran = value['跑'];
   if (typeof ran === 'object' && ran !== null && !Array.isArray(ran)) entry.跑 = ran;
@@ -315,11 +363,62 @@ export interface AttemptInput {
   错因?: unknown;
   /** 预测+验证题：学生先写下的预测（纯文本）。 */
   预测?: unknown;
+  /** 主观题（开放题 / 交付物）：自评或代跑时快照进历史的那份文本。 */
+  作答?: unknown;
+  /**
+   * 平时打字的那条通道：**只带 `草稿` 的条目**走这一支。它不 push 历史、不动 `上次结果`，
+   * 只更新顶层 `草稿[题 id]`——把防抖自动保存塞进 append-only 历史会把 50 条配额灌满，
+   * 并把真正的自评挤掉。
+   */
+  草稿?: unknown;
   /**
    * 代跑的事实（#77）。**原样收**：这一层的职责是把学生那边与 Host 那边交上来的东西落进
    * 作答数据，不是重新判一遍它——`lib/lab/tools.ts` 已经把形状钉在自己的输出契约里了。
    */
   跑?: unknown;
+}
+
+/** 文本上限按**码点**截：按 UTF-16 长度切会把 emoji 的代理对劈成半个。 */
+function capText(value: string): string {
+  const points = Array.from(value);
+  return points.length <= TEXT_MAX ? value : points.slice(0, TEXT_MAX).join('');
+}
+
+/** 草稿的 `时` 排序键；认不出时间的按最旧算（宁可先驱逐，也不让它永久占坑）。 */
+function draftTime(draft: AttemptDraft | undefined): number {
+  const raw = draft && typeof draft.时 === 'string' ? draft.时 : '';
+  const time = Date.parse(raw);
+  return Number.isFinite(time) ? time : 0;
+}
+
+/**
+ * 草稿键只增不回收→写侧到上限时按 `时` 保留最新 200 条。
+ * `keepIds` 是**本次写入**的题：即使它的时间戳比谁都旧，也不能刚写进去就被自己驱逐。
+ * 驱逐**只删键、不重排**：留下的键保持原文件里的先后，一次驱逐不会让整段草稿重新排序
+ * （否则写一条新草稿就能把 200 条的 diff 全翻一遍）。
+ */
+export function pruneDrafts(
+  drafts: Record<string, AttemptDraft>,
+  keepIds: string[] = [],
+): Record<string, AttemptDraft> {
+  const ids = Object.keys(drafts);
+  if (ids.length <= DRAFT_MAX) return drafts;
+  const keep = new Set(keepIds.filter((id) => Object.prototype.hasOwnProperty.call(drafts, id)));
+  // 先定「留谁」：本次写入的必留，其余按 `时` 从新到旧补满上限
+  const survivor = new Set(keep);
+  const rest = ids
+    .filter((id) => !survivor.has(id))
+    .sort((a, b) => draftTime(drafts[b]) - draftTime(drafts[a]) || a.localeCompare(b));
+  for (const id of rest) {
+    if (survivor.size >= DRAFT_MAX) break;
+    survivor.add(id);
+  }
+  // 再按原键序重建：顺序与输入逐字一致，只有被驱逐的键消失
+  const out: Record<string, AttemptDraft> = {};
+  for (const id of ids) {
+    if (survivor.has(id)) out[id] = drafts[id];
+  }
+  return out;
 }
 
 /** 入参 → 一条历史记录。认不出的值按「没选、不对」收——**不猜**（猜成「对了」最坏）。 */
@@ -332,7 +431,10 @@ function toEntry(raw: AttemptInput, at: string): AttemptEntry {
   };
   if (typeof raw.自评 === 'string' && raw.自评.trim() !== '') entry.自评 = raw.自评.trim();
   if (typeof raw.错因 === 'string' && raw.错因.trim() !== '') entry.错因 = raw.错因.trim();
-  if (typeof raw.预测 === 'string' && raw.预测.trim() !== '') entry.预测 = raw.预测.trim();
+  // `预测` 与 `作答` 都是学生自己写的正文：**原样落盘**（缩进/换行/首尾空格有意义），只按上限截断；
+  // 空判据统一按 trim 后的值——只含空白的文本不算写过，两边都不占键。
+  if (typeof raw.预测 === 'string' && raw.预测.trim() !== '') entry.预测 = capText(raw.预测);
+  if (typeof raw.作答 === 'string' && raw.作答.trim() !== '') entry.作答 = capText(raw.作答);
   // `跑` 原样收（对象才收）：它是**事实**，这一层不改写它——改写就等于二次加工真实输出
   if (typeof raw.跑 === 'object' && raw.跑 !== null && !Array.isArray(raw.跑)) entry.跑 = raw.跑;
   return entry;
@@ -393,6 +495,19 @@ export function writeAttempts({ workspace, subject, node, questions, expectedVer
     if (typeof item !== 'object' || item === null) {
       return refusal(400, 'questions-invalid', `题 ${id} 的作答必须是对象`);
     }
+    if (item.草稿 !== undefined) {
+      const draft = item.草稿;
+      if (typeof draft !== 'object' || draft === null || Array.isArray(draft)
+        || typeof (draft as Record<string, unknown>)['文本'] !== 'string') {
+        return refusal(400, 'questions-invalid', `题 ${id} 的草稿必须是 { 文本: string }`);
+      }
+      // 草稿条目只走草稿通道：混进 选/对/作答 会让「这到底算不算一次作答」变得不可判定
+      for (const key of ['选', '对', '自评', '错因', '预测', '作答', '跑'] as const) {
+        if (item[key] !== undefined) {
+          return refusal(400, 'questions-invalid', `题 ${id} 的草稿条目只带 草稿，不能同时带 ${key}`);
+        }
+      }
+    }
   }
   const version = expectedVersion === undefined || expectedVersion === null ? '' : String(expectedVersion).trim();
   if (version === '') {
@@ -403,16 +518,28 @@ export function writeAttempts({ workspace, subject, node, questions, expectedVer
   const dir = path.join(subjectDir, 'attempts');
   const lessonName = `${number}-${node}.md`;
   const at = toIso(now);
-  const normalized = items
-    .map(([id, item]) => [id.trim(), toEntry(item, at)] as const)
-    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-  // 指纹带上 `预测` 与 `跑`：同一道题的两次代跑（第二次的输出不一样）必须被认成**两次不同的
-  // 作答**，否则同一个 operationId 重放会把第二条真实输出当成「重复提交」丢掉。
+  type NormalizedItem = { id: string; draft: AttemptDraft } | { id: string; entry: AttemptEntry };
+  const normalized: NormalizedItem[] = items
+    .map(([id, item]): NormalizedItem => {
+      const cleanId = id.trim();
+      if (item.草稿 !== undefined) {
+        const draft = item.草稿 as Record<string, unknown>;
+        // 时用服务端这一笔的时刻：客户端时钟不可信，草稿的「上次作答时间」也要跟历史同一把尺
+        return { id: cleanId, draft: { 文本: capText(String(draft['文本'])), 时: at } };
+      }
+      return { id: cleanId, entry: toEntry(item, at) };
+    })
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // 指纹带上 `作答`（草稿带 `草稿.文本`）：同一道题两次不同的文本必须被认成**两次不同的写入**，
+  // 否则同一个 operationId 重放会把后一段真实文本当成「重复提交」丢掉。
   // `跑` 用 JSON 原文进指纹（键序由产出方固定），够稳。
   const fingerprint = fingerprintOf([
     String(subject), node, lessonName,
-    ...normalized.map(([id, entry]) => `${id}\u0001${entry.选 ?? ''}\u0001${entry.对}\u0001${entry.自评 ?? ''}`
-      + `\u0001${entry.错因 ?? ''}\u0001${entry.预测 ?? ''}\u0001${entry.跑 === undefined ? '' : JSON.stringify(entry.跑)}`),
+    ...normalized.map((one) => ('draft' in one
+      ? `${one.id}\u0001草稿\u0001${one.draft.文本}`
+      : `${one.id}\u0001作答\u0001${one.entry.选 ?? ''}\u0001${one.entry.对}\u0001${one.entry.自评 ?? ''}`
+        + `\u0001${one.entry.错因 ?? ''}\u0001${one.entry.预测 ?? ''}\u0001${one.entry.作答 ?? ''}`
+        + `\u0001${one.entry.跑 === undefined ? '' : JSON.stringify(one.entry.跑)}`)),
   ]);
 
   // 幂等回放放在版本校验**之前**：第一次写成功之后版本号已经变了，重试带回来的
@@ -436,17 +563,27 @@ export function writeAttempts({ workspace, subject, node, questions, expectedVer
   const next: AttemptsData = current.data ?? {
     节点: node, 课件: lessonName, 最后写入: '', 题: {},
   };
-  for (const [id, entry] of normalized) {
-    const existing = next.题[id];
+  const drafts: Record<string, AttemptDraft> = { ...(next.草稿 ?? {}) };
+  const writtenDraftIds: string[] = [];
+  for (const one of normalized) {
+    if ('draft' in one) {
+      // 草稿**只**更新顶层这一格：不 push 历史、不碰 `上次结果`——它不是一个作答事件
+      drafts[one.id] = one.draft;
+      writtenDraftIds.push(one.id);
+      continue;
+    }
+    const entry = one.entry;
+    const existing = next.题[one.id];
     const history = existing ? [...existing.作答历史] : [];
     history.push(entry);
     // 历史留最近 HISTORY_MAX 条：回顾只用得上最近几条，无界增长只会让文件越来越难读
-    next.题[id] = {
-      id,
+    next.题[one.id] = {
+      id: one.id,
       作答历史: history.slice(-HISTORY_MAX),
       上次结果: entry,
     };
   }
+  if (writtenDraftIds.length > 0) next.草稿 = pruneDrafts(drafts, writtenDraftIds);
   next.节点 = node;
   next.课件 = lessonName;
   next.最后写入 = at;
