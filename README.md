@@ -73,16 +73,15 @@ dsh plugin --profile desktop update @yunmiao/studymate@latest
 
 ### Google Antigravity
 
-> **支持范围：只有 `v1.0.0`。** 1.1.0 起的版本不再保证在这一侧可用。
-
-用 `v1.0.0` 那棵树构建并安装（不要用 `main`）：
+一条命令构建并安装：
 
 ```bash
-git checkout v1.0.0
-node bin/studymate.mjs build-antigravity --install
+npx -y @yunmiao/studymate@latest build-antigravity --install
 ```
 
-或者通过 `npm run build:antigravity` 构建 ZIP 包手动导入（详见 [Antigravity 说明](docs/使用/Antigravity.md)）。
+装好后 Antigravity 侧栏多出一个原生 **StudyMate Reader** 面板（`sidecar://studymate/reader/`）：读课件、作答判分、划选标注、记笔记、跑实验都在这里，读写的是同一个学习工作区。没有 Antigravity 的机器仍可用 `npx -y @yunmiao/studymate@latest export` 导一份离线静态页面。
+
+在仓库里工作时也可以用 `npm run build:antigravity` 构建 ZIP 包手动导入（详见 [Antigravity 说明](docs/使用/Antigravity.md)）。
 
 ## 它是什么
 

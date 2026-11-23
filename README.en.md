@@ -64,13 +64,15 @@ Download **studymate-openai.zip** from the [latest release](https://github.com/M
 
 ### Google Antigravity
 
-Run this in the repository root to build and install in one step:
+Build and install in one step:
 
 ```bash
-node bin/studymate.mjs build-antigravity --install
+npx -y @yunmiao/studymate@latest build-antigravity --install
 ```
 
-Or build a ZIP with `npm run build:antigravity` and import it manually (see the [Antigravity guide](docs/使用/Antigravity.md)).
+Once installed, Antigravity gets a native **StudyMate Reader** panel in the side bar (`sidecar://studymate/reader/`): read lessons, answer and grade practice, annotate, take notes, and run labs against the same study workspace. On machines without Antigravity, `npx -y @yunmiao/studymate@latest export` still produces a self-contained offline page.
+
+From a checkout you can also run `npm run build:antigravity` and import the ZIP manually (see the [Antigravity guide](docs/使用/Antigravity.md)).
 
 ## What It Is
 
