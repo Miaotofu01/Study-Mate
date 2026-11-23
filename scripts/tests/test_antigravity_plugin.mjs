@@ -34,6 +34,18 @@ test('导出的 Antigravity ZIP 是一份完整的插件：角色、技能、sch
   assert.equal(manifest.displayName, 'StudyMate');
   assert.equal(manifest.version, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);
 
+  // 1b. 官方 Manifest 只认这 10 个顶层键：多一个键宿主就可能整份忽略。
+  const OFFICIAL_KEYS = ['name', 'displayName', 'description', 'logo', 'suggestedPrompts',
+    'version', 'author', 'homepage', 'repository', 'disabled'];
+  for (const key of Object.keys(manifest)) {
+    assert.ok(OFFICIAL_KEYS.includes(key), `plugin.json 出现非官方键：${key}`);
+  }
+  assert.equal(manifest.logo, 'assets/logo.png');
+  assert.ok(Array.isArray(manifest.suggestedPrompts), 'suggestedPrompts 必须是数组');
+  assert.equal(manifest.suggestedPrompts.length, 3);
+  assert.equal('license' in manifest, false, 'license 不是官方键');
+  assert.equal('keywords' in manifest, false, 'keywords 不是官方键');
+
   // 2. Agents (5 dedicated subagents)
   assert.equal(fs.existsSync(path.join(plugin, 'agents')), true);
   for (const role of AGENT_ROLES) {
@@ -70,6 +82,7 @@ test('导出的 Antigravity ZIP 是一份完整的插件：角色、技能、sch
   assert.ok(controller.includes('Antigravity 宿主约定'), 'Controller should include Antigravity host guide');
   // Python 引擎随 #83 退役：导出件里没有脚本命令，只有「按 schema 自查」与那条导出 CLI。
   assert.ok(controller.includes('npx -y @yunmiao/studymate@latest export'), 'Controller should say how to export');
+  assert.ok(controller.includes('sidecar://studymate/reader/'), 'Controller should link to the native reader panel');
   assert.ok(!controller.includes('python3'), 'Controller must not invoke Python any more');
 
   // 3b. Nothing may ship empty: a referenced-but-empty file is a broken plugin.
@@ -83,6 +96,22 @@ test('导出的 Antigravity ZIP 是一份完整的插件：角色、技能、sch
   };
   collectEmpty(plugin);
   assert.deepEqual(empty, [], `插件内不得有 0 字节文件：${empty.join('、')}`);
+
+  // 3c. 原生 Sidecar 阅读端：宿主侧栏面板的全部运行时文件都随产物走。
+  for (const asset of [
+    'sidecars/reader/sidecar.json',
+    'sidecars/reader/main.mjs',
+    'sidecars/reader/host.js',
+    'sidecars/reader/boot.js',
+    'sidecars/reader/index.html',
+    'sidecars/reader/engine/bin/typescript-runtime.mjs',
+    'sidecars/reader/engine/lib/library.ts',
+    'sidecars/reader/engine/lib/notes/store.ts',
+    'sidecars/reader/vendor/react.production.js',
+    'sidecars/reader/vendor/react-jsx-runtime.production.js',
+  ]) {
+    assert.ok(fs.existsSync(path.join(plugin, asset)), `Sidecar 产物缺少：${asset}`);
+  }
 
   // 4. Rules
   assert.ok(fs.existsSync(path.join(plugin, 'rules/AGENTS.md')), 'rules/AGENTS.md must exist');
