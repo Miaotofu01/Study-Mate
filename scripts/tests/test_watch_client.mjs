@@ -171,7 +171,7 @@ test('推送接上了：changed 触发静默重取，重取后引用按上面的
   assert.equal(rendered.returned[0].status, 'loading');
   const cleanups = rendered.runEffects();
   assert.equal(sources.length, 1, '订阅推送的 effect 起了 EventSource');
-  assert.equal(sources[0].url, '/api/studymate/events');
+  assert.equal(sources[0].url, '/plugins/studymate/events');
 
   await sleep(20);
   assert.equal(fetchCount, 1, '挂载那一次 fetch');

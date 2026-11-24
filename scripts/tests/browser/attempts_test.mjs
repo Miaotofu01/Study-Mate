@@ -19,7 +19,7 @@
 
    数据现造现弃（临时工作区 + 临时 HOME），跑完即删；仓库里不存样例数据。
 
-   唯一一处不是「真」的：`/api/studymate/events`（#74 的变更推送）。阅读端挂载即订阅它，
+   唯一一处不是「真」的：`/plugins/studymate/events`（#74 的变更推送）。阅读端挂载即订阅它，
    而推送不在这一套的验收面上，所以迷你宿主只回一条不推数据的 text/event-stream——
    让那条请求有个正当落点，不至于在「控制台/失败请求」那一项上把这一套判红。
    推送本身在 watch_push_test.mjs 与真 DSH 探针里验。
@@ -164,7 +164,7 @@ async function startHost(workspace) {
       if (url.pathname === '/api/studymate/library') {
         return send(200, JSON.stringify(readLibrary({ workspace })), 'application/json; charset=utf-8');
       }
-      if (url.pathname === '/api/studymate/events') {
+      if (url.pathname === '/plugins/studymate/events') {
         // 变更推送（#74）：阅读端挂载即订阅这条通道。这一套验的是作答落盘，推送不在它的
         // 验收面上——但夹具是「真 HTTP 迷你宿主」，客户端发的每条请求都得有正当落点
         // （favicon 那条补 204 也是这个理由），不接这一下浏览器就记一条 404，

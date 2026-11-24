@@ -198,7 +198,7 @@ async function scenario(label, fn) {
     });
     page.on('response', response => { if (response.status() >= 400 && !(response.url().includes('/api/studymate/notes') && expectedStatuses.has(response.status()))) problems.push(`HTTP ${response.status()} ${response.url()}`); });
     page.on('requestfailed', request => {
-      if (navigating && request.url().endsWith('/api/studymate/events') && /ERR_ABORTED/.test(request.failure()?.errorText || '')) return;
+      if (navigating && request.url().endsWith('/plugins/studymate/events') && /ERR_ABORTED/.test(request.failure()?.errorText || '')) return;
       problems.push('requestfailed: ' + request.url() + ' ' + (request.failure()?.errorText || ''));
     });
     page.on('request', request => {

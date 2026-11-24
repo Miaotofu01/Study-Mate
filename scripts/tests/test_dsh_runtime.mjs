@@ -326,10 +326,10 @@ async function probeNativeTools(app, home, presetTools, presetScope) {
    真会加载插件的组合里造它——别的场景有自己的配置断言，别去碰（migrated 用例要逐字节比对）。
 
    验的三件事：
-     1. 生产路（`connection.fetch.register` 返回一个 body 没写完的 Response，挂在 /api 下）
-        真能建起 SSE：先用宿主打印的那条 URL 换会话 cookie，再读到建连问候；
-     2. 退路（`ctx.webServer.register` 的 exact 路由）在**真 webServer** 上也能建起来，
+     1. 生产路（`ctx.webServer.register` 的 exact 路由）在**真 webServer** 上能建起来，
         而且没有会话时必须 401——这条路不在 /api 围栏里，认证是自己判的；
+     2. 兼容退路（`connection.fetch.register` 返回一个 body 没写完的 Response，挂在 /api 下）
+        也能建起 SSE：先用宿主打印的那条 URL 换会话 cookie，再读到建连问候；
      3. 改一个课件文件 / 新建一个科目 → 通知真的推过来（`{kind:'changed',domains,at,seq}`）。
 
    **不验**：浏览器里的 EventSource（那要真浏览器）。页面侧的接线由
@@ -415,11 +415,11 @@ async function probeWatch(app, probe) {
   try { await authorized.body?.cancel(); } catch { /* 只是拿 Set-Cookie */ }
 
   const watchModule = await import(pathToFileURL(path.join(project, 'lib/watch/index.ts')).href);
-  // 退路：把 exact 路由挂到**真 webServer** 上。生产里这条路只在拿不到
-  // connection.fetch.register 时才选（这里显式挂一次，把它也验到）。
-  const disposeFallback = watchModule.registerWatchChannel({
-    get: (name) => ((name === 'webServer' || name === 'connection') ? app.ctx.get(name) : undefined),
-  }, { route: 'webServer' });
+  // 兼容退路：生产已经把 /plugins exact 路由挂到真 webServer；这里显式再挂一次
+  // connection 流式路由，把老宿主仍会走的 /api 通道也验到。
+  const disposeApi = watchModule.registerWatchChannel({
+    get: (name) => (name === 'connection' ? app.ctx.get(name) : undefined),
+  }, { route: 'connection' });
 
   const api = await openSse(`${origin}/api/studymate/events`, { cookie });
   const fallback = await openSse(`${origin}/plugins/studymate/events`, { cookie });
@@ -480,7 +480,7 @@ async function probeWatch(app, probe) {
   } finally {
     await api.close().catch(() => {});
     await fallback.close().catch(() => {});
-    await disposeFallback?.();
+    await disposeApi?.();
   }
 }
 

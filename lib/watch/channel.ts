@@ -4,16 +4,16 @@
    **推的是变更通知，不是整份数据**：`lib/watch/notice.ts` 里那个
    `{kind:'changed', domains, at, seq}`，页面收到后自己按需重取。
 
-   两条路，先试带认证的那条（ticket 明文：先流式 Response，不行再 webServer）：
+   两条路，优先用不占 `/api` 更新准入队列的 webServer 精确路由：
 
-   路 A（默认）`connection.fetch.register({path:'/api/studymate/events', …})`
+   路 A（兼容退路）`connection.fetch.register({path:'/api/studymate/events', …})`
      返回一个 **body 没写完的 `Response`**。为什么这样能当 SSE 用：载体的
      `bridge()` 是「先 writeHead，再 `for await (chunk of response.body)` 逐个 write」
      （dsh-client-connection/lib/index.js:34-100），所以只要我们不 close 这个
      ReadableStream，字节就是一条条推出去的。附带好处：路由挂在 `/api` 下，
      **Host/Origin 围栏与浏览器会话认证由载体自动做**（§6.3），我们一行认证都不用写。
 
-   路 B（退路）`ctx.webServer.register({kind:'exact', path:'/plugins/studymate/events'})`
+   路 B（默认）`ctx.webServer.register({kind:'exact', path:'/plugins/studymate/events'})`
      裸 node `IncomingMessage`/`ServerResponse`（§6.5 的官方 HMR 模板，逐条照抄）。
      这条路**不在** `/api` 围栏里，认证得自己判：能拿到 connection 就调
      `connection.requestRejection(req)`，拿不到就只在 loopback 上用，并且每次建连
@@ -102,7 +102,12 @@ export function streamResponse(channel: PushChannel, request: Request): Response
 
       // 载体在 `res` 关闭时 abort 这个 signal（bridge 里 res.on('close')）：
       // 页面关掉/刷新时这里必须把客户端摘掉，否则连接集合只涨不减。
-      const drop = (): void => { channel.remove(entry); };
+      const drop = (): void => {
+        channel.remove(entry);
+        // 载体的 bridge() 仍在 `for await (response.body)` 等流结束。只从集合摘掉
+        // 不会结束 ReadableStream，会把 `/api` 在途请求永久留在宿主更新锁里（#335）。
+        entry.close();
+      };
       if (request.signal.aborted) drop();
       else request.signal.addEventListener('abort', drop, { once: true });
     },

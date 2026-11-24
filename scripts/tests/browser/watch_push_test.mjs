@@ -7,7 +7,7 @@
 
    夹具怎么搭：
      · 一个**真 HTTP 服务**：/ 给夹具页，/api/studymate/library 现读临时工作区，
-       /api/studymate/events 走 lib/watch 的推送通道（bridge 与宿主载体同形：先 writeHead、
+       /plugins/studymate/events 走 lib/watch 的推送通道（bridge 与宿主载体同形：先 writeHead、
        再逐块 write body）；
      · 页面里是真的 fetch 与真的 EventSource（**不 stub**），插件本体是从 lib/client.js
        现取的（不手抄一份标记）；
@@ -149,7 +149,7 @@ async function serve({ workspace, sseRoute, page, miniReact }) {
           res.end(JSON.stringify(readLibrary({ workspace })));
           return;
         }
-        if (pathname === '/api/studymate/events') {
+        if (pathname === '/plugins/studymate/events') {
           await bridge(req, res, sseRoute.fetch);
           return;
         }

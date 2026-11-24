@@ -5,8 +5,10 @@
      registerWatchChannel(ctx)  **变更推送**通道（通知总线 → 打开的页面，SSE）
 
    为什么是两条注册线而不是一条：它们要挂的服务不一样。监听要 `fs`（拿不到就用 Node
-   `fs.watch`），推送要 `connection`（拿不到就退 `webServer`）。宿主里这两个服务就绪的
-   时机与位置不同，硬捏成一条会让「缺 connection 的组合连监听都不做」。
+   `fs.watch`），推送优先要 `webServer`（老宿主才退 `connection`）。宿主里这两个服务就绪的
+   时机与位置不同，硬捏成一条会让「缺 connection 的组合连监听都不做」。生产优先把
+   SSE 挂到 webServer 的 `/plugins` 精确路由，避免长连接占住 `/api` 更新准入队列；
+   老宿主拿不到 webServer 时才退到 connection 流式 Response。
    两条**各自**都能把整套拉起来（`ensureWatching` 幂等：一个进程里只有一份监听），
    所以任何一条线被别的改动挪掉，功能也不会静默消失。
 
@@ -266,6 +268,29 @@ function openChannel(ctx: WatchContext, options: ChannelOptions): () => void {
 
   const connection = readService(ctx, 'connection') as ConnectionLike | undefined;
   const canStream = Boolean(connection?.fetch?.register);
+
+  const webServer = readService(ctx, 'webServer') as {
+    register?: (route: { kind: 'exact'; path: string; handler: (req: never, res: never) => void }) => () => void;
+  } | undefined;
+  if (options.route !== 'connection' && webServer && typeof webServer.register === 'function') {
+    try {
+      if (!connection) {
+        warn('推送通道走 webServer 路由：这条路由不在 /api 围栏里，宿主没给 connection，认证判不了（只在 loopback 上用）');
+      }
+      const dispose = registerWebRoute(
+        webServer as Parameters<typeof registerWebRoute>[0], channel, connection,
+        options.path ?? FALLBACK_EVENTS_PATH,
+      );
+      return () => { closeChannel(); dispose(); };
+    } catch (error) {
+      warn(`/plugins 事件路由挂不上（${messageOf(error)}），退回 connection 流式路由`);
+      if (options.route === 'webServer') {
+        closeChannel();
+        return () => { /* 强制探针指定的路由挂不上，不暗换另一条 */ };
+      }
+    }
+  }
+
   if (options.route !== 'webServer' && canStream) {
     try {
       const dispose = registerStreamRoute(connection as ConnectionLike, channel, options.path ?? EVENTS_PATH);
@@ -274,22 +299,8 @@ function openChannel(ctx: WatchContext, options: ChannelOptions): () => void {
         void Promise.resolve(dispose()).catch(() => { /* 路由拆卸失败不值得再吵 */ });
       };
     } catch (error) {
-      warn(`/api 事件路由挂不上（${messageOf(error)}），退回 webServer 精确路由`);
+      warn(`/api 事件路由挂不上（${messageOf(error)}）`);
     }
-  }
-
-  const webServer = readService(ctx, 'webServer') as {
-    register?: (route: { kind: 'exact'; path: string; handler: (req: never, res: never) => void }) => () => void;
-  } | undefined;
-  if (webServer && typeof webServer.register === 'function') {
-    if (!connection) {
-      warn('推送通道走 webServer 退路：这条路由不在 /api 围栏里，宿主没给 connection，认证判不了（只在 loopback 上用）');
-    }
-    const dispose = registerWebRoute(
-      webServer as Parameters<typeof registerWebRoute>[0], channel, connection,
-      options.path ?? FALLBACK_EVENTS_PATH,
-    );
-    return () => { closeChannel(); dispose(); };
   }
 
   closeChannel();
