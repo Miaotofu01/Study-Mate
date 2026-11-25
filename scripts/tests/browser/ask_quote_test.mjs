@@ -36,6 +36,7 @@
    浏览器二进制由 harness 探测；找不到时明确跳过（退出码 3），不是静默绿。
 */
 import fs from 'node:fs';
+import { buildSync } from 'esbuild';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -118,6 +119,13 @@ function hostTokenCss() {
 }
 
 function buildFixture(dir, payload) {
+  buildSync({
+    absWorkingDir: ROOT, bundle: true, format: 'iife', platform: 'browser',
+    define: { 'process.env.NODE_ENV': '"production"' },
+    stdin: { contents: `import * as React from 'react'; import { createRoot } from 'react-dom/client';
+      window.TestReact = Object.assign({}, React, { mount: (node, el) => createRoot(el).render(node) });`, resolveDir: ROOT },
+    outfile: path.join(dir, 'real-react.js'),
+  });
   const css = extractCss(fs.readFileSync(path.join(ROOT, 'lib', 'client.js'), 'utf8'));
   const json = JSON.stringify(payload).replace(/</g, '\\u003c');
   const html = `<!doctype html>
@@ -219,45 +227,17 @@ function buildFixture(dir, payload) {
   // 变更推送（#74）：夹具页走 file://，那条请求只会被拦掉、变成一条「失败请求」。
   // lib/client.js 认这个早退（typeof EventSource !== 'function' 就不订阅）。
   window.EventSource = undefined;
-  /* mini-react 每次重渲染都**整树重建 DOM**（不 diff），把节点闭在 effect 里、之后还去量它的
-     代码在夹具里量到的是已经被换掉的旧节点：LessonPage 的 ResizeObserver 量画布宽，旧节点一
-     脱离文档就报 0，画布宽被写成 0，右栏永远打不开——而这条套件全靠右栏。真 React 里节点不换，
-     那段代码本身是对的（同一条夹具边界 reading_routes_test.mjs 已经记过一次）。这里换成
-     「observe 时同步报一次真实尺寸、之后不再报」：一次场景里窗口尺寸不会变。 */
-  window.ResizeObserver = function (callback) {
-    this.observe = function (target) {
-      callback([{ target: target, contentRect: target.getBoundingClientRect() }], this);
-    };
-    this.unobserve = function () {};
-    this.disconnect = function () {};
-  };
 </script>
 </head>
 <body>
 <div id="root"></div>
-<script src="${pathToFileURL(path.join(HERE, '..', 'fixtures', 'mini-react.js')).href}"></script>
+<script src="${pathToFileURL(path.join(dir, 'real-react.js')).href}"></script>
 <script src="${pathToFileURL(path.join(ROOT, 'lib', 'client.js')).href}"></script>
 <script>
   (function () {
-    // 真 React 把 children 放进函数组件的 props；mini-react 不（仓库里 PaneDrawer 的注释记过这个
-    // 边界，它的对策是把内容改用 body 传）。SessionProvider 是**宿主**给的组件、props 形状改不了，
-    // 所以这里**只在这一套夹具里**把那一步补上——让夹具与真宿主同语义，而不是绕开要验的那条路。
-    // 只对函数组件补：DOM 元素那一支 mini-react 自己会渲染 children。
-    var raw = window.MiniReact.createElement;
-    window.MiniReact.createElement = function (type, props, kids) {
-      var rest = Array.prototype.slice.call(arguments, 2);
-      if (typeof type === 'function' && rest.length) {
-        var merged = {};
-        for (var key in (props || {})) merged[key] = props[key];
-        merged.children = rest.length === 1 ? rest[0] : rest;
-        return raw.apply(null, [type, merged].concat(rest));
-      }
-      return raw.apply(null, arguments);
-    };
-
     var spec = window.__StudymateSpec;
     if (!spec) throw new Error('lib/client.js 没有向 window.__ModuleLoader__ 登记');
-    var mod = spec.factory(function (name) { return name === 'react' ? window.MiniReact : undefined; });
+    var mod = spec.factory(function (name) { return name === 'react' ? window.TestReact : undefined; });
     var Main = null;
     var registrations = [];
     var sessions = window.__HOST.sessions;
@@ -316,19 +296,19 @@ function buildFixture(dir, payload) {
         childVariant: child && child.props && child.props['data-variant'],
       });
       return window.__HOST_EMBED_LAYOUT
-        ? window.MiniReact.createElement('div', { 'data-proto': 'host-session-wrapper' }, child)
+        ? window.TestReact.createElement('div', { 'data-proto': 'host-session-wrapper' }, child)
         : child;
     }
     function renderFactorySlot(name, props) {
       window.__HOST.factoryCalls.push({ name: name, props: props });
       if (!window.__HOST_EMBED_LAYOUT) {
-        return window.MiniReact.createElement('div',
+        return window.TestReact.createElement('div',
           { 'data-proto': 'host-conversation', 'data-name': name, 'data-variant': props && props.variant },
           '宿主会话正文');
       }
       var turns = [];
       for (var i = 1; i <= 20; i += 1) {
-        turns.push(window.MiniReact.createElement('div', {
+        turns.push(window.TestReact.createElement('div', {
           key: 't' + i,
           'data-proto': 'host-turn',
           style: {
@@ -337,29 +317,29 @@ function buildFixture(dir, payload) {
           },
         }, '模拟第 ' + i + ' 轮问答内容，用于验证内嵌会话容器的受限高度与内部滚轮滚动。'));
       }
-      var flow = window.MiniReact.createElement('div', {
+      var flow = window.TestReact.createElement('div', {
         'data-proto': 'host-chat-flow',
         style: { flex: '1 0 auto', minHeight: 'auto', padding: '4px 8px' },
       }, turns);
-      var composer = window.MiniReact.createElement('div', {
+      var composer = window.TestReact.createElement('div', {
         'data-composer-seat': '',
         style: {
           position: 'sticky', bottom: '0px', flex: '0 0 auto', height: '96px',
           padding: '8px 10px', borderTop: '1px solid var(--smb-line)', background: 'var(--smb-panel)',
         },
       }, '模拟宿主输入框');
-      var scrollBody = window.MiniReact.createElement('div', {
+      var scrollBody = window.TestReact.createElement('div', {
         'data-conversation-scroll': '',
         style: { display: 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: '0px', overflowY: 'auto' },
       }, flow, composer);
-      return window.MiniReact.createElement('div', {
+      return window.TestReact.createElement('div', {
         'data-proto': 'host-conversation',
         'data-name': name,
         'data-variant': props && props.variant,
         style: { display: 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: '0px', overflow: 'hidden' },
       }, scrollBody);
     }
-    window.MiniReact.mount(window.MiniReact.createElement(Main, {
+    window.TestReact.mount(window.TestReact.createElement(Main, {
       SessionProvider: SessionProvider,
       renderSlot: function () { return null; },
       renderFactorySlot: renderFactorySlot,
@@ -567,6 +547,7 @@ const session = await openSession({ suite: 'ask-session', width: 1440, height: 9
 /** 首页 → 科目页 → 课件页。每个场景都从头走一遍，场景之间不带上一步的状态。 */
 async function openLesson(ctx) {
   await ctx.navigate(fixture, { settle: 1200 });
+  for (let i = 0; i < 30 && !await ctx.evaluate(`!!document.querySelector('[data-proto="nav-subject"]')`); i++) await ctx.sleep(100);
   await ctx.evaluate(OPEN_SUBJECT);
   await ctx.sleep(300);
   await ctx.evaluate(OPEN_LESSON);
@@ -696,7 +677,7 @@ try {
       && back.retains[back.retains.length - 1].id === 'qa-fixture-1',
       `creates=${back.creates} retains=${JSON.stringify(back.retains)}`);
     check('[保持] 切回来之后引用也还在',
-      back.quoteText === unfolded.panelChip && !!back.quoteText,
+      back.quoteText === opened.quoteText && !!back.quoteText,
       `before=${JSON.stringify(unfolded.panelChip)} after=${JSON.stringify(back.quoteText)}`);
     const kept = await ctx.evaluate(CHIP_PROBE);
     check('[chip] 切回来草稿里还是那一颗（重挂不许把同一段插成两颗）',
@@ -999,6 +980,64 @@ try {
   });
 } catch (error) {
   check('内嵌布局与滚轮回归场景跑完了', false, String(error));
+}
+
+// 新交互用真实 React 验：原有 mini-react 会整树重建，不能验证选区保持。
+try {
+  const { root, workspace } = makeWorkspace();
+  const lessonPath = path.join(workspace, '.learning/subjects/demo/lessons/1-变量.md');
+  const original = fs.readFileSync(lessonPath, 'utf8');
+  const code = Array.from({ length: 125 }, (_, i) => i === 111
+    ? 'client.query_points({ limit: 2 });' : 'const value' + i + ' = ' + i + ';');
+  fs.writeFileSync(lessonPath, original + '\n```js\n' + code.join('\n')
+    + '\n```\n\n`query_points` 接收查询参数，`missing_method` 不在代码中。\n');
+  fixture = buildFixture(root, readLibrary({ workspace }));
+
+  await session.scene('code-explanation-real-react', async (ctx) => {
+    await openLesson(ctx);
+    await ctx.evaluate(`document.querySelector('[data-proto="code-reference"]').scrollIntoView({block:'center',behavior:'instant'})`);
+    const before = await ctx.evaluate(`document.querySelector('.smb-center__body').scrollTop`);
+    await ctx.evaluate(`document.querySelector('[data-proto="code-reference"]').click()`);
+    await ctx.sleep(120);
+    const peek = await ctx.evaluate(`(() => {
+      const el = document.querySelector('[data-proto="code-peek"]');
+      const block = document.querySelector('.smb-code');
+      return { text: el && el.textContent, count: document.querySelectorAll('[data-proto="code-reference"]').length,
+        marks: el && el.querySelectorAll('mark').length,
+        line: el && el.querySelector('[data-no="112"]') !== null,
+        original: block.querySelectorAll('.smb-code__line--match').length,
+        scroll: document.querySelector('.smb-center__body').scrollTop,
+        expanded: document.querySelector('[data-proto="code-reference"]').getAttribute('aria-expanded') };
+    })()`);
+    check('[代码对照] 只给匹配的名称提供入口，就地显示原行号和高亮',
+      peek.count === 1 && peek.marks === 1 && peek.line && peek.original === 1
+      && peek.expanded === 'true' && peek.text.includes('query_points({ limit: 2 })'), JSON.stringify(peek));
+    check('[代码对照] 展开片段不把读者滚离解释段落', Math.abs(peek.scroll - before) < 3, JSON.stringify({ before, peek }));
+    await ctx.evaluate(`document.querySelector('[aria-label="关闭相关代码"]').click()`);
+    check('[代码对照] 关闭后原代码高亮一并撤销', await ctx.evaluate(`document.querySelectorAll('.smb-code-match, [data-proto="code-peek"]').length`) === 0);
+    await ctx.evaluate(`document.querySelector('[data-proto="code-reference"]').click()`);
+    return peek;
+  });
+  await session.scene('code-explanation-narrow-dark', async (ctx) => {
+    await session.send('Emulation.setDeviceMetricsOverride', { width: 800, height: 900, deviceScaleFactor: 1, mobile: false });
+    await openLesson(ctx);
+    await ctx.evaluate(`document.body.setAttribute('data-ds-dark-theme', '');
+      document.querySelector('[data-proto="code-reference"]').scrollIntoView({block:'center',behavior:'instant'});
+      document.querySelector('[data-proto="code-reference"]').click();`);
+    await ctx.sleep(150);
+    const result = await ctx.evaluate(`(() => {
+      const el = document.querySelector('[data-proto="code-peek"]'); const r = el.getBoundingClientRect();
+      return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:innerWidth, height:innerHeight,
+        pageOverflow:document.documentElement.scrollWidth - innerWidth,
+        text:el.querySelector('mark').textContent };
+    })()`);
+    check('[代码对照] 窄屏暗色中片段完整留在视口内、不撑宽页面',
+      result.left >= 0 && result.right <= result.width && result.top >= 0 && result.bottom <= result.height
+      && result.pageOverflow === 0 && result.text === 'query_points', JSON.stringify(result));
+    return result;
+  });
+} catch (error) {
+  check('真实 React 的代码对照回归跑完', false, String(error));
 }
 
 console.log(failures ? `\n${failures} 条失败` : '\n全部通过');
