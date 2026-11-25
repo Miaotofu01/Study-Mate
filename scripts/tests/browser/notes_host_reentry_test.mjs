@@ -368,7 +368,7 @@ async function scenario(label, fn) {
     page.on('requestfailed', request => {
       const error = request.failure()?.errorText || '';
       // EventSource 在页面/上下文收尾时被浏览器中止，不是页面错误。
-      if (new URL(request.url()).pathname === '/api/studymate/events' && /ERR_ABORTED/.test(error)) return;
+      if (new URL(request.url()).pathname === '/plugins/studymate/events' && /ERR_ABORTED/.test(error)) return;
       problems.push('requestfailed: ' + request.url() + ' ' + error);
     });
     page.on('request', request => {

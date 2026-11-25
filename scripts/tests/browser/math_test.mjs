@@ -170,7 +170,7 @@ async function startHost(workspace) {
       if (url.pathname === '/api/studymate/library') {
         return send(200, JSON.stringify(readLibrary({ workspace })), 'application/json; charset=utf-8');
       }
-      if (url.pathname === '/api/studymate/events') {
+      if (url.pathname === '/plugins/studymate/events') {
         // 阅读端挂载即订阅推送。这一套验的是公式，推送不在它的验收面上——但夹具是真 HTTP
         // 宿主，客户端发的每条请求都得有个正当落点，不然浏览器会记一条 404 把场景判红。
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });

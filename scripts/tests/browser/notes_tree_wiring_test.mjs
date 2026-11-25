@@ -145,7 +145,7 @@ try {
     problems.push('console: ' + text);
   });
   page.on('pageerror', error => problems.push('pageerror: ' + (error.stack || error.message)));
-  page.on('requestfailed', request => { if (!allowFault && !request.url().includes('/api/studymate/events')) problems.push('requestfailed: ' + request.url()); });
+  page.on('requestfailed', request => { if (!allowFault && !request.url().includes('/plugins/studymate/events')) problems.push('requestfailed: ' + request.url()); });
   page.on('response', response => { if (response.status() >= 400 && !allowFault && !expectedFaults.has(response.status())) problems.push(`status ${response.status()}: ${response.url()}`); });
   try {
     await enterNotes(page, fixture.origin);

@@ -4,16 +4,16 @@
    **推的是变更通知，不是整份数据**：`lib/watch/notice.ts` 里那个
    `{kind:'changed', domains, at, seq}`，页面收到后自己按需重取。
 
-   两条路，先试带认证的那条（ticket 明文：先流式 Response，不行再 webServer）：
+   两条路，优先用不占 `/api` 更新准入队列的 webServer 精确路由：
 
-   路 A（默认）`connection.fetch.register({path:'/api/studymate/events', …})`
+   路 A（兼容退路）`connection.fetch.register({path:'/api/studymate/events', …})`
      返回一个 **body 没写完的 `Response`**。为什么这样能当 SSE 用：载体的
      `bridge()` 是「先 writeHead，再 `for await (chunk of response.body)` 逐个 write」
      （dsh-client-connection/lib/index.js:34-100），所以只要我们不 close 这个
      ReadableStream，字节就是一条条推出去的。附带好处：路由挂在 `/api` 下，
      **Host/Origin 围栏与浏览器会话认证由载体自动做**（§6.3），我们一行认证都不用写。
 
-   路 B（退路）`ctx.webServer.register({kind:'exact', path:'/plugins/studymate/events'})`
+   路 B（默认）`ctx.webServer.register({kind:'exact', path:'/plugins/studymate/events'})`
      裸 node `IncomingMessage`/`ServerResponse`（§6.5 的官方 HMR 模板，逐条照抄）。
      这条路**不在** `/api` 围栏里，认证得自己判：能拿到 connection 就调
      `connection.requestRejection(req)`，拿不到就只在 loopback 上用，并且每次建连
@@ -30,7 +30,7 @@ import { sseFrame, sseGreeting, subscribeNotices } from './notice.ts';
 
 /** 路由挂在 `/api` 之下：载体自动做围栏 + 浏览器会话认证。 */
 export const EVENTS_PATH = '/api/studymate/events';
-/** 退路路径：`/plugins/*` 不属于 `/api` 围栏，认证自己判。 */
+/** 默认路径：`/plugins/*` 不属于 `/api` 围栏，认证自己判。 */
 export const FALLBACK_EVENTS_PATH = '/plugins/studymate/events';
 
 /** 一个已经连上的页面。两条路都在这里收口，广播逻辑只有一份。 */
@@ -44,6 +44,7 @@ export interface PushChannel {
   size(): number;
   add(client: SseClient): void;
   remove(client: SseClient): void;
+  disconnectAll(): void;
   closeAll(): void;
 }
 
@@ -56,16 +57,20 @@ export function createChannel(): PushChannel {
       try { client.send(frame); } catch { clients.delete(client); }
     }
   });
+  const disconnectAll = (): void => {
+    for (const client of clients) {
+      clients.delete(client);
+      try { client.close(); } catch { /* 关不掉就算了 */ }
+    }
+  };
   return {
     size: () => clients.size,
     add(client) { clients.add(client); },
     remove(client) { clients.delete(client); },
+    disconnectAll,
     closeAll() {
       unsubscribe();
-      for (const client of [...clients]) {
-        clients.delete(client);
-        try { client.close(); } catch { /* 关不掉就算了 */ }
-      }
+      disconnectAll();
     },
   };
 }
@@ -102,7 +107,12 @@ export function streamResponse(channel: PushChannel, request: Request): Response
 
       // 载体在 `res` 关闭时 abort 这个 signal（bridge 里 res.on('close')）：
       // 页面关掉/刷新时这里必须把客户端摘掉，否则连接集合只涨不减。
-      const drop = (): void => { channel.remove(entry); };
+      const drop = (): void => {
+        channel.remove(entry);
+        // 载体的 bridge() 仍在 `for await (response.body)` 等流结束。只从集合摘掉
+        // 不会结束 ReadableStream，会把 `/api` 在途请求永久留在宿主更新锁里（#335）。
+        entry.close();
+      };
       if (request.signal.aborted) drop();
       else request.signal.addEventListener('abort', drop, { once: true });
     },
@@ -131,7 +141,9 @@ export interface ConnectionLike {
 }
 
 /** 注册路 A。返回 disposer；`register` 抛异常时**不**吞掉（调用方决定是否退到路 B）。 */
-export function registerStreamRoute(connection: ConnectionLike, channel: PushChannel, path = EVENTS_PATH): () => Promise<void> | void {
+export function registerStreamRoute(
+  connection: ConnectionLike, channel: PushChannel, path = EVENTS_PATH, preferredPath?: () => string | undefined,
+): () => Promise<void> | void {
   const registry = connection.fetch;
   if (!registry || typeof registry.register !== 'function') throw new Error('connection 上没有 fetch.register');
   return registry.register({
@@ -141,6 +153,8 @@ export function registerStreamRoute(connection: ConnectionLike, channel: PushCha
     requestBody: 'buffered',
     fetch: async (request: Request) => {
       try {
+        const redirect = preferredPath?.();
+        if (redirect) return new Response(null, { status: 307, headers: { location: redirect } });
         return streamResponse(channel, request);
       } catch (error) {
         return new Response(`studymate: 建不了事件流：${error instanceof Error ? error.message : String(error)}`, { status: 500 });
