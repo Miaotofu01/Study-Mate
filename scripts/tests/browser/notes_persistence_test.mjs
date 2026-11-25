@@ -270,6 +270,8 @@ try {
     const before = fixture.read();
     assert.equal(before.resourceVersions[id], version, '移动/折叠修改了正文版本');
     assert.equal(JSON.stringify(before.layout).includes('PERSIST-NOTE-CANARY'), false, '布局出现第二份正文');
+    const savedTextNode = before.layout.nodes.find(n => n.type === 'text' && n.data.text === 'TEXT-NODE-PERSISTS');
+    assert.equal(savedTextNode?.style?.height, 84, '新建纯内容节点默认高度应为 84px');
     const posts = fixture.requests.filter(r => r.method === 'POST').length;
     await reload(); await saved(page); await delay(500);
     const after = fixture.read();
@@ -279,6 +281,20 @@ try {
     assert.equal(fixture.requests.filter(r => r.method === 'POST').length, posts, '恢复本身触发了不必要写入');
     assert.equal(await notes(page).locator('.knowledge-card.is-collapsed').count(), 1);
     assert.equal(await notes(page).locator('.text-node-content', { hasText: 'TEXT-NODE-PERSISTS' }).count(), 1);
+    // 持久化水合还原后，纯内容节点仍必须整块可拖动并落盘新坐标。
+    const hydratedTextNode = notes(page).locator('.react-flow__node-text', { hasText: 'TEXT-NODE-PERSISTS' });
+    const textRect0 = await hydratedTextNode.boundingBox();
+    await page.mouse.move(textRect0.x + 50, textRect0.y + 30); await page.mouse.down();
+    await page.mouse.move(textRect0.x + 125, textRect0.y + 85, { steps: 8 }); await page.mouse.up();
+    await delay(200);
+    const textRect1 = await hydratedTextNode.boundingBox();
+    assert.ok(Math.abs(textRect1.x - textRect0.x) > 40 && Math.abs(textRect1.y - textRect0.y) > 30,
+      `水合还原后的纯内容节点未能拖动：${textRect0.x},${textRect0.y} → ${textRect1.x},${textRect1.y}`);
+    await saved(page);
+    await until(() => {
+      const moved = fixture.read().layout.nodes.find(n => n.id === savedTextNode.id);
+      return moved && (Math.abs(moved.position.x - savedTextNode.position.x) > 30 || Math.abs(moved.position.y - savedTextNode.position.y) > 20);
+    }, '水合后拖动纯内容节点的新坐标未保存');
     await page.screenshot({ path: path.join(OUT, 'native-restored.png'), animations: 'disabled' });
   });
 

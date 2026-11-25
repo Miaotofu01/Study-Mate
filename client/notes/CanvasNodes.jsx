@@ -22,38 +22,39 @@ const hostOf = (href) => { try { return new URL(href).hostname; } catch { return
 // BoardContext 可能缺字段（例如别的入口只用节点组件）；缺省值让节点至少能渲染而不抛错。
 const noop = () => {};
 
-// 折叠：parent 在折叠时把 node.style.height 设成 48（固定高度），此时卡片内只剩标题栏。
-// 这里用 useStore 读回该节点自己的 style.height：这是根因层面的判据——节点容器被压到不高于
-// 标题栏时，正文、缩放控件、连接点都必须让位，不能只信 data.collapsed 这一份副本。
+export const COLLAPSED_CARD_HEIGHT = 48;
+// 纯内容节点框体纵向占用 38px（padding 18px×2 + 1px×2 边框），两行正文（14px×1.6 或 13px×1.65）约 43–45px，84px 恰好容纳两行且不出滚动条。
+export const TEXT_NODE_MIN_HEIGHT = 84;
+
+// 折叠：parent 在折叠时把节点高度压到 48（固定高度），此时卡片内只剩标题栏。
+// 这里用 useStore 读回该节点自己的实际渲染高度（与 React Flow 一致，优先顶层 height 再看 style.height）：
+// 节点容器被压到不高于标题栏时，正文、缩放控件都必须让位，不能只信 data.collapsed 这一份副本。
 // 注意 hooks 必须无条件、在一切提前 return 之前调用。
 function useCollapsedHeightFlag(id, data) {
   return useStore((store) => {
     const node = store.nodeLookup.get(id);
-    const height = node?.style?.height ?? node?.height ?? node?.initialHeight ?? data?.collapsedHeight;
+    const height = node?.height ?? node?.style?.height ?? node?.initialHeight ?? data?.collapsedHeight;
     const value = Number.parseFloat(height);
-    return Number.isFinite(value) && value <= 48;
+    return Number.isFinite(value) && value <= COLLAPSED_CARD_HEIGHT;
   });
 }
 
-function useOwnUpdateNodeInternals(id) {
-  const updateNodeInternals = useUpdateNodeInternals();
-  return () => updateNodeInternals(id);
+function useNodeSizeKey(id) {
+  return useStore((store) => {
+    const node = store.nodeLookup.get(id);
+    const width = node?.width ?? node?.style?.width ?? node?.initialWidth ?? '';
+    const height = node?.height ?? node?.style?.height ?? node?.initialHeight ?? '';
+    return `${width}x${height}`;
+  });
 }
 
-function useSelfSizedHeight(id) {
-  // 折叠会改 node.style.height；展开恢复时把测量到的外框高度写回节点，保证连接点按新高度重算。
-  const ref = useRef(null);
-  const update = useOwnUpdateNodeInternals(id);
+function useSyncNodeInternals(id, collapsed = false) {
+  // 折叠/展开或节点尺寸变化时通知 React Flow 重算 Handle 与连线端点坐标，避免连线停留在旧高度。
+  const updateNodeInternals = useUpdateNodeInternals();
+  const sizeKey = useNodeSizeKey(id);
   useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return undefined;
-    const height = Math.round(element.getBoundingClientRect().height);
-    const current = Number.parseFloat(element.style.height || '');
-    const fits = !Number.isFinite(current) || Math.abs(current - height) <= 16;
-    if (height > 0 && fits) update();
-    return undefined;
-  }, [id, update]);
-  return ref;
+    updateNodeInternals(id);
+  }, [id, collapsed, sizeKey, updateNodeInternals]);
 }
 
 export const KnowledgeCard = memo(function KnowledgeCard({ id, data, selected }) {
@@ -61,8 +62,8 @@ export const KnowledgeCard = memo(function KnowledgeCard({ id, data, selected })
   const { resources = {}, checkpoint = noop, toggleCardCollapsed = noop } = board;
   const resource = resources[data?.contentId];
   const sizedCollapsed = useCollapsedHeightFlag(id, data);
-  const root = useSelfSizedHeight(id);
   const collapsed = Boolean(data?.collapsed) || sizedCollapsed;
+  useSyncNodeInternals(id, collapsed);
   if (!resource) return <article className="knowledge-card">资源已移除</article>;
   const Icon = icons[resource.type] || FileText;
   const title = resource.title || '未命名.md';
@@ -72,14 +73,14 @@ export const KnowledgeCard = memo(function KnowledgeCard({ id, data, selected })
     return <>
       <NodeResizer isVisible={Boolean(selected)} minWidth={220} minHeight={60} onResizeStart={checkpoint} />
       <Handle type="target" position={Position.Left} id="in" aria-label="连线接收点" />
-      <article ref={root} className={'knowledge-card course-reference-card' + (selected ? ' is-selected' : '')} data-type="course" data-content-id={resource.id}><header className="card-drag-handle"><BookOpen size={14} /><div className="card-title-row"><h3>{found?.node.title || resource.courseRef.title || title}</h3></div><button className="button ghost nodrag nopan" disabled={!found || !board.navigateCourse} title={found ? '跳转到来源节点' : '来源失效，请在侧栏重新关联'} onClick={event => { event.stopPropagation(); board.navigateCourse?.(resource.courseRef); }}>跳转</button></header></article>
+      <article className={'knowledge-card course-reference-card' + (selected ? ' is-selected' : '')} data-type="course" data-content-id={resource.id}><header className="card-drag-handle"><BookOpen size={14} /><div className="card-title-row"><h3>{found?.node.title || resource.courseRef.title || title}</h3></div><button className="button ghost nodrag nopan" disabled={!found || !board.navigateCourse} title={found ? '跳转到来源节点' : '来源失效，请在侧栏重新关联'} onClick={event => { event.stopPropagation(); board.navigateCourse?.(resource.courseRef); }}>跳转</button></header></article>
       <Handle type="source" position={Position.Right} id="out" aria-label="拖出关系连线" />
     </>;
   }
   return <>
     <NodeResizer isVisible={Boolean(selected) && !collapsed} minWidth={220} minHeight={150} onResizeStart={checkpoint} />
     <Handle type="target" position={Position.Left} id="in" aria-label="连线接收点" />
-    <article ref={root} className={'knowledge-card' + (selected ? ' is-selected' : '') + (collapsed ? ' is-collapsed' : '')} data-type={resource.type} data-content-id={resource.id} data-collapsed={collapsed ? 'true' : 'false'}>
+    <article className={'knowledge-card' + (selected ? ' is-selected' : '') + (collapsed ? ' is-collapsed' : '')} data-type={resource.type} data-content-id={resource.id} data-collapsed={collapsed ? 'true' : 'false'}>
       <header className="card-drag-handle">
         <Icon size={14} />
         <div className="card-title-row"><h3>{title}</h3></div>
@@ -121,7 +122,7 @@ export const TextNode = memo(function TextNode({ id, data, selected }) {
   const [draft, setDraft] = useState(data?.text || '');
   const cancelled = useRef(false);
   const input = useRef(null);
-  useSelfSizedHeight(id);
+  useSyncNodeInternals(id);
   useEffect(() => { if (editing) { cancelled.current = false; setDraft(data?.text || ''); } }, [editing]);
   useEffect(() => {
     if (!editing) return undefined;
@@ -140,7 +141,7 @@ export const TextNode = memo(function TextNode({ id, data, selected }) {
   }, [editing]);
   const finish = () => { if (!cancelled.current) updateNodeText(id, draft); setEditingNode(null); };
   return <>
-    <NodeResizer isVisible={Boolean(selected)} minWidth={160} minHeight={100} onResizeStart={checkpoint} />
+    <NodeResizer isVisible={Boolean(selected)} minWidth={160} minHeight={TEXT_NODE_MIN_HEIGHT} onResizeStart={checkpoint} />
     <Handle type="target" position={Position.Left} id="in" aria-label="连线接收点" />
     {resourceLink
       ? <article className={'knowledge-card text-node is-resource-link' + (selected ? ' is-selected' : '')} data-type="link" data-content-id={resource.id}><ResourceLinkBody resource={resource} /></article>

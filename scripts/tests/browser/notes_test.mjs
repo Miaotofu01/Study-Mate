@@ -319,7 +319,8 @@ async function selectRawPhrase(page, lineNeedle, phrase) {
 }
 
 /** 画布默认形态：左栏开着、右栏关着、视图是画布。 */
-const LEFT_TOGGLE = '.topbar-panel-toggle';
+const LEFT_PANEL_TOGGLE = '.topbar-panel-toggle--left';
+const RIGHT_PANEL_TOGGLE = '.topbar-panel-toggle--right';
 
 async function ensureLeftOpen(page, open) {
   const collapsed = await page.locator('.left-panel').evaluate((el) => el.classList.contains('is-collapsed'));
@@ -499,8 +500,31 @@ try {
       await record('外壳与首屏', async () => {
         check('[外壳] 内页不再单独出现品牌名与图标（顶栏品牌由宿主承担）', (await page.locator('.brand-name, .brand-icon').count()) === 0);
         check('[外壳] 徽标如实说「开发中 · 刷新重置」（不假装能保存）', (await page.locator('.prototype-badge').textContent()).trim() === '开发中 · 刷新重置');
-        const toggle = await page.locator(LEFT_TOGGLE).getAttribute('aria-label');
-        check('[外壳] 右栏开关在顶栏最右侧，默认是「展开右侧栏」', toggle === '展开右侧栏' && (await page.locator('.topbar button').last().evaluate((el) => el.classList.contains('topbar-panel-toggle'))));
+        const leftToggleInfo = await page.evaluate(() => {
+          const toggle = document.querySelector('.topbar .topbar-panel-toggle--left');
+          const viewSwitch = document.querySelector('.topbar .view-switch');
+          const firstBtn = document.querySelector('.topbar button');
+          const leftHeaderClose = document.querySelector('.left-panel .panel-header [aria-label="收起文件侧栏"]');
+          const tBox = toggle?.getBoundingClientRect();
+          const vBox = viewSwitch?.getBoundingClientRect();
+          return {
+            exists: Boolean(toggle),
+            isFirst: toggle === firstBtn,
+            ariaLabel: toggle?.getAttribute('aria-label'),
+            expanded: toggle?.getAttribute('aria-expanded'),
+            controls: toggle?.getAttribute('aria-controls'),
+            beforeViewSwitch: Boolean(tBox && vBox && tBox.x + tBox.width <= vBox.x + 1),
+            leftHeaderHasClose: Boolean(leftHeaderClose),
+            railCount: document.querySelectorAll('.panel-rail--left').length,
+          };
+        });
+        check('[外壳] 左栏开关在顶栏最左侧且在「画布 文档」左侧，默认是「收起文件侧栏」，无左侧窄轨',
+          leftToggleInfo.exists && leftToggleInfo.isFirst && leftToggleInfo.beforeViewSwitch
+          && leftToggleInfo.ariaLabel === '收起文件侧栏' && leftToggleInfo.expanded === 'true'
+          && leftToggleInfo.controls === 'left-panel' && !leftToggleInfo.leftHeaderHasClose && leftToggleInfo.railCount === 0,
+          JSON.stringify(leftToggleInfo));
+        const toggle = await page.locator(RIGHT_PANEL_TOGGLE).getAttribute('aria-label');
+        check('[外壳] 右栏开关在顶栏最右侧，默认是「展开右侧栏」', toggle === '展开右侧栏' && (await page.locator('.topbar button').last().evaluate((el) => el.classList.contains('topbar-panel-toggle--right'))));
         check('[外壳] 右栏默认收起（宽度 0、aria-hidden）', await page.locator('.right-panel').evaluate((el) => el.getBoundingClientRect().width === 0 && el.getAttribute('aria-hidden') === 'true'));
         check('[外壳] 左栏默认展开，宽度在 200–480 之间', await page.locator('.left-panel').evaluate((el) => { const w = el.getBoundingClientRect().width; return w >= 200 && w <= 480; }));
         check('[外壳] 画布上有 4 张示例卡片与 3 条关系', (await page.locator('.react-flow__minimap-node').count()) === 4 && (await page.locator('.react-flow__edge').count()) === 3);
@@ -705,15 +729,26 @@ try {
       await record('布局：左右栏收放 / 拖宽 / 编辑器高度', async () => {
         const left = page.locator('.left-panel');
         const width0 = await left.evaluate((el) => el.getBoundingClientRect().width);
-        await page.getByRole('button', { name: '收起文件侧栏', exact: true }).click();
+        await page.locator(LEFT_PANEL_TOGGLE).click();
         await settle(page, 360);
         const collapsedState = await left.evaluate((el) => ({ width: el.getBoundingClientRect().width, inert: el.hasAttribute('inert'), hidden: el.getAttribute('aria-hidden') }));
         check('[左栏] 收起后宽度归零、inert 且 aria-hidden', collapsedState.width === 0 && collapsedState.inert && collapsedState.hidden === 'true', JSON.stringify(collapsedState));
-        check('[左栏] 收起后留一条窄轨，里面是「展开文件侧栏」', (await page.getByRole('button', { name: '展开文件侧栏', exact: true }).isVisible()) && (await page.locator('.panel-rail--left').evaluate((el) => el.getBoundingClientRect().width)) > 0);
-        await page.getByRole('button', { name: '展开文件侧栏', exact: true }).click();
+        const afterLeftCollapse = await page.evaluate(() => ({
+          railCount: document.querySelectorAll('.panel-rail--left').length,
+          canvasLeft: document.querySelector('.canvas-stage')?.getBoundingClientRect().left ?? -1,
+          label: document.querySelector('.topbar-panel-toggle--left')?.getAttribute('aria-label'),
+          expanded: document.querySelector('.topbar-panel-toggle--left')?.getAttribute('aria-expanded'),
+        }));
+        check('[左栏] 收起后无窄轨占位、画布占满左侧，顶栏左栏开关变为「展开文件侧栏」',
+          afterLeftCollapse.railCount === 0 && afterLeftCollapse.canvasLeft >= 0 && afterLeftCollapse.canvasLeft <= 1
+          && afterLeftCollapse.label === '展开文件侧栏' && afterLeftCollapse.expanded === 'false',
+          JSON.stringify(afterLeftCollapse));
+        await page.locator(LEFT_PANEL_TOGGLE).click();
         await settle(page, 360);
         const width1 = await left.evaluate((el) => el.getBoundingClientRect().width);
-        check('[左栏] 展开回到原来的宽度（状态没丢）', Math.abs(width1 - width0) < 1.5, `${width0} → ${width1}`);
+        check('[左栏] 展开回到原来的宽度（状态没丢）', Math.abs(width1 - width0) < 1.5
+          && (await page.locator(LEFT_PANEL_TOGGLE).getAttribute('aria-expanded')) === 'true'
+          && (await page.locator(LEFT_PANEL_TOGGLE).getAttribute('aria-label')) === '收起文件侧栏', `${width0} → ${width1}`);
         const hit = page.getByRole('separator', { name: '调整左侧栏宽度' });
         await hit.waitFor({ state: 'visible', timeout: 8000 });
         const hitBox = await hit.boundingBox();
@@ -733,12 +768,12 @@ try {
         await settle(page, 200);
         const width3 = await left.evaluate((el) => el.getBoundingClientRect().width);
         check('[左栏] 分隔线可键盘调宽（→ +16px）', Math.abs(width3 - (width2 + 16)) < 2.5, `${width2} → ${width3}`);
-        await page.locator(LEFT_TOGGLE).click();
+        await page.locator(RIGHT_PANEL_TOGGLE).click();
         await settle(page, 360);
         const right = page.locator('.right-panel');
         const rightWidth = await right.evaluate((el) => el.getBoundingClientRect().width);
         check('[右栏] 顶栏按钮展开右栏，宽度在 270–600 之间且不再 inert', rightWidth >= 270 && rightWidth <= 600 && !(await right.evaluate((el) => el.hasAttribute('inert'))), String(rightWidth));
-        check('[右栏] 展开的按钮变成「收起右侧栏」，aria-expanded 同步', (await page.locator(LEFT_TOGGLE).getAttribute('aria-label')) === '收起右侧栏' && (await page.locator(LEFT_TOGGLE).getAttribute('aria-expanded')) === 'true');
+        check('[右栏] 展开的按钮变成「收起右侧栏」，aria-expanded 同步', (await page.locator(RIGHT_PANEL_TOGGLE).getAttribute('aria-label')) === '收起右侧栏' && (await page.locator(RIGHT_PANEL_TOGGLE).getAttribute('aria-expanded')) === 'true');
         const rightHit = await page.getByRole('separator', { name: '调整右侧栏宽度' }).boundingBox();
         // 新开出来的右栏略等一帧：React Flow 的节点测量会改画布尺寸，右栏此刻可能还在重排。
         await page.waitForFunction(() => {
@@ -755,7 +790,7 @@ try {
         await settle(page, 240);
         const rightWidth2 = await right.evaluate((el) => el.getBoundingClientRect().width);
         check('[右栏] 拖左边界把它拖宽（往左拖就是变宽，方向不能反）', rightWidth2 > rightWidth + 40, `${rightWidth} → ${rightWidth2}`);
-        await page.locator(LEFT_TOGGLE).click();
+        await page.locator(RIGHT_PANEL_TOGGLE).click();
         await settle(page, 360);
         check('[右栏] 收起后宽度归零、aria-hidden', await right.evaluate((el) => el.getBoundingClientRect().width === 0 && el.getAttribute('aria-hidden') === 'true'));
         await createNote(page);
@@ -1283,24 +1318,64 @@ try {
       await openPage(page, baseUrl);
       await record('卡片折叠：只留可见页头', async () => {
         const card = page.locator('.react-flow__node[data-id="card-connections"]');
-        const before = await card.boundingBox();
-        const collapse = page.getByRole('button', { name: /^折叠卡片 连接，先于堆积$/ });
-        await collapse.click();
-        await settle(page, 360);
-        const collapsed = await card.evaluate((el) => {
-          const article = el.querySelector('.knowledge-card');
+        const measureEdgeAndHandles = () => page.evaluate(() => {
+          const node = document.querySelector('.react-flow__node[data-id="card-connections"]');
+          const article = node.querySelector('.knowledge-card');
+          const nodeBox = node.getBoundingClientRect();
+          const articleBox = article.getBoundingClientRect();
+          const leftHandle = node.querySelector('.react-flow__handle[data-handleid="in"]');
+          const rightHandle = node.querySelector('.react-flow__handle[data-handleid="out"]');
+          const leftBox = leftHandle.getBoundingClientRect();
+          const rightBox = rightHandle.getBoundingClientRect();
+          const edgePath = document.querySelector('.react-flow__edge[data-id="edge-1"] path.react-flow__edge-path');
+          let edgeStart = null;
+          if (edgePath) {
+            const pt = edgePath.getPointAtLength(0);
+            const ctm = edgePath.getScreenCTM();
+            edgeStart = { x: pt.x * ctm.a + pt.y * ctm.c + ctm.e, y: pt.x * ctm.b + pt.y * ctm.d + ctm.f };
+          }
           return {
-            height: el.getBoundingClientRect().height,
-            article: article.getBoundingClientRect().height,
+            styleHeight: parseFloat(node.style.height),
+            height: nodeBox.height,
+            top: nodeBox.top,
+            article: articleBox.height,
+            overflow: getComputedStyle(node).overflow,
+            articleOverflow: getComputedStyle(article).overflow,
             collapsedClass: article.classList.contains('is-collapsed'),
-            pointerEvents: getComputedStyle(el).pointerEvents,
+            pointerEvents: getComputedStyle(node).pointerEvents,
+            leftHandleCenterY: leftBox.top + leftBox.height / 2,
+            rightHandleCenterY: rightBox.top + rightBox.height / 2,
+            leftHandlePE: getComputedStyle(leftHandle).pointerEvents,
+            rightHandlePE: getComputedStyle(rightHandle).pointerEvents,
+            edgeStart,
             expanded: article.querySelector('.card-collapse')?.getAttribute('aria-expanded'),
             body: Boolean(article.querySelector('.card-body')),
           };
         });
-        check('[折叠] 卡片压成一行（高度 48，类名 is-collapsed）', Math.abs(collapsed.height - 48) <= 1.5 && collapsed.collapsedClass && Math.abs(collapsed.article - 48) <= 1.5, JSON.stringify(collapsed));
+        const initial = await measureEdgeAndHandles();
+        // 先选中并拖动缩放卡片高度，覆盖「缩放后折叠再展开」的完整路径。
+        await card.locator('.card-drag-handle').click();
+        await settle(page, 180);
+        const resizer = card.locator('.react-flow__resize-control.bottom.right');
+        const corner = await centerOf(resizer);
+        await drag(page, corner, { x: corner.x, y: corner.y + 70 });
+        await settle(page, 260);
+        const before = await measureEdgeAndHandles();
+        check('[折叠] 折叠前先拖大卡片高度生效', before.height > initial.height + 30 && before.styleHeight > initial.styleHeight + 30, `${initial.styleHeight} → ${before.styleHeight}`);
+        const collapse = page.getByRole('button', { name: /^折叠卡片 连接，先于堆积$/ });
+        await collapse.click();
+        await settle(page, 360);
+        const collapsed = await measureEdgeAndHandles();
+        check('[折叠] 缩放后的卡片折叠后外框压成 48（类名 is-collapsed）', Math.abs(collapsed.styleHeight - 48) <= 1 && Math.abs(collapsed.height - 48) <= 1.5 && collapsed.collapsedClass && Math.abs(collapsed.article - 48) <= 1.5, JSON.stringify(collapsed));
         check('[折叠] 折叠按钮的 aria-expanded 变 false（同一个按钮切换）', collapsed.expanded === 'false');
         check('[折叠] 节点外框不接收指针（旧正文位置不留透明命中块）', collapsed.pointerEvents === 'none', collapsed.pointerEvents);
+        const expectedMidY = collapsed.top + collapsed.height / 2;
+        check('[折叠] 折叠态左右连线点对齐到标题栏中点、不被裁切且可交互', collapsed.overflow === 'visible' && collapsed.articleOverflow === 'hidden'
+          && Math.abs(collapsed.leftHandleCenterY - expectedMidY) <= 3 && Math.abs(collapsed.rightHandleCenterY - expectedMidY) <= 3
+          && ['auto', 'all'].includes(collapsed.leftHandlePE) && ['auto', 'all'].includes(collapsed.rightHandlePE), JSON.stringify({ expectedMidY, ...collapsed }));
+        check('[折叠] 折叠后连线端点同步上移并与右侧连线点对齐', collapsed.edgeStart !== null && before.edgeStart !== null
+          && collapsed.edgeStart.y < before.edgeStart.y - 40
+          && Math.abs(collapsed.edgeStart.y - collapsed.rightHandleCenterY) <= 3, JSON.stringify({ before: before.edgeStart, collapsed: collapsed.edgeStart, rightHandleCenterY: collapsed.rightHandleCenterY }));
         const handlePE = await page.locator('.react-flow__node[data-id="card-connections"] .card-drag-handle').evaluate((el) => getComputedStyle(el).pointerEvents);
         check('[折叠] 只有可见的页头还能抓', handlePE === 'auto', handlePE);
         const cover = await page.evaluate(() => {
@@ -1318,9 +1393,15 @@ try {
         check('[折叠] 折叠后仍能抓页头拖动这张卡', Math.abs(dragged.y - collapsedBox.y) > 24);
         await page.getByRole('button', { name: /^展开卡片 连接，先于堆积$/ }).click();
         await settle(page, 360);
-        const expanded = await card.boundingBox();
-        check('[折叠] 展开恢复折叠前的高度（不是被压扁的 48）', Math.abs(expanded.height - before.height) <= 3, `${before.height} → ${expanded.height}`);
+        const expanded = await measureEdgeAndHandles();
+        check('[折叠] 展开恢复缩放后的高度（不是 48 也不是缩放前的旧高度）', Math.abs(expanded.height - before.height) <= 3 && Math.abs(expanded.styleHeight - before.styleHeight) <= 2, `${before.styleHeight} → ${expanded.styleHeight} (box ${before.height} → ${expanded.height})`);
+        check('[折叠] 展开后连线端点随右侧连线点同步下移', expanded.edgeStart !== null && Math.abs(expanded.edgeStart.y - expanded.rightHandleCenterY) <= 3 && expanded.edgeStart.y > collapsed.edgeStart.y + 40, JSON.stringify({ expanded: expanded.edgeStart, rightHandleCenterY: expanded.rightHandleCenterY }));
         check('[折叠] 展开后正文回到 DOM，页头仍可拖', (await card.locator('.card-body').count()) === 1 && (await card.locator('.card-drag-handle').count()) === 1);
+        const closeRight = page.getByRole('button', { name: '收起右侧栏', exact: true });
+        if (await closeRight.count()) {
+          await closeRight.click();
+          await settle(page, 300);
+        }
         const text = page.locator('.react-flow__node[data-id="card-link"]');
         const textBox = await text.boundingBox();
         await drag(page, { x: textBox.x + 40, y: textBox.y + 30 }, { x: textBox.x + 100, y: textBox.y + 80 });
@@ -1329,6 +1410,50 @@ try {
         check('[折叠] 纯文本节点没有页头，但整块可拖', Math.abs(textAfter.x - textBox.x - 60) < 12 && Math.abs(textAfter.y - textBox.y - 50) < 12);
         const bodyCollapse = await page.locator('.react-flow__node[data-id="card-link"] .card-collapse').count();
         check('[折叠] 纯文本节点没有折叠箭头（折叠只属于带页头的卡片）', bodyCollapse === 0);
+
+        // 纯内容节点：默认与最小高度对齐两行高度（84px），编辑/阅读两行都不出滚动条，且连线点可见、整块可拖。
+        await page.getByRole('button', { name: '添加纯内容节点', exact: true }).click();
+        await settle(page, 260);
+        const pureText = page.locator('.react-flow__node-text:not([data-id="card-link"])').first();
+        const editor = pureText.locator('textarea.text-node-editor');
+        await editor.waitFor({ state: 'visible', timeout: 4000 });
+        await editor.fill('第一行正文内容\n第二行正文内容');
+        await settle(page, 120);
+        const editingMetrics = await pureText.evaluate((el) => {
+          const area = el.querySelector('textarea.text-node-editor');
+          return {
+            styleHeight: parseFloat(el.style.height),
+            overflow: getComputedStyle(el).overflow,
+            handleOpacity: getComputedStyle(el.querySelector('.react-flow__handle')).opacity,
+            editorScrollH: area.scrollHeight,
+            editorClientH: area.clientHeight,
+          };
+        });
+        check('[内容节点] 新建默认高度为两行高度 84px，编辑态两行不出滚动条且外框不裁连线点', editingMetrics.styleHeight === 84
+          && editingMetrics.editorScrollH <= editingMetrics.editorClientH + 1
+          && editingMetrics.overflow === 'visible' && editingMetrics.handleOpacity === '1', JSON.stringify(editingMetrics));
+        await page.keyboard.press('Control+Enter');
+        await settle(page, 200);
+        const readingMetrics = await pureText.evaluate((el) => {
+          const content = el.querySelector('.text-node-content');
+          return { scrollH: content.scrollHeight, clientH: content.clientHeight };
+        });
+        check('[内容节点] 退出编辑后阅读态两行不出滚动条', readingMetrics.scrollH <= readingMetrics.clientH + 1, JSON.stringify(readingMetrics));
+        const pureResizer = pureText.locator('.react-flow__resize-control.bottom.right');
+        const pureCorner0 = await centerOf(pureResizer);
+        await drag(page, pureCorner0, { x: pureCorner0.x, y: pureCorner0.y + 50 });
+        await settle(page, 200);
+        const grownHeight = await pureText.evaluate((el) => parseFloat(el.style.height));
+        const pureCorner1 = await centerOf(pureResizer);
+        await drag(page, pureCorner1, { x: pureCorner1.x, y: pureCorner1.y - 120 });
+        await settle(page, 200);
+        const minHeight = await pureText.evaluate((el) => parseFloat(el.style.height));
+        check('[内容节点] 缩放最小高度锁在 84px（能拉高、压回后停在 84px）', grownHeight > 110 && Math.abs(minHeight - 84) <= 1, `${grownHeight} → ${minHeight}`);
+        const pureBeforeDrag = await pureText.boundingBox();
+        await drag(page, { x: pureBeforeDrag.x + 50, y: pureBeforeDrag.y + 30 }, { x: pureBeforeDrag.x + 120, y: pureBeforeDrag.y + 80 });
+        await settle(page, 200);
+        const pureAfterDrag = await pureText.boundingBox();
+        check('[内容节点] 退出编辑后整块可拖', Math.abs(pureAfterDrag.x - pureBeforeDrag.x) > 40 && Math.abs(pureAfterDrag.y - pureBeforeDrag.y) > 30, `${pureBeforeDrag.x.toFixed(0)},${pureBeforeDrag.y.toFixed(0)} → ${pureAfterDrag.x.toFixed(0)},${pureAfterDrag.y.toFixed(0)}`);
       });
     } finally {
       await close('卡片折叠：只留可见页头');
@@ -1390,6 +1515,33 @@ try {
           && await page.locator('.document-scroll').getByRole('button', { name: exportName }).count() === 0);
         const before = await page.locator('.tree-row.tree-file').count();
         const trigger = await openCreateMenu(page);
+        const createMenuCheck = await page.evaluate(() => {
+          const btn = document.querySelector('.notes-create-trigger');
+          const menu = document.querySelector('[role="menu"][aria-label="新建资源"]');
+          const items = [...(menu?.querySelectorAll('[role="menuitem"]') || [])];
+          const menuBox = menu?.getBoundingClientRect();
+          const iconWidths = items.map((item) => item.querySelector('svg')?.getBoundingClientRect().width ?? 0);
+          const textLefts = items.map((item) => {
+            const label = item.querySelector('span');
+            return label ? label.getBoundingClientRect().left : 0;
+          });
+          return {
+            text: (btn?.innerText || '').trim(),
+            ariaLabel: btn?.getAttribute('aria-label'),
+            hasSvg: Boolean(btn?.querySelector('svg')),
+            menuX: menuBox?.x ?? -1,
+            menuWidth: menuBox?.width ?? 999,
+            iconWidths,
+            textLefts,
+            iconUniform: iconWidths.length === 3 && Math.max(...iconWidths) - Math.min(...iconWidths) <= 0.5 && Math.min(...iconWidths) >= 14,
+            textAligned: textLefts.length === 3 && Math.max(...textLefts) - Math.min(...textLefts) <= 1,
+          };
+        });
+        check('[新建] 「新建」为纯图标按钮，菜单紧凑不被左裁切，三项图标等宽且文字左缘对齐',
+          createMenuCheck.text === '' && createMenuCheck.ariaLabel === '新建' && createMenuCheck.hasSvg
+          && createMenuCheck.menuX >= 8 && createMenuCheck.menuWidth < 180
+          && createMenuCheck.iconUniform && createMenuCheck.textAligned,
+          JSON.stringify(createMenuCheck));
         check('[新建] 左栏只剩一个「新建」菜单按钮，三项顺序是 笔记本 / 文件夹 / 笔记',
           (await page.getByRole('button', { name: '新建笔记', exact: true }).count()) === 0
           && (await page.locator('.left-panel .panel-header').getByRole('button', { name: '新建', exact: true }).count()) === 1
@@ -1459,15 +1611,15 @@ try {
         const panelFit = await page.locator('.resource-detail.is-note-detail').evaluate((el) => {
           const style = getComputedStyle(el);
           const editor = el.querySelector('.note-editor');
-          const bar = el.querySelector('.course-association-bar');
+          const option = el.closest('.right-panel').querySelector('.resource-header .course-assoc-option');
           if (!editor) return { ok: false, why: '右栏没有挂载 note-editor' };
           const box = el.getBoundingClientRect(), edit = editor.getBoundingClientRect();
           return {
             ok: style.paddingTop === '0px' && style.paddingBottom === '0px' && style.rowGap === '0px'
               && Math.abs(edit.width - el.clientWidth) <= 1
               && Math.abs(box.bottom - edit.bottom) <= 1
-              && Boolean(bar) && bar.getBoundingClientRect().bottom <= edit.top + 1,
-            why: JSON.stringify({ paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, rowGap: style.rowGap, panel: [box.width, box.height], editor: [edit.width, edit.height], bottomGap: box.bottom - edit.bottom, bar: bar ? bar.getBoundingClientRect().height : null }),
+              && option?.textContent === '未关联' && option.getBoundingClientRect().bottom <= edit.top + 1,
+            why: JSON.stringify({ paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, rowGap: style.rowGap, panel: [box.width, box.height], editor: [edit.width, edit.height], bottomGap: box.bottom - edit.bottom, association: option?.textContent }),
           };
         });
         check('[右栏] 笔记详情 padding/gap 归零，编辑器撑满宽度并吃到底部（无尾部留白）', panelFit.ok, panelFit.why);
@@ -1528,11 +1680,9 @@ try {
   {
     const measure = `(() => {
       const panel = document.querySelector('.left-panel');
-      const rail = document.querySelector('.panel-rail--left');
       return {
         panelWidth: getComputedStyle(panel).transitionProperty,
         panelDuration: getComputedStyle(panel).transitionDuration,
-        railDuration: getComputedStyle(rail).transitionDuration,
         motion: getComputedStyle(document.querySelector('.app-shell')).getPropertyValue('--v5-motion').trim(),
         theme: document.querySelector('.app-shell').dataset.theme,
       };
@@ -1549,12 +1699,12 @@ try {
         const collapse = await collapseAndSample(animated.page);
         const midway = collapse.samples.find((width) => width > 0 && width < collapse.startWidth);
         check('[动效] 收起是滑出去的过渡（中途宽度在两端之间），不是瞬间跳变', midway !== undefined && collapse.finalWidth === 0, `${midway === undefined ? 0 : midway.toFixed(0)} → ${collapse.finalWidth.toFixed(0)}（采样 ${collapse.samples.length} 帧）`);
-        await animated.page.waitForFunction(() => {
-          const rail = document.querySelector('.panel-rail--left');
-          return rail !== null && Math.abs(rail.getBoundingClientRect().width - 32) < 1.5;
-        }, null, { timeout: 1200 });
-        const rail = await animated.page.locator('.panel-rail--left').evaluate((el) => el.getBoundingClientRect().width);
-        check('[动效] 收起后窄轨回到 32px，开合状态可见', Math.abs(rail - 32) < 1.5, String(rail));
+        const toggleAfter = await animated.page.evaluate(() => ({
+          railCount: document.querySelectorAll('.panel-rail--left').length,
+          label: document.querySelector('.topbar-panel-toggle--left')?.getAttribute('aria-label'),
+          expanded: document.querySelector('.topbar-panel-toggle--left')?.getAttribute('aria-expanded'),
+        }));
+        check('[动效] 收起后无窄轨占位，顶栏左栏开关同步为展开入口', toggleAfter.railCount === 0 && toggleAfter.label === '展开文件侧栏' && toggleAfter.expanded === 'false', JSON.stringify(toggleAfter));
       });
     } finally {
       await animated.close(`侧栏动画：初始${scheme}`);
@@ -1651,15 +1801,31 @@ try {
           check(`[窄屏 ${width}] 顶栏与工具栏的行都在视口内`, overflow.outliers.length === 0, overflow.outliers.join(' / '));
           if (width < 700) {
             const left = await page.locator('.left-panel').evaluate((el) => el.getBoundingClientRect());
-            // 窄屏：左栏是浮层，窄轨（32px 的展开入口）应当还在窗口里；宽屏由顶栏按钮负责，不要求窄轨。
-            const rail = await page.locator('.panel-rail--left').evaluate((el) => {
-              const style = getComputedStyle(el);
-              return { display: style.display, box: el.getBoundingClientRect().toJSON() };
+            // 窄屏：左栏是浮层，顶栏左侧开关在视口内且位于「画布 文档」左侧，无左侧窄轨占位。
+            const narrowToggle = await page.evaluate(() => {
+              const toggle = document.querySelector('.topbar .topbar-panel-toggle--left');
+              const viewSwitch = document.querySelector('.topbar .view-switch');
+              const tBox = toggle?.getBoundingClientRect();
+              const vBox = viewSwitch?.getBoundingClientRect();
+              return {
+                railCount: document.querySelectorAll('.panel-rail--left').length,
+                tBox: tBox?.toJSON() || null,
+                beforeViewSwitch: Boolean(tBox && vBox && tBox.x + tBox.width <= vBox.x + 1),
+              };
             });
-            check(`[窄屏 ${width}] 左栏叠在画布上，窄轨仍在视口里（收得回来）`, left.width > 0 && rail.box.right <= width + 1 && (await page.getByRole('button', { name: '收起文件侧栏', exact: true }).isVisible()), `display=${rail.display} rail=${rail.box.width}`);
-            await page.getByRole('button', { name: '收起文件侧栏', exact: true }).click();
+            check(`[窄屏 ${width}] 左栏叠在画布上，顶栏左栏开关在视口内且无窄轨`,
+              left.width > 0 && narrowToggle.railCount === 0 && Boolean(narrowToggle.tBox)
+              && narrowToggle.tBox.left >= 0 && narrowToggle.tBox.right <= width + 1
+              && narrowToggle.beforeViewSwitch && (await page.locator(LEFT_PANEL_TOGGLE).isVisible()),
+              JSON.stringify(narrowToggle));
+            await page.locator(LEFT_PANEL_TOGGLE).click();
             await settle(page, 320);
             check(`[窄屏 ${width}] 收起后画布能吃满宽度`, await page.locator('.canvas-stage').evaluate((el) => el.getBoundingClientRect().width <= innerWidth + 1 && el.getBoundingClientRect().width > innerWidth - 8));
+            await page.locator(LEFT_PANEL_TOGGLE).click();
+            await settle(page, 240);
+            check(`[窄屏 ${width}] 顶栏左栏开关可重新展开浮层左栏`, (await page.locator('.left-panel').evaluate((el) => el.getBoundingClientRect().width)) > 0);
+            await page.locator(LEFT_PANEL_TOGGLE).click();
+            await settle(page, 240);
           }
           // 窄屏刚才把左栏收起了；先经窄轨把文件栏展开，再新建，最后仍把文件栏收起，
           // 这样格式栏量的是真实文档宽度，而不是被浮层压住的状态。

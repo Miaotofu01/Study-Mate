@@ -244,7 +244,7 @@ function normalizeNode(raw) {
   assertPlainObject(styleRaw, `节点「${id}」的 style 非法。`)
   const style = {}
   for (const key of ['width', 'height']) {
-    const value = styleRaw[key]
+    const value = raw[key] !== undefined ? raw[key] : styleRaw[key]
     if (value === undefined) continue
     if (!Number.isFinite(value) || value < 1 || value > 100000) fail(`节点「${id}」的 style.${key} 非法。`)
     style[key] = value
@@ -389,7 +389,6 @@ export function hydrateLayout(dto) {
       position: node.position,
       style: node.style,
       data: node.data,
-      dragHandle: '.card-drag-handle',
     })),
     edges: edges.map(normalizeEdge).map((edge) => ({
       id: edge.id,

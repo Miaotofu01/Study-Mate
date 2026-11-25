@@ -103,9 +103,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .react-flow__minimap { right: 16px !important; bottom: 72px !important; width: 150px !important; height: 98px !important; border: 1px solid #e1e7e3; border-radius: 9px; background: #fff !important; box-shadow: 0 2px 8px #24362f0d; }
 .react-flow__controls { display: none; }
 .react-flow__attribution { font-size: 8px !important; opacity: .55; }
-.react-flow__node-knowledge { overflow: visible !important; }
+.react-flow__node-knowledge, .react-flow__node-text { overflow: visible !important; }
 .react-flow__handle { width: 11px; height: 11px; z-index: 8; border: 2px solid white; background: #74a99c; box-shadow: 0 0 0 1px #579284; opacity: 0; transition: opacity var(--smb-motion, .14s) ease; }
-.react-flow__node-knowledge:hover .react-flow__handle, .react-flow__node-knowledge.selected .react-flow__handle { opacity: 1; pointer-events: all; }
+.react-flow__node-knowledge:hover .react-flow__handle, .react-flow__node-knowledge.selected .react-flow__handle,
+.react-flow__node-text:hover .react-flow__handle, .react-flow__node-text.selected .react-flow__handle { opacity: 1; pointer-events: all; }
 .react-flow__handle:hover { z-index: 12; }
 .react-flow__handle:hover { width: 13px; height: 13px; background: var(--teal); }
 .react-flow__resize-control.handle { width: 9px; height: 9px; border: 1px solid #fff; border-radius: 2px; background: var(--teal); box-shadow: 0 0 0 1px #75a99e; }
