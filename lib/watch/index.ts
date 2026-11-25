@@ -269,16 +269,62 @@ function openChannel(ctx: WatchContext, options: ChannelOptions): () => void {
   const connection = readService(ctx, 'connection') as ConnectionLike | undefined;
   const canStream = Boolean(connection?.fetch?.register);
 
-  const webServer = readService(ctx, 'webServer') as {
-    register?: (route: { kind: 'exact'; path: string; handler: (req: never, res: never) => void }) => () => void;
-  } | undefined;
+  type WebServer = Parameters<typeof registerWebRoute>[0];
+  if (!options.route && canStream && typeof ctx.inject === 'function') {
+    const webPath = options.path ?? FALLBACK_EVENTS_PATH;
+    let disposeWeb: (() => void) | undefined;
+    let disposeCompat: (() => Promise<void> | void) | undefined;
+    try {
+      disposeCompat = registerStreamRoute(connection!, channel, EVENTS_PATH, () => disposeWeb ? webPath : undefined);
+    } catch (error) {
+      warn(`/api 事件路由挂不上（${messageOf(error)}）`);
+    }
+    try {
+      ctx.inject(['webServer'], (webCtx) => {
+        const mount = (): (() => void) | undefined => {
+          if (closed || disposeWeb || typeof connection?.requestRejection !== 'function') return;
+          const webServer = readService(webCtx, 'webServer') as WebServer | undefined;
+          if (typeof webServer?.register !== 'function') return;
+          const webChannel = createChannel();
+          try {
+            const unregister = registerWebRoute(webServer, webChannel, connection, webPath);
+            const unmount = (): void => {
+              if (disposeWeb !== unmount) return;
+              disposeWeb = undefined;
+              webChannel.closeAll();
+              unregister();
+            };
+            disposeWeb = unmount;
+            // 让已连上旧路径的浏览器重连；兼容入口此时只返回短暂重定向。
+            channel.disconnectAll();
+            return unmount;
+          } catch (error) {
+            webChannel.closeAll();
+            warn(`/plugins 事件路由挂不上（${messageOf(error)}），继续使用 connection 流式路由`);
+          }
+        };
+        if (typeof webCtx.effect === 'function') webCtx.effect(mount, 'studymate: webServer 变更推送路由');
+        else mount();
+      });
+    } catch (error) {
+      warn(`等 webServer 服务时出错（${messageOf(error)}）`);
+    }
+    return () => {
+      closeChannel();
+      try { disposeWeb?.(); } finally {
+        void Promise.resolve(disposeCompat?.()).catch(() => { /* 路由已拆 */ });
+      }
+    };
+  }
+
+  const webServer = readService(ctx, 'webServer') as WebServer | undefined;
   if (options.route !== 'connection' && webServer && typeof webServer.register === 'function') {
     try {
       if (!connection) {
         warn('推送通道走 webServer 路由：这条路由不在 /api 围栏里，宿主没给 connection，认证判不了（只在 loopback 上用）');
       }
       const dispose = registerWebRoute(
-        webServer as Parameters<typeof registerWebRoute>[0], channel, connection,
+        webServer, channel, connection,
         options.path ?? FALLBACK_EVENTS_PATH,
       );
       return () => { closeChannel(); dispose(); };
@@ -310,7 +356,7 @@ function openChannel(ctx: WatchContext, options: ChannelOptions): () => void {
 
 /**
  * 注册变更推送通道。放在 `bin/dsh-plugin.ts` 的 `ctx.inject(['connection'], …)` 清单里
- * （那一行是 `connectionCtx.effect(() => registerWatchChannel(connectionCtx), '…')` 的形状）。
+ * 生产在 connection 生命周期下额外订阅 webServer，晚到或重载时重新挂默认路由。
  * 返回 disposer：路由与所有已连上的页面一起收掉。
  */
 export function registerWatchChannel(ctx: WatchContext, options: ChannelOptions = {}): () => void {

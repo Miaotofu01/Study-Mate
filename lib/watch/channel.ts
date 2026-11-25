@@ -30,7 +30,7 @@ import { sseFrame, sseGreeting, subscribeNotices } from './notice.ts';
 
 /** 路由挂在 `/api` 之下：载体自动做围栏 + 浏览器会话认证。 */
 export const EVENTS_PATH = '/api/studymate/events';
-/** 退路路径：`/plugins/*` 不属于 `/api` 围栏，认证自己判。 */
+/** 默认路径：`/plugins/*` 不属于 `/api` 围栏，认证自己判。 */
 export const FALLBACK_EVENTS_PATH = '/plugins/studymate/events';
 
 /** 一个已经连上的页面。两条路都在这里收口，广播逻辑只有一份。 */
@@ -44,6 +44,7 @@ export interface PushChannel {
   size(): number;
   add(client: SseClient): void;
   remove(client: SseClient): void;
+  disconnectAll(): void;
   closeAll(): void;
 }
 
@@ -56,16 +57,20 @@ export function createChannel(): PushChannel {
       try { client.send(frame); } catch { clients.delete(client); }
     }
   });
+  const disconnectAll = (): void => {
+    for (const client of clients) {
+      clients.delete(client);
+      try { client.close(); } catch { /* 关不掉就算了 */ }
+    }
+  };
   return {
     size: () => clients.size,
     add(client) { clients.add(client); },
     remove(client) { clients.delete(client); },
+    disconnectAll,
     closeAll() {
       unsubscribe();
-      for (const client of [...clients]) {
-        clients.delete(client);
-        try { client.close(); } catch { /* 关不掉就算了 */ }
-      }
+      disconnectAll();
     },
   };
 }
@@ -136,7 +141,9 @@ export interface ConnectionLike {
 }
 
 /** 注册路 A。返回 disposer；`register` 抛异常时**不**吞掉（调用方决定是否退到路 B）。 */
-export function registerStreamRoute(connection: ConnectionLike, channel: PushChannel, path = EVENTS_PATH): () => Promise<void> | void {
+export function registerStreamRoute(
+  connection: ConnectionLike, channel: PushChannel, path = EVENTS_PATH, preferredPath?: () => string | undefined,
+): () => Promise<void> | void {
   const registry = connection.fetch;
   if (!registry || typeof registry.register !== 'function') throw new Error('connection 上没有 fetch.register');
   return registry.register({
@@ -146,6 +153,8 @@ export function registerStreamRoute(connection: ConnectionLike, channel: PushCha
     requestBody: 'buffered',
     fetch: async (request: Request) => {
       try {
+        const redirect = preferredPath?.();
+        if (redirect) return new Response(null, { status: 307, headers: { location: redirect } });
         return streamResponse(channel, request);
       } catch (error) {
         return new Response(`studymate: 建不了事件流：${error instanceof Error ? error.message : String(error)}`, { status: 500 });

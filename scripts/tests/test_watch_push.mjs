@@ -213,6 +213,58 @@ test('connection 与 webServer 都可用时默认走 /plugins，避免 SSE 占�
   assert.equal(webRoutes[0].path, '/plugins/studymate/events');
 });
 
+test('webServer 晚到、卸载和重挂时切换兼容流，不留下在途请求', { timeout: 2000 }, async (t) => {
+  useHome(t, { withWorkspace: false });
+  watch.resetWatchRegistryForTests();
+  captureWarnings(t);
+  let apiRoute;
+  let onWebServer;
+  const connection = {
+    fetch: { register(route) { apiRoute = route; return () => {}; } },
+    requestRejection: () => undefined,
+  };
+  const dispose = watch.registerWatchChannel({
+    get: (name) => name === 'connection' ? connection : undefined,
+    inject(names, mount) {
+      if (names.includes('webServer')) onWebServer = mount;
+    },
+  });
+  t.after(dispose);
+  const connect = () => apiRoute.fetch(new Request('http://127.0.0.1/api/studymate/events'));
+  const mountWeb = (register) => {
+    let unmount;
+    onWebServer({
+      get: () => ({ register }),
+      effect(setup) { unmount = setup(); },
+    });
+    return unmount;
+  };
+  assert.equal(mountWeb(() => { throw new Error('webServer 尚未可用'); }), undefined);
+  const old = (await connect()).body.getReader();
+  assert.equal((await old.read()).done, false);
+  let registered = 0;
+  const register = (route) => {
+    assert.equal(route.path, '/plugins/studymate/events');
+    registered++;
+    return () => { registered--; };
+  };
+  const unmount = mountWeb(register);
+  assert.equal(registered, 1);
+  assert.equal((await old.read()).done, true);
+  const response = await connect();
+  assert.equal(response.status, 307);
+  assert.equal(response.headers.get('location'), '/plugins/studymate/events');
+  unmount();
+  assert.equal(registered, 0);
+  const legacy = await connect();
+  assert.equal(legacy.status, 200);
+  await legacy.body.cancel();
+  mountWeb(register);
+  assert.equal(registered, 1);
+  dispose();
+  assert.equal(registered, 0);
+});
+
 test('没有 connection.fetch.register 时仍可走 webServer，两条都没有就只警告', async (t) => {
   useHome(t, { withWorkspace: false });
   watch.resetWatchRegistryForTests();

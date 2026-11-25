@@ -415,22 +415,28 @@ async function probeWatch(app, probe) {
   try { await authorized.body?.cancel(); } catch { /* 只是拿 Set-Cookie */ }
 
   const watchModule = await import(pathToFileURL(path.join(project, 'lib/watch/index.ts')).href);
-  // 兼容退路：生产已经把 /plugins exact 路由挂到真 webServer；这里显式再挂一次
-  // connection 流式路由，把老宿主仍会走的 /api 通道也验到。
+  // 单独挂一个强制兼容探针：生产 /api 入口会重定向到当前可用的 /plugins 路由。
+  const compatProbePath = '/api/studymate/events-compat-probe';
   const disposeApi = watchModule.registerWatchChannel({
     get: (name) => (name === 'connection' ? app.ctx.get(name) : undefined),
-  }, { route: 'connection' });
+  }, { route: 'connection', path: compatProbePath });
 
-  const api = await openSse(`${origin}/api/studymate/events`, { cookie });
+  const api = await openSse(`${origin}${compatProbePath}`, { cookie });
   const fallback = await openSse(`${origin}/plugins/studymate/events`, { cookie });
   try {
-    // 退路不在 /api 围栏里：没有会话必须自己拒（不是 200）
+    const redirected = await fetch(`${origin}/api/studymate/events`, {
+      headers: { cookie }, redirect: 'manual',
+    });
+    assert.equal(redirected.status, 307);
+    assert.equal(redirected.headers.get('location'), '/plugins/studymate/events');
+
+    // 默认路由不在 /api 围栏里：没有会话必须自己拒。
     const denied = await fetch(`${origin}/plugins/studymate/events`);
-    assert.equal(denied.status, 401, '退路没有会话时该 401');
+    assert.equal(denied.status, 401, '默认路由没有会话时该 401');
     try { await denied.body?.cancel(); } catch { /* 只要状态码 */ }
 
     const apiGreeting = await api.greeting('/api 建连问候');
-    await fallback.greeting('退路建连问候');
+    await fallback.greeting('默认路由建连问候');
 
     // ① 改一个课件文件：两条通道都该收到通知。
     // 监听是**异步**起来的（扫盘 + 每个目录等 chokidar ready），改动恰好落在观察者挂好之前时
@@ -445,7 +451,7 @@ async function probeWatch(app, probe) {
       lessonNotice = api.notices()[0] ?? null;
     }
     assert.ok(lessonNotice, '改了三次课件文件，一条通知都没收到');
-    await fallback.waitForNotices(1, '退路上「课件变了」的通知', 3000);
+    await fallback.waitForNotices(1, '默认路由上「课件变了」的通知', 3000);
     assert.equal(lessonNotice.kind, 'changed');
     assert.deepEqual(lessonNotice.domains, ['lesson'], JSON.stringify(lessonNotice));
     assert.match(lessonNotice.at, /^\d{4}-\d{2}-\d{2}T/);
@@ -453,7 +459,7 @@ async function probeWatch(app, probe) {
 
     // 监听是**异步**起来的（扫盘 + 逐个挂观察者），所以建连问候可能是「那一刻」的旧标签。
     // 收到通知说明它确实在跑；这时再连一条，读到的 backend 才是结论。
-    const settled = await openSse(`${origin}/api/studymate/events`, { cookie });
+    const settled = await openSse(`${origin}/plugins/studymate/events`, { cookie });
     const settledGreeting = await settled.greeting('复核问候');
     await settled.close();
     const backend = /backend=([^\s]+)/.exec(settledGreeting)[1];
