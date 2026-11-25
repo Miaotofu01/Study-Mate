@@ -1,6 +1,6 @@
 // 变更推送（#74 `lib/watch/channel.ts`）的两条路，都在**真 HTTP** 上过一遍：
-//   · 路 A：`connection.fetch.register` 返回一个 body 没写完的 `Response`（/api 下）；
-//   · 路 B：`ctx.webServer.register` 的 exact 路由（/plugins 下，退路）。
+//   · 路 A：`connection.fetch.register` 返回一个 body 没写完的 `Response`（/api 下，兼容退路）；
+//   · 路 B：`ctx.webServer.register` 的 exact 路由（/plugins 下，生产默认）。
 //
 // 中间那个 bridge 是照 DSH 载体的实现抄的（dsh-client-connection/lib/index.js:34-100：
 // 先 writeHead，再 `for await (chunk of response.body)` 逐块 write）——「流式 Response
@@ -117,7 +117,32 @@ test('推送路 A：connection.fetch.register 的流式 Response 就是一条 SS
   await stream.cancel();
 });
 
-test('推送路 B（退路）：webServer 的 exact 路由，认证自己判（有 connection 就用 requestRejection）', async (t) => {
+test('推送路 A：请求 abort 会结束 Response body，不把宿主更新锁永久吊住', async (t) => {
+  useHome(t, { withWorkspace: false });
+  watch.resetWatchRegistryForTests();
+  captureWarnings(t);
+
+  const routes = [];
+  const dispose = watch.registerWatchChannel({
+    get: (name) => (name === 'connection'
+      ? { fetch: { register(route) { routes.push(route); return async () => {}; } } }
+      : undefined),
+  }, { route: 'connection' });
+  t.after(() => Promise.resolve(dispose()));
+
+  const abort = new AbortController();
+  const response = await routes[0].fetch(new Request('http://127.0.0.1/api/studymate/events', { signal: abort.signal }));
+  const reader = response.body.getReader();
+  const greeting = await reader.read();
+  assert.equal(greeting.done, false);
+  assert.match(new TextDecoder().decode(greeting.value), /studymate connected/);
+
+  abort.abort();
+  const ended = await reader.read();
+  assert.equal(ended.done, true, 'abort 后 ReadableStream 必须结束，让 bridge 的 for-await resolve');
+});
+
+test('推送路 B（默认）：webServer 的 exact 路由，认证自己判（有 connection 就用 requestRejection）', async (t) => {
   useHome(t, { withWorkspace: false });
   watch.resetWatchRegistryForTests();
   captureWarnings(t);
@@ -164,7 +189,83 @@ test('推送路 B（退路）：webServer 的 exact 路由，认证自己判（�
   await stream.cancel();
 });
 
-test('没有 connection.fetch.register 时自动退到 webServer，两条都没有就只警告', async (t) => {
+test('connection 与 webServer 都可用时默认走 /plugins，避免 SSE 占住 /api 更新队列', (t) => {
+  useHome(t, { withWorkspace: false });
+  watch.resetWatchRegistryForTests();
+  captureWarnings(t);
+
+  const apiRoutes = [];
+  const webRoutes = [];
+  const dispose = watch.registerWatchChannel({
+    get: (name) => {
+      if (name === 'connection') return {
+        fetch: { register(route) { apiRoutes.push(route); return async () => {}; } },
+        requestRejection: () => undefined,
+      };
+      if (name === 'webServer') return { register(route) { webRoutes.push(route); return () => {}; } };
+      return undefined;
+    },
+  });
+  t.after(() => dispose());
+
+  assert.equal(apiRoutes.length, 0, '新宿主不该把长连接挂进 /api');
+  assert.equal(webRoutes.length, 1);
+  assert.equal(webRoutes[0].path, '/plugins/studymate/events');
+});
+
+test('webServer 晚到、卸载和重挂时切换兼容流，不留下在途请求', { timeout: 2000 }, async (t) => {
+  useHome(t, { withWorkspace: false });
+  watch.resetWatchRegistryForTests();
+  captureWarnings(t);
+  let apiRoute;
+  let onWebServer;
+  const connection = {
+    fetch: { register(route) { apiRoute = route; return () => {}; } },
+    requestRejection: () => undefined,
+  };
+  const dispose = watch.registerWatchChannel({
+    get: (name) => name === 'connection' ? connection : undefined,
+    inject(names, mount) {
+      if (names.includes('webServer')) onWebServer = mount;
+    },
+  });
+  t.after(dispose);
+  const connect = () => apiRoute.fetch(new Request('http://127.0.0.1/api/studymate/events'));
+  const mountWeb = (register) => {
+    let unmount;
+    onWebServer({
+      get: () => ({ register }),
+      effect(setup) { unmount = setup(); },
+    });
+    return unmount;
+  };
+  assert.equal(mountWeb(() => { throw new Error('webServer 尚未可用'); }), undefined);
+  const old = (await connect()).body.getReader();
+  assert.equal((await old.read()).done, false);
+  let registered = 0;
+  const register = (route) => {
+    assert.equal(route.path, '/plugins/studymate/events');
+    registered++;
+    return () => { registered--; };
+  };
+  const unmount = mountWeb(register);
+  assert.equal(registered, 1);
+  assert.equal((await old.read()).done, true);
+  const response = await connect();
+  assert.equal(response.status, 307);
+  assert.equal(response.headers.get('location'), '/plugins/studymate/events');
+  unmount();
+  assert.equal(registered, 0);
+  const legacy = await connect();
+  assert.equal(legacy.status, 200);
+  await legacy.body.cancel();
+  mountWeb(register);
+  assert.equal(registered, 1);
+  dispose();
+  assert.equal(registered, 0);
+});
+
+test('没有 connection.fetch.register 时仍可走 webServer，两条都没有就只警告', async (t) => {
   useHome(t, { withWorkspace: false });
   watch.resetWatchRegistryForTests();
   const warnings = captureWarnings(t);

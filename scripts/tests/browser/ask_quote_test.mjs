@@ -10,7 +10,9 @@
        `studymateAsk`（**不是** `mainView`）；
      · 面板嵌的是 `conversation.content`，而且被 `SessionProvider` 包着、指着我们 retain 的那条；
      · 「新对话」建一条新的并换过去，上一条被 release；「上一段会话」只列答疑会话（标题前缀认）；
-     · 切「题目」tab 再切回、以及**真刷新页面**之后，会话还在（不重复建）。
+     · 切「题目」tab 再切回、以及**真刷新页面**之后，会话还在（不重复建）；
+     · #324 内嵌布局与滚轮回归：开启真宿主弹性包裹桩（`__HOST_EMBED_LAYOUT`）时，会话区撑满右栏、
+       内层拿到受限高度且鼠标滚轮驱动内层而非外层，「上一段会话」展开在长对话与矮视口下都不压扁、不裁掉输入框。
 
    外加 #106 那条链（引用 chip 是承重件：#92 只把选中的那段冻成一条数据，这里才让它跟着
    **下一条消息**走）：
@@ -174,7 +176,16 @@ function buildFixture(dir, payload) {
     calls: [], reply: null,
     create: function (body) {
       window.__HOST.seq += 1;
-      var id = 'qa-fixture-' + window.__HOST.seq;
+      // 会话 id **整个套件跑程**唯一，不只本页唯一：#241 的记忆表（studymate.ask.sessions.v1）
+      // 会把 id 带过页面边界，真宿主也绝不会重发用过的 id。每页都从 1 重数的话，「新对话」
+      // 建出来的 id 会跟记忆表指着的那条撞车——setSessionId 认成「就是当前这条」，retain/
+      // release 全都不动，看上去就像按钮没反应。localStorage 跨页存活，正好当这个计数器。
+      var n = window.__HOST.seq;
+      try {
+        n = Number(window.localStorage.getItem('studymate.fixture.sessionSeq') || 0) + 1;
+        window.localStorage.setItem('studymate.fixture.sessionSeq', String(n));
+      } catch (error) { /* localStorage 不给用就退回本页序号（夹具自己兜底） */ }
+      var id = 'qa-fixture-' + n;
       // 夹具镜像宿主那条路由的拼法（「答疑 · 科目 · 节点」，缺哪节少写哪节）
       var title = ['答疑', String(body.subject || '').trim(), String(body.node || '').trim()]
         .filter(function (part) { return part !== ''; }).join(' · ');
@@ -304,13 +315,49 @@ function buildFixture(dir, payload) {
         childName: child && child.props && child.props['data-name'],
         childVariant: child && child.props && child.props['data-variant'],
       });
-      return child;
+      return window.__HOST_EMBED_LAYOUT
+        ? window.MiniReact.createElement('div', { 'data-proto': 'host-session-wrapper' }, child)
+        : child;
     }
     function renderFactorySlot(name, props) {
       window.__HOST.factoryCalls.push({ name: name, props: props });
-      return window.MiniReact.createElement('div',
-        { 'data-proto': 'host-conversation', 'data-name': name, 'data-variant': props && props.variant },
-        '宿主会话正文');
+      if (!window.__HOST_EMBED_LAYOUT) {
+        return window.MiniReact.createElement('div',
+          { 'data-proto': 'host-conversation', 'data-name': name, 'data-variant': props && props.variant },
+          '宿主会话正文');
+      }
+      var turns = [];
+      for (var i = 1; i <= 20; i += 1) {
+        turns.push(window.MiniReact.createElement('div', {
+          key: 't' + i,
+          'data-proto': 'host-turn',
+          style: {
+            minHeight: '110px', padding: '10px 12px', marginBottom: '10px',
+            border: '1px solid var(--smb-line)', borderRadius: '8px',
+          },
+        }, '模拟第 ' + i + ' 轮问答内容，用于验证内嵌会话容器的受限高度与内部滚轮滚动。'));
+      }
+      var flow = window.MiniReact.createElement('div', {
+        'data-proto': 'host-chat-flow',
+        style: { flex: '1 0 auto', minHeight: 'auto', padding: '4px 8px' },
+      }, turns);
+      var composer = window.MiniReact.createElement('div', {
+        'data-composer-seat': '',
+        style: {
+          position: 'sticky', bottom: '0px', flex: '0 0 auto', height: '96px',
+          padding: '8px 10px', borderTop: '1px solid var(--smb-line)', background: 'var(--smb-panel)',
+        },
+      }, '模拟宿主输入框');
+      var scrollBody = window.MiniReact.createElement('div', {
+        'data-conversation-scroll': '',
+        style: { display: 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: '0px', overflowY: 'auto' },
+      }, flow, composer);
+      return window.MiniReact.createElement('div', {
+        'data-proto': 'host-conversation',
+        'data-name': name,
+        'data-variant': props && props.variant,
+        style: { display: 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: '0px', overflow: 'hidden' },
+      }, scrollBody);
     }
     window.MiniReact.mount(window.MiniReact.createElement(Main, {
       SessionProvider: SessionProvider,
@@ -732,14 +779,27 @@ try {
   /* ── 三、「新对话」建新的并换过去；「上一段会话」只列答疑会话 ────────────── */
   await session.scene('ask-session-switch', async (ctx) => {
     await openLesson(ctx);
-    await openAskTab(ctx);
-    const first = await ctx.evaluate(SESSION_PROBE);
-
-    // 单子里先塞两条别的：一条答疑（较早）、一条学习会话（更新的）——只有前者该出现
+    // 先把这页的棋局立起来，再开面板。记忆表指着「上一页留下」的那条（场景一建、#241 记下的
+    // qa-fixture-1）：面板一挂先问记忆表，不会在这页再建一条；而真宿主里那条会话还活在列表
+    // 里（会话落磁盘，不随页面消失），所以把它也种进列表——updated_at 压到最旧，让「新对话」
+    // 建出来的那条排最前。另种两条别的：一条答疑（较早）、一条学习会话（更新）——单子里只有
+    // 前者该出现。记忆表与种子会话对应的计数器也一起立起来：这条场景自给自足，不依赖前面
+    // 场景留在 localStorage 里的余烬（哪天键名换了，列表里那条照样把面板引到 qa-fixture-1；
+    // 计数器置成 '1'，点「新对话」才会稳稳产出 qa-fixture-2）。
     await ctx.evaluate(seedRows([
+      { id: 'qa-fixture-1', title: '答疑 · 演示科目 · 变量', displayTitle: '不计旧', updatedAt: 50, blank: false, running: false, retainedBy: {} },
       { id: 'qa-older', title: '答疑 · 演示科目 · 变量', displayTitle: '不计较', updatedAt: 100, blank: false, running: false, retainedBy: {} },
       { id: 'learn-1', title: '学习 · 演示科目 · 变量', displayTitle: '学习 · 演示科目 · 变量', updatedAt: 999, blank: false, running: false, retainedBy: {} },
     ]));
+    await ctx.evaluate(`(() => {
+      try {
+        localStorage.setItem('studymate.ask.sessions.v1',
+          JSON.stringify({ '答疑 · 演示科目 · 变量': 'qa-fixture-1' }));
+        localStorage.setItem('studymate.fixture.sessionSeq', '1');
+      } catch (error) { /* 存不下退回标题认 */ }
+    })()`);
+    await openAskTab(ctx);
+    const first = await ctx.evaluate(SESSION_PROBE);
 
     await ctx.evaluate(CLICK_NEW);
     await ctx.sleep(600);
@@ -783,7 +843,9 @@ try {
 
 /* ── 四、真刷新：会话在磁盘上，回来还是那一条 ──────────────────────────────
    用 `Page.addScriptToEvaluateOnNewDocument` 提前把「列表里有一条答疑会话」塞进去：它就是
-   「上一次打开留下的那条会话」。真刷新之后面板该认得出它，而不是又建一条。 */
+   「上一次打开留下的那条会话」。真刷新之后面板该认得出它，而不是又建一条。
+   面板认它有两条路（#241 的记忆表 → 标题前缀认快照）；这条场景专验第二条，记忆表在
+   场景里清掉，不然它先命中、标题那条路永远验不着。 */
 try {
   await session.inject(`window.__HOST_SEED = { rows: [
     { id: 'qa-persisted', title: '答疑 · 演示科目 · 变量', displayTitle: '不计题', updatedAt: 5, blank: false, running: false, retainedBy: {} },
@@ -791,6 +853,11 @@ try {
   ] };`);
   await session.scene('ask-session-reload', async (ctx) => {
     await openLesson(ctx);
+    // #241 的记忆表比标题投影更早命中，不清掉它这条永远走不到「标题前缀认」那半——上一段
+    // 场景点过的会话还躺在记忆里，面板会照记忆 retain，压根不看这份种子列表。清掉演的是
+    // 「换了浏览器，本地没记忆，宿主磁盘上会话还在」——正是标题前缀那条机制存在的场景。
+    // 要赶在面板挂出来之前清：面板一挂就读。
+    await ctx.evaluate(`(() => { try { localStorage.removeItem('studymate.ask.sessions.v1'); } catch (error) { /* 没有就算了 */ } })()`);
     await openAskTab(ctx);
     const seen = await ctx.evaluate(SESSION_PROBE);
     check('[刷新] 页面重开之后认出了最近那条答疑会话，没有再建一条',
@@ -806,6 +873,132 @@ try {
   });
 } catch (error) {
   check('刷新那一条跑完了', false, String(error));
+}
+
+/* ── 五、#324 内嵌布局与滚轮回归（真弹性嵌套 + 溢出滚动 + 历史单子 + 矮视口） ── */
+try {
+  const scrollRows = Array.from({ length: 10 }, (_, idx) => ({
+    id: 'qa-scroll-' + (idx + 1),
+    title: '答疑 · 演示科目 · 变量',
+    displayTitle: '答疑 · 演示科目 · 变量 #' + (idx + 1),
+    updatedAt: 100 - idx,
+    blank: false,
+    running: false,
+    retainedBy: {},
+  }));
+  await session.inject(`
+    window.__HOST_EMBED_LAYOUT = true;
+    window.__HOST_SEED = { rows: ${JSON.stringify(scrollRows)} };
+  `);
+  await session.scene('ask-embedded-scroll-layout', async (ctx) => {
+    await openLesson(ctx);
+    await ctx.evaluate(`(() => {
+      try {
+        localStorage.setItem('studymate.ask.sessions.v1',
+          JSON.stringify({ '答疑 · 演示科目 · 变量': 'qa-scroll-1' }));
+      } catch (error) { /* 忽略 */ }
+    })()`);
+    await openAskTab(ctx);
+    await ctx.sleep(400);
+
+    const layoutProbe = `(() => {
+      const body = document.querySelector('.smb-right__body');
+      const sess = document.querySelector('.smb-asksession');
+      const scroll = document.querySelector('[data-conversation-scroll]');
+      const seat = document.querySelector('[data-composer-seat]');
+      const menu = document.querySelector('.smb-askmenu');
+      const item = document.querySelector('.smb-askmenu__item');
+      const br = body ? body.getBoundingClientRect() : null;
+      const sr = sess ? sess.getBoundingClientRect() : null;
+      const cr = scroll ? scroll.getBoundingClientRect() : null;
+      const seatR = seat ? seat.getBoundingClientRect() : null;
+      const padBottom = body ? parseFloat(getComputedStyle(body).paddingBottom || '0') : 0;
+      return {
+        rightBodyClientH: body ? body.clientHeight : 0,
+        rightBodyScrollH: body ? body.scrollHeight : 0,
+        rightBodyScrollTop: body ? body.scrollTop : 0,
+        rightBodyBottom: br ? br.bottom : 0,
+        padBottom,
+        sessionBottom: sr ? sr.bottom : 0,
+        sessionHeight: sr ? sr.height : 0,
+        convScrollClientH: scroll ? scroll.clientHeight : 0,
+        convScrollScrollH: scroll ? scroll.scrollHeight : 0,
+        convScrollTop: scroll ? scroll.scrollTop : 0,
+        wheelX: cr ? Math.round(cr.left + cr.width / 2) : 0,
+        wheelY: cr && seatR ? Math.round((Math.max(br ? br.top : 0, cr.top) + Math.min(seatR.top, br ? br.bottom : seatR.top)) / 2) : 0,
+        seatTop: seatR ? seatR.top : 0,
+        seatBottom: seatR ? seatR.bottom : 0,
+        menuClientH: menu ? menu.clientHeight : 0,
+        menuScrollH: menu ? menu.scrollHeight : 0,
+        menuItemH: item ? item.getBoundingClientRect().height : 0,
+      };
+    })()`;
+
+    const initial = await ctx.evaluate(layoutProbe);
+    const gap = Math.abs((initial.rightBodyBottom - initial.padBottom) - initial.sessionBottom);
+    check('[嵌入布局] 会话区撑满右栏（下方无多余留白）且输入框落在右栏可视区内',
+      initial.sessionHeight > 300 && gap <= 2
+      && initial.seatBottom <= initial.rightBodyBottom + 1 && initial.seatTop >= 0,
+      JSON.stringify({ gap, sessionHeight: initial.sessionHeight, seatBottom: initial.seatBottom, rightBodyBottom: initial.rightBodyBottom }));
+    check('[嵌入布局] 内层滚动容器拿到受限高度（可滚）、外层不再跟着溢出',
+      initial.convScrollScrollH > initial.convScrollClientH + 200
+      && initial.rightBodyScrollH <= initial.rightBodyClientH + 1,
+      JSON.stringify({ conv: [initial.convScrollClientH, initial.convScrollScrollH], body: [initial.rightBodyClientH, initial.rightBodyScrollH] }));
+
+    for (let i = 0; i < 3; i += 1) {
+      await session.send('Input.dispatchMouseEvent', {
+        type: 'mouseWheel', x: initial.wheelX, y: initial.wheelY, deltaX: 0, deltaY: 360,
+      });
+      await ctx.sleep(80);
+    }
+    await ctx.sleep(150);
+    const afterWheel = await ctx.evaluate(layoutProbe);
+    check('[嵌入布局] 鼠标滚轮落在对话正文时驱动内层滚动，外层保持不动',
+      afterWheel.convScrollTop > 0 && afterWheel.rightBodyScrollTop === 0,
+      JSON.stringify({ convScrollTop: afterWheel.convScrollTop, rightBodyScrollTop: afterWheel.rightBodyScrollTop }));
+
+    await ctx.evaluate(OPEN_HISTORY);
+    await ctx.sleep(300);
+    const withMenu = await ctx.evaluate(layoutProbe);
+    check('[嵌入布局] 长对话下展开「上一段会话」不被压扁且菜单自身可滚',
+      withMenu.menuItemH > 0
+      && withMenu.menuClientH >= withMenu.menuItemH * 3 - 2
+      && withMenu.menuScrollH > withMenu.menuClientH,
+      JSON.stringify({ menuClientH: withMenu.menuClientH, menuScrollH: withMenu.menuScrollH, menuItemH: withMenu.menuItemH }));
+
+    await session.send('Emulation.setDeviceMetricsOverride', {
+      width: 1440, height: 560, deviceScaleFactor: 1, mobile: false,
+    });
+    await ctx.sleep(350);
+    const shortViewport = await ctx.evaluate(layoutProbe);
+    check('[嵌入布局] 矮视口（1440×560）展开 10 条菜单时仍多行可读且输入框不被裁出右栏',
+      shortViewport.menuItemH > 0
+      && shortViewport.menuClientH >= shortViewport.menuItemH * 2 - 2
+      && shortViewport.seatBottom <= shortViewport.rightBodyBottom + 1,
+      JSON.stringify({
+        menuClientH: shortViewport.menuClientH, menuItemH: shortViewport.menuItemH,
+        seatBottom: shortViewport.seatBottom, rightBodyBottom: shortViewport.rightBodyBottom,
+      }));
+
+    await session.send('Emulation.setDeviceMetricsOverride', {
+      width: 1440, height: 960, deviceScaleFactor: 1, mobile: false,
+    });
+    await ctx.sleep(250);
+    await ctx.evaluate(`document.querySelector('[data-proto="tab-quiz"]').click()`);
+    await ctx.sleep(250);
+    const quizTab = await ctx.evaluate(`(() => {
+      const rb = document.querySelector('.smb-right__body');
+      const cs = rb ? getComputedStyle(rb) : null;
+      return { hasAskBody: !!document.querySelector('.smb-askbody'), overflowY: cs ? cs.overflowY : null };
+    })()`);
+    check('[嵌入布局] 切回「题目」tab 后右栏正文恢复原生滚动，不受 :has 规则影响',
+      !quizTab.hasAskBody && quizTab.overflowY === 'auto',
+      JSON.stringify(quizTab));
+
+    return { initial, afterWheel, withMenu, shortViewport, quizTab };
+  });
+} catch (error) {
+  check('内嵌布局与滚轮回归场景跑完了', false, String(error));
 }
 
 console.log(failures ? `\n${failures} 条失败` : '\n全部通过');

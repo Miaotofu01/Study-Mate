@@ -21,7 +21,7 @@
 
    数据现造现弃（临时工作区 + 临时 HOME），跑完即删；仓库里不存样例数据。
 
-   唯一一处不是「真」的：`/api/studymate/events`（#74 的变更推送）——理由与
+   唯一一处不是「真」的：`/plugins/studymate/events`（#74 的变更推送）——理由与
    `attempts_test.mjs` 里那段逐字相同：那不在这一套的验收面上，但夹具是「真 HTTP 迷你宿主」，
    客户端发的每条请求都得有正当落点，否则会被 QA 骨架算成失败请求。
 */
@@ -198,7 +198,7 @@ async function startHost(workspace) {
       if (url.pathname === '/api/studymate/library') {
         return send(200, JSON.stringify(readLibrary({ workspace })), 'application/json; charset=utf-8');
       }
-      if (url.pathname === '/api/studymate/events') {
+      if (url.pathname === '/plugins/studymate/events') {
         // 变更推送（#74）：不在这一套的验收面上，但请求得有正当落点（见文件头）。
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });
         res.write(': studymate 夹具：变更推送不在这一套的验收面上\n\n');

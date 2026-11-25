@@ -62,6 +62,12 @@ try {
   await check('mounted home/sidebar switch en → zh → en without writes or remount', async () => {
     assert.equal(await page.locator('.smb-hero__title').innerText(), 'Learning workspace');
     await page.evaluate(() => { window.__homeElement = document.querySelector('.smb-hero__title'); });
+    // usePaneWidths() 挂载后 200ms 会写入默认 studymate.panes.v1，先等它落定再测语言切换本身零写入。
+    await page.waitForFunction(
+      () => window.__storageWrites.some(w => w.key === 'studymate.panes.v1'),
+      null,
+      { timeout: 1000 },
+    ).catch(() => {});
     const before = await page.evaluate(() => window.__storageWrites.length);
     await switchTo('zh');
     assert.equal(await page.locator('.smb-hero__title').innerText(), '学习工作台');
@@ -75,14 +81,21 @@ try {
   await check('reader content, selected lesson, DOM and scroll survive locale switches', async () => {
     await page.locator('[data-proto="continue"]').click();
     await page.locator('.smb-center__body').waitFor();
-    await page.locator('.smb-center__body').evaluate(el => { el.scrollTop = 450; window.__readerElement = el; });
-    await page.waitForFunction(() => document.querySelector('.smb-center__body').scrollTop > 400);
+    // .smb-center__body 带 scroll-behavior: smooth，直接赋值 scrollTop 会平滑滑行；
+    // 旧代码等 scrollTop > 400 就读 top 会采到滑行中途值，切回 en 时滑行已落定到 450 而表现为「漂移」。
+    // 改用 instant 立即到位并等 scrollTop === 450 后，zh ↔ en 重渲染前后 scrollTop 严格相等。
+    await page.locator('.smb-center__body').evaluate(el => {
+      el.scrollTo({ top: 450, behavior: 'instant' });
+      window.__readerElement = el;
+    });
+    await page.waitForFunction(() => document.querySelector('.smb-center__body').scrollTop === 450);
     const content = await page.locator('.smb-center__body').innerText();
     const top = await page.locator('.smb-center__body').evaluate(el => el.scrollTop);
     await switchTo('zh');
     await switchTo('en');
     assert.equal(await page.locator('.smb-center__body').innerText(), content);
-    assert.equal(await page.locator('.smb-center__body').evaluate(el => el.scrollTop), top);
+    const afterSwitch = await page.locator('.smb-center__body').evaluate(el => el.scrollTop);
+    assert.equal(afterSwitch, top);
     assert.equal(await page.evaluate(() => window.__readerElement === document.querySelector('.smb-center__body')), true);
     assert.equal(JSON.stringify(library), originalLibrary);
   });
@@ -100,7 +113,9 @@ try {
     assert.deepEqual(await page.locator('.smb-refcourse__body .smb-sec-block').allTextContents(), content);
   });
   await check('unsaved notes dialog survives locale removal/rearrival without writes', async () => {
-    await page.getByRole('button', { name: 'New folder', exact: true }).click();
+    // #320 后左栏只有一个「新建」菜单：点开菜单再选文件夹项（与 notes_locale_test 同款路径）。
+    await page.locator('.notes-create-trigger').click();
+    await page.getByRole('menuitem', { name: 'New folder', exact: true }).click();
     const input = page.locator('.modal input');
     await input.fill('未保存的文件夹 draft');
     await input.evaluate(el => { window.__draftElement = el; });

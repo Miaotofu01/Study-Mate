@@ -149,7 +149,7 @@ window.__STUDYMATE_EXPORT__ = ${json};
  *   ③ `fetch`：阅读端读的接口（library / reference）就地作答——离线页面没有 Host 半；
  *      **写请求一律回 403 并说清去哪写**（作答与资料都要回 DSH 里写），不假装成功；
  *   ④ 变更推送（#74）：离线页面是快照，没有 Host 半可推——用一个**静默的 EventSource 替身**，
- *      不让真 EventSource 去连 `/api/studymate/events`（`file://` 下必然失败，控制台会脏）；
+ *      不让真 EventSource 去连 `/plugins/studymate/events`（`file://` 下必然失败，控制台会脏）；
  *   ⑤ 取图地址：阅读端按宿主路由写 `/api/studymate/asset?…`，离线页面里图与页面同处一个目录
  *      树（`assets/<科目>/<相对路径>`）。改写在 **`src` 的 setter** 上——晚一步（比如渲染完再
  *      扫 DOM）浏览器已经按旧地址发过请求了，控制台会多一条失败请求。
@@ -274,7 +274,7 @@ export function hostScript(math: boolean): string {
   };
 
   /* ④ 变更推送：离线页面是**导出那一刻的快照**，没有 Host 半可以推。
-     真 EventSource 会去连 /api/studymate/events，在 file:// 下必然失败（控制台一条 CORS、
+     真 EventSource 会去连 /plugins/studymate/events，在 file:// 下必然失败（控制台一条 CORS、
      一条失败请求，浏览器套件按问题计）。所以给一个「永远静默」的替身：不连、不重连、不报错。 */
   function SilentEventSource(url) {
     this.url = String(url);
