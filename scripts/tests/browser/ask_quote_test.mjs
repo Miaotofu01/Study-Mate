@@ -683,39 +683,48 @@ try {
     return { quote: opened.quoteText, keeps: back.retains.length, creates: back.creates, ref: first.chips[0].ref };
   });
 
-  /* ── 二之二、再划一段：旧的被换掉（同一会话只挂一条，不攒成两颗） ──────────── */
-  await session.scene('ask-chip-replace', async (ctx) => {
+  /* ── 二之二、明确添加第二段，保留两段引用 ──────────── */
+  await session.scene('ask-chip-append', async (ctx) => {
     await openLesson(ctx);
     const first = await ctx.evaluate(selectTargetIn('绑定', 40));
-    check('[换掉] 取到了第一段（绑定）', !!first && first.text.trim().length >= 8, JSON.stringify(first));
+    check('[追加] 取到了第一段（绑定）', !!first && first.text.trim().length >= 8, JSON.stringify(first));
     if (first) await dragSelect(session, first);
     await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
     await ctx.sleep(600);
     const before = await ctx.evaluate(CHIP_PROBE);
-    check('[换掉] 第一段已经进了草稿', before.chipCount === 1, JSON.stringify(before.chips));
+    check('[追加] 第一段已经进了草稿', before.chipCount === 1, JSON.stringify(before.chips));
 
     const second = await ctx.evaluate(selectTargetIn('小结', 40));
-    check('[换掉] 取到了第二段（小结，另一节）',
+    check('[追加] 取到了第二段（小结，另一节）',
       !!second && second.text.trim().length >= 8 && second.sectionTitle.trim() === '小结',
       JSON.stringify(second));
     if (second) await dragSelect(session, second);
     const ordinary = await ctx.evaluate(CHIP_PROBE);
-    check('[换掉] 普通划选不替换原来的引用', ordinary.chips[0].ref === before.chips[0].ref);
+    check('[追加] 普通划选保持已有引用', ordinary.chips[0].ref === before.chips[0].ref);
     await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
     await ctx.sleep(400);
     const after = await ctx.evaluate(CHIP_PROBE);
 
-    check('[换掉] 还是只有一颗 chip（新选区换掉旧的，不是攒成两颗）',
-      after.chipCount === 1, JSON.stringify(after.chips));
-    check('[换掉] 那一颗换成了新的一段（ref 变了）',
-      after.chips[0].ref !== before.chips[0].ref, 'ref 没变：旧的没被换掉');
-    check('[换掉] 送出去的是新那段 + 它的来源小节（旧那段的原文不在草稿里了）',
-      !!after.serialized[0] && after.serialized[0].includes(second.text.trim())
-      && after.serialized[0].includes('小节「小结」')
-      && !after.draftText.includes(first.text.trim()),
+    const visible = await ctx.evaluate(`document.querySelectorAll('[data-proto="qa-quote"]').length`);
+    check('[追加] 选择的两段都在面板和宿主草稿', visible === 2 && after.chipCount === 2
+      && after.chips[0].ref === before.chips[0].ref, JSON.stringify(after.chips));
+    check('[追加] 两段各自保留原文和来源小节',
+      after.serialized[0]?.includes(first.text.trim()) && after.serialized[0]?.includes('小节「绑定」')
+      && after.serialized[1]?.includes(second.text.trim()) && after.serialized[1]?.includes('小节「小结」'),
       JSON.stringify(after.serialized));
 
-    return { chips: after.chips.length, serialized: after.serialized[0] };
+    await ctx.evaluate(OPEN_QUIZ);
+    await ctx.evaluate(BACK_TO_ASK);
+    await ctx.sleep(300);
+    const remounted = await ctx.evaluate(CHIP_PROBE);
+    check('[追加] 切换标签后两段继续保留，各出现一次',
+      remounted.chips.map((chip) => chip.ref).join() === after.chips.map((chip) => chip.ref).join());
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-quote-clear"]').click()`);
+    await ctx.sleep(200);
+    const remaining = await ctx.evaluate(CHIP_PROBE);
+    check('[追加] 删除一段时另一段仍在', remaining.chipCount === 1
+      && remaining.chips[0].ref === after.chips[1].ref);
+    return { serialized: after.serialized };
   });
 
   /* ── 二之三、删掉 chip：草稿里那颗也撤掉，照样能直接提问 ──────────────────── */
@@ -1037,11 +1046,11 @@ try {
     await session.send('Input.dispatchKeyEvent', {type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32});
     await session.send('Input.dispatchKeyEvent', {type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});
     await ctx.sleep(250);
-    const replaced = await ctx.evaluate(CHIP_PROBE);
-    check('[手动引用] 明确换引用保留已写问题，问答保持展开',
-      replaced.embedded && replaced.chipCount === 1 && replaced.chips[0].ref !== before.chips[0].ref
-      && replaced.draftText.includes('我手写的问题') && replaced.serialized[0].includes(again.text.trim()), JSON.stringify(replaced));
-    return { selection, draft: replaced.draftText };
+    const appended = await ctx.evaluate(CHIP_PROBE);
+    check('[手动引用] 明确追加引用保留已写问题，问答保持展开',
+      appended.embedded && appended.chipCount === 2 && appended.chips[0].ref === before.chips[0].ref
+      && appended.draftText.includes('我手写的问题') && appended.serialized[1]?.includes(again.text.trim()), JSON.stringify(appended));
+    return { selection, draft: appended.draftText };
   });
 
 } catch (error) {
