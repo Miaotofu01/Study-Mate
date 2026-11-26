@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ReactFlow, ReactFlowProvider, Background, BackgroundVariant, MiniMap, useReactFlow, useNodesInitialized, applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, FolderPlus, FileText, Link2, HelpCircle, RotateCcw, X, Undo2, Redo2, ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Type, Trash2, LayoutDashboard, Sun, Moon, LocateFixed, Copy, RefreshCw, ChevronDown, NotebookPen } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, FolderPlus, FileText, Link2, HelpCircle, RotateCcw, X, Undo2, Redo2, ZoomIn, ZoomOut, Maximize, Hand, MousePointer2, Type, Trash2, LayoutDashboard, Sun, Moon, LocateFixed, Copy, RefreshCw, NotebookPen } from 'lucide-react';
 import { makeDemo, card, textCard, edge } from './fixtures.js';
 import { BoardContext } from './BoardContext.js';
-import { nodeTypes, edgeTypes } from './CanvasNodes.jsx';
+import { nodeTypes, edgeTypes, COLLAPSED_CARD_HEIGHT, TEXT_NODE_MIN_HEIGHT } from './CanvasNodes.jsx';
 import ResourceTree, { initialFolders, initialParent } from './ResourceTree.jsx';
-import { folderDeleteBlockReason, canRenameResource, validateFolderName, validateFileTitle } from './resource-tree-model.js';
+import { folderDeleteBlockReason, canRenameResource, validateFolderName, validateFileTitle, planResourceMove } from './resource-tree-model.js';
 import MediaRenderer from './MediaRenderer.jsx';
 import ImportControls from './ImportControls.jsx';
 import { IMPORT_FILE_ACCEPT, IMPORT_PICKER_TYPES, captureFileDrop, readImportedEntry, resolveFileReference, isFileReference, originDescription, gridAppearance } from './imports.js';
@@ -16,7 +17,7 @@ import NoteTitleInput from './NoteTitleInput.jsx';
 import { isMarkdownResource, isUnsupportedNote, noteExtension, copyNoteTitle } from './note-types.js';
 import CourseReference from './CourseReference.jsx';
 import { NodeNotebookTree, NotesStatus } from './LearningNotes.jsx';
-import { CourseAssociationBar, NotebookBindingsForm, NoteAssociationsForm, notebookBindingLabel } from './CourseRelations.jsx';
+import { CourseAssociationBar, CourseAssociationOption, NotebookBindingsForm, NoteAssociationsForm, notebookBindingLabel } from './CourseRelations.jsx';
 import { createNotesWorkspace, sameSubject, sameCourse, courseRef, normalizeCourseRef, associateNote, notebookOf, ownedNote, resolveCourse } from './curriculum.js';
 import { corruptMessage } from './corrupt.js';
 import { useNotesLocale, nt } from './locale.js';
@@ -47,7 +48,8 @@ const fresh = () => {
 };
 const snapshot = (scene) => ({ nodes: scene.nodes.map(({ selected, dragging, resizing, measured, ...node }) => ({ ...node, data: { ...node.data }, style: { ...node.style } })), edges: scene.edges.map(({ selected, ...value }) => ({ ...value, data: { ...value.data } })) });
 // 画布里的几何一律用画布坐标：缩放时节点与点阵一起缩放，不能把屏幕像素写回节点。
-const COLLAPSED_ROW = 48;
+const COLLAPSED_ROW = COLLAPSED_CARD_HEIGHT;
+const TEXT_NODE_DEFAULT_HEIGHT = TEXT_NODE_MIN_HEIGHT;
 const nodeForResource = (id, resource, x, y, width = 310, height = 255) => resource?.type === 'link'
   ? textCard(id, resource.id, x, y, Math.max(240, width), Math.max(110, Math.min(160, height)))
   : (({ dragHandle, ...node }) => node)(card(id, resource.id, x, y, width, height));
@@ -82,24 +84,64 @@ function Modal({ title, onClose, children, className = '' }) {
 }
 
 const CREATE_ENTRIES = [['notebook', 'new_notebook', NotebookPen], ['folder', 'new_folder', FolderPlus], ['note', 'new_note', FileText]];
-function CreateMenu({ disabled, onChoose }) {
+function CreateMenu({ disabled, onChoose, getPortalHost }) {
   useNotesLocale();
   const [open, setOpen] = useState(false);
-  const trigger = useRef(null), menu = useRef(null);
-  useEffect(() => { if (open && !disabled) menu.current?.querySelector('button')?.focus(); }, [open, disabled]);
+  const [position, setPosition] = useState({});
+  const root = useRef(null), trigger = useRef(null), menu = useRef(null);
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
-  return <div className="notes-create-control" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
-    <button ref={trigger} className="button ghost notes-create-trigger" type="button" disabled={disabled} aria-expanded={open && !disabled} aria-haspopup="menu" onClick={() => setOpen(!open)}>{nt('new')} <ChevronDown size={13} aria-hidden="true" /></button>
-    {open && !disabled && <div ref={menu} className="import-menu-items notes-create-menu" role="menu" aria-label={nt('new_resource')} onKeyDown={event => {
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus(); }
-      else if (['ArrowUp','ArrowDown','Home','End'].includes(event.key)) {
-        const items = [...event.currentTarget.querySelectorAll('button')], index = items.indexOf(document.activeElement);
-        event.preventDefault();
-        items[event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
-      }
-    }}>
-      {CREATE_ENTRIES.map(([kind, labelKey, Icon]) => <button key={kind} type="button" role="menuitem" onClick={() => { trigger.current?.focus(); setOpen(false); onChoose(kind); }}><Icon size={15} aria-hidden="true" />{nt(labelKey)}</button>)}
-    </div>}
+  useLayoutEffect(() => {
+    if (!open || disabled) return undefined;
+    const place = () => {
+      const button = trigger.current?.getBoundingClientRect();
+      const host = getPortalHost()?.getBoundingClientRect();
+      if (!button || !host) return;
+      const menuWidth = menu.current?.getBoundingClientRect().width || 0;
+      const preferredLeft = button.right - host.left - menuWidth;
+      const maxLeft = Math.max(8, host.width - menuWidth - 8);
+      setPosition({
+        position: 'absolute',
+        left: Math.max(8, Math.min(preferredLeft, maxLeft)),
+        top: button.bottom - host.top + 4,
+      });
+    };
+    const outside = (event) => {
+      if (!root.current?.contains(event.target) && !menu.current?.contains(event.target)) setOpen(false);
+    };
+    place();
+    document.addEventListener('pointerdown', outside, true);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    menu.current?.querySelector('[role="menuitem"]')?.focus();
+    return () => {
+      document.removeEventListener('pointerdown', outside, true);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open, disabled, getPortalHost]);
+  const keys = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      trigger.current?.focus();
+    } else if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+      const items = [...(menu.current?.querySelectorAll('[role="menuitem"]') || [])];
+      if (!items.length) return;
+      const index = items.indexOf(document.activeElement);
+      event.preventDefault();
+      event.stopPropagation();
+      items[event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+    } else if (event.key === 'Tab') {
+      setOpen(false);
+    }
+  };
+  const portalHost = getPortalHost?.();
+  return <div ref={root} className="notes-create-control" onKeyDown={keys}>
+    <button ref={trigger} className="icon-button notes-create-trigger" type="button" disabled={disabled} aria-label={nt('new')} title={nt('new')} aria-expanded={open && !disabled} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}><Plus size={17} aria-hidden="true" /></button>
+    {open && !disabled && portalHost && createPortal(<div ref={menu} className="import-menu-items notes-create-menu" role="menu" aria-label={nt('new_resource')} style={position} onKeyDown={keys}>
+      {CREATE_ENTRIES.map(([kind, labelKey, Icon]) => <button key={kind} type="button" role="menuitem" onClick={() => { trigger.current?.focus(); setOpen(false); onChoose(kind); }}><Icon size={16} aria-hidden="true" /><span>{nt(labelKey)}</span></button>)}
+    </div>, portalHost)}
   </div>;
 }
 
@@ -292,6 +334,19 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, sco
       void flow.setViewport(fallback?.viewport || { x: 0, y: 0, zoom: 1 }, { duration: 0 });
     }
   }, [notesPersistence.markEdit, hasCanvasContent, announce, activeNotebook, flow]);
+  const moveEntry = (entry, parent) => {
+    const all = foldersRef.current;
+    const items = resourcesRef.current;
+    const move = planResourceMove(all, items, entry, parent);
+    if (!move || !notesPersistence.canEdit) return false;
+    if (move.crossesNotebook && !window.confirm(nt('confirm_resource_move', {
+      name: move.source.name || move.source.title, path: folderPath(all, parent),
+    }))) return false;
+    if (!notesPersistence.markEdit()) return false;
+    if (entry.kind === 'folder') storeFolders(all.map(folder => folder === move.source ? { ...folder, parent } : folder));
+    else storeResources({ ...items, [entry.id]: { ...move.source, parent } });
+    return true;
+  };
   const renameResource = useCallback((resourceId, title) => {
     const resource = resourcesRef.current[resourceId];
     const result = validateFileTitle(title);
@@ -445,7 +500,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, sco
     const node = nodeForResource(uid('node'), resource, point.x - 150, point.y - 120, ['image', 'svg', 'html'].includes(resource.type) ? 360 : 310, resource.courseRef ? 90 : 260);
     checkpoint(); changeScene((previous) => ({ ...previous, nodes: [...previous.nodes, { ...node, selected: true }] })); setView('canvas');
   };
-  const addText = () => { if (sceneRef.current.nodes.length >= 120) { announce('此体验版最多放置 120 个节点'); return; } if (!notesPersistence.markEdit()) return; const point = center(), id = uid('text'); checkpoint(); changeScene((previous) => ({ ...previous, nodes: [...previous.nodes.map((node) => ({ ...node, selected: false })), { id, type: 'text', position: { x: point.x - 130, y: point.y - 65 }, style: { width: 260, height: 130 }, data: { text: '' }, selected: true }] })); setEditingNode(id); setView('canvas'); };
+  const addText = () => { if (sceneRef.current.nodes.length >= 120) { announce('此体验版最多放置 120 个节点'); return; } if (!notesPersistence.markEdit()) return; const point = center(), id = uid('text'); checkpoint(); changeScene((previous) => ({ ...previous, nodes: [...previous.nodes.map((node) => ({ ...node, selected: false })), { id, type: 'text', position: { x: point.x - 130, y: point.y - TEXT_NODE_DEFAULT_HEIGHT / 2 }, style: { width: 260, height: TEXT_NODE_DEFAULT_HEIGHT }, data: { text: '' }, selected: true }] })); setEditingNode(id); setView('canvas'); };
   const beginCreate = (kind) => {
     const all = foldersRef.current;
     const selected = pickedEntry?.kind === 'file' ? resourcesRef.current[pickedEntry.id] : null;
@@ -486,6 +541,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, sco
   const deleteSelection = useCallback(() => { const previous = sceneRef.current, scoped = new Set(previous.nodes.filter(node => nodeScope(node) === activeNotebook).map(node => node.id)), ids = new Set(previous.nodes.filter(node => scoped.has(node.id) && node.selected).map(node => node.id)), edgeIds = new Set(previous.edges.filter(edge => scoped.has(edge.source) && scoped.has(edge.target) && edge.selected).map(edge => edge.id)); if (!ids.size && !edgeIds.size) return; checkpoint(); changeScene(value => ({ nodes: value.nodes.filter(node => !ids.has(node.id)), edges: value.edges.filter(edge => !edgeIds.has(edge.id) && !ids.has(edge.source) && !ids.has(edge.target)) })); setEditingNode(null); setEditingEdge(null); }, [checkpoint, changeScene, activeNotebook, legacyNotebook]);
   const removeCurrentCard = () => { const node = sceneRef.current.nodes.find((node) => node.data.contentId === current?.id && nodeScope(node) === activeNotebook); if (!node) return; checkpoint(); changeScene((previous) => ({ nodes: previous.nodes.filter((value) => value.id !== node.id), edges: previous.edges.filter((value) => value.source !== node.id && value.target !== node.id) })); announce('已移出画布，文件保留'); };
   // 折叠只留标题栏：节点自身高度压到 48，展开时恢复折叠前的高度；两者都进画板历史。
+  // 清掉顶层 height 让 React Flow 一律以 style.height 驱动外框高度，避免缩放后顶层 height 盖住折叠/展开。
   const toggleCardCollapsed = (id) => {
     const node = sceneRef.current.nodes.find((value) => value.id === id);
     if (!node) return;
@@ -493,12 +549,13 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, sco
     checkpoint();
     changeScene((previous) => ({ ...previous, nodes: previous.nodes.map((value) => {
       if (value.id !== id) return value;
+      const { height: _topHeight, ...rest } = value;
       if (collapsed) {
         const height = Math.round(Number.parseFloat(value.data?.expandedHeight) || 255);
-        return { ...value, data: { ...value.data, collapsed: false }, style: { ...value.style, height } };
+        return { ...rest, data: { ...value.data, collapsed: false }, style: { ...value.style, height } };
       }
-      const height = Number.parseFloat(value.style?.height ?? value.height ?? value.initialHeight) || 255;
-      return { ...value, data: { ...value.data, collapsed: true, expandedHeight: Math.round(height) }, style: { ...value.style, height: COLLAPSED_ROW } };
+      const height = Number.parseFloat(value.height ?? value.style?.height ?? value.measured?.height ?? value.initialHeight) || 255;
+      return { ...rest, data: { ...value.data, collapsed: true, expandedHeight: Math.round(height) }, style: { ...value.style, height: COLLAPSED_ROW } };
     }) }));
   };
   const updateNodeText = (id, text) => { const previous = sceneRef.current.nodes.find((node) => node.id === id); if (previous && previous.data.text !== text) { checkpoint(); changeScene((value) => ({ ...value, nodes: value.nodes.map((node) => node.id === id ? { ...node, data: { ...node.data, text } } : node) })); } };
@@ -689,8 +746,8 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, sco
   const manageAssociation = (id) => { setManageAt(id); setModal('note-associations'); };
   const managedBook = folders.find(folder => folder.id === manageAt && folder.kind === 'notebook');
   const managedNote = resources[manageAt];
-  const associationBar = current?.type === 'note' && <CourseAssociationBar resource={current} library={courseLibrary}
-    onNavigate={onNavigateCourse} onManage={() => manageAssociation(current.id)} canEdit={notesPersistence.canEdit && currentMarkdown && ownedNote(current)} />;
+  const canEditAssociation = notesPersistence.canEdit && currentMarkdown && ownedNote(current);
+  const openAssociation = () => manageAssociation(current.id);
   const ctx = { resources, openDocument, editingNode, setEditingNode, editingEdge, setEditingEdge, checkpoint, updateNodeText, commitEdgeLabel, toggleCardCollapsed, navigateCourse: onNavigateCourse, courseLibrary };
   const documentBody = current?.courseRef ? <CourseReference key={current.id} resource={current} library={courseLibrary} renderCourse={renderCourse} onNavigate={onNavigateCourse} canEdit={notesPersistence.canEdit} onChange={patch => updateResource(current.id, patch)} /> : currentMarkdown ? <NoteEditor key={current.id} resource={current} theme={theme} mode={documentMode} exportTarget={documentActions} onChange={markdown => updateResource(current.id, { markdown })} readOnly={referenceReadOnly || !notesPersistence.canEdit || !active} /> : isUnsupportedNote(current) ? <p className="unsupported-note" role="status">{nt('unsupported_note')}</p> : <div className="document-preview-pane">{current && ['image', 'svg', 'html'].includes(current.type) ? <div className="document-content"><MediaRenderer resource={current} className="media-preview document-media" /></div>
     : <div className="document-content"><h1>{current?.title}</h1><p>{current?.summary}</p>{current?.type === 'link' && <a href={current.url} target="_blank" rel="noopener noreferrer">{nt('open_web')}</a>}</div>}</div>;
@@ -702,6 +759,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, sco
     {notesPersistence.isNative && notesPersistence.corrupt.length > 0 && <div className="persistence-corrupt-list" role="status">{notesPersistence.corrupt.map(entry => <div className="persistence-corrupt" key={entry.id}>{corruptMessage(entry, courseLibrary, folders, scene)}</div>)}</div>}
     {notesPersistence.isNative && notesPersistence.conflictKeys.length > 0 && <div className="persistence-conflict" role="alert"><p>{nt('conflict_data')}</p><button className="button ghost" onClick={() => { if (window.confirm(nt('retry_confirm'))) notesPersistence.conflictKeys.forEach(key => notesPersistence.resolveConflict(key, { discard: false })); }}>{nt('keep_retry')}</button></div>}
     <header className="topbar">
+      <button className="icon-button topbar-panel-toggle topbar-panel-toggle--left" type="button" aria-label={nt(leftOpen ? 'close_files' : 'open_files')} title={nt(leftOpen ? 'close_files' : 'open_files')} aria-expanded={leftOpen} aria-controls="left-panel" onClick={() => setLeftOpen((value) => !value)}>{leftOpen ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}</button>
       <div className="view-switch" aria-label={nt('main_view')}><button className={view === 'canvas' ? 'is-active' : ''} aria-pressed={view === 'canvas'} onClick={() => { setView('canvas'); setEditingNode(null); }}><LayoutDashboard size={13} />{nt('canvas')}</button><button className={view === 'document' ? 'is-active' : ''} aria-pressed={view === 'document'} onClick={() => openDocument(current?.id)}><FileText size={13} />{nt('document')}</button></div>
       <span className="topbar-spacer" />{notesPersistence.isNative && <div className="persistence-actions">
         {Object.values(notesPersistence.saveStatus).some(state => state.state === SaveState.ERROR) && <button className="button ghost" onClick={notesPersistence.retryAll}>{nt('retry_save')}</button>}
@@ -715,22 +773,46 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, sco
         : <span className="prototype-badge">开发中 · 刷新重置</span>}
       <button className="icon-button theme-switch" aria-label={theme === 'dark' ? '切换浅色模式' : '切换暗色模式'} title={theme === 'dark' ? '当前：暗色模式（覆盖仅本页，刷新后跟宿主）' : '当前：浅色模式（覆盖仅本页，刷新后跟宿主）'} onClick={() => setThemeOverride(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>
       <button className="icon-button" aria-label="操作说明" title="操作说明" onClick={() => setModal('help')}><HelpCircle size={17} /></button>{!notesPersistence.isNative && <button className="icon-button" aria-label="恢复示例" title="恢复示例" onClick={() => setModal('reset')}><RotateCcw size={16} /></button>}
-      <button className="icon-button topbar-panel-toggle" aria-label={nt(rightOpen ? 'close_right' : 'open_right')} title={nt(rightOpen ? 'close_right' : 'open_right')} aria-expanded={rightOpen} aria-controls="right-panel" onClick={() => setRightOpen((value) => !value)}>{rightOpen ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>
+      <button className="icon-button topbar-panel-toggle topbar-panel-toggle--right" type="button" aria-label={nt(rightOpen ? 'close_right' : 'open_right')} title={nt(rightOpen ? 'close_right' : 'open_right')} aria-expanded={rightOpen} aria-controls="right-panel" onClick={() => setRightOpen((value) => !value)}>{rightOpen ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>
     </header>
     <div className="workspace" ref={workspaceRef}>
-      <aside className={'side-panel left-panel' + (!leftOpen ? ' is-collapsed' : '')} style={{ width: leftOpen ? leftWidth : 0 }} inert={!leftOpen ? true : undefined} aria-hidden={!leftOpen}>
-        <div className="panel-inner"><div className="panel-header"><span className="panel-title">{nt('files')}</span><div className="panel-actions"><ImportControls onChooseMode={beginImport} getPortalHost={getPortalHost} /><CreateMenu disabled={!notesPersistence.canEdit} onChoose={beginCreate} /><button className="icon-button" aria-label={nt('close_files')} title={nt('close_files')} onClick={() => setLeftOpen(false)}><PanelLeftClose size={17} /></button></div></div>
+      <aside id="left-panel" className={'side-panel left-panel' + (!leftOpen ? ' is-collapsed' : '')} style={{ width: leftOpen ? leftWidth : 0 }} inert={!leftOpen ? true : undefined} aria-hidden={!leftOpen}>
+        <div className="panel-inner"><div className="panel-header"><span className="panel-title">{nt('files')}</span><div className="panel-actions"><ImportControls onChooseMode={beginImport} getPortalHost={getPortalHost} /><CreateMenu disabled={!notesPersistence.canEdit} onChoose={beginCreate} getPortalHost={getPortalHost} /></div></div>
           <div className="tree-tools"><input className="tree-search" aria-label={nt('search_files')} placeholder={nt('search')} value={search} onChange={(event) => setSearch(event.target.value)} /></div>
           <div className="view-switch" aria-label={nt('directory_view')}><button className={treeMode === 'files' ? 'is-active' : ''} aria-pressed={treeMode === 'files'} onClick={() => setTreeMode('files')}>{nt('resources_view')}</button><button className={treeMode === 'nodes' ? 'is-active' : ''} aria-pressed={treeMode === 'nodes'} onClick={() => setTreeMode('nodes')}>{nt('nodes_view')}</button></div>
-          {treeMode === 'nodes' ? <NodeNotebookTree bridge={shared} library={courseLibrary} search={search} onCanvas={switchNotebook} onSelect={view === 'document' ? openDocument : selectResource} onPickEntry={setPickedEntry} onManageNotebook={manageNotebook} /> : <ResourceTree folders={folders} resources={resources} search={search} selectedId={current?.id} selectedFolder={selectedFolder} onFolderSelect={setSelectedFolder} onSelect={view === 'document' ? openDocument : selectResource} onOpenDocument={openDocument} onCanvas={switchNotebook} canEdit={notesPersistence.canEdit} onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameResource={renameResource} hasCanvasContent={hasCanvasContent} onPickEntry={setPickedEntry} onManageNotebook={manageNotebook} getNotebookBindingLabel={book => notebookBindingLabel(book, courseLibrary)} onCopyMarkdown={copyMarkdown} canCopyMarkdown={canCopyMarkdown} />}
+          {treeMode === 'nodes' ? <NodeNotebookTree bridge={shared} library={courseLibrary} search={search} onCanvas={switchNotebook} onSelect={view === 'document' ? openDocument : selectResource} onPickEntry={setPickedEntry} onManageNotebook={manageNotebook} /> : <ResourceTree folders={folders} resources={resources} search={search} selectedId={current?.id} selectedFolder={selectedFolder} onFolderSelect={setSelectedFolder} onSelect={view === 'document' ? openDocument : selectResource} onOpenDocument={openDocument} onCanvas={switchNotebook} canEdit={notesPersistence.canEdit} onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameResource={renameResource} hasCanvasContent={hasCanvasContent} onPickEntry={setPickedEntry} onManageNotebook={manageNotebook} getNotebookBindingLabel={book => notebookBindingLabel(book, courseLibrary)} onCopyMarkdown={copyMarkdown} canCopyMarkdown={canCopyMarkdown} onMoveEntry={moveEntry} />}
 
         </div>{leftOpen && <ResizeBar side="left" value={leftWidth} onChange={setLeftWidth} onResizing={setResizing} />}
       </aside>
-      <div className={'panel-rail panel-rail--left' + (leftOpen ? ' is-hidden' : '')} aria-hidden={leftOpen} inert={leftOpen ? true : undefined}><button className="icon-button" aria-label={nt('open_files')} title={nt('open_files')} onClick={() => setLeftOpen(true)}><PanelLeftOpen size={18} /></button></div>
       <main className="main-stage">
         <section ref={stage} className={'canvas-stage' + (space ? ' is-space-panning' : '') + (dropActive ? ' is-drop-target' : '')} style={view !== 'canvas' ? { position: 'absolute', inset: 0, visibility: 'hidden', pointerEvents: 'none' } : undefined} aria-hidden={view !== 'canvas'} inert={view !== 'canvas' ? true : undefined} onDragOver={(event) => { if ([...event.dataTransfer.types].some((type) => ['application/studymate-resource', 'application/studymate-course', 'Files'].includes(type))) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDropActive(true); } }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setDropActive(false); }} onDrop={drop}>
           <ReactFlow nodes={visibleNodes.map((node) => ({ ...node, type: resources[node.data.contentId]?.type === 'link' ? 'text' : node.type, draggable: !space && node.id !== editingNode }))} edges={visibleEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
-            onNodesChange={(changes) => { const update = (previous) => ({ ...previous, nodes: applyNodeChanges(changes, previous.nodes) }); if (changes.every(change => change.type === 'dimensions')) applyScene(update); else changeScenePersist(update); }} onEdgesChange={(changes) => changeScenePersist((previous) => ({ ...previous, edges: applyEdgeChanges(changes, previous.edges) }))}
+            onNodesChange={(changes) => {
+              const resizeChanges = new Map();
+              for (const change of changes) {
+                if (change.type === 'dimensions' && (change.setAttributes || typeof change.resizing === 'boolean')) resizeChanges.set(change.id, change);
+              }
+              const update = (previous) => {
+                const applied = applyNodeChanges(changes, previous.nodes);
+                if (!resizeChanges.size) return { ...previous, nodes: applied };
+                return {
+                  ...previous,
+                  nodes: applied.map((node) => {
+                    const change = resizeChanges.get(node.id);
+                    if (!change) return node;
+                    const { width: topW, height: topH, ...rest } = node;
+                    const nextStyle = { ...node.style };
+                    const nextW = topW ?? (change.resizing === false ? change.dimensions?.width : undefined);
+                    const nextH = topH ?? (change.resizing === false ? change.dimensions?.height : undefined);
+                    if (Number.isFinite(nextW) && nextW > 0) nextStyle.width = nextW;
+                    if (Number.isFinite(nextH) && nextH > 0) nextStyle.height = nextH;
+                    return { ...rest, style: nextStyle };
+                  }),
+                };
+              };
+              if (changes.every((change) => change.type === 'dimensions' && change.resizing === undefined && !change.setAttributes)) applyScene(update);
+              else changeScenePersist(update);
+            }} onEdgesChange={(changes) => changeScenePersist((previous) => ({ ...previous, edges: applyEdgeChanges(changes, previous.edges) }))}
             onNodeDragStart={checkpoint} onSelectionDragStart={checkpoint} onConnect={onConnect} nodesDraggable={notesPersistence.canEdit} nodesConnectable={notesPersistence.canEdit} elementsSelectable={notesPersistence.canEdit}
             onNodeClick={(event, node) => { if (editingNode && editingNode !== node.id) setEditingNode(null); if (node.data.contentId) { setCurrentId(node.data.contentId); setRightOpen(true); } }}
             onNodeDoubleClick={(event, node) => { const resource = resources[node.data.contentId]; if (resource?.type === 'link') { setCurrentId(resource.id); setRightOpen(true); void refreshResource(resource.id); return; } setEditingNode(node.id); if (node.data.contentId) { setCurrentId(node.data.contentId); setRightOpen(true); void refreshResource(node.data.contentId); } }}
@@ -749,11 +831,12 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, sco
           </div>
         </section>
         {view === 'document' && <section className="document-stage"><div className="document-toolbar" ref={setDocumentActions}>{current?.type === 'note' && !referenceReadOnly ? <NoteTitleInput resource={current} label={nt('document_title')} onRename={renameResource} disabled={!notesPersistence.canEdit} /> : <span className="document-title">{current?.title}</span>}
-        </div>{associationBar}{currentMarkdown && <div className="editor-mode-switch document-mode-switch" role="group" aria-label={nt('document_view_mode')}>{DOCUMENT_MODES.map(([mode, labelKey]) => <button key={mode} type="button" className={documentMode === mode ? 'is-active' : ''} aria-pressed={documentMode === mode} onClick={() => setDocumentModes(previous => ({ ...previous, [current.id]: mode }))}>{nt(labelKey)}</button>)}</div>}
+        </div>{currentMarkdown && <CourseAssociationBar resource={current} library={courseLibrary} onNavigate={onNavigateCourse} onManage={openAssociation} canEdit={canEditAssociation} />}{currentMarkdown && <div className="editor-mode-switch document-mode-switch" role="group" aria-label={nt('document_view_mode')}>{DOCUMENT_MODES.map(([mode, labelKey]) => <button key={mode} type="button" className={documentMode === mode ? 'is-active' : ''} aria-pressed={documentMode === mode} onClick={() => setDocumentModes(previous => ({ ...previous, [current.id]: mode }))}>{nt(labelKey)}</button>)}</div>}
           <div className={'document-scroll is-' + documentMode + (currentMarkdown ? ' note-document-scroll' : '')}>{documentBody}</div></section>}
       </main>
       <aside id="right-panel" className={'side-panel right-panel' + (!rightOpen ? ' is-collapsed' : '')} style={{ width: rightOpen ? rightWidth : 0 }} inert={!rightOpen ? true : undefined} aria-hidden={!rightOpen}><div className="panel-inner">
         <div className="panel-header resource-header"><span className="panel-title resource-header-title" title={current?.title}>{view === 'document' ? nt('chat') : current?.title || nt('files')}</span>
+          {view === 'canvas' && currentMarkdown && <CourseAssociationOption resource={current} library={courseLibrary} onManage={openAssociation} canEdit={canEditAssociation} />}
           {view === 'canvas' && <div className="resource-header-actions" ref={setResourceActions}>
             <button className="icon-button" disabled={!current} aria-label={nt(currentCard ? 'locate' : 'place')} title={nt(currentCard ? 'locate' : 'place')} onClick={() => placeResource(current.id)}>{currentCard ? <LocateFixed size={16} /> : <Plus size={16} />}</button>
             <button className="icon-button" disabled={!current} aria-label={nt('open_document')} title={nt('open_document')} onClick={() => openDocument(current.id)}><FileText size={16} /></button>
@@ -762,7 +845,6 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, sco
         </div>
         {view === 'document' ? <ChatComponent resources={resources} currentId={current?.id} quoteIds={quoteIds} onQuote={quote} onRemoveQuote={(id) => setQuoteIds((previous) => previous.filter((value) => value !== id))} draft={chatDraft} onDraftChange={setChatDraft} />
           : <div className={'resource-detail panel-body' + (currentMarkdown ? ' is-note-detail' : '')}>
-            {associationBar}
             {originDescription(current) && <div className="resource-origin-badge" data-origin={current.referenceError ? 'missing' : referenceReadOnly ? 'link' : 'local'}>{originDescription(current)}</div>}
             {referenceReadOnly && <button className="button ghost" onClick={() => refreshResource(current.id)}><RefreshCw size={13} />{nt('reread')}</button>}
             {referenceReadOnly && notesPersistence.isNative && <button className="button ghost" onClick={() => relinkFileReference(current.id)}><FileText size={13} />{nt('relink_file')}</button>}
@@ -777,7 +859,7 @@ function Board({ ChatComponent, hostTheme, onResourcesChange, active = true, sco
     {modal === 'help' && <Modal title="操作说明" className="help-modal" onClose={() => setModal(null)}><div className="help-dialog">
       <div className="help-sections"><section><h3>画布与关系</h3><ul><li>拖动卡片移动；双击后阅读选字或编辑纯内容节点。网页链接本身就是一个文本节点。</li><li>按住空格拖动，随时平移；保持空格时滚轮也可缩放。</li><li>拖动圆形连接点建立关系；双击连线可写说明，说明可以为空，空说明不显示标签。</li><li>点阵与节点使用同一套画布坐标，缩放时一起放大缩小，相对间距不变。</li></ul></section>
       <section><h3>文件与导入</h3><ul><li>从电脑导入或拖入画布时选择副本或引用。从左树拖入画布只添加引用；要复制 Markdown，在文件的「更多」菜单选择「复制 Markdown」。</li><li>副本是独立内容，不随来源变化；资源引用仍指向同一原件，已有节点会定位。</li><li>本地文件引用只读、不写回。有文件句柄时打开/引用发送会重新读取；不支持句柄的环境仅保留本次文件，原件变化需重新选择。</li><li>带标题的卡片可用标题右侧箭头折叠为仅标题；箭头已替换原来的“打开文档”图标。</li><li>右详情标题栏集中放置定位、打开文档和移出画布；删除节点不删除文件。</li></ul></section>
-      <section><h3>编辑与布局</h3><ul><li>文件名下的格式栏直接修改同一份 Markdown；光标触及的格式片段显示可编辑灰色标记，其他内容保留排版。</li><li>Ctrl / ⌘ + B、I、K 对当前正文应用粗体、斜体、链接；正文撤销与画布历史分开。侧栏边界仍可拖宽。</li><li>右栏开关在顶栏最右侧。独立文档有预览、编辑、双列和渲染编辑，每篇分别记忆；窄双列可切换源码或预览。明暗默认跟随宿主或系统，也可在本页切换。</li></ul></section>
+      <section><h3>编辑与布局</h3><ul><li>文件名下的格式栏直接修改同一份 Markdown；光标触及的格式片段显示可编辑灰色标记，其他内容保留排版。</li><li>Ctrl / ⌘ + B、I、K 对当前正文应用粗体、斜体、链接；正文撤销与画布历史分开。侧栏边界仍可拖宽。</li><li>左右侧栏开关分别在顶栏最左侧与最右侧。独立文档有预览、编辑、双列和渲染编辑，每篇分别记忆；窄双列可切换源码或预览。明暗默认跟随宿主或系统，也可在本页切换。</li></ul></section>
       <section><h3>安全与保存</h3><p>{notesPersistence.isNative
         ? '笔记内容与画布已接入 DSH 持久化服务，刷新或重启宿主后可恢复。保存中/未保存/已保存/失败/冲突状态见顶栏。'
         : '笔记、导入内容与画布仍只存本页，刷新即重置。'}项目内 examples/static-page.html 是可直接用“导入”打开的安全静态页面示例。{hostTheme ? 'DSH 会话由宿主管理，先显式选择，不自动发送。' : '独立预览未连接宿主会话，发送禁用。'}</p><p>图片 ≤4 MiB / 8192边长 / 1600万像素；SVG ≤512 KiB / 2000元素；HTML ≤256 KiB / 1500元素；本页文件总量 ≤32 MiB。不执行脚本、不加载外部资源、不递归访问文件夹。</p></section></div>

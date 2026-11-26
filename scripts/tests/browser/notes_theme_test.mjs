@@ -88,8 +88,8 @@ try {
   page.on('console', message => { if (message.type() === 'error') problems.push('console: ' + message.text()); });
   page.on('pageerror', error => problems.push('pageerror: ' + (error.stack || error.message)));
   page.on('requestfailed', request => {
-    // /api/studymate/events 是 SSE 长连接，页面导航/关闭时必然以 requestfailed 收场——夹具噪音，不算问题。
-    if (request.url().includes('/api/studymate/events')) return;
+    // /plugins/studymate/events 是 SSE 长连接，页面导航/关闭时必然以 requestfailed 收场——夹具噪音，不算问题。
+    if (request.url().includes('/plugins/studymate/events')) return;
     problems.push('requestfailed: ' + request.url());
   });
   try {

@@ -326,10 +326,10 @@ async function probeNativeTools(app, home, presetTools, presetScope) {
    真会加载插件的组合里造它——别的场景有自己的配置断言，别去碰（migrated 用例要逐字节比对）。
 
    验的三件事：
-     1. 生产路（`connection.fetch.register` 返回一个 body 没写完的 Response，挂在 /api 下）
-        真能建起 SSE：先用宿主打印的那条 URL 换会话 cookie，再读到建连问候；
-     2. 退路（`ctx.webServer.register` 的 exact 路由）在**真 webServer** 上也能建起来，
+     1. 生产路（`ctx.webServer.register` 的 exact 路由）在**真 webServer** 上能建起来，
         而且没有会话时必须 401——这条路不在 /api 围栏里，认证是自己判的；
+     2. 兼容退路（`connection.fetch.register` 返回一个 body 没写完的 Response，挂在 /api 下）
+        也能建起 SSE：先用宿主打印的那条 URL 换会话 cookie，再读到建连问候；
      3. 改一个课件文件 / 新建一个科目 → 通知真的推过来（`{kind:'changed',domains,at,seq}`）。
 
    **不验**：浏览器里的 EventSource（那要真浏览器）。页面侧的接线由
@@ -415,22 +415,28 @@ async function probeWatch(app, probe) {
   try { await authorized.body?.cancel(); } catch { /* 只是拿 Set-Cookie */ }
 
   const watchModule = await import(pathToFileURL(path.join(project, 'lib/watch/index.ts')).href);
-  // 退路：把 exact 路由挂到**真 webServer** 上。生产里这条路只在拿不到
-  // connection.fetch.register 时才选（这里显式挂一次，把它也验到）。
-  const disposeFallback = watchModule.registerWatchChannel({
-    get: (name) => ((name === 'webServer' || name === 'connection') ? app.ctx.get(name) : undefined),
-  }, { route: 'webServer' });
+  // 单独挂一个强制兼容探针：生产 /api 入口会重定向到当前可用的 /plugins 路由。
+  const compatProbePath = '/api/studymate/events-compat-probe';
+  const disposeApi = watchModule.registerWatchChannel({
+    get: (name) => (name === 'connection' ? app.ctx.get(name) : undefined),
+  }, { route: 'connection', path: compatProbePath });
 
-  const api = await openSse(`${origin}/api/studymate/events`, { cookie });
+  const api = await openSse(`${origin}${compatProbePath}`, { cookie });
   const fallback = await openSse(`${origin}/plugins/studymate/events`, { cookie });
   try {
-    // 退路不在 /api 围栏里：没有会话必须自己拒（不是 200）
+    const redirected = await fetch(`${origin}/api/studymate/events`, {
+      headers: { cookie }, redirect: 'manual',
+    });
+    assert.equal(redirected.status, 307);
+    assert.equal(redirected.headers.get('location'), '/plugins/studymate/events');
+
+    // 默认路由不在 /api 围栏里：没有会话必须自己拒。
     const denied = await fetch(`${origin}/plugins/studymate/events`);
-    assert.equal(denied.status, 401, '退路没有会话时该 401');
+    assert.equal(denied.status, 401, '默认路由没有会话时该 401');
     try { await denied.body?.cancel(); } catch { /* 只要状态码 */ }
 
     const apiGreeting = await api.greeting('/api 建连问候');
-    await fallback.greeting('退路建连问候');
+    await fallback.greeting('默认路由建连问候');
 
     // ① 改一个课件文件：两条通道都该收到通知。
     // 监听是**异步**起来的（扫盘 + 每个目录等 chokidar ready），改动恰好落在观察者挂好之前时
@@ -445,7 +451,7 @@ async function probeWatch(app, probe) {
       lessonNotice = api.notices()[0] ?? null;
     }
     assert.ok(lessonNotice, '改了三次课件文件，一条通知都没收到');
-    await fallback.waitForNotices(1, '退路上「课件变了」的通知', 3000);
+    await fallback.waitForNotices(1, '默认路由上「课件变了」的通知', 3000);
     assert.equal(lessonNotice.kind, 'changed');
     assert.deepEqual(lessonNotice.domains, ['lesson'], JSON.stringify(lessonNotice));
     assert.match(lessonNotice.at, /^\d{4}-\d{2}-\d{2}T/);
@@ -453,7 +459,7 @@ async function probeWatch(app, probe) {
 
     // 监听是**异步**起来的（扫盘 + 逐个挂观察者），所以建连问候可能是「那一刻」的旧标签。
     // 收到通知说明它确实在跑；这时再连一条，读到的 backend 才是结论。
-    const settled = await openSse(`${origin}/api/studymate/events`, { cookie });
+    const settled = await openSse(`${origin}/plugins/studymate/events`, { cookie });
     const settledGreeting = await settled.greeting('复核问候');
     await settled.close();
     const backend = /backend=([^\s]+)/.exec(settledGreeting)[1];
@@ -480,7 +486,7 @@ async function probeWatch(app, probe) {
   } finally {
     await api.close().catch(() => {});
     await fallback.close().catch(() => {});
-    await disposeFallback?.();
+    await disposeApi?.();
   }
 }
 

@@ -52,7 +52,7 @@ async function scenario(label, fn, { asyncDisabled = false } = {}) {
       if (response.status() >= 400 && !/client\.notes\.js/.test(response.url())) problems.push(`HTTP ${response.status()} ${response.url()}`);
     });
     page.on('requestfailed', request => {
-      if (navigating && request.url().endsWith('/api/studymate/events') && /ERR_ABORTED/.test(request.failure()?.errorText || '')) return;
+      if (navigating && request.url().endsWith('/plugins/studymate/events') && /ERR_ABORTED/.test(request.failure()?.errorText || '')) return;
       // 注入的 503 会让浏览器把分块脚本请求记成 ERR_ABORTED——这是注入的本意，不算问题。
       if (/client\.notes\.js/.test(request.url()) && (fixture.controls.chunkFailures > 0 || fixture.chunkRequests.some(r => (r.status || 0) >= 400))) return;
       problems.push('requestfailed: ' + request.url() + ' ' + (request.failure()?.errorText || ''));

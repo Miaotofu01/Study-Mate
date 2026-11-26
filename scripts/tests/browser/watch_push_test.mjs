@@ -3,12 +3,11 @@
    为什么要有这一条：这张 ticket 的验收第一条是「改一个课件文件：打开的页面收到推送并更新，
    **无需手动刷新**」。Host 半那一节在真 DSH 探针里验过（改文件 → 收到通知），页面那一节在
    Node 里用同一份 lib/client.js 验过（通知 → 静默重取 → 沿用旧引用）。剩下唯一没被真东西
-   连起来的一段是**浏览器的 EventSource ↔ 我们那条流式 Response**：这条只有真浏览器能验。
+   连起来的一段是**浏览器的 EventSource ↔ 默认 webServer 推送路由**：这条只有真浏览器能验。
 
    夹具怎么搭：
      · 一个**真 HTTP 服务**：/ 给夹具页，/api/studymate/library 现读临时工作区，
-       /api/studymate/events 走 lib/watch 的推送通道（bridge 与宿主载体同形：先 writeHead、
-       再逐块 write body）；
+       /plugins/studymate/events 直接走 lib/watch 注册的 webServer 处理器；
      · 页面里是真的 fetch 与真的 EventSource（**不 stub**），插件本体是从 lib/client.js
        现取的（不手抄一份标记）；
      · 监听走 Node fs.watch 后端（这台机器上有没有 ctx.fs 不由我们定），DSH_HOME 指向
@@ -62,20 +61,6 @@ function makeWorkspace() {
 
 /* ── 真 HTTP 服务：页面 + 数据 + SSE ───────────────────────────────────── */
 
-/** 与宿主载体同形：先 writeHead，再把 Response 的 body 逐块写出去（SSE 靠的就是这个）。 */
-async function bridge(req, res, routeFetch) {
-  const abort = new AbortController();
-  res.on('close', () => { if (!res.writableEnded) abort.abort(); });
-  const request = new Request(new URL(req.url, 'http://127.0.0.1'), {
-    method: req.method, headers: req.headers, signal: abort.signal,
-  });
-  const response = await routeFetch(request);
-  res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
-  if (!response.body) { res.end(); return; }
-  for await (const chunk of response.body) res.write(chunk);
-  res.end();
-}
-
 function buildPage() {
   const source = fs.readFileSync(path.join(ROOT, 'lib', 'client.js'), 'utf8');
   const css = extractCss(source);
@@ -128,7 +113,7 @@ async function serve({ workspace, sseRoute, page, miniReact }) {
       const pathname = new URL(req.url, 'http://127.0.0.1').pathname;
       try {
         if (pathname === '/') {
-          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'set-cookie': 'studymate-test=1; Path=/' });
           res.end(page);
           return;
         }
@@ -149,8 +134,8 @@ async function serve({ workspace, sseRoute, page, miniReact }) {
           res.end(JSON.stringify(readLibrary({ workspace })));
           return;
         }
-        if (pathname === '/api/studymate/events') {
-          await bridge(req, res, sseRoute.fetch);
+        if (pathname === sseRoute.path) {
+          sseRoute.handler(req, res);
           return;
         }
         res.writeHead(404); res.end('not found');
@@ -189,12 +174,17 @@ try {
   const { dshHome, workspace, demo } = makeWorkspace();
   process.env.DSH_HOME = dshHome;
 
-  // 推送通道：真的注册进 lib/watch（生产里那行挂在 connection 注入里，这里用一个最小载体接住）
   const routes = [];
-  const connection = { fetch: { register: (route) => { routes.push(route); return () => {}; } } };
-  disposeChannel = watch.registerWatchChannel({ get: (name) => (name === 'connection' ? connection : undefined) });
+  const services = {
+    connection: {
+      requestRejection: (req) => req.headers.cookie === 'studymate-test=1' ? undefined : 401,
+      fetch: { register() { throw new Error('默认路由不应注册兼容流'); } },
+    },
+    webServer: { register: (route) => { routes.push(route); return () => {}; } },
+  };
+  disposeChannel = watch.registerWatchChannel({ get: (name) => services[name] });
   const sseRoute = routes[0];
-  if (!sseRoute) throw new Error('推送路由没注册上');
+  if (sseRoute?.path !== '/plugins/studymate/events') throw new Error('默认推送路由没注册上');
 
   // 监听：Node fs.watch 后端（这台机器没有 ctx.fs 服务），工作区来自隔离的 DSH_HOME
   watch.registerWatch({ effect: (fn) => fn(), get: () => undefined });
@@ -205,6 +195,8 @@ try {
     page: buildPage(),
     miniReact: path.join(ROOT, 'scripts', 'tests', 'fixtures', 'mini-react.js'),
   });
+  const rejected = await fetch(server.origin + sseRoute.path);
+  check('未携带会话的推送请求被拒绝', rejected.status === 401, String(rejected.status));
 
   session = await openSession({ suite: SUITE });
   // 页面没被重新加载的凭据：刷新会把它抹掉

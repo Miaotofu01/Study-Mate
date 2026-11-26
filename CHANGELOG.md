@@ -1,5 +1,1735 @@
 # 更新日志
 
+<!-- studymate-release:v2.1.0 -->
+## [2.1.0](https://github.com/Miaotofu01/Study-Mate/releases/tag/v2.1.0) - 2026-11-25
+
+### 已合并的 Pull Request
+
+- fix(渲染器): 代码块行号槽按最宽的号自适应，两位数不再折成两行 ([#231](https://github.com/Miaotofu01/Study-Mate/pull/231))
+- fix(解析器): 块标量折行与 |+ / &gt;+ 尾随换行对齐 PyYAML ([#235](https://github.com/Miaotofu01/Study-Mate/pull/235))
+- fix(导出): React 依赖按包根解析，扁平安装不再误报 EXPORT\_REACT\_MISSING ([#237](https://github.com/Miaotofu01/Study-Mate/pull/237))
+- 建议：插件详情页完善 ([#253](https://github.com/Miaotofu01/Study-Mate/pull/253))
+- fix(预设): profile 补丁里跨行的引号标量不再让两条预设注册失败 ([#256](https://github.com/Miaotofu01/Study-Mate/pull/256))
+- feat(阅读端): 顶栏加字号档位，正文四档可切（\#257） ([#258](https://github.com/Miaotofu01/Study-Mate/pull/258))
+- fix(测试): 右栏把手落点按右边那一条窄轨对账，不再减两条之和 ([#259](https://github.com/Miaotofu01/Study-Mate/pull/259))
+- fix(数学): 题库字段的围栏与转义美元号不再被当成公式 ([#272](https://github.com/Miaotofu01/Study-Mate/pull/272))
+- fix(阅读端): 问答面板不再挂载即建空会话 ([#275](https://github.com/Miaotofu01/Study-Mate/pull/275))
+- fix(Windows): 门禁在 Windows 上真正跑通——监听摘观察者、落位退路、非 ASCII 拷贝与平台语义断言（\#273） ([#276](https://github.com/Miaotofu01/Study-Mate/pull/276))
+- fix(发布): npm pack --json 的两种形状都认，npm 12 上不再拿 undefined 校验 ([#277](https://github.com/Miaotofu01/Study-Mate/pull/277))
+- fix(检查): 浏览器套件在 Windows 上真的跑起来（where 探测 + Windows 安装位置 + 探测只留一份） ([#278](https://github.com/Miaotofu01/Study-Mate/pull/278))
+- feat(无界笔记): 正式模块、独立数据域持久化与科目绑定联动（\#262） ([#279](https://github.com/Miaotofu01/Study-Mate/pull/279))
+- fix(阅读端): 恢复没到位就别判「已到位」，首帧正文矮的时候也别停在顶部 ([#280](https://github.com/Miaotofu01/Study-Mate/pull/280))
+- fix(阅读端): 题干缺字段时渲染占位，不让一道坏题带走整个面板（\#174 ①） ([#281](https://github.com/Miaotofu01/Study-Mate/pull/281))
+- fix(阅读端): 每道题与面板根各一层渲染边界，坏一道题只坏它自己（\#174 ②） ([#282](https://github.com/Miaotofu01/Study-Mate/pull/282))
+- fix(检索): 缺题干的题不再从索引里静默消失（\#174 ③） ([#283](https://github.com/Miaotofu01/Study-Mate/pull/283))
+- fix(记忆): 旧工作区共享记忆可读可迁移（读侧兜底 + migrate 命令）（\#284） ([#287](https://github.com/Miaotofu01/Study-Mate/pull/287))
+- fix(工具): workspace\_context 摘要补回共享记忆画像三节（\#285） ([#288](https://github.com/Miaotofu01/Study-Mate/pull/288))
+- fix(导出): 泄漏守卫按产物角色识别科目子目录导出，不再误报客户端 bundle 与 vendor（\#286） ([#289](https://github.com/Miaotofu01/Study-Mate/pull/289))
+- fix(安装): 落位退回复制时绕开 Windows 原生拷贝，非 ASCII 目标不再静默丢文件（nodejs/node\#59636） ([#290](https://github.com/Miaotofu01/Study-Mate/pull/290))
+- fix(数据层): misconceptions.yaml 顶层写成映射时当场说清形状 ([#292](https://github.com/Miaotofu01/Study-Mate/pull/292))
+- fix(Windows): 非 ASCII 路径下不再用同步递归删除，中文用户名的安装不再整段崩掉 ([#293](https://github.com/Miaotofu01/Study-Mate/pull/293))
+- fix(测试): 答疑记忆套件的 React 桩补 Component 基类，渲染边界不再炸在工厂里（\#174 ②） ([#294](https://github.com/Miaotofu01/Study-Mate/pull/294))
+- fix(测试): 非 ASCII 路径下不再用 rmSync——测试夹具与 lab 沙箱改用逐层删除 ([#295](https://github.com/Miaotofu01/Study-Mate/pull/295))
+- feat(阅读端): 课件页标注——高亮、侧注、落盘与引用提问 ([#296](https://github.com/Miaotofu01/Study-Mate/pull/296))
+- fix(导出): 子目录同名非产物不再按产物判（\#286 误报的另一个方向） ([#297](https://github.com/Miaotofu01/Study-Mate/pull/297))
+- fix(记忆): 读不出来时不再说「内容不丢」，补齐 migrate --help 与迁移期边界 ([#298](https://github.com/Miaotofu01/Study-Mate/pull/298))
+- fix(测试): 动效档位断言不再依赖宿主默认的 prefers-reduced-motion ([#299](https://github.com/Miaotofu01/Study-Mate/pull/299))
+- fix(删除): 非 ASCII 路径下剩下的产品删除点不再用 fs.rmSync ([#300](https://github.com/Miaotofu01/Study-Mate/pull/300))
+- fix(测试): 单文件删除统一走 fixtures/fs-rm 的 removeFile ([#301](https://github.com/Miaotofu01/Study-Mate/pull/301))
+- feat(阅读端): 主观题受控输入、草稿落盘与带进答疑 (\#213) ([#305](https://github.com/Miaotofu01/Study-Mate/pull/305))
+- feat(渲染器): 正文按中文阅读规范排版——首行空两格、两端对齐、列表每级 2 字符 ([#307](https://github.com/Miaotofu01/Study-Mate/pull/307))
+- fix(笔记): 持久化存储的崩溃恢复、错误口径与落盘完整性 (\#304) ([#308](https://github.com/Miaotofu01/Study-Mate/pull/308))
+- perf(笔记): 资源序列化缓存与隐藏面暂停轮询，退役死的富文本依赖 (\#303) ([#309](https://github.com/Miaotofu01/Study-Mate/pull/309))
+- feat(客户端): 无界笔记懒分块——学习首屏零分块请求 (\#302) ([#310](https://github.com/Miaotofu01/Study-Mate/pull/310))
+- fix(测试): test\_bundle 的宿主 schema 拷贝复用 COPY\_ALL ([#311](https://github.com/Miaotofu01/Study-Mate/pull/311))
+- feat(笔记): 坏资源只读降级与损坏横幅 (\#304) ([#313](https://github.com/Miaotofu01/Study-Mate/pull/313))
+- docs(ADR): 课件页标注的 ADR 从 0015 挪到 0021，收口与无界笔记撞号 ([#315](https://github.com/Miaotofu01/Study-Mate/pull/315))
+- fix(作答数据): 预测与作答统一原样落盘口径，草稿驱逐只删键不重排（补 \#305 评审两条残余） ([#316](https://github.com/Miaotofu01/Study-Mate/pull/316))
+- feat(无界笔记): 完善文档视图与课程联动 ([#320](https://github.com/Miaotofu01/Study-Mate/pull/320))
+- fix(解析器): profile 补丁里的跨行流式集合按 YAML 折行读（\#317） ([#321](https://github.com/Miaotofu01/Study-Mate/pull/321))
+- fix(插件): 启动失败的原因进插件页状态卡与 no-workspace 提示（\#317） ([#322](https://github.com/Miaotofu01/Study-Mate/pull/322))
+- fix(阅读端): 首批界面跟随宿主语言并保留阅读状态 ([#325](https://github.com/Miaotofu01/Study-Mate/pull/325))
+- feat(阅读端): 在 DSH Web 右栏提供学习入口 ([#327](https://github.com/Miaotofu01/Study-Mate/pull/327))
+- docs(测试): 修正测试说明里两处指向工程约束的断链 ([#328](https://github.com/Miaotofu01/Study-Mate/pull/328))
+- fix(监听): 监听器只认内容变化——读回声与属性噪音不再推假通知（\#329） ([#330](https://github.com/Miaotofu01/Study-Mate/pull/330))
+- test(浏览器): locale\_test 走 \#320 的「新建」菜单路径，滚动断言改为容差 ([#331](https://github.com/Miaotofu01/Study-Mate/pull/331))
+- test(浏览器): ask\_quote 夹具会话 id 全程唯一，刷新场景隔离记忆表 ([#332](https://github.com/Miaotofu01/Study-Mate/pull/332))
+- fix(问答): 修复内嵌会话高度链与历史菜单收缩，避免滚轮失效与底部留白（\#324） ([#333](https://github.com/Miaotofu01/Study-Mate/pull/333))
+- fix(监听): 避免 SSE 长连接阻塞桌面更新 ([#336](https://github.com/Miaotofu01/Study-Mate/pull/336))
+
+### 所有提交
+
+- feat(插件页): 完善插件详情页 ([a4a4c3e](https://github.com/Miaotofu01/Study-Mate/commit/a4a4c3eec194585b277a4a8b0bb0c69511a804f0))
+
+  > 把插件详情页作为一个整体补全：插件元信息、学习工作区的原生配置卡、只读状态卡，以及按实例里 dsh-ops 0.5.0 的原生卡片语言呈现。
+  > 
+  > - 元信息：package.json.icon（README logo 派生的 128×128 PNG）+ locale/en.json、zh.json 的 meta.title/description；两份都不写 meta.detail，长文回退 README（中文 README.md / 英文 README.en.md）。
+  > - 配置：plugins.row.config（key @yunmiao/studymate\#studymate）；完整 ConfigForm 从 ctx.configForms 取；workspace 用 .volatile() 即时生效；目录选择优先 Desktop 系统桥，普通 Web 退回 uiWorkspace.pickDirectory()。
+  > - 状态：plugins.detail.section（order 50），bundle 与本行配置页都画，停用不画；GET /api/studymate/status 恒 200，只回事实/计数；卡片压到工作区 + 最多四门科目。
+  > - 样式：按 dsh-ops 0.5.0 的卡片语言（border/radius/下沉 body/facts/28px 刷新按钮/保存重置在卡后）；只引 --dsw-\* token，类名统一 smd-。
+  > - 测试：新增 test\_plugin\_metadata / test\_host\_status / test\_client\_plugin\_page；更新 bundle/checks/release 与 docs/规范/工程约束.md。
+  > - 架构门禁：状态卡不让 lib 域反向 import watch（watchState 由 bin 注入）；@deepseek-ai/schemastery 是宿主提供的可选 peer（Config schema），在 DOMAIN\_RULES 的 bin.packages 窄白名单显式登记，并加了「只有登记过的 peer 能过」的反证测试。
+  > 
+  > 验证：npm test（Node 24.21.0）结果见 PR 描述。
+
+- feat(阅读端): 顶栏加字号档位，正文四档可切（\#257） ([5069efd](https://github.com/Miaotofu01/Study-Mate/commit/5069efd19b553ea961ac0988f885c1c111b576d4))
+
+  > 正文 13px 是写死的 token，觉得小只能改源码。顶栏加一个与动效档同款的 select：
+  > standard / medium / large / xlarge，记在浏览器本地偏好里，默认档不变，所以现有
+  > 验收基线不受影响。
+  > 
+  > 换档换的是整条字号阶梯（body / lead / h2 / hero / h1 / code 一起放大，行高比
+  > 四档一致），不是只放大正文——只放正文会让 15px 的 lead 反被正文顶上去，正是
+  > \#89 要消的「一屏两种正文大小」。≤12px 的元信息档不跟着放大；900px 的正文列
+  > 上限也不动，特大档约 45 字/行，仍在舒适区间内。
+  > 
+  > fontTokens() 是唯一真相：CSS 的三个 data-font 块与它逐项对应，由
+  > scripts/tests/test\_client\_pure.mjs 守着；浏览器套件新增 reading-font 场景，量
+  > 四档的实测字号与行高比。
+  > 
+  > 验证：
+  > - node --test --test-isolation=none scripts/tests/test\_client\_pure.mjs scripts/tests/test\_client\_typography.mjs → 22 pass / 0 fail
+  > - node scripts/tests/browser/reading\_test.mjs → 全绿（含 reading-font）
+
+- refactor(插件页): 清掉死文案、接上 override 拆除、定下状态卡的取数与留空语义 ([88c1cb6](https://github.com/Miaotofu01/Study-Mate/commit/88c1cb66cb8a65cfbe5f916c1b5f6a1dfd955390))
+
+  > - 两本字典各 20 个键在状态卡收窄后无人使用；旧 i18n 门只扫「用到必须有定义」，
+  >   补上反方向，省得组件收窄之后文案一直躺在里面
+  > - \`setWorkspaceOverride\` 是模块级单例、此前没人拆；改为返回 disposer 并在 apply
+  >   里挂 \`ctx.effect\`，且只清自己那份（后接的不被先拆的抹掉）
+  > - 行 id \`studymate\` 两处字面量收成 \`PAGE\_ROW\_ID\`，config 槽的 key 从它派生
+  > - 目录留空后保存等价于「恢复默认」（unset），不再在 user 覆盖里留空串
+  > - 状态卡「最多四门」取谁未定 → 按 \`updated\_at\` 字典序倒序（与 library 的 today 同源）
+  > 
+  > 验证（本机）：client 12/12、host status 8/8、metadata 6/6、architecture 15/15、
+  > \`checks --static\` 80/80、\`test:types\` 0。installer/bundle 的 13/7 红是 Windows 下
+  > \`dsh.cmd\` 拉不起来的环境问题，main 上同样红，以 CI 的 Ubuntu 结果为准。
+
+- fix(监听): 目录被删后当场摘掉观察者，Windows 上不再空转 ([4a2f81b](https://github.com/Miaotofu01/Study-Mate/commit/4a2f81bf48bc1e24bef540b5e36f7aa8ab9eb9c7))
+
+  > Windows 的 ReadDirectoryChangesW 会对已经消失的路径反复回调：删掉一个被监听的
+  > 目录后实测每秒上万次回调、单核打满、进程再也退不出去（Linux 的 inotify 只发一次
+  > IN\_DELETE\_SELF，所以这条只在 Windows 上炸）。于是观察回调里先看一眼目录还在不在，
+  > 不在就关闭观察者并从目录集合里摘掉——sync() 会在下一次变更时把还在的目录补回来。
+  > 
+  > 修前 npm test 卡在 core 阶段（reach\_verify 17 条全过却退不出去，只能 --test-force-exit）；
+  > 修后同一条套件 4 秒自然退出、退出码 0。
+
+- fix(安装): 成品落位先试原子 rename，Windows 拒绝时退回复制 ([a347d33](https://github.com/Miaotofu01/Study-Mate/commit/a347d33e77cd032420f8130a89ee60b9ef2f133a))
+
+  > Windows 上目录改名会因「目标已存在」或「源目录里有活着的句柄」直接 EPERM（NTFS
+  > 语义，Win10/Win11 一致；同样的操作在 Linux 上反而成功），而安装器与两个插件构建器
+  > 都靠「临时目录 → 目标」这一步落盘，于是偶发安装 / 构建失败、重试又好了。
+  > 
+  > 新增 bin/fs-swap.mjs 的 moveIntoPlace()：先试 fs.renameSync；只有 EPERM/EACCES/
+  > EBUSY/EXDEV/ENOTEMPTY/EEXIST 才退化成「清目标 + 复制 + 删源」。ENOENT 故意不在
+  > 兜底集合里——那是路径写错，兜住只会把真的 bug 藏起来。三处调用点（安装器、
+  > OpenAI 插件、Antigravity 插件的落位与回滚）统一走它。
+
+- fix(测试): 非 ASCII 路径的夹具拷贝不再静默丢文件（nodejs/node\#59636） ([7671505](https://github.com/Miaotofu01/Study-Mate/commit/76715051046ce4dc4dc17eae2a18d988f56b41cc))
+
+  > \`fs.cpSync\` 不带 \`filter\` 时走 libuv 的原生拷贝快路径，源或目标路径里只要有一个非 ASCII
+  > 字符就不可靠：目标是中文时\*\*静默一个文件都不建\*\*（不抛错、\`existsSync\` 为 false），
+  > 源是中文时直接 0xC0000409 崩掉整个测试进程，TAP 输出一起没，看起来像「只跑到第 N 条」。
+  > 夹具的临时目录本来就叫「dsh O'Brien 中文」「包」，正好踩中。
+  > 
+  > 新增 \`scripts/tests/fixtures/copy.mjs\` 的 \`COPY\_ALL\`（\`recursive\` + 恒真 filter）作为唯一出处，
+  > 理由写在文件头。三个夹具改用它；\`test\_openai\_plugin\` 补一条「兜底复制对中文目标路径也真的
+  > 落盘」，钉住落位逻辑在非 ASCII 路径上不空转。
+  > 
+  > 实测：Node 24.13.0 上 ascii→中文 静默零拷贝、中文→ascii 崩溃（3221226505）；
+  > 24.22.x 已不复发。门禁只承诺 \`&gt;=24.0.0\`，所以这层绕法要留着，不按平台跳过。
+
+- fix(测试夹具): effect 清理按测试作用域收口，删临时目录前先关观察者 ([6238210](https://github.com/Miaotofu01/Study-Mate/commit/6238210b2b88090cc43ee781a6e59e091c721057))
+
+  > \`fakeContext.effect\` 只执行 effect、丢掉返回的 disposer，于是
+  > \`lib/watch\` 注册的 \`fs.watch(directory, { persistent: false })\` 在 \`t.after\` 删掉临时
+  > 目录之后仍然挂着。Windows 的 ReadDirectoryChangesW 会对已经消失的路径持续回调——实测
+  > 1.5 秒 68,876 条、4 秒 203,372 条，\`persistent: false\` 拦不住，进程再也退不出去，
+  > \`npm test\` 停在 core 阶段没有 footer。
+  > 
+  > 改成用 \`AsyncLocalStorage\` + \`WeakMap&lt;TestContext&gt;\` 把 disposer 收到测试自己的
+  > \`EffectScope\` 里：删临时目录前按 LIFO 全部执行，清理幂等、异常聚合上报；函数结束之后
+  > 再注册的 effect 直接拒，免得漏到下一个测试。生产 \`lib/watch\` 的行为不动——那条由
+  > 观察者自己摘（见上一笔）。
+  > 
+  > 反证：把作用域退回「全局数组」的旧写法，双测试交叉清理立即红（actual \[\] / expected \['a'\]）；
+  > 新夹具 8/8。修前 reach/lab 两套挂死，修后同一台机自然退出。
+
+- fix(门禁): 实验测试的 Node 命令表示与骨架拷贝按跨平台语义 ([3f9536b](https://github.com/Miaotofu01/Study-Mate/commit/3f9536b9b4fab0caccef1f98574d6ba2bb348cd9))
+
+  > 两件事，都在测试侧，生产文法一个字没放宽：
+  > 
+  > 1. \`process.execPath\` 不能原样进题目「证据」——Windows 安装路径既有空格又有反斜杠，
+  >    会被 \`lib/lab/contract.ts\` 的命令文法整条拒掉（引号与反斜杠都在拒绝字符里）。
+  >    改成：路径含空白就退回 PATH 上的 \`node\`，不含空白则换成正斜杠绝对路径。
+  > 2. 摆盘用的 5 处 \`cpSync\` 改用 \`COPY\_ALL\`：骨架目录叫 \`0000-示例\`、\`0001-变量\`，
+  >    不带 filter 时非 ASCII 源目录会 0xC0000409 崩掉整个子进程。
+  > 
+  > 前置说明：实验骨架契约含真实 \`sh check.sh\`，Windows 本机需要 Git for Windows 的 Git Bash
+  > 在\*\*当前测试进程\*\*的 PATH 上；Ubuntu CI 自带 POSIX shell。缺 \`sh\` 时那几条如实红，
+  > 不 skip、不强制退出、不改默认套件名单。
+
+- fix(门禁): 路径配置与诊断文件比较按本机语义，不再假红 ([d3f4070](https://github.com/Miaotofu01/Study-Mate/commit/d3f4070c7759f73f0d85cc05deee5776467b4d9a))
+
+  > 两处都只在 Windows 上红，机制不同：
+  > 
+  > 1. \`test\_host\_ask\_session\` 用 \`workspace: "${routeWorkspace}"\` 拼 YAML。Windows 路径带
+  >    反斜杠，双引号标量里的 \`\\U\`/\`\\A\` 被当转义，配置解析失败，成功/无模型两条用例都走了
+  >    「工作区错误」的 500 分支。改用 \`JSON.stringify\` 生成合法 YAML 标量
+  >    （产品侧写配置本来就是这么做的，\`docs/使用/Codex与ChatGPT.md\` 的示例也写正斜杠）。
+  > 2. \`test\_validators\_handoff\` 把纯函数层诊断里的混合分隔符路径，与 \`path.join()\` 的本机
+  >    表示逐字符比较。两者指向同一个 \`handoff.json\`，只是表示不同。改成按平台路径语义比较，
+  >    仍严格断言目标文件、真实行号、schema 违规与阻断结果。
+  > 
+  > 生产 YAML 解析、路由状态码、诊断输出、覆盖率参数、默认套件名单都没动。
+
+- fix(参考资料): 落盘名同时挡 Windows 保留设备名 ([d742ec9](https://github.com/Miaotofu01/Study-Mate/commit/d742ec93948f4a5ed32a2a892523c71aa87eb3ac))
+
+  > \`fileNameStem()\` 已经挡了 \`/ \\ :\`、控制字符与 \`&lt;&gt;"|?\*\`，但没挡设备名：\`CON\`、\`NUL\`、
+  > \`COM1\`、\`LPT1\` 这些\*\*主干\*\*在 Win32 上无论带不带扩展名都建不出来，\`CON.md\` 一样落到设备上，
+  > 写盘直接失败。它们只在 Windows 上坏，Linux 写得好好的，所以这是可移植性缺陷，不是该跳过
+  > 的用例。
+  > 
+  > 撞上保留名就退兜底名「参考资料」，重名继续走既有的 \`-2/-3\`。只净化落盘名：显示标题、
+  > front matter、来源栅栏仍用原值。补一条 4 个设备名的回归（\`assert.match\` 只允许兜底名）。
+
+- fix(门禁): 技能可见性按真实归属判定，不把本地其它技能当泄漏 ([f9ef4ed](https://github.com/Miaotofu01/Study-Mate/commit/f9ef4edd3db41bb56965a97ed75f97ff1be22b4d))
+
+  > 第一条用例只判断 \`.dsh/skills\` 目录存不存在，于是开发者本地自己的 \`grill-me\`、
+  > \`grilling\` 之类也被当成 StudyMate 出方向泄漏。原规则意图是「别的预设看不到 StudyMate 的
+  > 技能」，不是禁止开发者拥有任何技能。
+  > 
+  > 改成沿真实默认扫描根逐个判归属：StudyMate 的源技能、同名复制、改目录名的复制仍然必须红
+  > （补了正反证夹具），空目录与无关技能不误报。不删用户 \`.dsh/\`、不忽略整个测试、
+  > 不改生产宿主的扫描器与预设的 \`includeDefaultRoots:false\`。
+  > 
+  > 拷贝夹具同时改用 \`COPY\_ALL\`：临时包目录名是「包」，非 ASCII 路径下旧写法会静默丢文件。
+
+- chore(引擎): 只支持 Node 24 起，不再对 22 做兼容 ([d7da5db](https://github.com/Miaotofu01/Study-Mate/commit/d7da5db8d1f94fabe1857196812d910f052ae681))
+
+  > \`engines\` 由 \`^22.19.0 || &gt;=24.0.0\` 收到 \`&gt;=24.0.0\`；两份 README 的徽标同步改成 24+。
+  > 理由不是「22 没人用」，而是这一轮实测出来的：非 ASCII 路径的 \`cpSync\` 在 24.13 上照样
+  > 静默零拷贝、甚至 0xC0000409 崩进程，只在 24.22 起才不复发。给 22 留一条永远测不到的
+  > 支持线，等于把这类问题继续藏起来。
+  > 
+  > 代码里那层 \`filter: () =&gt; true\` 的绕法保留：门禁承诺的是 \`&gt;=24.0.0\`，24.0–24.21 仍需它。
+  > CI 与发布本来就跑 Node 24，这条只让声明与事实对齐。
+
+- Merge pull request \#276 from Miaotofu01/fix/windows-platform ([f94c47b](https://github.com/Miaotofu01/Study-Mate/commit/f94c47b4b46ac4c991df83c273af66c232c8745d))
+
+  > fix(Windows): 门禁在 Windows 上真正跑通——监听摘观察者、落位退路、非 ASCII 拷贝与平台语义断言（\#273）
+
+- feat(无界笔记): 把原型纳入正式模块，统一单客户端入口与发布白名单 ([fb3f687](https://github.com/Miaotofu01/Study-Mate/commit/fb3f6872835cc6ca433ad2fd46d75700cabb219f))
+
+  > 原型在 \`prototypes/unbounded-notes\` 里验证过的画布、资源树、导入、媒体与编辑器行为，现在
+  > 搬进共享源码 \`client/notes/\`，随旧阅读端打进\*\*同一条\*\* \`./client\` 产物：一次
+  > \`window.\_\_ModuleLoader\_\_.load\`，React / DOM / jsx 由宿主提供，不再各自打包一份。
+  > 
+  > - \`scripts/build-client.mjs\` + \`client-build-helpers.mjs\` 是唯一的组合构建；stdin 必须
+  >   导出三件套，否则 esbuild 会把宿主桥接 tree-shake 掉。
+  > - \`package.json\` 的 \`exports\['./client'\]\` 指向 \`dist/client.js\`；发布白名单严格只含
+  >   \`dist/client.js\` 与 \`dist/client-notices.txt\`，第三方许可随产物交付（\`client/notes/licenses/\`）。
+  > - 学习侧只注册一个 \`main\` 与学习侧栏里的笔记座位（\`lib/client.js\` 的 \`factory\`/\`compose\`），
+  >   不新增第二个 main 或独立侧栏；两面首次懒挂后保活，隐藏时不响应快捷键、不动相机。
+  > - 独立网页保留为开发与自动化验收入口，与 DSH 入口共用组件；会话区是明确的占位面板，
+  >   不接宿主会话、不调用模型。
+  > - CI 只跑 Node 24；\`npm test\` 先 \`build:client\` 再跑后续门禁，避免拿到过期产物。
+  > 
+  > ADR-0015 记录模块、单入口构建与独立数据域边界。
+
+- feat(无界笔记): 正式 DSH 入口接入独立数据域持久化 ([a93137b](https://github.com/Miaotofu01/Study-Mate/commit/a93137b31f87ae54b8ee8ec2b4ec8ec776be823f))
+
+  > 正式入口改成显式持久化适配器（\`persistence\` prop），数据落在 \`&lt;DSH\_HOME&gt;/studymate-notes/\`
+  > ——用 \`profileContext.home\` 定位，跨 project/profile 共享，不进学习工作区，卸载插件不删。
+  > 独立网页不传适配器，仍是纯内存、刷新重置。
+  > 
+  > 数据形状：
+  > - 每篇自有笔记是真实 Markdown（顶部一行专用元信息），布局与正文分开存放，保存布局不覆盖正文；
+  > - \`layout.json\` 只有画布节点/尺寸/折叠/关系/相机与逻辑目录，不含第二份正文；
+  > - 外部文件引用只落元信息 JSON，不存正文、句柄或 \`canReopen\`；重载后一律失效，必须用户重新选择。
+  > 
+  > 写入安全：
+  > - 版本 = 文件字节 SHA256（\`null\` = 不存在），同字节幂等 200，旧版本 409 携当前版本；
+  > - 短临界区用 Node 内置 \`node:sqlite\` 的 \`BEGIN IMMEDIATE\` 做 OS 锁（两进程实测互斥、进程崩溃后
+  >   锁随 SQLite 释放，不留 PID 残骸），文件用 temp + fsync + rename 原子发布；
+  > - 根目录、锁文件与副文件先做链接与越域守卫；未知/损坏格式 503 封口，不写默认值、不回退演示数据。
+  > 
+  > 客户端（\`persistence.js\` / \`useNotesPersistence.js\`）：
+  > - 读载门禁完成前不可编辑，空库不 seed 演示；保存按资源/布局串行合并，成功与失败状态清楚可见；
+  > - 失败与 409 保留最新草稿并可导出、显式重试或 keep（CAS 覆盖），不静默假装已保存；
+  > - 焦点触发与 7s 轮询检测外部编辑，版本不变时复用资源对象；迟到的回包按代际丢弃。
+  > 
+  > HTTP 挂在宿主已认证的 API 下（\`/api/studymate/notes\`），\`bin/dsh-plugin.ts\` 动态 import 注册，
+  > 模块缺失不拖垮预设。ADR-0016 记录目录、格式版本与版本栅栏。
+
+- feat(笔记联动): 科目绑定、节点视图与共享即时 Markdown 编辑 ([6d65378](https://github.com/Miaotofu01/Study-Mate/commit/6d653782f1e87e472b0d1fdbc76e1c01f8fb79c0))
+
+  > 维护者已确认「科目绑定」要做（早前「本轮不实现」的意见作废），决策见 ADR-0017 / ADR-0018。
+  > 这部分工作与上一笔出在同一条工作树里，合并后统一验收。
+  > 
+  > - 个人集中笔记库：学习课件左栏的笔记管理只有「节点 → Markdown 笔记」两层，不建自定义分类
+  >   文件夹、不嵌套；每个科目首次新建笔记时显式选择或创建默认笔记本，换默认只影响未来新建。
+  > - 学习右栏的笔记页与无界侧栏共用同一套渲染与即时编辑（Milkdown / CodeMirror），保留
+  >   Markdown 源码能力；文件标题下常驻单一格式栏，格式片段显示可编辑的灰色标记。
+  > - 无界侧新增节点视图，只显示「笔记本 → 节点 → MD 笔记」；节点关联是单一数据来源，拖动只改
+  >   关联，不搬原件、不改普通文件层级与画布；节点卡只显示标题与跳转。
+  > - 来源按 \`workspace + 科目 slug + 节点 id\` 精确匹配，失效保留原显示名并要求手动重绑，
+  >   不按同名猜测；agent 不自动读写用户笔记。
+  > - 布局升到格式 2（笔记本、科目关联），旧数据按显式备份路径升级，不做静默迁移。
+
+- docs(笔记): 独立数据域、呈现判据与状态分层写进规范 ([ebcb164](https://github.com/Miaotofu01/Study-Mate/commit/ebcb164b332ce9fdf56dd8a8d3f701458adf63ba))
+
+  > - \`docs/规范/工程约束.md\`：四区域补上「独立笔记数据域 \`&lt;DSH\_HOME&gt;/studymate-notes/\`，由
+  >   \`profileContext.home\` 定位」；登记 \`lib/notes/\` 一级域与 notes HTTP 路由；说明客户端单入口
+  >   构建与三份第三方许可来源。
+  > - \`docs/规范/文件归属.md\`：加上笔记数据域的写方（自有 MD / 元信息 JSON / layout）与薄网页的
+  >   依赖归属。
+  > - \`docs/规范/阅读端呈现.md\`：补笔记工作空间的判据——内页不再出现品牌名、独立网页刷新重置
+  >   是正确行为、验收状态只指设计 §0。
+  > - \`docs/设计/无界笔记.md\`：§0 状态分层写清「首轮持久化已落地并通过回归」「课程联动 \#270 已
+  >   落地」，其余（归属交接、回收站、批量迁移）明确未实现，避免把有限能力写成完整能力。
+  > - \`docs/设计/目标态规格.md\`：更新「现在做到哪一步」，持久化状态不再复述、只指向 §0。
+  > - \`AGENTS.md\` / \`GLOSSARY.md\` / 两份 README：补入口指针与词条，徽标改为 Node 24+。
+
+- test(笔记): 登记全部回归，浏览器验收只按需跑 ([e10e497](https://github.com/Miaotofu01/Study-Mate/commit/e10e4977097b9181b9d789be26172169603c4f58))
+
+  > - \`scripts/release/checks.mjs\`：把 store / route / persistence / curriculum / markdown-
+  >   formatting / inline-editor / learning-notes 等 Node 套件登记进默认 core；浏览器套件留在
+  >   按需组，默认门禁不因此需要浏览器或真实宿主。
+  > - \`scripts/tests/test\_architecture\_boundaries.mjs\`：登记 notes 域（只许 \`core\`/\`lib\` + 内置，
+  >   不允许 npm 包），并让 JSX/TSX 入口也在扫描范围内。
+  > - 新增 \`test\_notes\_imports\` / \`test\_notes\_media\` / \`test\_notes\_editor\_gutter\`：导入的副本与
+  >   引用语义、媒体体积与结构上限、编辑器行号与整行选择的纯函数面。
+  > - \`test\_tools\_effect\_cleanup\`：钉住夹具的 effect 作用域——删临时目录前按 LIFO 关观察者，
+  >   跨测试不串味，非法重入报错。
+  > - 浏览器：\`notes\_test\`（独立网页交互）、\`notes\_brand\_test\`（双面品牌与保活，用真客户端 +
+  >   真 notes 路由 + 每场景临时 HOME）、\`notes\_persistence\_test\`（11 个持久化场景）。
+  > - \`release.test.mjs\` 与 \`release.mjs\` 跟着构建/白名单变化更新。
+  > 
+  > 默认门禁仍是一条 \`npm test\`：core 1182 tests / 1179 pass / 0 fail / 3 条既有环境 skip。
+
+- fix(发布): npm pack --json 的两种形状都认，npm 12 上不再拿 undefined 校验 (\#277) ([72b3740](https://github.com/Miaotofu01/Study-Mate/commit/72b37409acc68e281011589171bc51de3d18d40a))
+
+  > npm 12 起 \`npm pack --json\` 的输出从数组改成以包名为键的对象，两处按数组取下标的地方都
+  > 拿到 \`undefined\`：门禁里 \`test\_bundle.mjs\` 的打包校验直接 TypeError，\`release.mjs\` 的
+  > \`packPackage()\` 在本地演练发布时抛 \`Cannot read properties of undefined\`。CI（Node 24 自带
+  > npm 11）与 Release workflow（显式钉 npm@11）都碰不到，所以红的只有本地用 npm 12 的人——
+  > \#248 的作者在 Windows 上就是被这一条挡住的。
+  > 
+  > 改法：把「从 \`pack --json\` 的载荷里取出这一次打的那一个包」收进 \`packEntry()\`（导出，放在
+  > \`validatePack\` 旁边，两处共用一处定义）。数组与对象两种形状都认，认不出来的形状直接报错——
+  > 打包校验宁可红，也不能拿 \`undefined\` 当成校验过了。
+  > 
+  > 补 \`test\_pack\_json.mjs\` 钉住这件事（两种形状、同一个结果、坏形状报错），并挂进
+  > \`npm run test:installer\`，因此也进了 \`npm test\`。
+  > 
+  > Refs \#250
+
+- fix(检查): 浏览器套件在 Windows 上真的跑起来——用 \`where\` 探测、认 Windows 安装位置、探测只留一份 (\#278) ([fd02c55](https://github.com/Miaotofu01/Study-Mate/commit/fd02c55416ce1a468d752e3393704e27c716985b))
+
+  > \`npm run test:browser\` 在 Windows 上整组跑不起来：\`harness.mjs\` 探测浏览器时一律调 \`which\`，
+  > 而 Windows 上没有这个命令，于是 \`findBrowser()\` 必然返回 null、每套都按「跳过」（退出码 3）收场——
+  > 一个断言都没做的「跳过」连报错都没有，\`\#123\` 报的正是这种坏法。
+  > 
+  > 三处改动：
+  > 
+  > 1. \`onPath()\` 按平台选命令：Windows 用 \`where\`；那边 PATH 上的名字也换成 \`chrome\` / \`msedge\`
+  >    （不是 Linux 的 \`google-chrome\`）。
+  > 2. 安装位置不再只有 macOS 的 \`.app\`：Windows 会查 \`Program Files\` / \`Program Files (x86)\` /
+  >    \`LOCALAPPDATA\` 下的 Chrome、Edge、Chromium。Edge 是 Windows 10 起系统自带的那个，
+  >    所以 Windows 上通常不需要再设 \`STUDYMATE\_CHROME\`。
+  > 3. \`reading\_position\_test.mjs\` 自己抄的那份 \`findChrome()\` 删掉，改叫 \`requireBrowser()\`——
+  >    \`\#123\` 提出的「两份实现就是漂移的来源」，现在只剩 \`harness.mjs\` 一份。
+  > 
+  > 顺带修掉一个被「永远跳过」挡住的问题：那个套件用 \`import(FIXTURE)\` 直接拿绝对路径做说明符，
+  > Windows 上会被当成协议 \`c:\` 报 \`ERR\_UNSUPPORTED\_ESM\_URL\_SCHEME\`。改成 \`pathToFileURL(FIXTURE).href\`。
+  > 
+  > Refs \#123
+
+- fix(阅读端): 恢复没到位就别判「已到位」，首帧正文矮的时候也别停在顶部（\#214） (\#280) ([9fc49d1](https://github.com/Miaotofu01/Study-Mate/commit/9fc49d1094914e729dda425cef20974dae74848a))
+
+  > \`readingPositionSettled()\` 以前有两条「到位」：滚到目标附近，或者布局还在长——目标被
+  > clamp 到当下能滚到底的地方就先接受，注释写着「等长起来再重算」。可接受之后就是
+  > \`run.done = true\`：那一轮重试到此结束，代码里再没有「重算」的时刻。首帧正文只有一屏时
+  > \`maxScroll\` 是 0，目标被夹成 0，跟当前位置 0 一比正好在容差里——恢复当场收尾、一次都没滚过，
+  > 于是每次重进课件都从顶部开始（\#214）。
+  > 
+  > 另外，那条「够不到也算到位」的分支其实是死代码：\`resolveReadingTargets()\` 已经把目标夹进
+  > \`\[0, maxScroll\]\`，\`height + 24 &lt; aim\` 对夹过的目标永远不成立。所以真正的触发点只有
+  > 「夹成 0 且当前位置也是 0」这一种，改法也只需盯住「意图」跟「落点」的分离。
+  > 
+  > - \`resolveReadingTargets()\` 除 clamp 过的落点 \`top\`，再给出夹之前的意图 \`aim\`；
+  >   「到位没有」只拿 \`aim\` 比，拿去滚的仍然是 \`top\`。
+  > - \`readingPositionSettled()\` 只剩一条判据：离 \`aim\` ±24px。另加一道 \`wait\`，调用方给两个
+  >   理由——正文这一帧比上一帧高/矮（图与公式刚上屏，几何还在变）；存下来的滚动位置还没被
+  >   正文撑到（正文还比上次短）。两种都算「等它长起来再算」，不是「到位」。
+  > - 重试窗口没动（40 帧 / 1500ms 两道）：真够不到（正文被改短）时靠上限收尾，停在已经滚到的
+  >   地方，不回顶部。
+  > 
+  > 单测里那条 \`readingPositionSettled(1000, 200, 200) === true\` 改掉了——它把错误行为写成了
+  > 断言（「先接受，等长起来再重算」），而代码里没有重算这回事。浏览器套件加「验收 6 · 先矮后长」：
+  > 修前停在 0，修后落回 2600。
+  > 
+  > L0 18 pass；L1 types EXIT=0、static 73 pass / 0 fail；L2 reading\_position 31 项通过 0 失败
+  > （修前 30/1，验收 6 是 0 / 2600）。
+
+- fix(阅读端): 题干缺字段时渲染占位，不让一道坏题带走整个面板 (\#281) ([b80ab97](https://github.com/Miaotofu01/Study-Mate/commit/b80ab976f21d7dbad8a781d8f1cce6876d931637))
+
+  > 题库里某道题没有 \`q\`（模型重出题时写成 \`stem\`、或干脆漏了字段）时，\`Question\` 里的
+  > \`item.q.split('\\n')\` 直接抛 \`TypeError\`，宿主把这一下记成 \`slot entry crashed in 'main'\`：
+  > 正文与左右栏一起从 DOM 消失，之后点「学习」也重挂不回来，只能整页刷新（\#174）。
+  > 一道坏数据换掉整个面板，代价完全不对等。
+  > 
+  > - \`lib/client.js\` 新增题干判定内核 \`questionStem(item)\`（源码标记包裹的纯函数），
+  >   \`Question\` 只在它说「读得到」时才逐行排版；读不到就渲染一颗占位，
+  >   带 \`data-proto=question-missing\`、节点号与题号，学生和老师都能顺着它回工作区补字段。
+  > - \`scripts/tests/test\_client\_question\_stem.mjs\`（6 条，切内核求值，不需要浏览器）钉住判定：
+  >   缺字段、字段名写成 \`stem\`、null / 数字 / 对象、纯空白、连 \`item\` 都没有。
+  > - \`scripts/tests/browser/attempts\_test.mjs\` 新增 \`attempts-missing-stem\` 场景：题库第三题
+  >   写成 \`stem\`，断言正文还在、三道题都在右栏、占位带钩子说得出是哪道题、好题选项一个不少。
+  >   main 上这条是红的（\`Cannot read properties of undefined (reading 'split')\`，右栏 0 道题）。
+  > - 占位复用现有的 \`smb-note--warn\` 配色，不新加样式表条目。
+
+- fix(阅读端): 每道题与面板根各一层渲染边界，坏一道题只坏它自己（\#174 ②） (\#282) ([e43041b](https://github.com/Miaotofu01/Study-Mate/commit/e43041bfce631610d1cae0fa28fcc2cf23f1a270))
+
+  > \* fix(发布): npm pack --json 的两种形状都认，npm 12 上不再拿 undefined 校验
+  > 
+  > npm 12 起 \`npm pack --json\` 的输出从数组改成以包名为键的对象，两处按数组取下标的地方都
+  > 拿到 \`undefined\`：门禁里 \`test\_bundle.mjs\` 的打包校验直接 TypeError，\`release.mjs\` 的
+  > \`packPackage()\` 在本地演练发布时抛 \`Cannot read properties of undefined\`。CI（Node 24 自带
+  > npm 11）与 Release workflow（显式钉 npm@11）都碰不到，所以红的只有本地用 npm 12 的人——
+  > \#248 的作者在 Windows 上就是被这一条挡住的。
+  > 
+  > 改法：把「从 \`pack --json\` 的载荷里取出这一次打的那一个包」收进 \`packEntry()\`（导出，放在
+  > \`validatePack\` 旁边，两处共用一处定义）。数组与对象两种形状都认，认不出来的形状直接报错——
+  > 打包校验宁可红，也不能拿 \`undefined\` 当成校验过了。
+  > 
+  > 补 \`test\_pack\_json.mjs\` 钉住这件事（两种形状、同一个结果、坏形状报错），并挂进
+  > \`npm run test:installer\`，因此也进了 \`npm test\`。
+  > 
+  > Refs \#250
+  > 
+  > \* fix(检查): 浏览器套件在 Windows 上真的跑起来——用 \`where\` 探测、认 Windows 安装位置、探测只留一份
+  > 
+  > \`npm run test:browser\` 在 Windows 上整组跑不起来：\`harness.mjs\` 探测浏览器时一律调 \`which\`，
+  > 而 Windows 上没有这个命令，于是 \`findBrowser()\` 必然返回 null、每套都按「跳过」（退出码 3）收场——
+  > 一个断言都没做的「跳过」连报错都没有，\`\#123\` 报的正是这种坏法。
+  > 
+  > 三处改动：
+  > 
+  > 1. \`onPath()\` 按平台选命令：Windows 用 \`where\`；那边 PATH 上的名字也换成 \`chrome\` / \`msedge\`
+  >    （不是 Linux 的 \`google-chrome\`）。
+  > 2. 安装位置不再只有 macOS 的 \`.app\`：Windows 会查 \`Program Files\` / \`Program Files (x86)\` /
+  >    \`LOCALAPPDATA\` 下的 Chrome、Edge、Chromium。Edge 是 Windows 10 起系统自带的那个，
+  >    所以 Windows 上通常不需要再设 \`STUDYMATE\_CHROME\`。
+  > 3. \`reading\_position\_test.mjs\` 自己抄的那份 \`findChrome()\` 删掉，改叫 \`requireBrowser()\`——
+  >    \`\#123\` 提出的「两份实现就是漂移的来源」，现在只剩 \`harness.mjs\` 一份。
+  > 
+  > 顺带修掉一个被「永远跳过」挡住的问题：那个套件用 \`import(FIXTURE)\` 直接拿绝对路径做说明符，
+  > Windows 上会被当成协议 \`c:\` 报 \`ERR\_UNSUPPORTED\_ESM\_URL\_SCHEME\`。改成 \`pathToFileURL(FIXTURE).href\`。
+  > 
+  > Refs \#123
+  > 
+  > \* fix(阅读端): 恢复没到位就别判「已到位」，首帧正文矮的时候也别停在顶部（\#214）
+  > 
+  > \`readingPositionSettled()\` 以前有两条「到位」：滚到目标附近，或者布局还在长——目标被
+  > clamp 到当下能滚到底的地方就先接受，注释写着「等长起来再重算」。可接受之后就是
+  > \`run.done = true\`：那一轮重试到此结束，代码里再没有「重算」的时刻。首帧正文只有一屏时
+  > \`maxScroll\` 是 0，目标被夹成 0，跟当前位置 0 一比正好在容差里——恢复当场收尾、一次都没滚过，
+  > 于是每次重进课件都从顶部开始（\#214）。
+  > 
+  > 另外，那条「够不到也算到位」的分支其实是死代码：\`resolveReadingTargets()\` 已经把目标夹进
+  > \`\[0, maxScroll\]\`，\`height + 24 &lt; aim\` 对夹过的目标永远不成立。所以真正的触发点只有
+  > 「夹成 0 且当前位置也是 0」这一种，改法也只需盯住「意图」跟「落点」的分离。
+  > 
+  > - \`resolveReadingTargets()\` 除 clamp 过的落点 \`top\`，再给出夹之前的意图 \`aim\`；
+  >   「到位没有」只拿 \`aim\` 比，拿去滚的仍然是 \`top\`。
+  > - \`readingPositionSettled()\` 只剩一条判据：离 \`aim\` ±24px。另加一道 \`wait\`，调用方给两个
+  >   理由——正文这一帧比上一帧高/矮（图与公式刚上屏，几何还在变）；存下来的滚动位置还没被
+  >   正文撑到（正文还比上次短）。两种都算「等它长起来再算」，不是「到位」。
+  > - 重试窗口没动（40 帧 / 1500ms 两道）：真够不到（正文被改短）时靠上限收尾，停在已经滚到的
+  >   地方，不回顶部。
+  > 
+  > 单测里那条 \`readingPositionSettled(1000, 200, 200) === true\` 改掉了——它把错误行为写成了
+  > 断言（「先接受，等长起来再重算」），而代码里没有重算这回事。浏览器套件加「验收 6 · 先矮后长」：
+  > 修前停在 0，修后落回 2600。
+  > 
+  > L0 18 pass；L1 types EXIT=0、static 73 pass / 0 fail；L2 reading\_position 31 项通过 0 失败
+  > （修前 30/1，验收 6 是 0 / 2600）。
+  > 
+  > \* fix(阅读端): 题干缺字段时渲染占位，不让一道坏题带走整个面板
+  > 
+  > 题库里某道题没有 \`q\`（模型重出题时写成 \`stem\`、或干脆漏了字段）时，\`Question\` 里的
+  > \`item.q.split('\\n')\` 直接抛 \`TypeError\`，宿主把这一下记成 \`slot entry crashed in 'main'\`：
+  > 正文与左右栏一起从 DOM 消失，之后点「学习」也重挂不回来，只能整页刷新（\#174）。
+  > 一道坏数据换掉整个面板，代价完全不对等。
+  > 
+  > - \`lib/client.js\` 新增题干判定内核 \`questionStem(item)\`（源码标记包裹的纯函数），
+  >   \`Question\` 只在它说「读得到」时才逐行排版；读不到就渲染一颗占位，
+  >   带 \`data-proto=question-missing\`、节点号与题号，学生和老师都能顺着它回工作区补字段。
+  > - \`scripts/tests/test\_client\_question\_stem.mjs\`（6 条，切内核求值，不需要浏览器）钉住判定：
+  >   缺字段、字段名写成 \`stem\`、null / 数字 / 对象、纯空白、连 \`item\` 都没有。
+  > - \`scripts/tests/browser/attempts\_test.mjs\` 新增 \`attempts-missing-stem\` 场景：题库第三题
+  >   写成 \`stem\`，断言正文还在、三道题都在右栏、占位带钩子说得出是哪道题、好题选项一个不少。
+  >   main 上这条是红的（\`Cannot read properties of undefined (reading 'split')\`，右栏 0 道题）。
+  > - 占位复用现有的 \`smb-note--warn\` 配色，不新加样式表条目。
+  > 
+  > \* fix(阅读端): 给每道题与面板根各加一层渲染边界，坏一道题只坏它自己
+  > 
+  > 上一片只堵住了「题干缺字段」这一种坏数据形状。同一个题库换成别的坏形状（\`opts\` 写成字符串、
+  > \`ans\` 形态不对……）照样在 \`Question\` 渲染时抛，宿主记 \`slot entry crashed in 'main'\`：
+  > 正文与左右栏一起从 DOM 消失，之后再点「学习」也重挂不回来，只能整页刷新（\#174 的第 2 条）。
+  > 
+  > - \`lib/client.js\`：新增 \`RenderBoundary\`（\`extends React.Component\`，\`getDerivedStateFromError\`
+  >   + \`componentDidCatch\`）与兜底卡片 \`boundaryNote\`，挂两处——每道题一格、面板根一格
+  >   （\`StudyMateRoot\` 包住 \`StudyMateApp\`）。异常被接住之后宿主看不到崩溃，slot 不会被摘掉，
+  >   「点学习挂不回来」这件事从根上消失。卡片带 \`data-proto\`（\`question-crash\` / \`app-crash\`）、
+  >   节点号与题号，还有一颗「重试」（\`setState({ error: null })\` 重画一次）。
+  > - 卡片沿用 \`smb-note--warn\` 的语义，只加三条 \`smb-boundary\_\_\*\` 样式。\*\*不\*\*复用 \`smb-opt\`：
+  >   那是选项的钩子，套件按它数选项，混进来会把「这题几个选项」数错。
+  > - \`componentDidCatch\` 里\*\*不\*\*写 \`console.error\`：宿主的 harness 把控制台错误算成「场景问题」，
+  >   而被边界接住本来就不是页面问题。留痕由卡片自己承担——它把 \`error.message\` 原样印在卡片上。
+  > - 测试夹具补 \`Component\`：\`mini-react\`（浏览器）真的把类组件与边界语义实现出来（实例按路径缓存、
+  >   子树抛出的错误冒到最近的边界再兜底重画、被接住的不 report）；\`client\_harness.mjs\` /
+  >   \`test\_client\_pure.mjs\` / \`test\_client\_panes.mjs\` / \`test\_watch\_client.mjs\` 的桩只补一个最小基类
+  >   （Node 侧没有 DOM，边界逻辑一次也跑不到）。
+  > - \`attempts\_test.mjs\` 新增 \`attempts-boundary\` 场景：第四题 \`opts\` 写成字符串，断言正文还在、
+  >   三道好题照常渲染、兜底卡片说得出「节点 fn.call · 第 4 题」、好题选项一个没丢；点「重试」
+  >   之后面板还在（坏数据下卡片会再出现——重点是面板活着，不用刷页）。
+
+- fix(检索): 缺题干的题不再从索引里静默消失（\#174 ③） (\#283) ([7578a8c](https://github.com/Miaotofu01/Study-Mate/commit/7578a8c0b5497e06f78814318989f77604aaa0bd))
+
+  > \* fix(发布): npm pack --json 的两种形状都认，npm 12 上不再拿 undefined 校验
+  > 
+  > npm 12 起 \`npm pack --json\` 的输出从数组改成以包名为键的对象，两处按数组取下标的地方都
+  > 拿到 \`undefined\`：门禁里 \`test\_bundle.mjs\` 的打包校验直接 TypeError，\`release.mjs\` 的
+  > \`packPackage()\` 在本地演练发布时抛 \`Cannot read properties of undefined\`。CI（Node 24 自带
+  > npm 11）与 Release workflow（显式钉 npm@11）都碰不到，所以红的只有本地用 npm 12 的人——
+  > \#248 的作者在 Windows 上就是被这一条挡住的。
+  > 
+  > 改法：把「从 \`pack --json\` 的载荷里取出这一次打的那一个包」收进 \`packEntry()\`（导出，放在
+  > \`validatePack\` 旁边，两处共用一处定义）。数组与对象两种形状都认，认不出来的形状直接报错——
+  > 打包校验宁可红，也不能拿 \`undefined\` 当成校验过了。
+  > 
+  > 补 \`test\_pack\_json.mjs\` 钉住这件事（两种形状、同一个结果、坏形状报错），并挂进
+  > \`npm run test:installer\`，因此也进了 \`npm test\`。
+  > 
+  > Refs \#250
+  > 
+  > \* fix(检查): 浏览器套件在 Windows 上真的跑起来——用 \`where\` 探测、认 Windows 安装位置、探测只留一份
+  > 
+  > \`npm run test:browser\` 在 Windows 上整组跑不起来：\`harness.mjs\` 探测浏览器时一律调 \`which\`，
+  > 而 Windows 上没有这个命令，于是 \`findBrowser()\` 必然返回 null、每套都按「跳过」（退出码 3）收场——
+  > 一个断言都没做的「跳过」连报错都没有，\`\#123\` 报的正是这种坏法。
+  > 
+  > 三处改动：
+  > 
+  > 1. \`onPath()\` 按平台选命令：Windows 用 \`where\`；那边 PATH 上的名字也换成 \`chrome\` / \`msedge\`
+  >    （不是 Linux 的 \`google-chrome\`）。
+  > 2. 安装位置不再只有 macOS 的 \`.app\`：Windows 会查 \`Program Files\` / \`Program Files (x86)\` /
+  >    \`LOCALAPPDATA\` 下的 Chrome、Edge、Chromium。Edge 是 Windows 10 起系统自带的那个，
+  >    所以 Windows 上通常不需要再设 \`STUDYMATE\_CHROME\`。
+  > 3. \`reading\_position\_test.mjs\` 自己抄的那份 \`findChrome()\` 删掉，改叫 \`requireBrowser()\`——
+  >    \`\#123\` 提出的「两份实现就是漂移的来源」，现在只剩 \`harness.mjs\` 一份。
+  > 
+  > 顺带修掉一个被「永远跳过」挡住的问题：那个套件用 \`import(FIXTURE)\` 直接拿绝对路径做说明符，
+  > Windows 上会被当成协议 \`c:\` 报 \`ERR\_UNSUPPORTED\_ESM\_URL\_SCHEME\`。改成 \`pathToFileURL(FIXTURE).href\`。
+  > 
+  > Refs \#123
+  > 
+  > \* fix(阅读端): 恢复没到位就别判「已到位」，首帧正文矮的时候也别停在顶部（\#214）
+  > 
+  > \`readingPositionSettled()\` 以前有两条「到位」：滚到目标附近，或者布局还在长——目标被
+  > clamp 到当下能滚到底的地方就先接受，注释写着「等长起来再重算」。可接受之后就是
+  > \`run.done = true\`：那一轮重试到此结束，代码里再没有「重算」的时刻。首帧正文只有一屏时
+  > \`maxScroll\` 是 0，目标被夹成 0，跟当前位置 0 一比正好在容差里——恢复当场收尾、一次都没滚过，
+  > 于是每次重进课件都从顶部开始（\#214）。
+  > 
+  > 另外，那条「够不到也算到位」的分支其实是死代码：\`resolveReadingTargets()\` 已经把目标夹进
+  > \`\[0, maxScroll\]\`，\`height + 24 &lt; aim\` 对夹过的目标永远不成立。所以真正的触发点只有
+  > 「夹成 0 且当前位置也是 0」这一种，改法也只需盯住「意图」跟「落点」的分离。
+  > 
+  > - \`resolveReadingTargets()\` 除 clamp 过的落点 \`top\`，再给出夹之前的意图 \`aim\`；
+  >   「到位没有」只拿 \`aim\` 比，拿去滚的仍然是 \`top\`。
+  > - \`readingPositionSettled()\` 只剩一条判据：离 \`aim\` ±24px。另加一道 \`wait\`，调用方给两个
+  >   理由——正文这一帧比上一帧高/矮（图与公式刚上屏，几何还在变）；存下来的滚动位置还没被
+  >   正文撑到（正文还比上次短）。两种都算「等它长起来再算」，不是「到位」。
+  > - 重试窗口没动（40 帧 / 1500ms 两道）：真够不到（正文被改短）时靠上限收尾，停在已经滚到的
+  >   地方，不回顶部。
+  > 
+  > 单测里那条 \`readingPositionSettled(1000, 200, 200) === true\` 改掉了——它把错误行为写成了
+  > 断言（「先接受，等长起来再重算」），而代码里没有重算这回事。浏览器套件加「验收 6 · 先矮后长」：
+  > 修前停在 0，修后落回 2600。
+  > 
+  > L0 18 pass；L1 types EXIT=0、static 73 pass / 0 fail；L2 reading\_position 31 项通过 0 失败
+  > （修前 30/1，验收 6 是 0 / 2600）。
+  > 
+  > \* fix(阅读端): 题干缺字段时渲染占位，不让一道坏题带走整个面板
+  > 
+  > 题库里某道题没有 \`q\`（模型重出题时写成 \`stem\`、或干脆漏了字段）时，\`Question\` 里的
+  > \`item.q.split('\\n')\` 直接抛 \`TypeError\`，宿主把这一下记成 \`slot entry crashed in 'main'\`：
+  > 正文与左右栏一起从 DOM 消失，之后点「学习」也重挂不回来，只能整页刷新（\#174）。
+  > 一道坏数据换掉整个面板，代价完全不对等。
+  > 
+  > - \`lib/client.js\` 新增题干判定内核 \`questionStem(item)\`（源码标记包裹的纯函数），
+  >   \`Question\` 只在它说「读得到」时才逐行排版；读不到就渲染一颗占位，
+  >   带 \`data-proto=question-missing\`、节点号与题号，学生和老师都能顺着它回工作区补字段。
+  > - \`scripts/tests/test\_client\_question\_stem.mjs\`（6 条，切内核求值，不需要浏览器）钉住判定：
+  >   缺字段、字段名写成 \`stem\`、null / 数字 / 对象、纯空白、连 \`item\` 都没有。
+  > - \`scripts/tests/browser/attempts\_test.mjs\` 新增 \`attempts-missing-stem\` 场景：题库第三题
+  >   写成 \`stem\`，断言正文还在、三道题都在右栏、占位带钩子说得出是哪道题、好题选项一个不少。
+  >   main 上这条是红的（\`Cannot read properties of undefined (reading 'split')\`，右栏 0 道题）。
+  > - 占位复用现有的 \`smb-note--warn\` 配色，不新加样式表条目。
+  > 
+  > \* fix(检索): 缺题干的题不再从索引里静默消失
+  > 
+  > \`buildIndex\` 里 \`it('题目', item.q)\` 撞上 \`push\` 里的 \`if (!hit.text) return\`：缺 \`q\` 的题
+  > 一个字都不进索引。学生搜题干里明明有的词，一条「题目」都搜不到，以为题库里没这道题
+  > （\#174 现象第 3 条）。重建索引的人、出题的人也都看不到「这里少了一道」。
+  > 
+  > - \`lib/client.js\` 内核新增 \`questionIndexText(item, position)\`（纯函数，与 \`questionStem\`
+  >   同一段源码标记）：字段名写成 \`stem\` 的题内容其实还在，用它当文本并标出「字段名写成了
+  >   stem」；只剩选项的，用选项拼一段；什么都没有的，留一条「缺题干 · 第 N 题」占位。
+  >   占位带上第几题，去重键（含 text）才不会把两道空题压成一条。
+  > - \`buildIndex\` 改走这个函数；label 会显示在搜索结果上（「缺题干 · 第 3 题」「题目数据不全」）。
+  > - \`test\_client\_search\_index.mjs\` 新增一条：一份题库里放正常题、写成 \`stem\` 的题、只剩选项的题、
+  >   什么都没有的题，断言四条的文本与 label，并断言「hello-repo」同时命中正常题与写错字段名的那道。
+
+- fix(测试): 右栏把手落点按右边那一条窄轨对账，不再减两条之和 (\#259) ([54ace2a](https://github.com/Miaotofu01/Study-Mate/commit/54ace2a62c0ecc060a61c4f303e780d6d4a4ade8))
+
+  > 三档画布下这条断言自 \#219 落地起就是红的：探针把左右两条 \`.smb-railbar\` 的宽
+  > 加起来（76px）当作窄轨宽，再从画布宽里减掉，而右手把只需要跨过右边那一条
+  > （38px）。1440 / 800 / 700 三档实测都正好差 38px，说明产品是对的，账算错了。
+  > 
+  > 改为单独量 \`.smb-railbar--right\`，断言用 railBarRight 对账；railBarWidth（两条
+  > 之和）留给「两条窄轨加起来 = --smb-rail × 2」那条断言用。
+  > 
+  > 验证：node scripts/tests/browser/reading\_routes\_test.mjs → 254 PASS / 31 场景 / 0 FAIL。
+  > 
+  > Co-authored-by: WillEatBug &lt;202426143+WillEatBug@users.noreply.github.com&gt;
+
+- fix(预设): profile 补丁里跨行的引号标量不再让两条预设注册失败 (\#256) ([dce4e5f](https://github.com/Miaotofu01/Study-Mate/commit/dce4e5f03b5468f084a1e233afd3ae7ab655542c))
+
+  > Signed-off-by: Бат-Орших &lt;34618353+orshih6@users.noreply.github.com&gt;
+
+- fix(数学): 题库字段的围栏与转义美元号不再被当成公式 (\#272) ([02bb876](https://github.com/Miaotofu01/Study-Mate/commit/02bb876fab167999f433db0f46cabf04fb577f57))
+
+  > 题面/选项/解析等题库字段逐行跑 MATH\_ONLY，同一行两个原始 $ 就被配成行内公式；
+  > 围栏内的 shell 代码没有豁免，\#271 里的题面因此整段变 TeX 原文。
+  > 
+  > 题库字段改走 mathParagraphs：\`\`\` 围栏内逐字保留（与正文 format.ts:693 同口径），
+  > 围栏外仍用同一条 MATH\_ONLY；mathNodes 先按 \\$ 切分，转义美元号还原成字面 $
+  > 且不参与配对（与 format.ts:1264 同口径）。
+  > 
+  > Closes \#271
+  > 
+  > Co-authored-by: terk &lt;249576037+Sodapopper-pixel@users.noreply.github.com&gt;
+
+- fix(阅读端): 问答面板不再挂载即建空会话 (\#275) ([49697a5](https://github.com/Miaotofu01/Study-Mate/commit/49697a5fb3d348b4089505eaf7c555463507abb9))
+
+  > 病根三条：①面板挂载 effect 没有持久凭据，挂上就请宿主半建一条；②建完 refresh()
+  > 不等结果，刷新没落地时重挂按标题认不出刚建的那条，又建一条；③宿主半 rename 不
+  > await，持久标题投影出来之前按标题认不出旧会话。症状是同一节课的空会话在一分钟内聚堆。
+  > 
+  > 补法（issue 期望方案 2）：面板把「科目/节点标题 → sessionId」记进 localStorage
+  > （读写都不抛——无痕模式里 localStorage 会抛），挂载按「记忆 → 标题快照 → 才建」
+  > 三级认领，建成写回；学生点「上一段会话」里哪条，哪条写进记忆成为这一课的恢复目标。
+  > 封顶 64 条丢最早。
+  > 
+  > 套件自建加载器（client\_harness 的沙箱 window 没有 localStorage）：9 条断言读写
+  > 不抛、三级认领、写回与点选。
+  > 
+  > Closes \#241
+  > 
+  > Co-authored-by: Sodapopper-pixel &lt;Sodapopper-pixel@users.noreply.github.com&gt;
+
+- fix(安装): 落位退回复制时绕开 Windows 原生拷贝，非 ASCII 目标不再静默丢文件（nodejs/node\#59636） (\#290) ([2ada782](https://github.com/Miaotofu01/Study-Mate/commit/2ada7824e7dfb63300d2771950d863570259925d))
+- Merge remote-tracking branch 'origin/main' into feat/unbounded-notes ([9e130c2](https://github.com/Miaotofu01/Study-Mate/commit/9e130c209c3a520be5bb7638779c570862b12446))
+
+  > \# Conflicts:
+  > \#	lib/client.js
+  > \#	scripts/release/release.mjs
+  > \#	scripts/tests/README.md
+
+- fix(测试): 答疑记忆套件的 React 桩补 Component 基类，渲染边界不再炸在工厂里（\#174 ②） (\#294) ([241dc2a](https://github.com/Miaotofu01/Study-Mate/commit/241dc2a3fc66a0ab4ebfe7a70ccff100753c2f6c))
+
+  > 现象：main 在 Core regression tests 上红，唯一失败是 test\_client\_ask\_memory.mjs 的「Class extends value undefined is not a constructor or null」，位置在 loadClient 的工厂里（lib/client.js 的 class RenderBoundary extends React.Component）。
+  > 
+  > 原因：\#282 给每道题与面板根各挂了一层 RenderBoundary，需要 React.Component；而 \#275 新加的这份套件自带一份 React 桩（stubReact），里面只有 createElement / hooks，没有 Component。两份 PR 的 CI 都基于当时的 main，各自都是绿的，合到 main 之后才炸。
+  > 
+  > 改法：照 test\_client\_pure / test\_client\_panes / client\_harness 那几份已经补过的写法，给这份桩补最小同形的 Component（构造函数记 props、setState 合并）。边界里的 getDerivedStateFromError / componentDidCatch 在 Node 侧跑不到，这里只负责「工厂能物化」。
+  > 
+  > L0：test\_client\_ask\_memory 全过；L1：test:static 全过。
+
+- Merge remote-tracking branch 'origin/main' into feat/unbounded-notes ([d69c642](https://github.com/Miaotofu01/Study-Mate/commit/d69c64266bb8ed645c102c33a633871f95798f4f))
+- fix(解析器): 块标量折行与 |+ / &gt;+ 尾随换行对齐 PyYAML（\#224） (\#235) ([3f2305f](https://github.com/Miaotofu01/Study-Mate/commit/3f2305f05597a5bebfd8cd1450c03fa57e9de5dc))
+
+  > \`readBlockScalar()\` 有两处与 YAML 规则不一致，都在 main 上就已经存在：
+  > 
+  > 1. 折行块（\`&gt;\`）里缩进更深的行被当成普通行折成一个空格。YAML 的规则是
+  >    more-indented 行旁边的换行不折叠，多出来的前导空格属于正文。于是
+  >    \`a: &gt;\` + \`  x\` + \`   y\` 读成 \`"x  y\\n"\`，PyYAML 是 \`"x\\n y\\n"\`——静默少一层缩进，
+  >    正是文件头说的「越界就静默解析错」那一类。
+  > 2. \`+\`（keep）的尾随空行在收集阶段就被 pop 掉了，而 keep 的语义正是保留尾部
+  >    所有换行，于是 \`|+\` / \`&gt;+\` 永远比 PyYAML 少若干个 \`\\n\`。
+  > 
+  > 改法照 PyYAML \`scan\_block\_scalar\` 的口径重写：记住块缩进，more-indented 行输出
+  > \`\\n\` + 多出来的前导空格；空行按「几个空行给几个换行」折；chomping 收完所有行之后
+  > 统一做（strip 全去、clip 留一个且文末没换行就不补、keep 原样留）。
+  > 
+  > 期望值不是手推的：测试里那五例逐行照抄 \#224 的对拍表，其余用例（CRLF、列表项、
+  > 嵌套键、\`&gt;2\`、块后面接同级键）也都是 PyYAML 6.0.1 实跑出来的。等缩进的既有用例
+  > 一个字没动。
+  > 
+  > Co-authored-by: wylovecat &lt;20747658+wylovecat@users.noreply.github.com&gt;
+
+- fix(导出): React 依赖按包根解析，扁平安装不再误报 EXPORT\_REACT\_MISSING (\#237) ([6f0e62c](https://github.com/Miaotofu01/Study-Mate/commit/6f0e62c47519d5fcc43c6998acee8fe3f3eef392))
+
+  > \`lib/export/react.ts\` 找 \`scheduler\` 时手拼了一条嵌套路径
+  > （\`react-dom/node\_modules/scheduler/cjs/scheduler.production.js\`），只有 npm 把
+  > scheduler 嵌进 react-dom 目录里才命中。而 npm 7+ 的扁平安装把它提升到顶层
+  > （\`node\_modules/scheduler/...\`），于是四个 React 构建齐全的机器上导出仍然报
+  > \`EXPORT\_REACT\_MISSING\`，并把五个候选目录都列出来让人以为是没装 React。
+  > 
+  > 改法：候选根解析改成「从某个包自己的位置出发解析」，与 \`react\` / \`react-dom\` 同一套：
+  > \`createRequire(path.join(reactDomDir, 'noop.cjs')).resolve('scheduler/package.json')\`
+  > 拿到 scheduler 的包根，再拼 \`cjs/scheduler.production.js\`。嵌套与扁平两种布局都命中，
+  > 命中哪一份就是运行时真正会用的那一份。对外形状（\`resolveReact\` / \`reactCandidates\` /
+  > \`ReactMissingError\`）没动，错误文案里的候选目录列表照旧。
+  > 
+  > 测试：新增两条——扁平树必须命中且命中的是\*\*顶层\*\*那一份；四个构建缺任何一个仍必须
+  > 抛 \`ReactMissingError\`（不能因为放宽解析而把「没装」也放过）。
+  > 
+  > Co-authored-by: wylovecat &lt;20747658+wylovecat@users.noreply.github.com&gt;
+  > Co-authored-by: terk &lt;249576037+Sodapopper-pixel@users.noreply.github.com&gt;
+
+- fix(渲染器): 代码块行号槽按最宽的号自适应，两位数不再折成两行 (\#231) ([1f546d8](https://github.com/Miaotofu01/Study-Mate/commit/1f546d89e7e92874bcfea0878df0e2d8e23c63aa))
+
+  > \* fix(渲染器): 代码块行号槽按最宽的号自适应，两位数不再折成两行
+  > 
+  > 行号槽写死 \`flex: 0 0 2.5ch\` 且没有 \`white-space: nowrap\`：这一档字号下 2.5ch 只放得下
+  > 一个数字，于是 10 行以上的代码块里每个号按字符折行——\`10\` 变成竖排的 \`1\`/\`0\`，\`100\` 折成
+  > 三行。行号列的高度变成代码的三倍，每个号与它那一行对不上，整块被撑高，阅读页里留出一大
+  > 片空白。
+  > 
+  > 改成 \`flex: 0 0 auto\` + \`min-width: 2.5ch\` + \`white-space: nowrap\`：宽度跟着最宽的号走，
+  > ≤9 行时观感一像素不变；行数越多槽越宽，没有断点。槽本来就在横滚层之外，「代码横滚时行号
+  > 不跟着跑」这条不受影响。
+  > 
+  > 浏览器套件补一个靶子块（120 行、号到三位数，放正文最末，不动既有读数）与两条断言：每个号
+  > 的高度 = 一行行高、仍逐行对齐且末号 120。把 CSS 回退成 2.5ch 时这两条会红（实测一号占
+  > 1/2/3 行），换回修法后宽窄两档都绿。
+  > 
+  > Refs \#230
+  > 
+  > \* test(浏览器): 行号槽宽度补第三条断言并补规范判据
+  > 
+  > 采纳 \#231 评审里 wylovecat 给的两条可选补充：
+  > 
+  > - 套件：PROBE 的 gutter 读数加 \`contentW\`（槽的内容宽，扣掉左右内边距）与 \`boxes\`
+  >   （每个号的文本、高度、现在占的宽、以及不折行时要占的宽）；在既有的「一个号只占一行」
+  >   「仍逐行对齐」之后追加第三条「行号实际占宽不超过行号槽内容宽（装得进槽）」。
+  >   评审给的算式用 Range 量「现在占的宽」——实测旧 CSS（\`flex: 0 0 2.5ch\`）下槽内容宽 7px、
+  >   折成两行的号 Range 只剩 6.61px，\`b.w &lt;= contentW + 1\` \*\*仍然是绿的\*\*（假绿：折行的号在
+  >   DOM 里只占最宽那一列字）。所以另量一份 nowrap 下的固有宽 \`singleW\`（旧 CSS 19.8px &gt; 7），
+  >   断言同时看两者。把 CSS 回退成 2.5ch 时这条会红，换回修法后宽窄两档都绿。
+  > - 规范：§一 补一条判据「行号槽按这一块最长行号的位数撑开」；§八 表里 \`lesson\_body\_test\`
+  >   那条的括注补「行号槽按位数撑开」。
+  > 
+  > 验证：本机 Windows 检出（\`core.autocrlf=true\`）下 \`lib/client.js\` 是 CRLF，浏览器夹具的
+  > \`extractCss\` 认的是「\`;\\n」，在仓库里直接跑会报「找不到 \`const CSS = …\`」；于是把仓库复制成
+  > LF 临时副本、用真 Chrome 跑：\`lesson\_body\_test\` 宽档 1440×960 / 窄档 800×900 全绿；把 CSS
+  > 回退成 2.5ch 时新旧三条行号断言全红（新这条读数 \`contentW=7\`、\`widest.singleW=19.8\`）；
+  > \`node --check scripts/tests/browser/lesson\_body\_test.mjs\` 通过。
+  > 
+  > Refs \#231
+  > 
+  > ---------
+  > 
+  > Co-authored-by: soybeanmilka &lt;soybeanmilka@users.noreply.github.com&gt;
+  > Co-authored-by: terk &lt;249576037+Sodapopper-pixel@users.noreply.github.com&gt;
+
+- fix(工具): workspace\_context 摘要补回共享记忆画像三节 (\#288) ([22f2d99](https://github.com/Miaotofu01/Study-Mate/commit/22f2d9964b772a487a24adbf09a76219e43db936))
+
+  > 开场只调一次工作区摘要工具，模型读到的是 output.render 拼出来的文本。
+  > execute 已经返回 memory.markdown（readMemory(...).injectable 的画像三节投影），
+  > 但 render 只拼了工作区一行、科目行与 notes——description 与技能口径承诺的
+  > 「共享记忆的画像三节」在模型实际看到的文本里一个字都没有，模型只能再读一遍
+  > 记忆文件，开场「只调一次」的意义就丢了一半（审计 P1：实跑输出只有 7 行）。
+  > 
+  > render 末尾追加画像三节，做法与现有边界一致：
+  > 
+  > - 只带画像三节：execute 里的投影已按 lib/core/memory.ts 的白名单排除「积累」
+  >   与科目记忆，渲染不再分一次节（复制一份白名单就会漂，\`积累\` 永不进上下文）。
+  > - 超过 2048 字符（码点口径，宿主工具结果裁剪阈值 8192 的四分之一）按码点截断，
+  >   下一行注明「已截断」并给完整原文路径；返回结构 OUTPUT\_SCHEMA 与 execute 返回
+  >   形状一个字不动——那是宿主契约（ADR-0014）。
+  > - 没有可注入内容（无文件 / 只有「积累」/ 空骨架）时一段都不出现：新工作区没有
+  >   共享记忆是常态，不留空标题、不留空行。
+  > 
+  > 测试新增 4 条（画像三节进文本、\`积累\` 不进且盘上确有那条积累、超长截断且正文
+  > 不超预算、无记忆不留空段），既有 9 条保持通过。
+
+- fix(导出): 泄漏守卫按产物角色识别科目子目录导出，不再误报客户端 bundle 与 vendor (\#289) ([0e54357](https://github.com/Miaotofu01/Study-Mate/commit/0e543575f4001ac5932f2a891cfa8f6cc1eeea38))
+
+  > 导出的科目子目录里是一份完整导出（多科目导出目录里 \`&lt;科目&gt;/vendor/\`、\`&lt;科目&gt;/studymate-client.js\`
+  > 与根目录同名同角色），但 \`roleOf()\` 只按根目录精确路径判角色，子目录里的 client / vendor /
+  > data / manifest 全落到 page 按全规则扫：客户端 bundle 的 \`require('react')\`、React CJS 构建的
+  > \`process.\` / \`module.exports\` 被报成泄漏。真实多科目导出样本里一次 17 条，全是这类误报；另外
+  > 导出目录里学生放的 PDF 被当 utf8 文本读，文档里本来就有的 \`file:///\` 链接被报成 machine-path
+  > （第 18 条）。离线页实测能跑，说明红的是判据口径，不是产物。
+  > 
+  > 角色改为按任意深度的「文件名 + 路径段」判（studymate-client.js → client、vendor/ → vendor、
+  > data.js → data、export.json → manifest），index.html / host.js / boot.js 仍按 page 全规则扫，
+  > 真泄漏照报（新增反证：子目录页面里注入 require 仍红）。PDF / 图片 / 字体 / 压缩包这类二进制
+  > 扩展名按 asset 处理、不进文本扫描：它们不是导出器写的文本产物，读成 utf8 再扫原文只会假阳性。
+  > LEAK\_RULES 一条没动，没有用白名单放过真页面，判据没有放宽。
+  > 
+  > 真实多科目导出样本（根清单登记 134 个文件、盘上 195 个）：修复前 18 条 violation，修复后 0 条。
+
+- fix(数据层): misconceptions.yaml 顶层写成映射时当场说清形状 (\#292) ([cfc678d](https://github.com/Miaotofu01/Study-Mate/commit/cfc678dbf99d3b3e4cbb6d2cde874ef15e78f87f))
+
+  > readYamlList 原来把解析结果盲 cast 成数组，形状不对时这个错会一路带到
+  > 消费点，最后在 lib/library.ts 的 \`misconceptionRaw.forEach(...)\` 上炸成
+  > 「misconceptionRaw.forEach is not a function」——报错离现场好几层，看不出
+  > 是哪个文件、该改成什么。
+  > 
+  > 现在当场判形状：非数组就抛
+  > 「&lt;文件&gt; 顶层必须是 YAML 列表，这里读到的是映射（顶层键：items）；没有记录时写 \[\]」，
+  > 读到标量时同样点名类型。空文件、只有注释、顶层 null 仍按「没有记录」返回空清单，
+  > 不误报。
+  > 
+  > 补一份特征化测试：映射形状抛错且错误带形状（含 isolateBrokenSubjects 时
+  > 点名那门科目），只有注释的文件仍是空清单。
+  > 
+  > Refs \#291
+  > 
+  > Co-authored-by: zeki520 &lt;331502583+zeki520@users.noreply.github.com&gt;
+
+- fix(记忆): 旧工作区的共享记忆可读可迁移（读侧兜底 + migrate 命令） (\#287) ([df3c5a0](https://github.com/Miaotofu01/Study-Mate/commit/df3c5a081a806f198b0759bd220ba827532885bb))
+
+  > 2.0.x 工作区的共享记忆是 .learning/MEMORY.md（\#\# 分节 + bullet）。\#190 之后读侧改成按
+  > YAML 节取用，旧文件被静默当成「没有记忆」：画像三节与「积累」全丢（审计用插件自己的
+  > 解析器复现：readMemory 喂旧文件得到 sections=\[\]，四节全 missing）。ADR-0014 当时按
+  > 「只改名、内容形状不变」决定不兜旧名；\#190 改了内容形状，这条前提不再成立。
+  > 
+  > - 读侧兜底：MEMORY.yaml 优先；缺它而旧文件在时，按旧格式转换后读，每进程提示一次
+  >   「请迁移」。答疑注入 / 工作区摘要 / 图片库载荷三个消费点统一走 lib/memory-file.ts。
+  > - 一次性迁移：studymate migrate \[--workspace\] \[--dry-run\] \[--json\]。不覆盖已有新文件、
+  >   幂等、不丢内容（转不了进 warning 或原样带过去，旧文件整份留 .bak）、可回滚；
+  >   「跨科目观察」并进「积累」，规范外旧节原样保留并逐条列 warning。
+  > - 摘要工具在 notes 里直接给出迁移命令（总控开场唯一能看到的一行）。
+  > - 测试：test\_memory\_rename.mjs 扩展旧格式转换/兜底/迁移四承诺/CLI 端到端，答疑注入、
+  >   载荷、摘要三个消费点各加旧格式用例；ADR-0014 补迁移期边界与结束条件。
+
+- fix(Windows): 非 ASCII 路径下不再用同步递归删除，中文用户名的安装不再整段崩掉 (\#293) ([3e6bb67](https://github.com/Miaotofu01/Study-Mate/commit/3e6bb678d86045af7d0ea8db5023c48a330e108b))
+
+  > \* fix(Windows): 非 ASCII 路径下不再用同步递归删除，中文用户名的安装不再整段崩掉
+  > 
+  > 现象：main 的 installer 套件在本机 20/29 红，全部是子进程 0xC0000005 崩掉；中文用户名下安装器会静默失败。
+  > 
+  > 根因：Node v24.13.0 在 Windows 上对非 ASCII 路径做同步递归删除（fs.rmSync(p, {recursive:true})）会直接打死进程。同机 Node v22.23.2 正常，异步 fs.rm 与手工 unlink+rmdir 也正常——不是本机安全软件（对照组是同一台机器）。
+  > 
+  > 改法：新增 lib/fs-remove.mjs 的 removeTreeSync（lstat + readdir + unlink + rmdir），替换安装器与两个构建器里的同步递归删除；atomicWrite 只在 rename 失败时才清临时文件；fs-swap 的退路拷贝补恒真 filter（与 \#290 同源）。
+  > 
+  > 验证：test\_installer + test\_bundle 29/29（改前 9/29）；openai 10/10；antigravity 6/6；preset\_install 25/26（剩下那条是既有 /标记/ 文案断言，main 上同样红）。
+  > 
+  > \* fix(预设): 同步 main 时补回 quotedScalarContinuation 两处开关，别把 \#256 的修复回退掉
+  > 
+  > 重建 \#293 时，lib/preset.ts 里 PATCH\_PARSE\_OPTIONS 与预设插件列表两处的 quotedScalarContinuation: true 被分支版本覆盖成了旧样，CI 于是红在「profile 补丁里的跨行双引号标量不挡注册（宿主按 80 列重排写盘的真实形态）」。
+  > 
+  > 这条 PR 本意只改「失败路径删临时文件」这一处（atomicWrite 里 rename 成功就不再 rmSync），与 \#256 的解析开关无关；把开关按 main 原样补回，本 PR 的差异就只剩那一处。
+
+- fix(测试): 动效档位断言不再依赖宿主默认的 prefers-reduced-motion ([b997a85](https://github.com/Miaotofu01/Study-Mate/commit/b997a855b95b262ca40025b70a3c875da4cff52d))
+
+  > 现象：验证机（CUPC-ZBX1ICFHWU）上跑浏览器档，reading\_routes\_test 的
+  > \`\[动效\] 时长随档位单调变短、off 真的关掉、auto 默认取全动效\` 红，
+  > 实得 \["70ms","140ms","70ms","0ms"\]——auto 拿到的是 reduced 的时长。
+  > reading\_test 的 \`默认 auto 档取 full 的时长\` 是同一个前提，同一台机上也会红。
+  > 
+  > 根因不是产品：\`auto\` 档按设计就跟随系统偏好（CSS 里
+  > \`@media (prefers-reduced-motion: reduce) { .smb-root\[data-motion="auto"\] { --smb-motion: 70ms } }\`）。
+  > 这台验证机的桌面会话下 Edge 默认就报 \`prefers-reduced-motion: reduce\`（无桌面/远程会话的
+  > Windows 会把「客户端区动画」关掉），于是 auto 取 70ms。断言把「宿主的默认偏好」
+  > 当成了常量——同一份代码在普通桌面上是 140ms，在这里是 70ms。
+  > 
+  > 改法：两套件在动效场景开始时显式 \`session.emulate({ reducedMotion: 'no-preference' })\`
+  > 再读 auto 档，断言「给定 no-preference 时 auto 取 full 的时长」；reduce 那一支原本就在下面
+  > 单独模拟，不动。产品代码一行未改。
+  > 
+  > 验证（本机 Edge，Node 24.13.0）：\`reading\_routes\_test.mjs\` 与 \`reading\_test.mjs\`
+  > 改后全绿（含两套件的对比度、三档视口、动效四档与系统偏好两支）；改前 routes 的
+  > auto 实测 70ms。
+
+- fix(测试): 非 ASCII 路径下不再用 rmSync——测试夹具与 lab 沙箱改用逐层删除 (\#295) ([0b94f56](https://github.com/Miaotofu01/Study-Mate/commit/0b94f56c5d6c3761f79b4e37cd940d444c4ba160))
+
+  > 现象：main（3f2305f）上非浏览器档 4 条红，都不是断言差异，而是「要删的东西没删掉」
+  > 或「删的时候把进程打死」：test\_lab\_runner 两条反证、test\_preset\_install 的坏 bundle
+  > 组、test\_skill\_visibility 整份文件（0xC0000409，一条断言都跑不出来）。
+  > 
+  > 根因：Node 24.13.0 在 Windows 上，fs.rmSync 对\*\*路径含非 ASCII 字符\*\*的目标坏了两种
+  > 形态，且都静默——递归删目录直接崩（0xC0000005 / 0xC0000409）；连非递归的
+  > rmSync(文件) 也返回成功但文件还在。同机 Node 22.23.2 全正常；unlinkSync、
+  > rmdirSync、fs.promises.rm 在同样的路径上都正常。所以不是杀软、也不是权限。
+  > 
+  > 改法：新增 scripts/tests/fixtures/fs-rm.mjs（removeFile 用 unlinkSync；removeTree
+  > 逐层 readdir + unlink + rmdir，符号链接/junction 先摘链接不跟进去，避免顺着 junction
+  > 删到别人的技能源）；lib/lab/runner.ts 的 rmQuiet（删 os.tmpdir() 下的沙箱目录，
+  > 用户家目录含中文时那条路径就是非 ASCII）同样改逐层删；test\_lab\_runner 3 处、
+  > test\_skill\_visibility 4 处、test\_preset\_install 2 处换掉 rmSync。
+  > 
+  > 验证：三条套件改前 64 条 59 过 4 红 → 改后 69 条 68 过 1 跳过 0 红（条数变化是
+  > test\_skill\_visibility 崩溃时用例根本没被统计）。把 rmSync 换回去，四条立刻复现。
+  > 
+  > 未做：浏览器档（\[动效\] 档位单调那条在 scripts/tests/browser/\*\*，需要 Edge，属另一
+  > 条线）；typecheck（本机工作树没有 node\_modules）。与 PR \#293 同源但互补：那条修安装
+  > 器/构建器，这条修测试夹具与 lab 沙箱，互不 import。
+
+- fix(导出): 子目录里同名但不是产物的文件不再按产物判（\#286 误报的另一个方向） (\#297) ([f77ddb5](https://github.com/Miaotofu01/Study-Mate/commit/f77ddb5cb478d646530cdb0223d738261b928679))
+
+  > \#289 合进来之后 roleOf 按 basename 在任意深度判角色，于是「学生放进导出目录、与产物同名但同目录没有 export.json 的文件」被当成产物：&lt;科目&gt;/lessons/data.js 判成 data、缺载荷标记就报 data-payload；&lt;科目&gt;/vendor/README.txt 判成 vendor、切不出包装壳就报 vendor-wrapper。这两个在 \#289 之前是 page、扫下来是干净的——误报只是从「客户端 bundle」换到了「同名非产物」。
+  > 
+  > 收窄：client / data 只在该目录自己有 export.json（一份完整导出）时按产物判，否则留在 page；vendor 只认 .js；export.json 仍任意深度按 manifest 判（只过机器路径一条）。补一条用例：同名非产物留在 page、整树无 violation；既有的「子目录整树导出仍按角色识别」「子目录真页面注入仍报 cjs-require」两条反证照旧通过。
+  > 
+  > Refs \#286
+
+- fix(记忆): 旧文件读不出来时不再说「内容不丢」，并补齐 migrate --help 与迁移期边界 (\#298) ([357b442](https://github.com/Miaotofu01/Study-Mate/commit/357b442641ba5f9e6d76796d0f8157402687621f))
+
+  > \#284 合进来之后还剩三处「说明与实际行为对不上」：
+  > 1) 旧 MEMORY.md 没有 \#\# 分节时，转换不出任何一节、注入是空串，提示语却仍写「已按旧格式读取，内容不丢」；
+  > 2) readSharedMemory 的 warnings 没有任何消费点，转换报告只在 migrate 里出现一次；
+  > 3) studymate migrate --help 被当成「不支持的参数」退 1。
+  > 
+  > 改法：readSharedMemory 增 unreadable（旧格式且 text === null），vault 把它透出来；摘要 notes 按它分支——能迁移时说「规范内的分节照常生效」，读不出来时说「读不出来（内容还在盘上）」并给 migrate --dry-run；migrate 的 --help/-h 印用法退 0。ADR-0014 的「后续」补两条边界：监听域仍只认新名（手工改旧文件不触发刷新，保留 \#189 的稳定契约）、读不出来必须说出来。安装文档的升级段同步写明这两点。
+  > 
+  > 测试：新增「没有 \#\# 分节 → unreadable 为真、text 为 null、提示不说内容不丢」「摘要 notes 走读不出来那一支」「migrate --help 退 0」三条。
+  > 
+  > Refs \#284
+
+- Merge pull request \#258 from WillEatBug/feat/font-size-levels ([ba3966c](https://github.com/Miaotofu01/Study-Mate/commit/ba3966cfe88d1b9b72aa120955388a410f64b264))
+
+  > feat(阅读端): 顶栏加字号档位，正文四档可切（\#257）
+
+- Merge remote-tracking branch 'origin/main' into fix/browser-motion-default ([fdf6a6e](https://github.com/Miaotofu01/Study-Mate/commit/fdf6a6e14121c57829b19460e9bfd674a721bfe0))
+- test(浏览器): 合并 main 后去掉重复的 no-preference 模拟 ([44d9305](https://github.com/Miaotofu01/Study-Mate/commit/44d9305a3b71d743666f8a134012a50fee855d8c))
+
+  > main 上 \#258 已在 reading\_test 的 reading-motion 场景开头加了同一行 emulate，本分支的同一处就成了第二份。去掉自己那份，保留 \#258 的那份，断言不变。
+  > 
+  > 验证：reading\_routes\_test 与 reading\_test 在本机 Edge 上全绿（含 31 张截图的三档视口与两套件的对比度）。
+
+- Merge pull request \#299 from Miaotofu01/fix/browser-motion-default ([91f5a98](https://github.com/Miaotofu01/Study-Mate/commit/91f5a988249d5410153d49a76e180c7f6105e762))
+
+  > fix(测试): 动效档位断言不再依赖宿主默认的 prefers-reduced-motion
+
+- feat(阅读端): 课件页标注——高亮、侧注、落盘与引用提问 (\#296) ([cb9c0f1](https://github.com/Miaotofu01/Study-Mate/commit/cb9c0f10886ffd1233b7975a0bf03e1dc844e37e))
+
+  > \* docs(ADR): 0015 课件页标注——新增 annotations/ 与 schema 的破例边界
+  > 
+  > 先写 ADR 再动代码：标注要同时穿过 ADR-0004 的布局冻结与 ADR-0010 的「阅读端只写 reference/ 与作答数据」两个已决策，边界不先写死就会在评审里变成第三套说法。
+  > 
+  > ADR-0015 的结论：annotations/ 与 annotations.schema.json 是\*\*新增而非改动\*\*（旧工作区零迁移），标注是作答数据这一族的扩员而不是第三条写入路径；同时收窄 ADR-0014 里「五份 schema 不动」的表述为「已有 schema 不动」。
+  > 
+  > \* feat(数据层): 课件标注落盘——annotations/ 目录、版本栅栏与载荷
+  > 
+  > 学生划选正文留下的高亮与注释需要一个持久落点：写回课件正文会被模型重写整段覆盖
+  > （与「作答绝不写回题库」同一份理由），只放浏览器 localStorage 则清缓存即丢、换机器
+  > 没有、模型也读不到。按 ADR-0015 落成 \`&lt;科目&gt;/annotations/&lt;NNNN&gt;-&lt;节点id&gt;.json\`，
+  > 与课件一一对应。
+  > 
+  > 这是 ADR-0004 布局与文件名冻结的又一处破例，但破法是\*\*新增而非改动\*\*：只多一个
+  > 子目录与一份 schema，已有文件、目录与 schema 一个字节不动，旧工作区没有
+  > annotations/ 照样能开（读侧 present:false，第一次标注才建目录），零迁移。它也不是
+  > ADR-0010 之外的第三条写入路径——标注与 attempts/ 是同一族（同为学生对内容的反应、
+  > 同为派生记录、删掉不损失任何学习内容、模型可直接读），只是给已批准的那一族多加
+  > 一个文件。
+  > 
+  > 按 ADR-0015，块切分只由阅读端 parseBlocks 说了算，Host 半写入/读回都不解析课件，
+  > 只做字节存储 + 版本栅栏（operationId 幂等重放、expectedVersion 冲突拒绝并重读，
+  > 台账独立实例，判据在 lib/core/fence.ts）；range 指向的块还在不在由客户端渲染时按
+  > 四态对账，不在数据层判。写入口径是全量替换：整份数组进、「标 id → 标注」落盘，
+  > 创建/编辑/删除都靠一次写入表达，空数组=清空但文件仍写出（「删光了」与「从来没标
+  > 过」在盘上分得开）。
+  > 
+  > 载荷侧给 \`node.annotations = {present, version, items}\`（items 按 id 升序保证稳定），
+  > 监听域新增 \`annotations\`；路由只开 POST、读走 payload；错误码词表加
+  > \`annotations-invalid\`。
+  > 
+  > 自带两个套件：数据层（落盘形状/幂等/版本栅栏/全量替换/路径越界/坏文件读侧容错/
+  > payload/watch 域/schema 对账）与路由（注册形状/200/400/405/409/500/跨请求读回）。
+  > 另有两处回归同步：test\_host\_library\_payload 的节点键表加 annotations；
+  > test\_core\_schema\_subset 的 schema 计数与样例同步到第十份（新增 schema 的必然同步）。
+  > 
+  > 文档与门禁登记同步：文件归属表、工程约束的目录树与路由清单、目标态规格 §5.1
+  > 布局树（含「已有 schema 不动」的收窄表述）、tests README 与 checks.mjs 的 core 组。
+  > 
+  > \* feat(阅读端): 课件页标注——选中高亮、侧注与失效重指
+  > 
+  > 课件正文要能被学生「划一段、写一句」，而且模型重写课件之后旧标注不许贴到错位置。
+  > 这一笔把锚点、渲染与写盘三层一起落地：
+  > 
+  > - parseBlocks 给每块记绝对起始行（含 practice/tip/warn/note 嵌套 body 的 baseLine），
+  >   Block/MathSpan 的叶子根元素挂 data-line；行号相对正文、不含 frontmatter。
+  > - 纯函数内核（STUDY\_ANNOTATE\_KERNEL 标记夹住，零 DOM）：块渲染纯文本 + FNV-1a 哈希、
+  >   四态判定（resolved/stale/ambiguous/missing，多匹配不静默取第一个）、reassignRange、
+  >   选区偏移换算与标段原文摘录。DOM 侧只按同一口径把文本节点喂进来，对不上就拒绝建标注。
+  > - 高亮是 .smb-doc 里的绝对定位覆盖层（Range.getClientRects），不重写 inlineNodes；
+  >   公式排版落位 dispatch studymate:math-settled，覆盖层据此重算。
+  > - 写盘走 POST /api/studymate/annotations：整份数组 + operationId + expectedVersion，
+  >   串行队列 + 旧版本读数围栏；409 用回执里的 annotations/version 重读并给人话。
+  > - 样式只引 --dsw-alias-\* / --smb-\* / --smb-fs-\* token；新增 Node 套件与真浏览器套件
+  >   （划选→保存→覆盖层→刷新仍在→原文变了不贴错位置→重新指定）。
+  > 
+  > spike（临时目录现造课件，含 $$ 公式、term 代码块、宽表格、::: quiz / ::: note；脚本不入库）：
+  > 正文 34 行、叶子块 9 个，行号全部回指原文（callout 自身行 14、嵌套块行 15，证明 baseLine 递归）；
+  > 同一输入解析两次 blocks 逐字相同；改 1 段 → 1/9 stale、其余 resolved；前面插一个块 → 9/9 靠
+  > hash 重定位 resolved（blockIndex 1→2）；复制一段 → ambiguous；reassignRange 给出最近同类块。
+  > 
+  > 文档与门禁登记同步：使用说明 §二 补「在课件页上做标注」与 §六 的 annotations/ 落点，
+  > tests README 的套件清单/浏览器数量，checks.mjs 的 core 与 --browser 两组登记。
+  > 
+  > 回执读取口径（写入口径为「数组进、Record 落盘」）：回执与 409 信封里的
+  > \`annotations.标\` 是「id → 标注」的 Record，payload 的 items 是数组——两端在
+  > annotationsFromReceipt 里归一，写成功后列表不会先被清空。三种形状（Record / 数组 /
+  > 老回执没有那一格）都有断言。
+  > 
+  > \* feat(阅读端): 标注多选拼一条引用 chip 进答疑
+  > 
+  > 列表里勾选若干条标注 →「带着 N 条标注提问」：把原文摘录 + 注释按列表顺序拼成一条
+  > quote，走 \#106 现成的引用机制（referenceInsertFor / putQuoteInDraft / AskPanel 的
+  > quote prop）进答疑会话草稿，同时把右栏切到「问答」tab。不新开路由、不改
+  > POST /api/studymate/qa/session 的契约、不另写选区监听。
+  > 
+  > annotationQuoteFor 是纯函数（STUDY\_ANNOTATE\_KERNEL 标记内）：每条一段
+  > 「标注 N（第 L 段）：原文摘录」+「注释：…」，空摘录/空注释省略；选中顺序就是列表
+  > 顺序，所以同样多选两次拼出来的文本逐字相同。空选择不产 chip（referenceInsertFor
+  > 得 null），不会往草稿里塞空壳。
+  > 
+  > 测试：test\_client\_annotations.mjs 追加拼法 / 顺序稳定 / 编解码往返 / 面板多选入口
+  > 断言；browser/annotations\_test.mjs 加第三场 annotations-ask——真浏览器里勾两条 →
+  > 「问答」tab 自己切过去 → chip 出现 → 点开看全文（两条原文与注释都在），全程只拼引用、
+  > 不额外写标注数据。
+  > 
+  > 文档同步：使用说明 §二 补「多选标注拼一条引用 chip 进答疑」一句。
+  > 
+  > \* feat(导出): 产物内嵌标注只读快照
+  > 
+  > 导出页是\*\*快照\*\*：离线产物没有 Host 半，\`host.js\` 对一切写请求回 403（作答、参考资料、
+  > 标注都写不进来）。所以在 \`data.js\` 的 library 快照上打只读标记 \`offline: true\`
+  > （\`lib/export/page.ts\` 的 \`dataScript\` 一处定义），阅读端据此进入只读模式：
+  > 
+  > - 标注照常渲染：高亮覆盖层、行内小标记、本页标注列表（含四态徽标）全在；
+  > - 编辑 / 删除 / 「重新指定到当前段落」/ 多选与「带着标注提问」入口全不出现；
+  > - 所有写动作在函数入口也有 readOnly 守卫——按钮藏了不等于写请求发不出去，两层都要；
+  > - 标记从 payload（\`library.offline\`）判断，不读任何宿主内部全局，也不为导出页开第二条读法。
+  > 
+  > 标注数据本身不需要导出代码做额外搬运：\`plan.ts\` 的 data.js 快照就是 \`readLibrary()\` 的
+  > 同一份 payload，Host 数据层把 \`node.annotations = {present, version, items}\` 读进来之后
+  > 自动内联进 data.js（items 是数组、按 id 升序；版本号不落盘，是内容哈希）。
+  > 
+  > 新增 \`scripts/tests/test\_export\_annotations.mjs\`：造含一条标注的临时工作区 → 真导出 →
+  > data.js 里 library.offline === true；盘上标注逐字进 node.annotations（Host 读入那笔合入后
+  > 走严格断言，合入前在真导出快照上用生产 dataScript 验证同一形状，注释写明过渡理由）；
+  > 产物里 studymate-client.js 与 lib/client.js 哈希逐字相同；泄漏守卫干净；只读模式下列表/
+  > 弹层的入口断言。
+  > 
+  > 文档与门禁登记同步：使用说明 §二 补「离线导出产物里标注是只读快照」一句；
+  > tests README 增套件行；checks.mjs 的 --static 组登记 test\_export\_annotations.mjs。
+
+- fix(删除): 非 ASCII 路径下剩下的产品删除点不再用 fs.rmSync (\#300) ([57d1f0a](https://github.com/Miaotofu01/Study-Mate/commit/57d1f0a66a4a2f106a15a4597314982a5b4b91a5))
+
+  > 同一条缺陷（Node 24 + Windows + 路径含非 ASCII 字符）在 main 上还留着五处，
+  > 全部是\*\*清理或撤回\*\*路径：\`fs.rmSync\` 返回成功但文件还在，调用方已经按「删掉了」往下走。
+  > 
+  > - \`lib/preset.ts\` 的 \`atomicWrite\`：写失败时清临时文件；改成 \`removeTreeSync\`。
+  > - \`lib/memory-migrate.ts\`：写新文件失败清临时文件、旧文件改名失败撤回新文件；两处都改。
+  >   撤回那处更要紧——静默不删会让「已撤回新文件（原文件未动）」变成一句空话，新旧两份都在盘上。
+  > - \`lib/tasks/service.ts\` 的 \`rmArtifact\`：删产物是\*\*普通文件\*\*，直接 \`unlinkSync\`。
+  > - \`lib/tasks/store.ts\` 的 \`remove\`：删任务记录同样是文件，直接 \`unlinkSync\`
+  >   （原本静默不删会把「已清掉」报出去，记录却还在盘上）。
+  > - \`openai/studymate/scripts/interaction\_state.mjs\`：原子提交失败时清 \`.interaction-\*.tmp\`。
+  >   这个脚本随 OpenAI 插件单独发货，不能 import \`lib/fs-remove.mjs\`，所以就地 \`unlinkSync\`
+  >   并只忽略 \`ENOENT\`。
+  > 
+  > 验证（本机 Windows 11 + Node 24.13.0，\`node\` 走 \`C:\\Program Files\\nodejs\`，Git \`sh\` 在 PATH）：
+  > 
+  > | 套件 | 改前 | 改后 |
+  > | --- | --- | --- |
+  > | \`test\_interaction\_state.mjs\` | \`原子替换失败时保留原状态\` 红（现场残留 \`.interaction-\*.tmp\`） | 15 条 / 14 过 / 0 红（1 条 Windows 符号链接用例 skip） |
+  > | \`test\_tasks\_model.mjs\` / \`test\_export\_tool\_task.mjs\` / \`test\_memory\_rename.mjs\` / \`test\_core\_memory.mjs\` / \`test\_preset\_install.mjs\` / \`test\_client\_ask\_memory.mjs\` | — | 全绿（\`test\_preset\_install\` 连跑 3 次 0 红） |
+  > | \`typecheck\` | — | 通过（\`tsc --noEmit\`） |
+  > 
+  > 注：\`test\_preset\_install\` 首次跑曾出现一次 \`EPERM: operation not permitted, rename …\`，
+  > 重跑即绿——那是本机安全代理短暂持有句柄，与本改动无关（改的只是 finally 里的清理）。
+
+- fix(测试): 单文件删除统一走 fixtures/fs-rm 的 removeFile (\#301) ([139edfe](https://github.com/Miaotofu01/Study-Mate/commit/139edfee8d0042c592f32f71241cb22109000bd6))
+
+  > \* fix(测试): 单文件删除统一走 fixtures/fs-rm 的 removeFile
+  > 
+  > PR \#295 已经把「非 ASCII 路径下 \`fs.rmSync\` 坏了」写进测试夹具，但只覆盖了当时红的
+  > 那三条套件。main 上还剩 11 处单文件 \`fs.rmSync\`（\`test\_host\_qa\_preset\`、\`test\_tools\_validate\`
+  > 等），表现同样是「返回成功、文件还在」。最典型的两处已经变成红线：
+  > 
+  > - \`test\_host\_qa\_preset.mjs\`：\`rmSync(.../lessons/0002-fn.md)\` 静默不删，正文文件仍在，
+  >   于是「大纲里有、正文没落盘」的用例拿到 \`found: true\` → \`只读工具：不存在的节点…\` 红。
+  > - \`test\_tools\_validate.mjs\`：\`rmSync(.../assets/img/pool.md)\` 静默不删，图片库目录里还留着
+  >   一份索引，\`索引写错地方\` 的用例判不出来 → 那条红线，并顺着把 \`test\_core\_coverage\_floor\`
+  >   （「整个纯函数域」）拖红——它把子套件的失败翻译成「没达到覆盖率下限」，报错会骗人。
+  > 
+  > 改法：这 11 处一律换成 \`scripts/tests/fixtures/fs-rm.mjs\` 的 \`removeFile\`（\`unlinkSync\` +
+  > 忽略 \`ENOENT\`，即 \`force: true\` 的语义）。涉及文件：
+  > 
+  > - \`test\_host\_qa\_preset.mjs\`（1 处）、\`test\_tools\_validate.mjs\`（2 处）
+  > - \`test\_host\_library\_payload.mjs\`、\`test\_interaction\_state.mjs\`（2 处）、\`test\_memory\_rename.mjs\`
+  > - \`test\_openai\_plugin.mjs\`、\`test\_preset\_install.mjs\`
+  > 
+  > 验证（本机 Windows 11 + Node 24.13.0）：
+  > 
+  > | 套件 | 改前 | 改后 |
+  > | --- | --- | --- |
+  > | \`test\_host\_qa\_preset.mjs\` + \`test\_tools\_validate.mjs\` | 各红 1 条 | \*\*29 条 / 29 过 / 0 红\*\* |
+  > 
+  > \#\# 没做的
+  > 
+  > - 测试里还有 52 处 \`rmSync(目录, { recursive: true })\` 的清理调用。它们删的是
+  >   \`os.tmpdir()\` 下的临时目录，在本机（用户名为 ASCII）不复现；只有落在 \`学习资料/\` 这类
+  >   非 ASCII 夹具根下才会中招。这次没有一次性全改，避免把「修红」变成大扫除。
+  > - \`scripts/tests/browser/\*\*\` 同样有 \`rmSync(PROFILE, { recursive: true })\`，未动。
+  > 
+  > \* fix(测试): 导出缺件用例的单文件删除也走 fs-rm，非 ASCII 路径下不再假通过
+
+- merge: 合入 main（路由清单冲突取并集：main 的 annotations + 本 PR 的 status） ([6c523e0](https://github.com/Miaotofu01/Study-Mate/commit/6c523e0a1b4752bc535322c1d3acdad30607ed38))
+
+  > \`docs/规范/工程约束.md\` 的阅读端路由清单两处各加了一条：main（\#296 课件页标注）
+  > 加了 \`annotations\`，本 PR 加了 \`status\`。取并集，其余 42 个提交全部自动合并。
+  > 
+  > 合入后复验：\`test:types\` 0；client plugin page / host status / plugin metadata
+  > 27/27；\`checks --static\` 95/95。
+
+- feat(阅读端): 主观题受控输入、草稿落盘与带进答疑 (\#213) ([33a882d](https://github.com/Miaotofu01/Study-Mate/commit/33a882dff5ff82e31a49796bef784c9aac5a24c7))
+
+  > 主观题文本是状态不是事件：草稿另起顶层 草稿 字段，走同一条写队列但只更新那一格，不 push 历史、不动上次结果；只有自评这类离散动作才把文本快照进历史条目并带 作答（预测验证仍写 预测）。50 条历史配额不会被打字灌满，上次结果也不会被没有自评的文本覆盖。
+  > 
+  > 「带进答疑」复用现有引用 chip 与草稿插入：题干 + 我的作答拼一条引用，切到问答 tab 预填，发送仍由学生按。
+
+- Merge pull request \#253 from xinspark/feat/plugin-detail-page ([e8e88ac](https://github.com/Miaotofu01/Study-Mate/commit/e8e88ac106274e964cd1594ee19eec2fd935a2aa))
+
+  > 建议：插件详情页完善
+
+- merge: 合入 main（\#253 插件页 + 20 个提交），解 client.js / 导出 / 配置冲突 ([a7af1a7](https://github.com/Miaotofu01/Study-Mate/commit/a7af1a764d00a014dc9e20cbb3345ae0a30b9a76))
+
+  > - lib/client.js：顶栏与根渲染取并集——保留 main 的字号档位、标注（只读态、高亮层、
+  >   标注面板与写入口），同时接入无界笔记的面（surface / 品牌切换 / 笔记侧栏与
+  >   \`notesContext\`）。LessonPage 的签名合并两侧 props。
+  > - package.json / package-lock.json：\`./client\` 走 dist 单入口、\`locale/\*.json\` 与
+  >   \`@deepseek-ai/schemastery\` 可选 peer 并存；devDependencies 取并集。
+  > - scripts/release/release.mjs：tarball 白名单与必需文件取并集（dist 两个文件 +
+  >   locale 两份 + icon）。
+  > - 架构边界：bin 的宿主 peer 白名单与 notes / notes-client 两个域并存。
+  > - 测试适配：LessonPage 新增的标注状态位按新调用顺序喂给 React 桩；导出 React 解析
+  >   加 \`packageRoot: null\`，让「一个候选都没有」在装了 react 的仓库里仍可测。
+
+- Merge pull request \#279 from Miaotofu01/feat/unbounded-notes ([6720374](https://github.com/Miaotofu01/Study-Mate/commit/67203749187372b6d93f58d2a7bd8cf89f33332a))
+
+  > feat(无界笔记): 正式模块、独立数据域持久化与科目绑定联动（\#262）
+
+- merge: 合入 main（同步 \#213 分支，解 client.js 冲突） ([0e64a15](https://github.com/Miaotofu01/Study-Mate/commit/0e64a150296ffa154eff4300f004625334d67101))
+- feat(渲染器): 正文按中文阅读规范排版——首行空两格、两端对齐、列表每级 2 字符 ([fb38b11](https://github.com/Miaotofu01/Study-Mate/commit/fb38b11ae6f8074fed56242491ddf73f7d483907))
+
+  > 学生 2026-11-15 的原话：「把首行缩进两个字符的样式规范做好，还有从属关系的 Tab 缩进」
+  > 「它不喜欢换行，喜欢塞在一行，就算有换行的逻辑它也不换行」。前一句是排版，后一句里有一半
+  > 其实是解析器坏了（见下），两件事在这次一起修。
+  > 
+  > \*\*排版三样，取值有出处\*\*
+  > 
+  > - 首行缩进 2 字符（\`--smb-indent-first: 2em\`）、从属层级每级 2 字符
+  >   （\`--smb-indent-step: 2em\`）、成段正文两端对齐（\`text-align: justify\`）。
+  > - 一律用 \`em\`，不写 \`px\`：顶栏的字号四档换过之后仍然是「空两格」。写死 26px 就只在 13px
+  >   那一档对——那正是「看起来像做了、换个档就不是了」的那种坏法。
+  > - 「2 字符」不是估的：Word 的样式表里正文是 \`w:ind w:firstLineChars="200"\`
+  >   （200 ÷ 100 = 2 个字符），列表族 \`List\`/\`List2\`/\`List3\` 是 \`w:left="360"/"720"/"1080"\`
+  >   （每级 +360 twips = 2 个字符）——两条独立的写法指向同一个数。中文排版的通行做法也是
+  >   段首空两格，所以这一档不是偏好，就是规范本身。
+  > - \*\*框内的段落不缩进\*\*：课头的元信息行、本节目标、提示卡与练习块里的段落，以及代码块的
+  >   框内解释槽，一律复位成「不缩进、左对齐」。它们各自的容器已经有边距或边框，再叠两格就是
+  >   三级缩进，层级反而看不出来；两端对齐在短句上还会拉出难看的字间距。
+  > 
+  > \*\*列表的从属层级：它一直是坏的\*\*
+  > 
+  > \`parseBlocks\` 的列表分支过去只吃顶格那几行，缩进 2 格的子项被下一轮的段落分支收走，
+  > 再喂进 \`join(' ')\`，于是两级条目挤在同一行里。真机读数（同一份课件、Edge 1100×1000）：
+  > 
+  >     改前 第 1 段首行缩进   0px   对齐 left      列表层级 只有 1 层（194）
+  >          正文里出现一段「- 第二层… - 第三层…」   ← 从属关系被压成散文
+  >     改后 第 1 段首行缩进  26px = 2.00 字符       对齐 justify
+  >          列表三层 194 → 220 → 246（每级 +26px = 2 字符），压平的那一段消失
+  > 
+  > 现在按服务端 \`parseList\` 的同一条口径建 \`item.children\`：\*\*缩进 2 格 = 下一层\*\*（4 格在
+  > 服务端是报错，这边也不悄悄收下），条目从字符串变成 \`{ text, children, line }\`，与
+  > \`lib/core/format.ts\` 的 \`ListItem\` 同构——阅读端与导出端切出来的是同一棵树。
+  > 
+  > \*\*跟着改的三处（都是被条目形状带出来的，不是顺带重构）\*\*
+  > 
+  > - \`blockPlainText\`：按 DOM 顺序\*\*先序\*\*摊平（\`&lt;li&gt;\` 里先文字、后子列表），这是标注锚点
+  >   偏移能对上的前提；
+  > - \`blockFragments\`（检索串）：子项一样要搜得到，命中的仍是这一块；
+  > - \`Block\` 的 list 分支：认得两种条目形态（裸字符串是 \`::: resources\` 与外部喂进来的块），
+  >   子列表挂成真正的 \`&lt;ul&gt;\`/\`&lt;ol&gt;\` 嵌套，缩进只由 CSS 给。
+  > 
+  > \*\*门禁\*\*
+  > 
+  > - \`test\_client\_typography.mjs\` 新增四条：首行缩进是 2em 且引 token、层级缩进只有一个出处、
+  >   成段正文 justify、复位规则\*\*写在正文规则之后\*\*（写在前面就是同特异度下被盖掉的死声明）。
+  > - 新增 \`test\_client\_list.mjs\`（14 条）：两级 / 三级 / 有序嵌套、同级不被中间的子树打断、
+  >   4 格不是一层、每条带绝对行号（含嵌套指令的 \`baseLine\`）、纯文本按 DOM 顺序、裸字符串
+  >   兼容、检索串两级都搜得到、段落合并没被改坏。末了一条是\*\*注入反证\*\*：把挂子列表那条判据
+  >   改成恒假，缩进那行必须落回正文段落——判据本身也证明它会红。
+  > 
+  > \`npm test\` 与未改动的 \`main\` 逐条对过账：\`test:static\` 由 1280（1271 pass / 6 fail）变成 1298
+  > （1289 pass / 6 fail）——\*\*恰好多出 18 条\*\*（新套件 14 条 + 排版套件新增 4 条），失败一条
+  > 没多；\`checks（core）\` 与其余四层两边逐字相同。那 6 条失败是本机（Windows）既有的环境
+  > 问题：4 条 lab 骨架要 POSIX \`sh\`、1 条同类差异、1 条覆盖率下限依赖它们。
+
+- fix(笔记): 持久化存储的崩溃恢复、错误口径与落盘完整性 (\#304) ([e4cce7b](https://github.com/Miaotofu01/Study-Mate/commit/e4cce7ba2c0120e0dd21ac694bf4de8184062733))
+
+  > 首次 marker 原子写完成前进程退出时，残留的 .tmp 会让全新数据域永远
+  > notes-unavailable。本轮把「首次创建只许 brand-new」的判定收紧为可恢复的
+  > 精确白名单（确切锁名 / 空资源 / 本模块命名的 .tmp-&lt;16hex&gt; 且 stat 为普通
+  > 非链接单链文件），孤儿临时文件只在 SQLite 锁内清理；坏 JSON/UTF-8/未知
+  > 格式统一走稳定 shape 错误码，原始 IO 错误只进服务端诊断、客户端拿固定
+  > 文案，不再泄露绝对路径；origin 超限整条拒绝不再静默截断。
+  > 
+  > rename 之后补目录 fsync（POSIX 真同步；Windows 上按 errno 明确一次降级，
+  > 不吞 EIO），崩溃窗口收窄到「旧库已换新、回执失败」——该窗口保留逐字节旧
+  > 库备份并幂等重试补同步；升级发布后不再删唯一备份。GET 资源补物理读取
+  > 上限与总预算，预算 stat 失败不吞错，meta.id 不再被记录 id 覆写。
+  > 
+  > 新增 scripts/tests/test\_notes\_store\_recovery.mjs（12 条故障注入与并发
+  > 回归，登记默认 core）：崩溃残留恢复、精确 temp 拒绝、坏格式稳定码、
+  > IO 隐私、origin 上限、大量条目、媒体预算、中文路径、双进程 CAS 409、
+  > 发布后目录 fsync 失败仍留备份等。
+
+- perf(笔记): 资源序列化缓存与隐藏面暂停轮询，退役死的富文本依赖 (\#303) ([f7135f6](https://github.com/Miaotofu01/Study-Mate/commit/f7135f65b846edfd3c7e573be65e75a5d867f94f))
+
+  > 画布每次拖动/折叠都把全部资源重新序列化一遍：真实场景里 4 篇笔记的
+  > 正文被 JSON.stringify 36 次。资源序列化改为按对象身份缓存
+  > （client/notes/resource-serialization-cache.js，WeakMap + 失效换新表，
+  > 不强持历史对象；编辑/导入/undo 换新引用自动重算，序列化抛错不进缓存），
+  > 拖动/折叠只提交布局，正文零重复序列化。
+  > 
+  > 笔记面隐藏时暂停 7 秒轮询（跨 page.clock.fastForward(21000) 实测零
+  > GET），重显 3 秒内恢复；共享学习笔记的保存与读取不受影响。
+  > 
+  > 退役从未接线的富文本路径：MarkdownLiveEditor.jsx / live-editor.css /
+  > @milkdown 全族依赖从源码与 package.json 移除（notes\_live\_editor\_test
+  > 实际测的是 NoteEditor + 格式栏，继续保留）；ADR-0017 §5 的历史说明
+  > 同步改述。
+  > 
+  > 新增 scripts/tests/browser/notes\_performance\_test.mjs 4 场景（正文序列
+  > 化计数探针、隐藏面轮询暂停/恢复、共享笔记场景、零 console/错误/外网）
+  > 与 scripts/tests/test\_notes\_serialization\_cache.mjs 5 条行为反证
+  > （GC 断言经 --expose-gc 子进程跨宏任务真跑，默认门禁内无 skip）。
+
+- feat(客户端): 无界笔记懒分块——学习首屏零分块请求 (\#302) ([feef887](https://github.com/Miaotofu01/Study-Mate/commit/feef887e807b9dadffed6e8ca3927c0dacc37b0a))
+
+  > 正式包此前把阅读端与整个笔记子模块（ReactFlow/CodeMirror/KaTeX/私有
+  > 字体）打进同一个 dist/client.js（2,598,638B / gzip 958,552B），学习侧
+  > 首屏为从未打开的笔记付全量下载。宿主客户端模块系统本就支持包内相对
+  > 分块（require.async 按 revision 从入口同目录按需取、失败不缓存可重试），
+  > 缺口只在产物与登记方式。
+  > 
+  > 产物拆成「一个入口 + 一个分块」，单 ./client export 不变：
+  > - dist/client.js（490,124B / gzip 157,377B）：阅读端 + 轻量懒控制器
+  >   （client/notes/host/lazy-bridge.jsx）；入口 apply 只登记上下文与
+  >   门面组件，绝不触发加载——学习首屏零分块请求，课件页照常。
+  > - dist/client.notes.js（2,113,860B / gzip 801,591B）：笔记子模块与
+  >   限域样式/私有字体；第一次真的需要笔记 UI（笔记 tab / 左栏 / 节点
+  >   笔记面板 / 笔记面，全是用户动作）才由宿主 require.async 拉一次。
+  > - 状态机 idle/loading/ready/failed：加载中 role=status 占位、失败
+  >   role=alert + 重试按钮（真实重发，不缓存失败）、旧宿主没有
+  >   require.async 是同一个明确失败态；不静默回退、不挂无边界 Suspense、
+  >   学习面完全不受影响。分块物化先校验组件齐全与 CHAT\_SLOT 恒等，再在
+  >   宿主上下文执行 notes.apply（限域样式随分块注入并自清理），之后才
+  >   渲染真组件；settle 先于 emit，无半初始化竞态。
+  > - pack 白名单精确新增 dist/client.notes.js 一条；notices 覆盖入口与
+  >   分块两份构建输入；KaTeX 版本与私有字体族第一步不动（0.19.1 不指向
+  >   阅读端 0.18.7 资源），统一版本留后续决定。构建报告分别记录入口与
+  >   分块的 raw/gzip 与合计。
+  > 
+  > 新增 scripts/tests/browser/notes\_lazy\_chunk\_test.mjs 四场景网络断言
+  > （真组合产物 + 真 notes HTTP + 临时 HOME）：①学习首屏零分块请求且课件
+  > 页照常；②首开恰一次请求、往返保活不重拉不重挂；③注入 503 → 明确
+  > 错误态 → 重试成功恰两次请求；④旧宿主无 require.async → 学习照常、
+  > 笔记明确失败、零请求。登记进 test:notes:browser 与 checks --browser 组。
+  > 
+  > 决定记录：ADR-0019；工程约束 §「客户端单入口」与无界笔记设计 §0 状态
+  > 表、文件归属同步更新。
+
+- Merge pull request \#308 from Sodapopper-pixel/fix/304-notes-store-recovery ([3f5dad6](https://github.com/Miaotofu01/Study-Mate/commit/3f5dad6a674d83c221722d44eda51b9d85fcd0b2))
+
+  > fix(笔记): 持久化存储的崩溃恢复、错误口径与落盘完整性 (\#304)
+
+- Merge remote-tracking branch 'origin/main' into review/309 ([7d5004d](https://github.com/Miaotofu01/Study-Mate/commit/7d5004dc08855c981482b2a2d8e750f3bfcca511))
+- Merge pull request \#309 from Sodapopper-pixel/fix/303-notes-performance ([432a0b3](https://github.com/Miaotofu01/Study-Mate/commit/432a0b3420d29aa80f181e2b7171fc0d0b7dec22))
+
+  > perf(笔记): 资源序列化缓存与隐藏面暂停轮询，退役死的富文本依赖 (\#303)
+
+- Merge remote-tracking branch 'origin/main' into review/310 ([7fb2c6c](https://github.com/Miaotofu01/Study-Mate/commit/7fb2c6cb48f8be26f9248302256a1bddb3f6d624))
+
+  > \# Conflicts:
+  > \#	package.json
+  > \#	scripts/tests/README.md
+
+- Merge pull request \#310 from Sodapopper-pixel/fix/302-notes-lazy-chunk ([b537668](https://github.com/Miaotofu01/Study-Mate/commit/b537668a58e679780c6f7a3408c5f2a59580a388))
+
+  > feat(客户端): 无界笔记懒分块——学习首屏零分块请求 (\#302)
+
+- fix(测试): test\_bundle 的宿主 schema 拷贝复用 COPY\_ALL ([bbc2407](https://github.com/Miaotofu01/Study-Mate/commit/bbc240775acfa7c7254b110f931dbbc0c8a22b1d))
+
+  > provideHostSchema 的 fs.cpSync 没带 filter，目标路径是「npm 用户 O'Brien \#1」；Node 24 在非 ASCII 目标上会静默零拷贝，装完 tarball 找不到 @deepseek-ai/schemastery。7671505 已把 fixtures/copy.mjs 的 COPY\_ALL 定为唯一出处并修了三个夹具，但漏了这个调用点；本次只补这一处，不改断言。
+
+- Merge pull request \#311 from Sodapopper-pixel/test/bundle-copy-all ([11f3f01](https://github.com/Miaotofu01/Study-Mate/commit/11f3f0131d911e797cd9a743931d1549d3f5bcf4))
+
+  > fix(测试): test\_bundle 的宿主 schema 拷贝复用 COPY\_ALL
+
+- feat(笔记): 坏资源只读降级与损坏横幅 (\#304) ([2365298](https://github.com/Miaotofu01/Study-Mate/commit/23652983353c205df354d5b47143b80eb3b55adc))
+
+  > 显式 onCorrupt=skip 时跳过单个资源的 file-shape-unknown，返回 corrupt 清单；普通 GET 仍 fail closed，layout/EACCES/重复 id/48MiB 预算仍整库失败。客户端遇 file-shape-unknown 自动重试一次 skip，逐条渲染三档横幅，坏卡不进画布，并提供只读载入入口。Refs \#304
+
+- test(笔记): 性能套件接入浏览器门禁组 (\#304) ([5623335](https://github.com/Miaotofu01/Study-Mate/commit/5623335567a52bb9dccb763562f8afaa76642836))
+
+  > 上游 \#309 新增的 notes\_performance\_test 已在 package.json 的按需入口里，但未登记到 checks.mjs 的 --browser 组，导致无 Edge 机器上 npm test 的套件存活检查把它当空跑并失败。补登记后门禁可区分「按需浏览器套件」与「无人认领」。Refs \#304
+
+- fix(笔记): \#312 侧栏资源树体验与编辑导出批次检查点 ([a5239f0](https://github.com/Miaotofu01/Study-Mate/commit/a5239f06aa2c4dfb715f6facb8bb667b71c6ca69))
+
+  > - ResourceTree：单高亮互斥、行级更多菜单（重命名/归档占位）、目录与笔记本
+  >   删除四层保护（根/回退目录/最后一本/默认本/绑定本/非空）+二次确认、
+  >   行内重命名切换目标不丢值、只读禁拖拽、菜单初始焦点落可用项；
+  >   纯逻辑抽到 resource-tree-model.js，App.jsx 集成重命名/删除/画布计数回调。
+  > - NoteEditor/局部编辑/导出：标题安全文件名导出、原稿逐字导出与对象 URL 回收、
+  >   主题亮暗对比与接线回归。
+  > - 新增套件：test\_notes\_resource\_tree、notes\_resource\_tree\_test、
+  >   test\_notes\_note\_export、notes\_theme\_test、notes\_tree\_wiring\_test、
+  >   notes\_persistence\_hidden\_draft\_test（隐藏面草稿保护，等 \#303 合入后跑）。
+  > - checks.mjs 登记 test\_notes\_note\_export（其余待 \#303 合入后统一登记）。
+
+- perf(笔记): 资源序列化缓存与隐藏面暂停轮询，退役死的富文本依赖 (\#303) ([298ecec](https://github.com/Miaotofu01/Study-Mate/commit/298ececa53cddad3226ba099ff2a41b970e70b74))
+
+  > 画布每次拖动/折叠都把全部资源重新序列化一遍：真实场景里 4 篇笔记的
+  > 正文被 JSON.stringify 36 次。资源序列化改为按对象身份缓存
+  > （client/notes/resource-serialization-cache.js，WeakMap + 失效换新表，
+  > 不强持历史对象；编辑/导入/undo 换新引用自动重算，序列化抛错不进缓存），
+  > 拖动/折叠只提交布局，正文零重复序列化。
+  > 
+  > 笔记面隐藏时暂停 7 秒轮询（跨 page.clock.fastForward(21000) 实测零
+  > GET），重显 3 秒内恢复；共享学习笔记的保存与读取不受影响。
+  > 
+  > 退役从未接线的富文本路径：MarkdownLiveEditor.jsx / live-editor.css /
+  > @milkdown 全族依赖从源码与 package.json 移除（notes\_live\_editor\_test
+  > 实际测的是 NoteEditor + 格式栏，继续保留）；ADR-0017 §5 的历史说明
+  > 同步改述。
+  > 
+  > 新增 scripts/tests/browser/notes\_performance\_test.mjs 4 场景（正文序列
+  > 化计数探针、隐藏面轮询暂停/恢复、共享笔记场景、零 console/错误/外网）
+  > 与 scripts/tests/test\_notes\_serialization\_cache.mjs 5 条行为反证
+  > （GC 断言经 --expose-gc 子进程跨宏任务真跑，默认门禁内无 skip）。
+
+- chore(测试): \#312/\#303 合入后统一登记新套件 ([085e7f2](https://github.com/Miaotofu01/Study-Mate/commit/085e7f20e1ed42057bcc50a18a61d42d5a4bd296))
+
+  > - checks.mjs 核心组补 test\_notes\_resource\_tree（\#312 资源树纯逻辑层）；
+  > - checks.mjs 浏览器组补 notes\_performance\_test（\#303 自带，此前 checks 侧漏登）
+  >   与 \#312 的 notes\_resource\_tree/notes\_tree\_wiring/notes\_theme/
+  >   notes\_persistence\_hidden\_draft（注释注明依赖 \#303 重显核对语义）；
+  > - package.json test:notes:browser 同步扩到十一套（无重复）；
+  > - scripts/tests/README.md 套件表与数量同步更新；
+  > - inline-editor.css 一处过时注释指向已删除的 live-editor.css，改指 note-editor.css。
+
+- docs(ADR): 作答文本的破例边界——草稿是状态，快照才是事件 ([06be924](https://github.com/Miaotofu01/Study-Mate/commit/06be924f0b829e6210e4315de588570b5ee677f6))
+
+  > \#213 给 attempts schema 增加了三个可选字段：历史条目的 \`作答\`、\`上次结果.作答\`、
+  > 顶层 \`草稿\`。这不是新增 schema，而是在已有 schema 上开可选字段——ADR-0004 的
+  > 「已有 schema 一个不改」与 ADR-0015 的「新增 schema 属于例外」都没有覆盖这一类。
+  > 补 ADR-0020 把它钉成第三类破例，并写明边界：只到 attempts 一族、零迁移、旧文件
+  > 照读、新字段读侧按需存在。
+  > 
+  > 同时记录草稿与快照的分工（草稿是状态、快照才是事件）、8192 码点截断、空草稿墓碑、
+  > 引用 chip 的来源，以及导出只有整份 library 快照、没有单独草稿通道这一事实。
+  > 把 ADR-0014 与目标态规格 §5.3 的指路补到第三类，后续同类破例以本 ADR 为准。
+  > 
+  > 编号用 0020：main 的笔记懒分块已占用 ADR-0019，任务原稿的 0016 也已被笔记持久化占用。
+
+- fix(阅读端): 草稿读侧忽略空文本、超长按码点判定，草稿键到上限回收 ([50ef302](https://github.com/Miaotofu01/Study-Mate/commit/50ef302f9a5880626652199957d3a5cc33b310a2))
+
+  > 三处收口，都是 \#213 落盘草稿的边界：
+  > 
+  > - capAnswerText 先 Array.from 一次，判定与截断都按码点，与服务端 capText 同口径；
+  >   5000 个 emoji（UTF-16 长度 10000）不再被误判成超长而重建。
+  > - 清空后的草稿是墓碑（\`{文本:'', 时}\`），不是一段文本。draftsFromPayload 跳过空串，
+  >   题目读侧也把空草稿当没有，文本与「上次作答」时刻都回落到历史快照，刷新后不会
+  >   把清空那一刻当成上次作答时间。
+  > - 草稿键只增不回收会把 attempts 文件拖成无界。写侧在写入后按 \`时\` 保留最新 200 条，
+  >   本次写入的题一定留下（pruneDrafts 的 keepIds）；不设 TTL，读侧形状与幂等指纹不动。
+  > 
+  > 测试：单元测试补码点判定、空墓碑回落、409 重发同一 patch 且不吞本地 dirty 字；
+  > 宿主路由补 201 条草稿驱逐最旧且本次写入必留；浏览器 attempts 套件补一幕
+  > attempts-subjective-cleared（清空→落盘墓碑→刷新后输入框为空、时刻仍是历史快照）。
+
+- merge: 合入 main（同步 \#213 分支，避开 ADR-0019 编号冲突） ([9df627a](https://github.com/Miaotofu01/Study-Mate/commit/9df627a517a994233af8d1b7d362c306d2775965))
+- fix(阅读端): 清空草稿不回填历史文本，预测与计数统一按码点 ([09bf0a5](https://github.com/Miaotofu01/Study-Mate/commit/09bf0a55b867bef74396307aa7d5d649fba7e4ce))
+
+  > - 空草稿墓碑保留在读侧 Map：有墓碑时输入框取空串，不再回落历史作答
+  > - 预测与作答同走 8192 码点上限：服务端 capText，schema 加 maxLength
+  > - 已写字数用 Array.from 计数，5000 个 emoji 不再显示成 10000 字
+  > - 更新单测、浏览器 cleared 场景（历史已有作答也不回填）、ADR-0020
+
+- fix(笔记): 超限坏文件也计入 48 MiB 实际总量 (\#304) ([b82cc13](https://github.com/Miaotofu01/Study-Mate/commit/b82cc13cedd7b11d94a956daab6d0e5dd59ea982))
+- docs(ADR): 课件页标注的 ADR 从 0015 挪到 0021，收口与无界笔记撞号 ([257df0b](https://github.com/Miaotofu01/Study-Mate/commit/257df0bd896a8aeac2ef1a909780fa698df4f547))
+
+  > \`docs/adr/0015-课件页标注与作答数据族扩员.md\` 与
+  > \`docs/adr/0015-无界笔记模块与独立数据域.md\` 同号：链接靠文件名区分，正文与注释里
+  > 只写「ADR-0015」，指向哪一份只能靠上下文猜，评审时已经真的猜错过一次。
+  > 
+  > 把「课件页标注」这一份改为 0021，并把全仓指向它的引用一并改到 0021
+  > （0014 的两条链接、目标态规格的树与破例段、文件归属、使用说明、annotations 的
+  > schema/数据层/路由/监听域注释、dsh-plugin、scripts/tests/README 的 \#225 行、
+  > 两条 annotations 特征化测试、checks.mjs 的四条登记）。指向「无界笔记」的 0015
+  > 一处未动——两份 ADR 的语义现在能分开。
+  > 
+  > 只改文件名、链接与注释，无代码行为变化：
+  > - \`node --test scripts/tests/test\_docs\_references.mjs\` 5/5（含源码注释里的仓库路径）
+  > - \`node scripts/release/checks.mjs --static\` 95/95
+  > - \`node --test scripts/tests/test\_host\_annotations.mjs test\_host\_annotations\_route.mjs\` 25/25
+
+- chore(ADR): 把课件页标注的 ADR 重编号(0015→0021)合进 \#305 的基线，给叠在上面的补丁 PR 一个能跑通的树 ([11b3e19](https://github.com/Miaotofu01/Study-Mate/commit/11b3e19392830869dfeb326ba70edd25aa9fc4e6))
+
+  > \# Conflicts:
+  > \#	docs/adr/0014-共享记忆改名MEMORY.yaml.md
+  > \#	docs/设计/目标态规格.md
+  > \#	lib/library.ts
+
+- fix(作答数据): 预测与作答统一「原样落盘、空判据按 trim」，草稿驱逐只删键不重排 ([5bca967](https://github.com/Miaotofu01/Study-Mate/commit/5bca967621db701aa50579b335b57d3fd3a7c25e))
+
+  > 评审 \#305 留的两条残余（原评论见 \#305 的 issuecomment-6939454973），按「帮他补上」直接落代码：
+  > 
+  > 1. \`toEntry\` 里 \`预测\` 多 trim 了一道、\`作答\` 连空白都不校验——同一族两个口径。两者都是学生
+  >    自己写的正文，统一成：\*\*原样落盘\*\*（缩进/换行/首尾空格有意义），只按码点截断；空判据一律
+  >    按 \`trim()\` 后的值——只含空白的文本不算写过，两边都不占键。
+  > 2. \`pruneDrafts\` 到 200 上限时先把 \`keepIds\` 排到最前、其余按 \`时\` 降序补满，输出的键序与输入
+  >    不同：写一条新草稿就能让整段草稿重新排序，diff 全翻。改为先定「留谁」、再按\*\*原键序\*\*重建，
+  >    驱逐只删键、不重排。
+  > 
+  > 顺带把 \`docs/adr/0020\` 里 5 处指向「课件页标注」的 ADR-0015 改成 0021（那份 ADR 已重编号，
+  > 见 \#315）：0020 引的是「新增 schema」那条先例，不是无界笔记那一份。
+  > 
+  > 验证：
+  > - \`node --test scripts/tests/test\_host\_attempts\_route.mjs\` 15/15（新增一条文本口径用例，草稿上限用例补了键序断言）
+  > - \`node --test scripts/tests/test\_client\_attempt\_fence.mjs\` 29/29
+  > - \`node scripts/release/typecheck.mjs\` 通过
+
+- fix(笔记): 保护未确认草稿与资源树只读状态 ([c1cc769](https://github.com/Miaotofu01/Study-Mate/commit/c1cc7691862f2c864cd4bc9855e01f9b06d5f341))
+
+  > 保留冲突及导航时未确认的原稿，修复只读菜单和达到上限后的假脏状态，并登记对应浏览器回归。
+
+- Merge pull request \#315 from Miaotofu01/docs/adr-0015-renumber ([e06f2ce](https://github.com/Miaotofu01/Study-Mate/commit/e06f2ce6f35d6473a3b9d6dcc40b607ff160691f))
+
+  > docs(ADR): 课件页标注的 ADR 从 0015 挪到 0021，收口与无界笔记撞号
+
+- chore(笔记): 同步上游主分支 ([66389b4](https://github.com/Miaotofu01/Study-Mate/commit/66389b4ec5c933635e38fdfcaa461dfd10083bda))
+
+  > 保留无界笔记懒分块和两侧浏览器回归入口。
+
+- feat(无界笔记): 完善文档视图与课程联动 ([0384363](https://github.com/Miaotofu01/Study-Mate/commit/03843636c531ed5e71626d2e645abd9733a39837))
+
+  > 让独立文档支持四种视图，离开学习后在同标签恢复位置与草稿；把本级绑定、单篇课程关联和原件目录分开管理。
+  > 
+  > 统一新建与 Markdown 复制入口，左树拖拽只建立引用，补齐正式懒分块之后的浏览器回归和文档。
+  > 
+  > Refs \#312
+
+- Merge remote-tracking branch 'origin/main' into review/313-fix ([ebb5c34](https://github.com/Miaotofu01/Study-Mate/commit/ebb5c34827d116cc1cc24a5b6b888a98fc38c26f))
+- merge: 合入 main 核验 \#305 冲突（本地验证用，不推远端） ([b466822](https://github.com/Miaotofu01/Study-Mate/commit/b4668227a411eefcefaf98101682397e2724834f))
+
+  > 三处冲突均为 ADR 0015→0021 重编号与 \#305 草稿语义新增同区触碰：
+  > 按 main 的重编号口径为准，完整保留 \#305 新增段落
+  > （ADR-0020 第三类破例行、规格两类/第三类措辞、library.ts 的 AttemptDraft 导入与 drafts 字段）。
+
+- fix(ADR): 解冲突后补齐 ADR-0020 的 0015→0021 重编号 ([cabde64](https://github.com/Miaotofu01/Study-Mate/commit/cabde644735233fdb18219e574a181d8d094ba9d))
+- Merge pull request \#305 from buguoshixc/feat/issue-213-subjective-draft ([3c1d6c6](https://github.com/Miaotofu01/Study-Mate/commit/3c1d6c6ec2d5e584f577bc6f32ec206da18e76bd))
+
+  > feat(阅读端): 主观题受控输入、草稿落盘与带进答疑 (\#213)
+
+- merge: 核验 \#316 叠在 \#305 合并后的 main 上 ([9d025ea](https://github.com/Miaotofu01/Study-Mate/commit/9d025ea7bcfd8531b80d10a0bf217e2e537d8ff8))
+- Merge pull request \#316 from Miaotofu01/fix/305-review-nits ([797e52c](https://github.com/Miaotofu01/Study-Mate/commit/797e52c934494ebb5745b48099922262679f896d))
+
+  > fix(作答数据): 预测与作答统一原样落盘口径，草稿驱逐只删键不重排（补 \#305 评审两条残余）
+
+- merge: 核验 \#313 叠在 \#305/\#316 合并后的 main 上 ([fbc470c](https://github.com/Miaotofu01/Study-Mate/commit/fbc470c1819b08dc711b06a67b0468aa907f5f3b))
+- test(浏览器): 稳定 notes 侧栏收起动效采样 ([5df5a9b](https://github.com/Miaotofu01/Study-Mate/commit/5df5a9bb956a127caf501752c834d2790bf30d38))
+
+  > 原先 locator.click() 返回后再固定等待 90ms；Playwright 的点击本身可能耗时约 100ms，采样点会落在 200ms 过渡结束之后，读到 0 → 0。
+  > 
+  > 改为在同一次 page.evaluate 内触发真实点击并用 requestAnimationFrame 逐帧采样，直到宽度归零；断言仍要求出现过中间宽度且终态为 0，不放松成只看终态。窄轨宽度也改为显式等待到 32px 后再断言。
+
+- Merge pull request \#313 from buguoshixc/feat/notes-oncorrupt-skip ([a6b40e0](https://github.com/Miaotofu01/Study-Mate/commit/a6b40e0bb055bfaa4290e16cc2abc1f424b40edf))
+
+  > feat(笔记): 坏资源只读降级与损坏横幅 (\#304)
+
+- fix(解析器): profile 补丁里的跨行流式集合按 YAML 折行读（\#317） ([2356b46](https://github.com/Miaotofu01/Study-Mate/commit/2356b464b29e8cbb6fbf8b5a6b31c0729b6f5092))
+
+  > DSH 设置页与宿主保存配置时会把长的模型清单折成 \`- {\` 起头、几行之后才闭合的 flow mapping——标准 YAML，宿主自己的 yaml 库读得动。解析器以前只认「同一行闭合」，于是一整份 cordis.patch.yml 在 \`- {\` 那一行就抛「流式集合缺少闭合的 "}"」，installPreset 随之失败，用户看到的是插件装了但预设不注册、config 不落盘。
+  > 
+  > 新增 \`flowCollectionContinuation\`，默认关闭、只在 profile 补丁那条解析路径（\`PATCH\_PARSE\_OPTIONS\`）打开；学习文件仍严格，见到跨行流式集合照旧报错。折行口径对齐 PyYAML 的 flow 规则：行尾与续行行首空白去掉、单次换行折一个空格、每个空行折一个换行、双引号里行尾的 \`\\\` 吃掉换行、引号外行首或空白后的 \`\#\` 到行尾是注释；括号深度归零就停，闭合那一行剩下的原文交回调用方按「流式集合后面还有多余内容」报错，报错行号指向闭合行。
+  > 
+  > 文档根是流式集合时本来就允许跨行，但以前靠整篇拼接：跨行的引号标量会被错折，闭合之后还有结构也只是碰巧能报错。这次换成同一套折行（无条件），并补上「闭合后还有结构」的检查。
+  > 
+  > 回归：解析器层钉住 issue 原形状、嵌套、末尾逗号、行尾注释、跨行引号标量、孩子是流式集合、闭合后的多余内容、默认仍报错；test\_preset\_install.mjs 按 \#255/\#256 的形状补 bundle 与声明式两条注册路径的端到端。\`docs/规范/工程约束.md\` 的选项清单同步。npm test 通过。
+
+- fix(插件): 启动失败的原因进插件页状态卡与 no-workspace 提示（\#317） ([5960bfa](https://github.com/Miaotofu01/Study-Mate/commit/5960bfa456612aa3199ebd139c4d584775e03d18))
+
+  > \#317 的根因（补丁里的跨行 flow 集合）修在解析器那边；这里补的是它暴露出来的第二个问题：解析一旦失败，插件入口的 catch 只写一行 console.warn，预设不注册、config 不落盘，界面上剩下的只有「没有学习工作区」——用户照着「先跑一次 install」再跑一遍，圈回同一个错误。
+  > 
+  > 插件入口把这次 apply 里预设没注册上的原因记下来，连同 profile 一起交给状态路由：\`GET /api/studymate/status\` 多一个 \`registration: {ok, error}\`，\`error\` 是 catch 到的那句原文（哪份文件、哪一行、什么错误）。状态卡在注册失败时改说「学习模式没装上」并把原文摆出来；旧载荷没有这个字段，按成功算。no-workspace 信封在启动失败时也说清失败原因，不再劝用户去跑同一个会失败的安装器。
+  > 
+  > \`startupFailure\` 刻意是 apply 里的局部值：同一进程里两个 profile 共用这个模块，一个失败不该让另一个显示失败。状态载荷的 \`ok\` 仍然只表示读盘成败，注册失败不混淆它。
+  > 
+  > 回归：\`test\_bundle\` 用「\`- {\` 永不闭合」的补丁跑真实安装路径，断言状态路由拿到 \`registration.ok=false\` 与解析器原文；\`test\_host\_status\` 钉缺省成功与注入失败两条，\`test\_client\_plugin\_page\` 钉投影与两本字典（键集/占位符/反向使用）。npm test 通过。
+
+- Merge remote-tracking branch 'origin/main' into fix/yaml-flow-continuation ([dcc3936](https://github.com/Miaotofu01/Study-Mate/commit/dcc393615edcb59a293945578f9be0be8902fc6c))
+- Merge remote-tracking branch 'origin/main' into fix/startup-failure-visible ([e0901ff](https://github.com/Miaotofu01/Study-Mate/commit/e0901ffcb28b823d3f8c7ba61e7624a988e5bdad))
+- fix(阅读端): 界面跟随宿主语言并保留阅读与笔记状态 ([67cdd24](https://github.com/Miaotofu01/Study-Mate/commit/67cdd247e420e65af28fef01feabbfa35aab2fab))
+
+  > 关联 \#323：通过可选 locale 字典和订阅翻译入口、主页、缺课件提示与笔记课程引用。保持学习内容、三档标识和会话标题规则不变，并用真实浏览器检查切换与卸载。
+
+- fix(笔记): 控件跟随宿主语言并保留编辑草稿 ([262b2c9](https://github.com/Miaotofu01/Study-Mate/commit/262b2c92b8512f2101ca1ae0c2804e4062af2154))
+- Merge pull request \#322 from buguoshixc/fix/startup-failure-visible ([fcc3dde](https://github.com/Miaotofu01/Study-Mate/commit/fcc3ddeb40f56f70c5fedfeb6da9af5b1e0d8c5b))
+
+  > fix(插件): 启动失败的原因进插件页状态卡与 no-workspace 提示（\#317）
+
+- Merge remote-tracking branch 'origin/main' into fix/yaml-flow-continuation ([6b3422d](https://github.com/Miaotofu01/Study-Mate/commit/6b3422db46cf0f88398fd9aee5e61174f75fb01c))
+- feat(阅读端): 在 DSH Web 右栏提供学习入口 ([8075099](https://github.com/Miaotofu01/Study-Mate/commit/807509992fcc701eca8c0e9173b8a2bf4d38d180))
+
+  > 将现有阅读端注册到右栏开始页，方便读课件和记笔记时保留当前对话。保留左侧全宽入口，复用工作区和宿主右栏布局。
+  > 
+  > 统一学习与无界笔记的顶栏高度、字号与动效，并提高两个原生下拉在暗色模式中的可读性。
+
+- fix(解析器): 跨行流式集合折行保住双引号里的转义空白 ([a639aac](https://github.com/Miaotofu01/Study-Mate/commit/a639aacd9cded2d72164459e7594d57db109b374))
+
+  > foldFlowLines 之前用正则在每行末尾裁空白，双引号里的 \`\\ \` 转义空格也被裁掉；遇到空行还会留下裸反斜杠。参照 readQuoted 维护 keep 指针，只裁未转义的原文空白，转义对整体计入内容。补三条根级 flow 对照断言。
+
+- docs(规范): 跨行流式集合只在 profile 补丁打开 ([4f88794](https://github.com/Miaotofu01/Study-Mate/commit/4f88794c6dfcc79be0f487e9fd6322011e3926c7))
+
+  > 与代码口径对齐：PATCH\_PARSE\_OPTIONS 开 flowCollectionContinuation 与 documentMarkers；解析 agent.cordis.yml 的预设插件列表仍按严格单行读，不开这两项。
+
+- chore(仓库): 移除误提交的 node\_modules 符号链接 ([99209a8](https://github.com/Miaotofu01/Study-Mate/commit/99209a8c218a83121a09273f0fd423c37a6aeaae))
+
+  > 该链接指向本机 /home/buguoshixc/code/StudyMate/node\_modules，Windows 工作树检出后是坏链接；npm ci 会把它替换成真实目录，git status 随后永久显示 D node\_modules。移除后本分支相对 main 只剩 5 个源码/测试/文档文件。
+
+- docs(测试): 修正测试说明里两处指向工程约束的断链 ([839207c](https://github.com/Miaotofu01/Study-Mate/commit/839207c0941f7a7609b3d951b7dcc57ff7b3ecef))
+
+  > scripts/tests/README.md 里 test:dsh-contract 与 test\_host\_route\_envelope.mjs 两行把工程约束链接写成了 ../规范/工程约束.md。相对 scripts/tests/ 这指向并不存在的 scripts/规范/工程约束.md，在 GitHub 上点开是 404。改成同一份文件里 test\_skill\_visibility.mjs 那一行已经在用的 ../../docs/规范/工程约束.md。
+  > 
+  > 只改这两处链接目标，文字不动。test\_docs\_references.mjs 的检查范围不含这份 README，所以门禁此前没有报出来；检查范围本次不动。
+  > 
+  > Co-Authored-By: Claude Fable 5.2 &lt;noreply@anthropic.com&gt;
+
+- Merge pull request \#328 from SelmanBoray/docs/tests-readme-broken-links ([108f20c](https://github.com/Miaotofu01/Study-Mate/commit/108f20c5d354c0e7b69b2b9d9199d599c30241dc))
+
+  > docs(测试): 修正测试说明里两处指向工程约束的断链
+
+- Merge pull request \#321 from buguoshixc/fix/yaml-flow-continuation ([af53f38](https://github.com/Miaotofu01/Study-Mate/commit/af53f38ef9481be85124a03b31b68da593b4469a))
+
+  > fix(解析器): profile 补丁里的跨行流式集合按 YAML 折行读（\#317）
+
+- Merge pull request \#325 from chirag127/fix/host-locale ([e593cc7](https://github.com/Miaotofu01/Study-Mate/commit/e593cc7c319e9beeac1ff0f5e7969d8cb061c399))
+
+  > fix(阅读端): 首批界面跟随宿主语言并保留阅读状态
+
+- Merge remote-tracking branch 'upstream/main' into feat/dsh-rightbar-learning ([7f950a3](https://github.com/Miaotofu01/Study-Mate/commit/7f950a3674db07fd3a98a95125509c9dd0ac2e63))
+
+  > 冲突取两者之长：\#325 的宿主语言本地化（nt()/rt()、notesSurface 条件、
+  > sidebar.panellist 动态标签）与 \#327 的右栏布局（topbar grid 与
+  > .smb-topbar\_\_tools 包装、scopedShortcuts/getMotionScale、registerRightbar）。
+  > 画布工具时长统一走 getMotionScale()——\#327 已移除 reducedMotion 定义。
+
+- Merge pull request \#327 from Miaotofu01/feat/dsh-rightbar-learning ([9a3d12d](https://github.com/Miaotofu01/Study-Mate/commit/9a3d12dd8f8c48fe566e669544c917d8b6957140))
+
+  > feat(阅读端): 在 DSH Web 右栏提供学习入口
+
+- Merge remote-tracking branch 'upstream/main' into feat/notes-checklist-polish ([02f20a0](https://github.com/Miaotofu01/Study-Mate/commit/02f20a0d0f711bad75f58ad27d9e62e6a6c20bd6))
+
+  > 架构整合决策（按主会话拍板的方向落地）：
+  > 
+  > - useNotesPersistence.js 以 \#320 的 session 租约模型为结构基座，把 main 侧 \#313/\#325
+  >   的 87 行 corrupt-skip 增量移植进去：import nt；corrupt 的 useState 放 hook 内；
+  >   applyBase 把 snapshot.corrupt 记到会话 store（store.corrupt 与 loaded 同源，跨租约
+  >   存续），restoreFromStore 重挂时按会话清单复原横幅；fetchSnapshot 增加 skipCorrupt
+  >   选项并对 file-shape-unknown 自动降级重试一次（bootstrap 与显式 reload 共用同一语义，
+  >   与 theirs 的 load 内重试等价）；checkExternal 在基线已是降级快照时继续用
+  >   skipCorrupt 读；discard/upgrade 确认文案改 nt('discard\_confirm')/nt('upgrade\_confirm')；
+  >   返回值补 corrupt。错误门禁的「只读载入其余笔记」走 reloadStore({skipCorrupt:true})。
+  > - persistence-session.js 不感知 corrupt：清单的读写都由 hook 完成，会话模块与它的
+  >   382 行单测保持原样。
+  > - App.jsx：ours 的 \#320 UI（文档视图四模式、课程联动、CreateMenu 单入口、草稿恢复
+  >   按钮只在真实失败态出现）+ theirs 的 corrupt 横幅（persistence-corrupt-list 接
+  >   corruptMessage）、错误门禁的 load\_rest 按钮、conflict/corrupt 门禁与 nt() 文案；
+  >   Board 签名同时收 ours 的 persistenceSession/viewMemory 与 theirs 的
+  >   scopedShortcuts/getMotionScale；动效时长统一 140/220 \* getMotionScale()。
+  > - LearningNotes/NoteEditor/ResourceTree：ours 结构 + theirs 的 nt() 本地化；corrupt
+  >   横幅文案由 locale.js 提供。
+  > - locale.js 为 \#320 新增文案补 10 个键（new/new\_resource/note\_name/create\_target/
+  >   四个文档视图模式/document\_view\_mode/unsupported\_note），zh/en 成对。
+  > - lib/client.js：StudyMateApp 签名合并 viewMemory + inRightbar；顶栏为 ours 的
+  >   grid/.smb-topbar\_\_tools 包装 + theirs 的 notesSurface 条件与 rt() 文案。字号/动效
+  >   选择器按 \#327 原意两面共用——7f950a3 的合并曾误改回「无界面隐藏」，浏览器套件不在
+  >   默认门禁里所以当时未暴露；test\_client\_learning\_notes 的同主题断言随之对齐。
+  > - notes\_locale\_test/notes\_persistence\_test 里 theirs 形状的直开「新建文件夹/新建笔记」
+  >   点击路径改为 CreateMenu 菜单流，断言本体（本地化 aria、草稿/焦点保留、降级后可编辑）
+  >   原样保留。
+  > 
+  > 测试：test\_notes\_persistence\_session 13/13；npm test（build+types+installer+openai+
+  > antigravity+checks+static）全绿；npm run test:notes:browser 全绿（无界笔记 11 套、
+  > 754 项 PASS）。npm run test:browser 里 locale\_test 1 条、watch\_push\_test 2 条、
+  > ask\_quote\_test 6 条失败，经 MERGE\_HEAD 纯基线逐字复现核对为 upstream 既有问题
+  > （Windows fs.watch 双触发 / 阅读端滚动锚定 / \#327 自带的答疑会话时序），与本合并
+  > 无关，不在本次范围内修。
+
+- Merge pull request \#320 from Miaotofu01/feat/notes-checklist-polish ([af83536](https://github.com/Miaotofu01/Study-Mate/commit/af8353660312e127736c7d70a29d62317b8f205d))
+
+  > feat(无界笔记): 完善文档视图与课程联动
+
+- fix(监听): 监听器只认内容变化——读回声与属性噪音不再推假通知 ([18ed566](https://github.com/Miaotofu01/Study-Mate/commit/18ed566dcc84089c8cb6791c0e7539c981bb014a))
+
+  > Windows 的 libuv fs.watch 订阅 LAST\_ACCESS/ATTRIBUTES：readLibrary 枚举科目
+  > 目录、sync() 重扫目录集合都会触发事件，监听器把「自己读盘」当成「别人改盘」，
+  > 推通知 → 页面静默重取 → 重取又读盘。新工作区首次读库必现一条幽灵通知
+  > （watch\_push\_test 首屏取数 2 次、两次变更共 5 次的直接根源）。
+  > 
+  > flush 发布前对比内容指纹（条目集 + 类型 + mtime，不含 atime）；基线在挂
+  > 观察者之前取，监听启动窗口里的真写入不会被当基线漏报；sync 的重扫回声被
+  > 同一机制吸收。指纹不变的批次不发布、不重扫。
+  > 
+  > 有意取舍：改内容又原样保 mtime 的写法（备份/同步工具）会漏报，直到下一
+  > 次正常写入——相对「每次读盘都推一轮」明确更划算。
+  > 
+  > 验收：watch\_push\_test 6/6、test\_watch\_tree/push/notice 16/16、npm test
+  > 全绿、npm run test:browser 全绿。
+  > 
+  >  closes \#329
+
+- test(浏览器): locale\_test 走 \#320 的「新建」菜单路径，滚动断言改为容差 ([d9d84bd](https://github.com/Miaotofu01/Study-Mate/commit/d9d84bdd38810332fd830fdfc7ef2cedf6644a74))
+
+  > 两处既有红：
+  > 
+  > 1. 「未保存对话框」场景直开「New folder」按钮——\#320 把左栏入口换成
+  >    CreateMenu 单菜单，直开按钮已不存在（30s 超时）。改走
+  >    .notes-create-trigger → menuitem（与 notes\_locale\_test 同款路径）。
+  > 
+  > 2. 「滚动在语言切换后保持」钉了 scrollTop 精确相等（418 !== 407 红）。
+  >    语言切换重渲染时浏览器滚动锚定（overflow-anchor）保的是锚点元素，
+  >    scrollTop 有小漂移；阅读位置的恢复本身也是 section → offset →
+  >    progress 的三级近似（\#76）。改断言：漂移 ≤ 32px 且没被打回顶部，
+  >    意图不变（滚动 survives），不再钉实现做不到的精确值。
+  > 
+  > 验收：locale\_test 6/6，npm run test:browser 全绿。
+
+- test(浏览器): ask\_quote 夹具会话 id 全程唯一，刷新场景隔离记忆表 ([13647b6](https://github.com/Miaotofu01/Study-Mate/commit/13647b69986dd96a45861095e21f26f63b178502))
+
+  > 六条既有红不是时序问题，是确定性的跨场景状态污染：
+  > 
+  > 1. 夹具 \_\_QA.create 用页面内序号编号，每次导航从 0 起——新会话永远叫
+  >    qa-fixture-1；而 \#241 的答疑会话记忆表跨页存活，switch 场景命中记忆后
+  >    不发 POST，「新对话」建出的 id 又与当前相同，setSessionId 同值短路
+  >    （产品行为正确：真宿主 UUID 不会重发 id），retain/release/嵌入全都不动。
+  >    修法：会话 id 改用 localStorage 计数器，整个套件跑程唯一，对齐真宿主
+  >    「会话 id 不重发」的语义；switch 场景自己种进记忆表与列表行，四条原
+  >    断言一字未改。
+  > 
+  > 2. reload 场景要验「标题前缀认，不用另存 id 清单」的路，但 switch 场景
+  >    留下的记忆表让面板照记忆 retain 了别的会话，走不到那条路。修法：面板
+  >    挂载前清掉记忆表，演的正是该机制存在的场景（换浏览器、宿主磁盘会话
+  >    还在）。断言未改。
+  > 
+  > 产品代码零改动；chip 全部场景本来就在 PASS。验收：ask\_quote\_test 连跑
+  > 两遍 43/43，npm test 门禁全绿。
+
+- merge: 合入 upstream/main（58 个提交）——同步 \#311 的 test\_bundle 修复与笔记/右栏新功能 ([9bd2752](https://github.com/Miaotofu01/Study-Mate/commit/9bd27521a8068402f6a52c97311482afc90c6ae5))
+
+  > 评审要求合入前与 main 同步：本分支此前停在 6720374，落后 upstream/main 58 个提交。三方合并无文本冲突，合入后重跑了 npm test。
+  > 
+  > - 上游 \#311 让 test\_bundle 的宿主 schema 拷贝复用 COPY\_ALL（Windows 上不再假红）；
+  > - 同一批里还有无界笔记懒加载分块、笔记工具栏/标题/导出、右栏学习入口与宿主语言跟随，与本分支的排版/列表改动不重叠；
+  > - 本分支那 6 个文件的改动原样保留（lib/client.js 的排版与解析、两个套件、规范登记、checks 注册）。
+
+- fix(渲染器): 标注弹层段落复位，列表同级标记锁定、空条目不炸 ([58eb2df](https://github.com/Miaotofu01/Study-Mate/commit/58eb2dfcf196a1affe2d8323f8d3897a5387b82c))
+
+  > 评审（Sodapopper-pixel）在 \#307 实测点名的几处，按同一份口径补齐。
+  > 
+  > 1. 标注弹层的 &lt;p&gt; 被 .smb-doc p 命中：.smb-annot-popover 挂在 article.smb-doc 里，可它是浮在正文上的卡片、不是正文。带注释时 pre-wrap 的手写换行第一行缩两格、第二行顶格；无注释时「这条标注没有注释。」与只读提示也缩进并两端对齐。复位选择器补入 .smb-doc .smb-annot-popover p（0,2,1，写在正文规则之后），test\_client\_typography 的复位断言补上它和 .smb-code\_\_caption。
+  > 
+  > 2. 列表同级标记按首项锁定：与服务端 lib/core/format.ts 的 parseList 同口径（marker = ordered ? ORDERED\_RE : UL\_RE，层内换标记就收手、另起一块）。此前统一用 listStart，\`- 甲\` 紧跟 \`1. 乙\` 会并成一个无序列表，阅读端与导出端的块边界不一致。
+  > 
+  > 3. 空条目防御：renderItems 先读 item.text 再判空，遇 null 抛 TypeError（整页白屏）；改为先判空跳过（空字符串仍按裸条目渲染）。blockFragments 同样跳过 null，不把空值塞进检索串。
+  > 
+  > 4. test\_client\_typography 的列表缩进正则放宽到 .smb-doc li &gt; ul（原来只认 .smb-doc (ul|ol)，挂在 &lt;li&gt; 里的子列表溜过去）。
+  > 
+  > 新增 3 条列表判据（换标记另起一块 / 同标记不切断 / 空条目不炸且不进检索串），逐条做过注入反证：把复位选择器、标记锁定、判空改回旧写法，三条各自变红。
+  > 
+  > npm test：1435 项（1432 pass / 0 fail / 3 skipped）。本机 %TEMP% 不让 esbuild 写盘（Access is denied，与改动无关）；按 scripts/tests/README 的 Windows 前置把 sh 放上 PATH、TEMP 指到工作区目录后全绿。
+
+- Merge pull request \#307 from RSLN-creator/feat/typography-cjk-indent ([11ad9b2](https://github.com/Miaotofu01/Study-Mate/commit/11ad9b229a76cc6b1150e1930e2069b2fbb46340))
+
+  > feat(渲染器): 正文按中文阅读规范排版——首行空两格、两端对齐、列表每级 2 字符
+
+- Merge remote-tracking branch 'upstream/main' into fix/listen-read-echo ([5da15c3](https://github.com/Miaotofu01/Study-Mate/commit/5da15c388a934b7c20bcfb15c9888d74f18a7061))
+- Merge remote-tracking branch 'upstream/main' into fix/locale-test-browser ([889b2cd](https://github.com/Miaotofu01/Study-Mate/commit/889b2cd32887df6f5520941127832af0c5bf8819))
+- Merge remote-tracking branch 'upstream/main' into fix/ask-quote-browser-test ([b277967](https://github.com/Miaotofu01/Study-Mate/commit/b2779679ab543bfb4c82105eebc99112a8d2f971))
+- test(浏览器): ask-session-switch 前置初始化 fixture.sessionSeq，消除对前置场景的隐式依赖 ([4a89d46](https://github.com/Miaotofu01/Study-Mate/commit/4a89d46e31900623f03c604046d95d6b8d58d7f5))
+- test(浏览器): locale\_test 改用 instant 滚动并等待栏宽初始落盘，消除两处时序竞态 ([93269ba](https://github.com/Miaotofu01/Study-Mate/commit/93269ba9a56881076fa9c1433ae980a18c8f1a05))
+- fix(监听): 指纹补入文件大小与条目排序，并补齐读回声与同刻度回归单测 ([43ecb63](https://github.com/Miaotofu01/Study-Mate/commit/43ecb63d39e5f26e71d76012916d657e91f9922e))
+- Merge pull request \#330 from Miaotofu01/fix/listen-read-echo ([075fec3](https://github.com/Miaotofu01/Study-Mate/commit/075fec373d9dfb92949286e9c8e53f8209149f20))
+
+  > fix(监听): 监听器只认内容变化——读回声与属性噪音不再推假通知（\#329）
+
+- Merge pull request \#331 from Miaotofu01/fix/locale-test-browser ([bd6fb10](https://github.com/Miaotofu01/Study-Mate/commit/bd6fb1028a79638fe9e4f20cd67d23a773f5c46c))
+
+  > test(浏览器): locale\_test 走 \#320 的「新建」菜单路径，滚动断言改为容差
+
+- Merge pull request \#332 from Miaotofu01/fix/ask-quote-browser-test ([69e0884](https://github.com/Miaotofu01/Study-Mate/commit/69e0884b0d88f26648a95de7d05bacdfa3f46517))
+
+  > test(浏览器): ask\_quote 夹具会话 id 全程唯一，刷新场景隔离记忆表
+
+- fix(问答): 修复内嵌会话高度链与历史菜单收缩，避免滚轮失效与底部留白（\#324） ([4601130](https://github.com/Miaotofu01/Study-Mate/commit/4601130c88954947922a325f909ebe47404d3b27))
+
+  > 阅读端问答标签内嵌宿主会话时存在两类耦合问题：
+  > 1. \`.smb-right\_\_body\` 原为块级布局且未向 \`.smb-askbody\` 传递剩余高度约束，导致 \`.smb-asksession\` 及其子层按内容高度撑开：\`\[data-conversation-scroll\]\` 退化为 \`clientHeight === scrollHeight\` 的假滚口，短对话下底部露出宿主底色留白，长对话下从底部编辑区向上滚动的 \`wheel\` 事件无法命中真实滚口。
+  > 2. \`.smb-asksession\` 与 \`.smb-asksession &gt; \*\` 原先使用 \`flex: 1 1 auto\`，主轴基准尺寸退化为对流内容总高，使负剩余空间全部压到设置了 \`overflow-y: auto\`（自动最小高度为 0）的 \`.smb-askmenu\` 上；多条会话历史在常规桌面视口下也会被挤成不足一行（Issue \#324 comment \#1），而 \`min-height: 240px\` 配合 \`.smb-right\_\_body { overflow: hidden }\` 又会在较矮视口中裁掉底部输入栏。
+  > 
+  > 本次修改：
+  > - 为包含 \`.smb-askbody\` 的 \`.smb-right\_\_body\` 启用纵向弹性列布局并收口外层溢出，不影响 Quiz/Notes/Outline 标签切换后的滚口恢复。
+  > - 将 \`.smb-askbody\`、\`.smb-asksession\` 及 \`.smb-asksession &gt; \*\` 的主轴高度链统一为 \`flex: 1 1 0; min-height: 0; display: flex; flex-direction: column;\`，固定 \`.smb-ask\_\_head\`、\`.smb-askquote\` 与提示条不收缩，移除 \`.smb-asksession\` 的 \`min-height: 240px\` 硬下限。
+  > - 将 \`.smb-askmenu\` 设为 \`flex: 0 0 auto; max-height: min(30vh, 240px); overflow-y: auto;\`，保留历史列表自身滚动与正常条目高度。
+  > - 在 \`scripts/tests/browser/ask\_quote\_test.mjs\` 中增补仅由测试桩启用的内嵌滚口场景 \`ask-embedded-scroll-layout\`，回归验证滚口填满、真实鼠标滚轮传播、多会话菜单不塌陷、矮视口输入栏不被裁切及切回 Quiz 滚口恢复。
+
+- fix(监听): 避免 SSE 长连接阻塞桌面更新 ([ae95933](https://github.com/Miaotofu01/Study-Mate/commit/ae95933e523bcf89ff98122427c21c65f6cdc5e5))
+
+  > 优先将事件流挂到带显式鉴权的 /plugins 精确路由，避免占用 /api 更新准入队列。
+  > 
+  > 同时在兼容流收到 abort 时关闭 ReadableStream，防止 bridge 与更新锁永久等待。
+
+- Merge pull request \#333 from Miaotofu01/fix/324-ask-scroll ([b1e23a3](https://github.com/Miaotofu01/Study-Mate/commit/b1e23a380ded25485e3ebd633356ba05070440fb))
+
+  > fix(问答): 修复内嵌会话高度链与历史菜单收缩，避免滚轮失效与底部留白（\#324）
+
+- Merge remote-tracking branch 'origin/main' into fix/335-sse-update-lock ([610be57](https://github.com/Miaotofu01/Study-Mate/commit/610be57d3f0fef7fae2acba489db00c295c01a64))
+- fix(监听): 补齐事件流切换与兼容回退 ([66abf44](https://github.com/Miaotofu01/Study-Mate/commit/66abf44e827feeefa5f4f76d44399d85bc90f4a6))
+- Merge pull request \#336 from mia03ther/fix/335-sse-update-lock ([0f6054d](https://github.com/Miaotofu01/Study-Mate/commit/0f6054df6ea2038cdda603ce00c41711cc1da97d))
+
+  > fix(监听): 避免 SSE 长连接阻塞桌面更新
+
+
+[完整比较](https://github.com/Miaotofu01/Study-Mate/compare/v2.0.4...v2.1.0)
+<!-- /studymate-release:v2.1.0 -->
+
 <!-- studymate-release:v2.0.4 -->
 ## [2.0.4](https://github.com/Miaotofu01/Study-Mate/releases/tag/v2.0.4) - 2026-11-06
 
