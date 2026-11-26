@@ -17,11 +17,11 @@
    外加 #106 那条链（引用 chip 是承重件：#92 只把选中的那段冻成一条数据，这里才让它跟着
    **下一条消息**走）：
 
-     · 真鼠标划一段正文 → 面板输入框上方出现一颗 chip（原文 + 来源小节），**而且它已经进了
+     · 用真鼠标划正文，再点击「就这段问一句」 → 面板输入框上方出现一颗 chip（原文 + 来源小节），**而且它已经进了
        那条会话的草稿**——宿主没有提交钩子，草稿里没有它，消息就不会带上它；
      · 提交那一刻送出去的文字 = 我们注册的引用来源的 `codec.serialize(ref)`（探针照宿主那条
        调用走一遍：按 `occurrence.source` 找 owner，拿它序列化）；
-     · 再划一段 → 旧的被**换掉**（草稿里始终只有一颗 chip），不是攒成两颗；
+     · 再次手动添加一段 → 旧的被**换掉**（草稿里始终只有一颗 chip），不是攒成两颗；
      · chip 点得开（看完整原文与来源）、删得掉（草稿里那颗同时撤掉），删掉之后照样能提问；
      · 太短的选区（误触）不产生 chip；点输入框、切 tab 都不会把 chip 弄丢。
 
@@ -36,6 +36,7 @@
    浏览器二进制由 harness 探测；找不到时明确跳过（退出码 3），不是静默绿。
 */
 import fs from 'node:fs';
+import { buildSync } from 'esbuild';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -118,6 +119,13 @@ function hostTokenCss() {
 }
 
 function buildFixture(dir, payload) {
+  buildSync({
+    absWorkingDir: ROOT, bundle: true, format: 'iife', platform: 'browser',
+    define: { 'process.env.NODE_ENV': '"production"' },
+    stdin: { contents: `import * as React from 'react'; import { createRoot } from 'react-dom/client';
+      window.TestReact = Object.assign({}, React, { mount: (node, el) => createRoot(el).render(node) });`, resolveDir: ROOT },
+    outfile: path.join(dir, 'real-react.js'),
+  });
   const css = extractCss(fs.readFileSync(path.join(ROOT, 'lib', 'client.js'), 'utf8'));
   const json = JSON.stringify(payload).replace(/</g, '\\u003c');
   const html = `<!doctype html>
@@ -219,45 +227,17 @@ function buildFixture(dir, payload) {
   // 变更推送（#74）：夹具页走 file://，那条请求只会被拦掉、变成一条「失败请求」。
   // lib/client.js 认这个早退（typeof EventSource !== 'function' 就不订阅）。
   window.EventSource = undefined;
-  /* mini-react 每次重渲染都**整树重建 DOM**（不 diff），把节点闭在 effect 里、之后还去量它的
-     代码在夹具里量到的是已经被换掉的旧节点：LessonPage 的 ResizeObserver 量画布宽，旧节点一
-     脱离文档就报 0，画布宽被写成 0，右栏永远打不开——而这条套件全靠右栏。真 React 里节点不换，
-     那段代码本身是对的（同一条夹具边界 reading_routes_test.mjs 已经记过一次）。这里换成
-     「observe 时同步报一次真实尺寸、之后不再报」：一次场景里窗口尺寸不会变。 */
-  window.ResizeObserver = function (callback) {
-    this.observe = function (target) {
-      callback([{ target: target, contentRect: target.getBoundingClientRect() }], this);
-    };
-    this.unobserve = function () {};
-    this.disconnect = function () {};
-  };
 </script>
 </head>
 <body>
 <div id="root"></div>
-<script src="${pathToFileURL(path.join(HERE, '..', 'fixtures', 'mini-react.js')).href}"></script>
+<script src="${pathToFileURL(path.join(dir, 'real-react.js')).href}"></script>
 <script src="${pathToFileURL(path.join(ROOT, 'lib', 'client.js')).href}"></script>
 <script>
   (function () {
-    // 真 React 把 children 放进函数组件的 props；mini-react 不（仓库里 PaneDrawer 的注释记过这个
-    // 边界，它的对策是把内容改用 body 传）。SessionProvider 是**宿主**给的组件、props 形状改不了，
-    // 所以这里**只在这一套夹具里**把那一步补上——让夹具与真宿主同语义，而不是绕开要验的那条路。
-    // 只对函数组件补：DOM 元素那一支 mini-react 自己会渲染 children。
-    var raw = window.MiniReact.createElement;
-    window.MiniReact.createElement = function (type, props, kids) {
-      var rest = Array.prototype.slice.call(arguments, 2);
-      if (typeof type === 'function' && rest.length) {
-        var merged = {};
-        for (var key in (props || {})) merged[key] = props[key];
-        merged.children = rest.length === 1 ? rest[0] : rest;
-        return raw.apply(null, [type, merged].concat(rest));
-      }
-      return raw.apply(null, arguments);
-    };
-
     var spec = window.__StudymateSpec;
     if (!spec) throw new Error('lib/client.js 没有向 window.__ModuleLoader__ 登记');
-    var mod = spec.factory(function (name) { return name === 'react' ? window.MiniReact : undefined; });
+    var mod = spec.factory(function (name) { return name === 'react' ? window.TestReact : undefined; });
     var Main = null;
     var registrations = [];
     var sessions = window.__HOST.sessions;
@@ -316,19 +296,19 @@ function buildFixture(dir, payload) {
         childVariant: child && child.props && child.props['data-variant'],
       });
       return window.__HOST_EMBED_LAYOUT
-        ? window.MiniReact.createElement('div', { 'data-proto': 'host-session-wrapper' }, child)
+        ? window.TestReact.createElement('div', { 'data-proto': 'host-session-wrapper' }, child)
         : child;
     }
     function renderFactorySlot(name, props) {
       window.__HOST.factoryCalls.push({ name: name, props: props });
       if (!window.__HOST_EMBED_LAYOUT) {
-        return window.MiniReact.createElement('div',
+        return window.TestReact.createElement('div',
           { 'data-proto': 'host-conversation', 'data-name': name, 'data-variant': props && props.variant },
           '宿主会话正文');
       }
       var turns = [];
       for (var i = 1; i <= 20; i += 1) {
-        turns.push(window.MiniReact.createElement('div', {
+        turns.push(window.TestReact.createElement('div', {
           key: 't' + i,
           'data-proto': 'host-turn',
           style: {
@@ -337,29 +317,29 @@ function buildFixture(dir, payload) {
           },
         }, '模拟第 ' + i + ' 轮问答内容，用于验证内嵌会话容器的受限高度与内部滚轮滚动。'));
       }
-      var flow = window.MiniReact.createElement('div', {
+      var flow = window.TestReact.createElement('div', {
         'data-proto': 'host-chat-flow',
         style: { flex: '1 0 auto', minHeight: 'auto', padding: '4px 8px' },
       }, turns);
-      var composer = window.MiniReact.createElement('div', {
+      var composer = window.TestReact.createElement('div', {
         'data-composer-seat': '',
         style: {
           position: 'sticky', bottom: '0px', flex: '0 0 auto', height: '96px',
           padding: '8px 10px', borderTop: '1px solid var(--smb-line)', background: 'var(--smb-panel)',
         },
       }, '模拟宿主输入框');
-      var scrollBody = window.MiniReact.createElement('div', {
+      var scrollBody = window.TestReact.createElement('div', {
         'data-conversation-scroll': '',
         style: { display: 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: '0px', overflowY: 'auto' },
       }, flow, composer);
-      return window.MiniReact.createElement('div', {
+      return window.TestReact.createElement('div', {
         'data-proto': 'host-conversation',
         'data-name': name,
         'data-variant': props && props.variant,
         style: { display: 'flex', flexDirection: 'column', flex: '1 1 0%', minHeight: '0px', overflow: 'hidden' },
       }, scrollBody);
     }
-    window.MiniReact.mount(window.MiniReact.createElement(Main, {
+    window.TestReact.mount(window.TestReact.createElement(Main, {
       SessionProvider: SessionProvider,
       renderSlot: function () { return null; },
       renderFactorySlot: renderFactorySlot,
@@ -544,7 +524,7 @@ async function clickAt(session, point) {
 }
 
 /** 真拖拽划词：按下 → 分几步挪过去 → 抬起。几步是必要的，一步到位浏览器不认成划选。 */
-async function dragSelect(session, target) {
+async function dragSelect(session, target, release = target.to) {
   await session.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: target.from.x, y: target.from.y, button: 'left', buttons: 1, clickCount: 1 });
   const steps = 6;
   for (let i = 1; i <= steps; i++) {
@@ -556,7 +536,7 @@ async function dragSelect(session, target) {
     });
     await session.sleep(25);
   }
-  await session.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: target.to.x, y: target.to.y, button: 'left', buttons: 0, clickCount: 1 });
+  await session.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: release.x, y: release.y, button: 'left', buttons: 0, clickCount: 1 });
   await session.sleep(250);
 }
 
@@ -567,6 +547,7 @@ const session = await openSession({ suite: 'ask-session', width: 1440, height: 9
 /** 首页 → 科目页 → 课件页。每个场景都从头走一遍，场景之间不带上一步的状态。 */
 async function openLesson(ctx) {
   await ctx.navigate(fixture, { settle: 1200 });
+  for (let i = 0; i < 30 && !await ctx.evaluate(`!!document.querySelector('[data-proto="nav-subject"]')`); i++) await ctx.sleep(100);
   await ctx.evaluate(OPEN_SUBJECT);
   await ctx.sleep(300);
   await ctx.evaluate(OPEN_LESSON);
@@ -633,13 +614,9 @@ try {
   /* ── 二、划一段 → chip 进草稿；点输入框 / 切 tab 都不丢；点得开、删得掉 ────── */
   await session.scene('ask-session-keep', async (ctx) => {
     await openLesson(ctx);
-    // 先划一段正文：面板上看得见那一段与它的来源，而且它已经进了那条会话的草稿（#106）
     const target = await ctx.evaluate(SELECT_TARGET);
     check('[保持] 取到了要划的那一段正文', !!target && target.text.trim().length >= 8, JSON.stringify(target));
     if (target) await dragSelect(session, target);
-    const chipped = await ctx.evaluate(`(() => { const el = document.querySelector('[data-proto="qa-chip"]'); return el ? el.textContent.trim() : null; })()`);
-    check('[保持] 真鼠标划完正文后浮出「就这段问一句」', chipped === '就这段问一句', String(chipped));
-
     await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
     await ctx.sleep(600);
     const opened = await ctx.evaluate(SESSION_PROBE);
@@ -696,7 +673,7 @@ try {
       && back.retains[back.retains.length - 1].id === 'qa-fixture-1',
       `creates=${back.creates} retains=${JSON.stringify(back.retains)}`);
     check('[保持] 切回来之后引用也还在',
-      back.quoteText === unfolded.panelChip && !!back.quoteText,
+      back.quoteText === opened.quoteText && !!back.quoteText,
       `before=${JSON.stringify(unfolded.panelChip)} after=${JSON.stringify(back.quoteText)}`);
     const kept = await ctx.evaluate(CHIP_PROBE);
     check('[chip] 切回来草稿里还是那一颗（重挂不许把同一段插成两颗）',
@@ -706,36 +683,48 @@ try {
     return { quote: opened.quoteText, keeps: back.retains.length, creates: back.creates, ref: first.chips[0].ref };
   });
 
-  /* ── 二之二、再划一段：旧的被换掉（同一会话只挂一条，不攒成两颗） ──────────── */
-  await session.scene('ask-chip-replace', async (ctx) => {
+  /* ── 二之二、明确添加第二段，保留两段引用 ──────────── */
+  await session.scene('ask-chip-append', async (ctx) => {
     await openLesson(ctx);
     const first = await ctx.evaluate(selectTargetIn('绑定', 40));
-    check('[换掉] 取到了第一段（绑定）', !!first && first.text.trim().length >= 8, JSON.stringify(first));
+    check('[追加] 取到了第一段（绑定）', !!first && first.text.trim().length >= 8, JSON.stringify(first));
     if (first) await dragSelect(session, first);
     await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
     await ctx.sleep(600);
     const before = await ctx.evaluate(CHIP_PROBE);
-    check('[换掉] 第一段已经进了草稿', before.chipCount === 1, JSON.stringify(before.chips));
+    check('[追加] 第一段已经进了草稿', before.chipCount === 1, JSON.stringify(before.chips));
 
     const second = await ctx.evaluate(selectTargetIn('小结', 40));
-    check('[换掉] 取到了第二段（小结，另一节）',
+    check('[追加] 取到了第二段（小结，另一节）',
       !!second && second.text.trim().length >= 8 && second.sectionTitle.trim() === '小结',
       JSON.stringify(second));
     if (second) await dragSelect(session, second);
+    const ordinary = await ctx.evaluate(CHIP_PROBE);
+    check('[追加] 普通划选保持已有引用', ordinary.chips[0].ref === before.chips[0].ref);
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
     await ctx.sleep(400);
     const after = await ctx.evaluate(CHIP_PROBE);
 
-    check('[换掉] 还是只有一颗 chip（新选区换掉旧的，不是攒成两颗）',
-      after.chipCount === 1, JSON.stringify(after.chips));
-    check('[换掉] 那一颗换成了新的一段（ref 变了）',
-      after.chips[0].ref !== before.chips[0].ref, 'ref 没变：旧的没被换掉');
-    check('[换掉] 送出去的是新那段 + 它的来源小节（旧那段的原文不在草稿里了）',
-      !!after.serialized[0] && after.serialized[0].includes(second.text.trim())
-      && after.serialized[0].includes('小节「小结」')
-      && !after.draftText.includes(first.text.trim()),
+    const visible = await ctx.evaluate(`document.querySelectorAll('[data-proto="qa-quote"]').length`);
+    check('[追加] 选择的两段都在面板和宿主草稿', visible === 2 && after.chipCount === 2
+      && after.chips[0].ref === before.chips[0].ref, JSON.stringify(after.chips));
+    check('[追加] 两段各自保留原文和来源小节',
+      after.serialized[0]?.includes(first.text.trim()) && after.serialized[0]?.includes('小节「绑定」')
+      && after.serialized[1]?.includes(second.text.trim()) && after.serialized[1]?.includes('小节「小结」'),
       JSON.stringify(after.serialized));
 
-    return { chips: after.chips.length, serialized: after.serialized[0] };
+    await ctx.evaluate(OPEN_QUIZ);
+    await ctx.evaluate(BACK_TO_ASK);
+    await ctx.sleep(300);
+    const remounted = await ctx.evaluate(CHIP_PROBE);
+    check('[追加] 切换标签后两段继续保留，各出现一次',
+      remounted.chips.map((chip) => chip.ref).join() === after.chips.map((chip) => chip.ref).join());
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-quote-clear"]').click()`);
+    await ctx.sleep(200);
+    const remaining = await ctx.evaluate(CHIP_PROBE);
+    check('[追加] 删除一段时另一段仍在', remaining.chipCount === 1
+      && remaining.chips[0].ref === after.chips[1].ref);
+    return { serialized: after.serialized };
   });
 
   /* ── 二之三、删掉 chip：草稿里那颗也撤掉，照样能直接提问 ──────────────────── */
@@ -771,7 +760,7 @@ try {
     check('[太短] 两字的误触不产生 chip（面板上没有、草稿里也没有）',
       seen.panelChip === null && seen.chipCount === 0,
       `panel=${JSON.stringify(seen.panelChip)} chips=${JSON.stringify(seen.chips)}`);
-    check('[太短] 浮出的「就这段问一句」也没有', seen.floatChip === null, String(seen.floatChip));
+    check('[太短] 误选时隐藏提问入口', seen.floatChip === null, String(seen.floatChip));
 
     return { chips: seen.chipCount };
   });
@@ -999,6 +988,73 @@ try {
   });
 } catch (error) {
   check('内嵌布局与滚轮回归场景跑完了', false, String(error));
+}
+
+// 新交互用真实 React 验：原有 mini-react 会整树重建，不能验证选区保持。
+try {
+  const { root, workspace } = makeWorkspace();
+  fixture = buildFixture(root, readLibrary({ workspace }));
+
+  await session.scene('manual-quote-real-react', async (ctx) => {
+    await openLesson(ctx);
+    check('[手动引用] 没有选区时不显示提问入口', (await ctx.evaluate(CHIP_PROBE)).floatChip === null);
+    const target = await ctx.evaluate(SELECT_TARGET);
+    const release = await ctx.evaluate(`(() => {
+      const doc = document.querySelector('.smb-doc');
+      const r = doc.getBoundingClientRect();
+      const y = ${target.to.y};
+      const x = Math.floor(r.left - 6);
+      return { x, y, outside: !doc.contains(document.elementFromPoint(x, y)) };
+    })()`);
+    check('[手动引用] 模拟在正文外松手', release.outside, JSON.stringify(release));
+    await dragSelect(session, target, release);
+    const plain = await ctx.evaluate(CHIP_PROBE);
+    const selection = await ctx.evaluate('String(window.getSelection())');
+    check('[手动引用] 拖到正文外松手仍显示入口，普通划选不建会话、原文仍可复制',
+      plain.chipCount === 0 && !plain.panelChip && plain.floatChip === '就这段问一句'
+      && selection.trim().length >= 4 && await ctx.evaluate('window.__QA.calls.length') === 0);
+    const nativeMenu = await ctx.evaluate(`document.querySelector('article.smb-doc').dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`);
+    check('[手动引用] 系统右键菜单可用', nativeMenu);
+    const edge = await ctx.evaluate(`(() => { const r = document.querySelector('[data-proto="qa-chip"]').getBoundingClientRect();
+      return { x: Math.round(r.left + 6), y: Math.round(r.top + r.height / 2) }; })()`);
+    await clickAt(session, edge);
+    await ctx.sleep(650);
+    const added = await ctx.evaluate(CHIP_PROBE);
+    check('[手动引用] 明确添加才打开问答并导入所选原文',
+      added.chipCount === 1 && added.serialized[0].includes(selection.trim()), JSON.stringify(added));
+    await ctx.evaluate(`(() => { const at = window.__DRAFT.detect.length;
+      if (!window.__DRAFT.insertText('我手写的问题', {start: at, end: at, draftRev: window.__DRAFT.rev})) throw new Error('夹具没有成功输入问题'); })()`);
+    const before = await ctx.evaluate(CHIP_PROBE);
+    const other = await ctx.evaluate(selectTargetIn('小结', 30));
+    await dragSelect(session, other);
+    const after = await ctx.evaluate(CHIP_PROBE);
+    check('[手动引用] 问答已打开时复制其他正文也不替换引用或草稿',
+      after.chips[0].ref === before.chips[0].ref && after.draftText === before.draftText);
+    await ctx.evaluate(`window.getSelection().removeAllRanges()`);
+    await ctx.sleep(150);
+    const cleared = await ctx.evaluate(CHIP_PROBE);
+    check('[手动引用] 清除选区后隐藏入口，保留原引用', cleared.floatChip === null && cleared.chips[0].ref === before.chips[0].ref);
+    const again = await ctx.evaluate(selectTargetIn('小结', 30));
+    await dragSelect(session, again);
+    const focused = await ctx.evaluate(`(() => {
+      const button = document.querySelector('[data-proto="qa-chip"]');
+      button.focus({ preventScroll: true });
+      return document.activeElement === button;
+    })()`);
+    check('[手动引用] 划选入口支持键盘焦点', focused);
+    await session.send('Input.dispatchKeyEvent', {type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32});
+    await session.send('Input.dispatchKeyEvent', {type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});
+    await ctx.sleep(250);
+    const appended = await ctx.evaluate(CHIP_PROBE);
+    check('[手动引用] 明确追加引用保留已写问题，问答保持展开',
+      appended.embedded && appended.chipCount === 2 && appended.chips[0].ref === before.chips[0].ref
+      && appended.draftText.includes('我手写的问题') && appended.serialized[1]?.includes(again.text.trim()), JSON.stringify(appended));
+    return { selection, draft: appended.draftText };
+  });
+
+} catch (error) {
+  check('真实 React 的手动引用回归跑完', false, String(error));
 }
 
 console.log(failures ? `\n${failures} 条失败` : '\n全部通过');

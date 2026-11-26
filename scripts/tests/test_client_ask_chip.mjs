@@ -8,7 +8,7 @@
      2. **引用来源在插件激活时注册、随插件卸载注销**：名字不与宿主的 reference / skill /
         command 撞；`(trigger, name)` 重复注册即抛（所以只许造一次）。
         ——这条是承重的：提交那一刻按 name 找不到 owner 的 codec，**整次发送失败、草稿还原**；
-     3. **进草稿那条调用序列**（插入 / 换掉 / 撤掉）：同一会话只挂一条，再划一段换掉旧的；
+     3. **进草稿那条调用序列**（追加 / 撤掉）：同一会话可保留多段，各段独立删除；
         `draftRev` 的 CAS 失败要重试或把话说明白，别静默丢。
 
    夹具：`fixtures/client_harness.mjs`（React 桩 + `apply(fakeCtx)`）+ `fixtures/ask_draft_facade.js`
@@ -211,7 +211,7 @@ test('#106 来源：trigger 是 @、名字不撞宿主那三个，codec 在册',
 test('#106 来源：候选读「这个会话此刻那条引用」，没有就给空数组', async () => {
   const source = quoteReferenceSource();
   assert.deepEqual(await source.candidates({ sessionId: 'qa-1' }, {}), []);
-  quoteSlots.set('qa-1', QUOTE);
+  quoteSlots.set('qa-1', [{ ref: encodeQuoteRef(QUOTE), quote: QUOTE }]);
   const list = await source.candidates({ sessionId: 'qa-1' }, {});
   assert.equal(list.length, 1);
   assert.equal(decodeQuoteRef(list[0].value).text, TEXT);
@@ -258,7 +258,7 @@ test('#106 插入：草稿里没有我们的 chip 就落在末尾，且只有一
   assert.equal(draft.chips.length, 1);
 });
 
-test('#106 换掉：同一会话只挂一条——再划一段换掉旧的，不攒成两颗', () => {
+test('#106 追加：同一会话保留两段，重复添加复用原引用', () => {
   const draft = fakeDraft('qa-1', '前缀 ');
   boot({ draft });
   const slot = held('qa-1', draft);
@@ -266,9 +266,9 @@ test('#106 换掉：同一会话只挂一条——再划一段换掉旧的，不
   putQuoteInDraft(slot, QUOTE);
   const second = { text: '换一段重问：别名只是同一个值的两个名字。', anchor: { lesson: 'demo/1-变量.md', section: 'binding-3', sectionTitle: '小结' } };
   assert.equal(putQuoteInDraft(slot, second), 'in');
-  assert.equal(draft.chips.length, 1, '攒成两颗了：模型答的不是学生此刻指着的那一段');
-  assert.equal(decodeQuoteRef(draft.chips[0].ref).text, second.text);
-  assert.equal(draft.draft.includes(TEXT), false, '旧那一段还留在草稿里：' + draft.draft);
+  assert.deepEqual(draft.chips.map((chip) => decodeQuoteRef(chip.ref).text), [TEXT, second.text]);
+  assert.equal(putQuoteInDraft(slot, QUOTE), 'same');
+  assert.equal(draft.chips.length, 2);
   assert.ok(draft.draft.startsWith('前缀 '), '打好的字被动了：' + draft.draft);
 });
 
@@ -298,7 +298,7 @@ test('#106 坐标：chip 在 detect 投影里恒占 1 个字，检测长度 = �
   assert.equal(detectOffsetOfClipboardOffset(now.occurrences, chip.offset + chip.length), span.end);
 });
 
-test('#106 坐标：chip 后面有学生打的字时，换掉只动那一颗 chip——不连带删字', () => {
+test('#106 坐标：追加与单独删除引用时保留学生打的字', () => {
   const draft = fakeDraft('qa-1', '先说一句：');
   boot({ draft });
   const slot = held('qa-1', draft);
@@ -311,11 +311,11 @@ test('#106 坐标：chip 后面有学生打的字时，换掉只动那一颗 chi
 
   const second = { text: '换一段：别名只是同一个值的两个名字。', anchor: ANCHOR };
   assert.equal(putQuoteInDraft(slot, second), 'in');
-  // 只有那一颗 chip 被换掉：学生打的字一个不落
-  assert.equal(draft.chips.length, 1, '换完该还是只有一颗 chip：' + JSON.stringify(draft.chips));
-  assert.equal(draft.draft.includes(TEXT), false, '旧那一段还留在草稿里：' + draft.draft);
-  assert.ok(draft.draft.includes(tail.trim()), 'chip 后面学生打的字被连带删了：' + draft.draft);
-  assert.equal(decodeQuoteRef(draft.chips[0].ref).text, second.text);
+  assert.deepEqual(draft.chips.map((chip) => decodeQuoteRef(chip.ref).text), [TEXT, second.text]);
+  assert.equal(dropQuoteFromDraft(slot, encodeQuoteRef(QUOTE)), 'gone');
+  assert.deepEqual(draft.chips.map((chip) => decodeQuoteRef(chip.ref).text), [second.text]);
+  assert.ok(draft.draft.includes(tail.trim()), 'chip 后面学生打的字要保留');
+
 });
 
 test('#106 坐标：chip 后头还跟着别的来源的 chip（宿主自己的 @ 引用）时，新建不越界', () => {
@@ -433,7 +433,7 @@ function frame({ sessionId = null, reference = null } = {}) {
 }
 
 test('#106 chip 界面：原文 + 来源小节在，点开看全文的入口在，删掉的入口也在', () => {
-  const text = renderWithState(AskPanel, { subject: SUBJECT, node: NODE, quote: QUOTE, hostKit: fakeKit() }, frame())
+  const text = renderWithState(AskPanel, { subject: SUBJECT, node: NODE, quotes: [QUOTE], hostKit: fakeKit() }, frame())
     .replace(/\s+/g, ' ').trim();
   assert.ok(text.includes(TEXT), 'chip 上没写原文：' + text);
   assert.ok(text.includes('来源：小节「绑定」 · demo/1-变量.md'), text);
@@ -441,7 +441,7 @@ test('#106 chip 界面：原文 + 来源小节在，点开看全文的入口在�
   resetHookState();
   setHookState(frame());
   let tree = null;
-  try { tree = AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, hostKit: fakeKit() }); } finally { resetHookState(); }
+  try { tree = AskPanel({ subject: SUBJECT, node: NODE, quotes: [QUOTE], hostKit: fakeKit() }); } finally { resetHookState(); }
   assert.equal(findByProp(tree, 'data-proto', 'qa-quote-toggle').length, 1, '没有「点开看原文」的入口');
   assert.equal(findByProp(tree, 'data-proto', 'qa-quote-clear').length, 1, '没有「删掉」的入口');
   // 默认收起：chip 是输入框上方的附件，不该一上来就吃掉正文高度
@@ -460,14 +460,14 @@ test('#106 删除：点一下删掉，草稿里那颗跟着撤掉，学生照样
   let tree = null;
   try {
     tree = AskPanel({
-      subject: SUBJECT, node: NODE, quote: QUOTE, hostKit: fakeKit(),
+      subject: SUBJECT, node: NODE, quotes: [QUOTE], hostKit: fakeKit(),
       onQuoteClear: () => cleared.push(true),
     });
     drainEffects();                      // 插入引用 + 订阅草稿
   } finally { resetHookState(); }
 
   assert.equal(draft.chips.length, 1, '面板看见引用时没把它放进草稿（宿主没有提交钩子，这一步不能省）');
-  assert.equal(quoteSlots.get('qa-1'), QUOTE, '会话槽里没有当前这条引用');
+  assert.equal(quoteSlots.get('qa-1')[0].ref, encodeQuoteRef(QUOTE));
 
   const drop = findByProp(tree, 'data-proto', 'qa-quote-clear')[0];
   drop.props.onClick();
@@ -477,7 +477,7 @@ test('#106 删除：点一下删掉，草稿里那颗跟着撤掉，学生照样
   assert.equal(quoteSlots.has('qa-1'), false);
 });
 
-test('#106 提交即让位：草稿里那颗没了（消息真送出去了）就清掉面板上这一颗', () => {
+test('#106 发送清草稿后引用消失，不会再次插入', () => {
   const draft = fakeDraft('qa-1');
   boot({ draft });
   const slot = held('qa-1', draft);
@@ -486,14 +486,15 @@ test('#106 提交即让位：草稿里那颗没了（消息真送出去了）就
   resetHookState();
   setHookState(frame({ sessionId: 'qa-1', reference: slot.reference }));
   try {
-    AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, hostKit: fakeKit(), onQuoteClear: () => cleared.push(true) });
+    AskPanel({ subject: SUBJECT, node: NODE, quotes: [QUOTE], hostKit: fakeKit(), onQuoteClear: () => cleared.push(true) });
     drainEffects();
   } finally { resetHookState(); }
 
   assert.equal(draft.draft.includes(TEXT), true);
   // 宿主发完就清草稿（我们够不着提交钩子，看见的是这一步）
   draft.setDraft('');
-  assert.deepEqual(cleared, [true], '消息送出去了，面板上那一颗还留着');
+  assert.equal(quoteSlots.has('qa-1'), false);
+  assert.deepEqual(cleared, [true], '只有成功交给草稿时从待处理列表清除');
 });
 
 test('#106 提交没成功（草稿被还原）：chip 回来，引用留着——那一次什么都没送出去', () => {
@@ -505,11 +506,12 @@ test('#106 提交没成功（草稿被还原）：chip 回来，引用留着—�
   resetHookState();
   setHookState(frame({ sessionId: 'qa-1', reference: slot.reference }));
   try {
-    AskPanel({ subject: SUBJECT, node: NODE, quote: QUOTE, hostKit: fakeKit(), onQuoteClear: () => cleared.push(true) });
+    AskPanel({ subject: SUBJECT, node: NODE, quotes: [QUOTE], hostKit: fakeKit(), onQuoteClear: () => cleared.push(true) });
     drainEffects();
   } finally { resetHookState(); }
 
   // 发送被拦下：草稿原样还回来（chip 还在），面板订阅看到的一直是「在」
   assert.ok(ourOccurrence(draft.state.getSnapshot()), 'chip 不该被我们弄丢');
-  assert.deepEqual(cleared, [], '那一次什么都没送出去，引用不该被清');
+  assert.equal(quoteSlots.get('qa-1')[0].ref, encodeQuoteRef(QUOTE));
+  assert.deepEqual(cleared, [true]);
 });

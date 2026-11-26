@@ -133,3 +133,11 @@ test('#92 捕获：模型还没就绪时的正文（没有小节归属）也留�
   assert.equal(quote.text, LONG_ENOUGH);
   assert.deepEqual(quote.anchor, { lesson: LESSON, section: '', sectionTitle: '' });
 });
+
+
+test('手动引用拒绝从正文跨到侧栏的选区', () => {
+  const { body, text, outside } = fakeDoc();
+  const selection = { rangeCount: 1, toString: () => LONG_ENOUGH,
+    getRangeAt: () => ({ startContainer: text, endContainer: outside }) };
+  assert.equal(captureQuote(null, selection, body, LESSON), null);
+});
