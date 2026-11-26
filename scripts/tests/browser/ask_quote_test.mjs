@@ -990,32 +990,54 @@ try {
   const code = Array.from({ length: 125 }, (_, i) => i === 111
     ? 'client.query_points({ limit: 2 });' : 'const value' + i + ' = ' + i + ';');
   fs.writeFileSync(lessonPath, original + '\n```js\n' + code.join('\n')
-    + '\n```\n\n`query_points` 接收查询参数，`missing_method` 不在代码中。\n');
+    + '\n```\n\n`query_points` 接收查询参数，`missing_method` 不在代码中，重复对照 `query_points`。\n'
+    + '\n- 列表里调用 `query_points`\n\n| 方法 | 说明 |\n| --- | --- |\n| `query_points` | 查询 |\n');
   fixture = buildFixture(root, readLibrary({ workspace }));
 
   await session.scene('code-explanation-real-react', async (ctx) => {
     await openLesson(ctx);
     await ctx.evaluate(`document.querySelector('[data-proto="code-reference"]').scrollIntoView({block:'center',behavior:'instant'})`);
-    const before = await ctx.evaluate(`document.querySelector('.smb-center__body').scrollTop`);
-    await ctx.evaluate(`document.querySelector('[data-proto="code-reference"]').click()`);
-    await ctx.sleep(120);
+    const before = await ctx.evaluate(`(() => {
+      const body = document.querySelector('.smb-center__body');
+      return { scroll: body.scrollTop, height: body.scrollHeight,
+        row: document.querySelector('.smb-table-wrap').getBoundingClientRect().top };
+    })()`);
+    await ctx.evaluate(`document.querySelectorAll('p [data-proto="code-reference"]')[1].click()`);
     const peek = await ctx.evaluate(`(() => {
       const el = document.querySelector('[data-proto="code-peek"]');
-      const block = document.querySelector('.smb-code');
-      return { text: el && el.textContent, count: document.querySelectorAll('[data-proto="code-reference"]').length,
-        marks: el && el.querySelectorAll('mark').length,
-        line: el && el.querySelector('[data-no="112"]') !== null,
-        original: block.querySelectorAll('.smb-code__line--match').length,
-        scroll: document.querySelector('.smb-center__body').scrollTop,
-        expanded: document.querySelector('[data-proto="code-reference"]').getAttribute('aria-expanded') };
+      const body = document.querySelector('.smb-center__body');
+      const refs = [...document.querySelectorAll('[data-proto="code-reference"]')];
+      return { text: el?.textContent, hosts: refs.map(ref => ref.closest('p, li, td')?.tagName),
+        marks: el?.querySelectorAll('mark').length, line: !!el?.querySelector('[data-no="112"]'),
+        original: document.querySelectorAll('.smb-code__line--match').length,
+        scroll: body.scrollTop, height: body.scrollHeight,
+        row: document.querySelector('.smb-table-wrap').getBoundingClientRect().top,
+        expanded: refs.map(ref => ref.getAttribute('aria-expanded')),
+        underline: getComputedStyle(refs[1].querySelector('code')).textDecorationStyle };
     })()`);
-    check('[代码对照] 只给匹配的名称提供入口，就地显示原行号和高亮',
-      peek.count === 1 && peek.marks === 1 && peek.line && peek.original === 1
-      && peek.expanded === 'true' && peek.text.includes('query_points({ limit: 2 })'), JSON.stringify(peek));
-    check('[代码对照] 展开片段不把读者滚离解释段落', Math.abs(peek.scroll - before) < 3, JSON.stringify({ before, peek }));
-    await ctx.evaluate(`document.querySelector('[aria-label="关闭相关代码"]').click()`);
-    check('[代码对照] 关闭后原代码高亮一并撤销', await ctx.evaluate(`document.querySelectorAll('.smb-code-match, [data-proto="code-peek"]').length`) === 0);
-    await ctx.evaluate(`document.querySelector('[data-proto="code-reference"]').click()`);
+    check('[代码对照] 段落、列表和表格只给匹配的名称提供入口，预览显示原行号和高亮',
+      JSON.stringify(peek.hosts) === JSON.stringify(['P', 'P', 'LI', 'TD'])
+      && peek.marks === 1 && peek.line && peek.original === 1 && peek.underline === 'solid'
+      && peek.text.includes('query_points({ limit: 2 })'), JSON.stringify(peek));
+    check('[代码对照] 只有点击的那一处展开，预览不推动正文',
+      peek.expanded.join(',') === 'false,true,false,false'
+      && peek.scroll === before.scroll && peek.height === before.height && peek.row === before.row, JSON.stringify({ before, peek }));
+    await session.send('Input.dispatchKeyEvent', {type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    await session.send('Input.dispatchKeyEvent', {type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    check('[代码对照] Esc 关闭浮窗、撤销高亮并把焦点还给第二个同名词', await ctx.evaluate(`
+      !document.querySelector('.smb-code-match, [data-proto="code-peek"]')
+      && document.activeElement === document.querySelectorAll('p [data-proto="code-reference"]')[1]`));
+
+    await ctx.evaluate(`document.querySelector('li [data-proto="code-reference"]').click()`);
+    await clickAt(session, { x: 10, y: 10 });
+    check('[代码对照] 点浮窗外关闭预览', await ctx.evaluate(`!document.querySelector('[data-proto="code-peek"]')`));
+
+    await ctx.evaluate(`document.querySelector('td [data-proto="code-reference"]').click()`);
+    await ctx.evaluate(`document.querySelector('[data-proto="code-peek"] button').click()`);
+    check('[代码对照] 查看完整代码会关闭浮窗，并聚焦原代码的匹配行', await ctx.evaluate(`
+      !document.querySelector('[data-proto="code-peek"]')
+      && document.activeElement.matches('.smb-code__line--match')
+      && document.activeElement.textContent.includes('query_points({ limit: 2 })')`));
     return peek;
   });
   await session.scene('code-explanation-narrow-dark', async (ctx) => {
