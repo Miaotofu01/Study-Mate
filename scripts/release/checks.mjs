@@ -423,6 +423,7 @@ const groups = {
       // 用假 DOM 逐个喂（含各种「读到空选区」的触发方式，都不得清掉已存在的引用）。真鼠标拖拽
       // 那一条在 --browser 组。
       'scripts/tests/test_client_ask_quote.mjs',
+      'scripts/tests/test_client_code_reference.mjs',
       // #106：引用 chip（选中那段跟着**下一条消息**走）。`ref` 是字符串、没有反序列化入口，
       // 所以「原文 + 来源锚点」的编解码 / `serialize` / `clipboardText` 是一对纯函数；引用来源
       // 「插件激活时注册、卸载时注销」是承重的（提交那一刻找不到 owner 会让整次发送失败），
