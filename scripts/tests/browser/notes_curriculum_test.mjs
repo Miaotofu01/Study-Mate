@@ -519,6 +519,18 @@ async function main() {
     assert.ok(await bindForm.getByRole('button', { name: '解除绑定' }).count() >= 1, '绑定行有解除绑定入口');
     await page.getByRole('button', { name: '关闭弹窗' }).click();
     await SCREENSHOT(page, '06-node-view');
+    await bookOneCanvas.click();
+    await bookOneNode.locator('.notes-md-row').filter({ hasText: '课程甲.md' }).locator('.notes-md-open').click();
+    const right = page.locator('[data-proto="notes-surface"] .right-panel');
+    const linkedCourse = right.locator('.resource-header').getByRole('button', { name: '管理课程关联：课程科目', exact: true });
+    await linkedCourse.waitFor({ state: 'visible' });
+    assert.equal(await linkedCourse.innerText(), '课程科目', '右栏标题旁显示科目名而不是节点名');
+    assert.equal(await right.locator('.resource-detail .course-association-bar').count(), 0, '右栏正文不重复展示关联条');
+    await linkedCourse.click();
+    const relations = page.locator('[data-proto="note-associations-form"]');
+    await relations.waitFor({ state: 'visible' });
+    assert.match(await relations.innerText(), /课程乙/, '同一个选项打开关联管理并展示具体节点');
+    await page.getByRole('button', { name: '关闭弹窗' }).click();
 
     // ⑦ 拖课程节点到画布：只有标题 + 跳转，不复制正文；侧栏是实际只读课件。
     // 先把「课程笔记」这本设为当前画布，课程卡才会落到这一本，而不是初始的空画布。

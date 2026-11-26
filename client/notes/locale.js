@@ -60,7 +60,9 @@ export const zh = {
   new: '新建', new_resource: '新建资源', note_name: '笔记名称', create_target: '新建位置：{path}',
   document_mode_preview: '预览', document_mode_edit: '编辑', document_mode_split: '双列', document_mode_inline: '渲染编辑',
   document_view_mode: '文档视图模式',
-  unsupported_note: '不支持的文件类型。改回支持的 Markdown 扩展名可恢复编辑，原内容仍保留。',
+  unsupported_note: '不支持的文件类型',
+  confirm_resource_move: '将「{name}」移动到「{path}」？原位置不保留条目，已有画布卡片和课程关联不变。',
+  course_association_unlinked: '未关联', manage_course_association: '管理课程关联：{name}',
 };
 
 export const en = {
@@ -122,7 +124,9 @@ export const en = {
   new: 'New', new_resource: 'New resource', note_name: 'Note name', create_target: 'New location: {path}',
   document_mode_preview: 'Preview', document_mode_edit: 'Edit', document_mode_split: 'Split', document_mode_inline: 'Inline edit',
   document_view_mode: 'Document view mode',
-  unsupported_note: 'Unsupported file type. Restoring a supported Markdown extension re-enables editing; the content is preserved.',
+  unsupported_note: 'Unsupported file type',
+  confirm_resource_move: 'Move “{name}” to “{path}”? No entry will remain in the original location. Existing canvas cards and course associations will stay unchanged.',
+  course_association_unlinked: 'Not linked', manage_course_association: 'Manage course associations: {name}',
 };
 
 const scope = createLocaleScope('@yunmiao/studymate/notes', { zh, en });

@@ -160,11 +160,15 @@
 .app-shell.v4 .button.primary:hover { border-color: var(--v4-accent-strong); background: var(--v4-accent-strong); }
 .app-shell.v4 .button.danger { color: var(--v4-danger-text); border-color: var(--v4-danger-border); background: var(--v4-danger-soft); }
 
-/* 顶栏最右的右栏开关：右栏不再是 flex 项，恢复入口只有这一处，所以永远可见、永远最后。
-   结构：<button class="icon-button topbar-panel-toggle" aria-expanded aria-controls="right-panel"> */
-.app-shell.v4 .topbar-panel-toggle { flex: 0 0 auto; width: 32px; height: 32px; margin-left: 2px; border: 1px solid var(--v4-border); border-radius: 8px; background: var(--v4-surface); }
+/* 顶栏左右侧栏开关：左右对称，展开态底色高亮。
+   结构：<button class="icon-button topbar-panel-toggle topbar-panel-toggle--left|right" aria-expanded aria-controls="left-panel|right-panel"> */
+.app-shell.v4 .topbar-panel-toggle { flex: 0 0 auto; width: 32px; height: 32px; border: 1px solid var(--v4-border); border-radius: 8px; background: var(--v4-surface); }
+.app-shell.v4 .topbar-panel-toggle--right { margin-left: 2px; }
 .app-shell.v4 .topbar-panel-toggle:hover { border-color: var(--v4-border-strong); background: var(--v4-hover); }
 .app-shell.v4 .topbar-panel-toggle[aria-expanded="true"] { color: var(--v4-text); border-color: var(--v4-border-strong); background: var(--v4-active); }
+@media (max-width: 380px) {
+  .app-shell.v4 .topbar-panel-toggle { width: 28px; height: 28px; margin-left: 0; }
+}
 
 /* 焦点环统一：中性壳层里只有焦点用品牌色。优先级 (0,2,0)，压得住
    styles.css 的 `:root` 色值与 components-v2.css 的 `:is(button,…):focus-visible`。 */
@@ -240,8 +244,7 @@
 @media (max-width: 699px) {
   .app-shell.v4 .left-panel { position: absolute; top: 0; bottom: 0; left: 0; z-index: 26; box-shadow: var(--v4-panel-shadow-left); }
   .app-shell.v4 .left-panel.is-collapsed { box-shadow: none; }
-  .app-shell.v4 .left-panel:not(.is-collapsed) { max-width: min(320px, calc(100vw - var(--v4-rail-width) - 8px)); }
-  .app-shell.v4 .panel-rail--left { position: absolute; top: 0; bottom: 0; left: 0; z-index: 27; padding-top: 6px; border-right-color: transparent; background: transparent; }
+  .app-shell.v4 .left-panel:not(.is-collapsed) { max-width: min(320px, calc(100vw - 16px)); }
 }
 /* 断点切换时不播侧栏 / 窄轨动画（v3 已有 data-breakpoint-changing 钩子） */
 .app-shell.v4[data-breakpoint-changing="true"] .side-panel,
@@ -302,6 +305,18 @@
 .app-shell.v4 .import-menu-items :is([role="menuitem"], .menuitem)[aria-disabled="true"] { color: var(--v4-text-4); cursor: not-allowed; }
 .app-shell.v4 .import-menu-items .menu-separator { height: 1px; margin: 4px 2px; background: var(--v4-border-soft); }
 .app-shell.v4 .import-menu-items .import-menu-error { padding: 6px 9px; color: var(--v4-danger-text); font-size: 11px; line-height: 1.5; }
+.app-shell.v4 .notes-create-control { position: relative; display: inline-flex; }
+.app-shell.v4 .notes-create-trigger { flex: 0 0 auto; }
+.app-shell.v4 .notes-create-trigger[aria-expanded="true"] { color: var(--v4-text); background: var(--v4-active); }
+.app-shell.v4 .notes-create-trigger:disabled { color: var(--v4-text-4); cursor: not-allowed; }
+.app-shell.v4 .import-menu-items.notes-create-menu { min-width: 0; width: max-content; padding: 4px; }
+.app-shell.v4 .import-menu-items.notes-create-menu :is([role="menuitem"], button) {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 12px 6px 10px;
+  white-space: nowrap; text-align: left; line-height: 1.4;
+}
+.app-shell.v4 .import-menu-items.notes-create-menu :is([role="menuitem"], button) svg {
+  width: 16px; height: 16px; flex: 0 0 16px; margin-top: 0;
+}
 
 /* ── 6. 资源页头：右侧也是 .panel-header.resource-header，标题 span.panel-title ──
    标题占满剩余宽并被省略，按钮 flex:0 0 auto 且 justify-content:flex-end，
@@ -313,6 +328,13 @@
   min-width: 0; flex: 1 1 auto; margin: 0; overflow: hidden; color: var(--v4-text);
   font-size: 12px; font-weight: 650; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap;
 }
+.app-shell.v4 .resource-header > .course-assoc-option {
+  flex: 0 1 auto; min-width: 0; max-width: 36%; overflow: hidden;
+  border: 1px solid var(--v4-border); border-radius: 5px; padding: 2px 6px;
+  background: transparent; color: var(--v4-text); cursor: pointer;
+  font: inherit; font-size: 12px; text-overflow: ellipsis; white-space: nowrap;
+}
+.app-shell.v4 .resource-header > .course-assoc-option:disabled { cursor: default; }
 .app-shell.v4 .resource-header-actions { display: flex; min-width: 0; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 2px; margin-left: auto; }
 .app-shell.v4 .resource-header-actions > * { flex: 0 0 auto; }
 @media (max-width: 520px) {

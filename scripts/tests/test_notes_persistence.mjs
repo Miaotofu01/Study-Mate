@@ -197,16 +197,35 @@ test('serializeLayout nodes 只保留白名单 data 字段', () => {
   assert.deepEqual(Object.keys(edge.data), ['label']);
 });
 
-test('hydrateLayout 复原 edge marker/styles 用 fixture 默认值', () => {
+test('hydrateLayout 复原 edge marker/styles 用 fixture 默认值，且不强加 dragHandle', () => {
   const layout = hydrateLayout({
     folders: [],
-    nodes: [{ id: 'n1', type: 'knowledge', position: { x: 0, y: 0 }, style: { width: 310, height: 255 }, data: { contentId: 'r-1' } }],
-    edges: [{ id: 'e1', source: 'n1', target: 'n2', type: 'relation', data: { label: 'L' } }],
+    nodes: [
+      { id: 'n1', type: 'knowledge', position: { x: 0, y: 0 }, style: { width: 310, height: 255 }, data: { contentId: 'r-1' } },
+      { id: 't1', type: 'text', position: { x: 40, y: 50 }, style: { width: 260, height: 84 }, data: { text: '两行内容' } },
+    ],
+    edges: [{ id: 'e1', source: 'n1', target: 't1', type: 'relation', data: { label: 'L' } }],
     viewport: { x: 0, y: 0, zoom: 1 },
   });
+  assert.equal('dragHandle' in layout.nodes[0], false);
+  assert.equal('dragHandle' in layout.nodes[1], false);
   const edge = layout.edges[0];
   assert.equal(edge.markerEnd.type, 'arrowclosed');
   assert.equal(edge.style.stroke, '#9caea7');
+});
+
+test('serializeLayout 优先保存缩放后的顶层 width/height 到 style', () => {
+  const layout = serializeLayout({
+    folders: [],
+    nodes: [
+      { id: 'n1', type: 'knowledge', position: { x: 0, y: 0 }, width: 380, height: 360, style: { width: 310, height: 255 }, data: { contentId: 'r-1' } },
+    ],
+    edges: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  });
+  assert.deepEqual(layout.nodes[0].style, { width: 380, height: 360 });
+  assert.equal('width' in layout.nodes[0], false);
+  assert.equal('height' in layout.nodes[0], false);
 });
 
 test('serializeLayout 非法几何显式 throw（不静默归 0）', () => {

@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { isMarkdownResource } from './note-types.js';
 import { courseKey, ownedNote, resolveCourse, sameSubject, subjectKey } from './curriculum.js';
+import { useNotesLocale } from './locale.js';
 import './curriculum.css';
 
 export function notebooksOf(folders) {
@@ -70,6 +71,18 @@ function useErrors() {
     try { setError(''); return await task(); } catch (e) { setError(e?.message || String(e)); return undefined; }
   };
   return [error, setError, run];
+}
+
+export function CourseAssociationOption({ resource, library, onManage, canEdit }) {
+  const t = useNotesLocale();
+  const names = (resource.associations || []).map(ref => {
+    const subject = library?.workspace === ref.workspace && library.subjects.find(item => item.slug === ref.subject);
+    return (subject?.name || ref.subject) + (resolveCourse(library, ref) ? '' : t('unavailable_suffix'));
+  });
+  const label = names.length > 1 ? names[0] + ' +' + (names.length - 1) : names[0] || t('course_association_unlinked');
+  return <button type="button" className="course-assoc-option" aria-haspopup="dialog"
+    aria-label={t('manage_course_association', { name: label })} title={names.length ? names.join('、') : label}
+    disabled={!canEdit} onClick={onManage}>{label}</button>;
 }
 
 export function CourseAssociationBar({ resource, library, onNavigate, onManage, canEdit }) {

@@ -290,7 +290,7 @@ export async function startNotesHostFixture({ seedDemo = false, library = librar
           response.end(JSON.stringify(library));
           return;
         }
-        if (pathname === '/api/studymate/events') {
+        if (pathname === '/plugins/studymate/events') {
           response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
           response.write(': connected\n\n');
           return;

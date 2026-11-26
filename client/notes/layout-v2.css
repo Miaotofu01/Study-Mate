@@ -126,7 +126,7 @@ body:has(.app-shell.v2[data-resizing="true"]) { user-select: none; cursor: col-r
 .app-shell.v2 .knowledge-card.selected .node-actions { opacity: 1; }
 .app-shell.v2 .text-node { position: relative; min-width: 100px; min-height: 38px; cursor: grab; }
 .app-shell.v2 .text-node-content { min-height: 1.5em; color: #39463f; font-size: var(--smb-fs-body, 14px); line-height: var(--smb-lh-body, 1.6); white-space: pre-wrap; overflow-wrap: anywhere; }
-.app-shell.v2 .text-node-editor { width: 100%; min-height: 48px; resize: none; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }
+.app-shell.v2 .text-node-editor { width: 100%; min-height: 0; resize: none; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }
 .app-shell.v2 .canvas-stage.is-space-panning, .app-shell.v2 .canvas-stage.is-space-panning * { cursor: grabbing !important; }
 .app-shell.v2 .canvas-stage.is-space-panning .pan-capture-layer { position: absolute; inset: 0; z-index: 30; cursor: grab !important; }
 .app-shell.v2 .inline-edge-editor { display: inline-flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid #dce8e2; border-radius: 7px; background: #fff; box-shadow: 0 2px 8px #24362f12; }

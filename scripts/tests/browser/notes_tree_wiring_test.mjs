@@ -145,7 +145,7 @@ try {
     problems.push('console: ' + text);
   });
   page.on('pageerror', error => problems.push('pageerror: ' + (error.stack || error.message)));
-  page.on('requestfailed', request => { if (!allowFault && !request.url().includes('/api/studymate/events')) problems.push('requestfailed: ' + request.url()); });
+  page.on('requestfailed', request => { if (!allowFault && !request.url().includes('/plugins/studymate/events')) problems.push('requestfailed: ' + request.url()); });
   page.on('response', response => { if (response.status() >= 400 && !allowFault && !expectedFaults.has(response.status())) problems.push(`status ${response.status()}: ${response.url()}`); });
   try {
     await enterNotes(page, fixture.origin);
@@ -173,10 +173,13 @@ try {
       await until(async () => JSON.stringify(await classes()) === '[true,false]', '切回资源视图没有恢复高亮');
     });
 
-    await guarded('左栏「新建」菜单：三项顺序、贴住触发器、Escape 还焦点', async () => {
+    await guarded('左栏「新建」菜单：纯图标按钮、紧凑不裁切、三项图标与文字对齐、Escape 还焦点', async () => {
       const trigger = notes(page).locator('.left-panel .panel-header button.notes-create-trigger');
       assert.equal(await trigger.count(), 1, '左栏应有唯一「新建」按钮');
       assert.equal(await notes(page).locator('.left-panel').getByRole('button', { name: '新建笔记', exact: true }).count(), 0, '左栏不该再有独立的新建按钮');
+      assert.equal(await trigger.getAttribute('aria-label'), '新建');
+      assert.equal((await trigger.innerText()).trim(), '', '新建按钮应为纯图标，不含可见文字');
+      assert.equal(await trigger.locator('svg').count(), 1, '新建按钮应含十字图标 svg');
       assert.equal(await trigger.getAttribute('aria-haspopup'), 'menu');
       assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
       await trigger.click();
@@ -188,12 +191,28 @@ try {
       const placed = await page.evaluate(() => {
         const menu = document.querySelector('[role="menu"][aria-label="新建资源"]');
         const trigger = document.querySelector('.notes-create-trigger');
-        const m = menu.getBoundingClientRect(), t = trigger.getBoundingClientRect();
-        return { inside: Boolean(menu.closest('.app-shell')), gap: m.top - t.bottom, overlap: m.left < t.right && m.right > t.left };
+        const host = menu.closest('.app-shell');
+        const m = menu.getBoundingClientRect(), t = trigger.getBoundingClientRect(), h = host?.getBoundingClientRect();
+        const rows = [...menu.querySelectorAll('[role="menuitem"]')];
+        const iconWidths = rows.map(row => row.querySelector('svg')?.getBoundingClientRect().width ?? 0);
+        const textLefts = rows.map(row => row.querySelector('span')?.getBoundingClientRect().left ?? 0);
+        return {
+          inside: Boolean(host),
+          gap: m.top - t.bottom,
+          overlap: m.left < t.right && m.right > t.left,
+          leftOffset: h ? m.left - h.left : -1,
+          width: m.width,
+          iconWidths,
+          textLefts,
+        };
       });
       assert.equal(placed.inside, true, '新建菜单没有挂到 .app-shell 下');
       assert.ok(placed.gap >= -2 && placed.gap <= 24, '新建菜单没有贴在触发器下方：' + placed.gap);
       assert.equal(placed.overlap, true, '新建菜单没有对齐触发器');
+      assert.ok(placed.leftOffset >= 7.5, '新建菜单左侧不应被裁切：' + placed.leftOffset);
+      assert.ok(placed.width < 180, '新建菜单宽度应紧凑（< 180px）：' + placed.width);
+      assert.ok(Math.max(...placed.iconWidths) - Math.min(...placed.iconWidths) <= 0.5, '三项图标宽度应一致：' + JSON.stringify(placed.iconWidths));
+      assert.ok(Math.max(...placed.textLefts) - Math.min(...placed.textLefts) <= 1, '三项文字左缘应垂直对齐：' + JSON.stringify(placed.textLefts));
       await page.keyboard.press('Escape');
       await menu.waitFor({ state: 'detached', timeout: 5000 });
       assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
@@ -260,6 +279,50 @@ try {
       const added = after.layout.nodes.find(node => !before.layout.nodes.some(old => old.id === node.id));
       assert.equal(added.data?.contentId, id, '卡片没有引用同一原件');
       assert.equal(await notes(page).locator(`.react-flow__node:has([data-content-id="${id}"])`).count(), 1, '画布上没有该原件卡片');
+    });
+
+    await guarded('资源视图拖动文件和目录：换层级、拒绝循环、跨归属先确认，原稿和卡片不变', async () => {
+      const tree = notes(page).locator('.resource-tree');
+      const folderRow = name => tree.locator('.tree-row').filter({ has: page.getByRole('button', { name: name + ' 文件夹', exact: true }) });
+      const fileRow = name => tree.locator('.tree-file').filter({ has: page.getByRole('button', { name: '打开 ' + name, exact: true }) });
+      const before = fixture.read();
+      const source = Object.values(before.resources).find(resource => resource.title === '拖入源.md');
+      await fileRow(source.title).dragTo(folderRow('例子'));
+      await until(() => fixture.read().resources[source.id]?.parent === 'examples', '同本移动没有落盘');
+      await saved(page);
+      await folderRow('例子').dragTo(folderRow('概念'));
+      await until(() => fixture.read().layout.folders.some(folder => folder.id === 'examples' && folder.parent === 'notes'), '普通文件夹没有换层级');
+      await saved(page);
+      await folderRow('概念').dragTo(folderRow('例子'));
+      assert.equal(await folderRow('概念').getAttribute('data-drop-target'), null);
+      assert.equal(fixture.read().layout.folders.find(folder => folder.id === 'notes').parent, 'book');
+      let asked = 0;
+      page.once('dialog', async dialog => { asked++; await dialog.dismiss(); });
+      await folderRow('例子').dragTo(folderRow('参考资料'));
+      assert.equal(asked, 1, '跨归属未确认');
+      assert.equal(fixture.read().layout.folders.find(folder => folder.id === 'examples').parent, 'notes');
+      page.once('dialog', dialog => dialog.accept());
+      await folderRow('例子').dragTo(folderRow('参考资料'));
+      await until(() => fixture.read().layout.folders.some(folder => folder.id === 'examples' && folder.parent === 'references'), '跨归属移动没有落盘');
+      await saved(page);
+      const after = fixture.read();
+      assert.deepEqual(after.resources[source.id], { ...source, parent: 'examples' });
+      assert.deepEqual(after.layout.nodes, before.layout.nodes);
+      assert.deepEqual(Object.keys(after.resources), Object.keys(before.resources));
+      assert.equal(await fileRow(source.title).count(), 1);
+    });
+
+    await guarded('未知扩展名不在资源条目显示，右栏仅显示类型提示', async () => {
+      await createNote(page, fixture, '# Extension content\n', '类型检查.md');
+      page.once('dialog', dialog => dialog.accept());
+      await renameViaMenu(page, '类型检查.md', '类型检查.md 的文件操作', '类型检查.unknown');
+      await notes(page).getByRole('button', { name: '画布', exact: true }).click();
+      const item = notes(page).getByRole('button', { name: '打开 类型检查.unknown', exact: true });
+      await item.click();
+      assert.doesNotMatch(await item.locator('..').innerText(), /不支持的文件/);
+      const type = notes(page).locator('.right-panel .unsupported-note');
+      await type.waitFor();
+      assert.equal(await type.innerText(), '不支持的文件类型');
     });
 
     await guarded('笔记本目录菜单有「课程绑定」入口并打开绑定面板', async () => {

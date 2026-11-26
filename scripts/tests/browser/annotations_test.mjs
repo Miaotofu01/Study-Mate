@@ -164,7 +164,7 @@ function startHost(workspace, state, reads) {
         node.annotations = { present: state.present, version: state.version, items: state.items };
         return send(200, JSON.stringify(data), 'application/json; charset=utf-8');
       }
-      if (url.pathname === '/api/studymate/events') {
+      if (url.pathname === '/plugins/studymate/events') {
         // 阅读端挂载即订阅变更推送：这一套不验推送，给一条不推数据的 text/event-stream，
         // 让请求有正当落点（否则 QA 骨架会把 404 算成失败请求）。
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' });

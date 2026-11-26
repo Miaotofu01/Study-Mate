@@ -456,7 +456,7 @@ function buildFixture(dir, payload, name = 'reading-routes-fixture.html') {
       json: function () { return Promise.resolve({ error: '夹具没有这条接口：' + url }); },
     });
   };
-  // 变更推送（#74）：阅读端挂载即订阅 /api/studymate/events。夹具页走 file://，那条请求只会
+  // 变更推送（#74）：阅读端挂载即订阅 /plugins/studymate/events。夹具页走 file://，那条请求只会
   // 被拦掉、变成一条「失败请求」——而推送不在这一面的验收面上。lib/client.js 认这个早退
   // （typeof EventSource !== 'function' 就不订阅），所以收掉它，别让注定失败的请求污染判据。
   // 这条通道本身由 browser/watch_push_test.mjs 与真 DSH 探针覆盖。

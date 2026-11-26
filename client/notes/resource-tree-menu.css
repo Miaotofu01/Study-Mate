@@ -1,3 +1,8 @@
+.app-shell.v2 .resource-tree .tree-row[data-drop-target] {
+  outline: 2px solid var(--v4-focus);
+  outline-offset: -2px;
+}
+
 /* 资源树 · 更多菜单与笔记本绑定摘要（#312 之后新增的 UI）。
    只放 ResourceTree 自己的选择器；不改 layout-v2.css / ui-v4.css 里已有的规则。
    菜单本身的成套装扮仍复用 .import-menu-items（ui-v4.css），这里只补绑定摘要。 */
