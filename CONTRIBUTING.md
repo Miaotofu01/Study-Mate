@@ -26,11 +26,12 @@
 | `schemas/*.json` | 该 schema 本身；[文件归属](docs/规范/文件归属.md) |
 | `bin/*.mjs`、`bin/dsh-plugin.ts` 安装器、插件构建与 DSH 插件入口 | [安装说明](docs/使用/安装.md)；[Codex 与 ChatGPT](docs/使用/Codex与ChatGPT.md) |
 | `openai/studymate/**` 插件源 | [Codex 与 ChatGPT](docs/使用/Codex与ChatGPT.md) |
+| `antigravity/studymate/**` 插件源（含 `antigravity/studymate/sidecars/reader/` 侧栏阅读端） | [Antigravity 使用说明](docs/使用/Antigravity.md)；[ADR-0023](docs/adr/0023-Antigravity侧栏阅读端.md) |
 | 课件内容文件 | [课件内容格式](docs/规范/课件内容格式.md) |
 | `lib/client.js` 的阅读端呈现（页面、样式、问答面板的观感与交互） | [阅读端呈现](docs/规范/阅读端呈现.md)：四个面「看起来对不对」的判据；形状归 [目标态规格](docs/设计/目标态规格.md) §4，三栏让位归 [ADR-0011](docs/adr/0011-阅读端三栏让位顺序.md) |
 | `docs/**`、`README.md` | 该文件已有的口径；新规则遵循「一处定义，别处只给指针」 |
 
-提示词、`schemas/` 与数据骨架会**同时**流进 DSH 预设与两个无头宿主插件（插件由 `npm run build:plugin` / `npm run build:antigravity` 从这些源转换而来），改完别只验 DSH 一侧。无头宿主没有引擎脚本也没有原生工具：那边只有技能 + schema + 数据骨架 + 一条导出 CLI（`npx -y @yunmiao/studymate export`）。
+提示词、`schemas/` 与数据骨架会**同时**流进 DSH 预设与两个无头宿主插件（插件由 `npm run build:plugin` / `npm run build:antigravity` 从这些源转换而来），改完别只验 DSH 一侧。无头宿主没有引擎脚本也没有原生工具：那边只有技能 + schema + 数据骨架 + 一条导出 CLI（`npx -y @yunmiao/studymate export`）。Antigravity 多一个原生侧栏阅读端：构建期把 `lib/**`、`bin/typescript-runtime.mjs`、客户端构建产物与 React `vendor/` 封进 `sidecars/reader/`，面板与 DSH 共用同一份渲染代码和数据层——改 `lib/client.js` 或 `lib/**` 的数据路由时，`npm run test:antigravity` 会连 Sidecar 契约一起验。
 
 ## 本地验证
 

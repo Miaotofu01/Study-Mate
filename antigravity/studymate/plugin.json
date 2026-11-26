@@ -1,19 +1,16 @@
 {
   "name": "studymate",
   "displayName": "StudyMate",
-  "description": "你的AI学习搭档：定计划、讲知识、做项目，学透一门科目。包含总控、课程设计、讲解、练习评估等完整学习工作流与HTML课件引擎，原生支持 Google Antigravity 多智能体协同。",
+  "description": "你的AI学习搭档：定计划、讲知识、做项目，学透一门科目。包含多智能体学习工作流、练习评估与原生 Antigravity Sidecar 交互式学习面板。",
+  "logo": "assets/logo.png",
+  "suggestedPrompts": [
+    "我想学计算机网络，帮我定学习路线",
+    "我不知道学什么，帮我选个学习方向",
+    "继续我当前的课程学习进度"
+  ],
   "author": {
     "name": "Miaotofu01"
   },
-  "repository": "https://github.com/Miaotofu01/Study-Mate",
-  "license": "MIT",
-  "keywords": [
-    "study",
-    "learning",
-    "education",
-    "courseware",
-    "math",
-    "cs",
-    "antigravity"
-  ]
+  "homepage": "https://github.com/Miaotofu01/Study-Mate#readme",
+  "repository": "https://github.com/Miaotofu01/Study-Mate"
 }

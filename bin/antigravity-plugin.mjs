@@ -1,3 +1,4 @@
+import './typescript-runtime.mjs';
 import fs from 'node:fs';
 import { removeTreeSync } from '../lib/fs-remove.mjs';
 import path from 'node:path';
@@ -7,8 +8,104 @@ import { adaptAntigravitySkill, adaptAntigravityAgent, AGENT_ROLES } from './ant
 import { writeDocsPayload } from './docs-payload.mjs';
 import { writeZip } from './zip.mjs';
 
+// 静态字符串字面量的 .ts 导入放在模块加载期：bin -> export 是允许的依赖方向，
+// buildAntigravityPlugin 因此保持同步签名，Sidecar 的 React vendor 在构建期即可确定性生成。
+const { resolveReact, ReactMissingError } = await import('../lib/export/react.ts');
+const { vendorFile, VENDOR_MODULES, VENDOR_FILES } = await import('../lib/export/page.ts');
+
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const marker = '.studymate-build.json';
+
+/** Sidecar 引擎闭包里不该出现的构建垃圾：字节码、旧备份与 Python 遗留物。 */
+function isSidecarEngineNoise(name) {
+  return name === '__pycache__'
+    || name.endsWith('.pyc')
+    || name.endsWith('.py')
+    || name === '.bak'
+    || name.endsWith('.bak');
+}
+
+/** 统一 LF：确定性 ZIP（同一份源必须给出同一串字节）。 */
+function normalizeEol(text) {
+  return text.replace(/\r\n?/g, '\n');
+}
+
+/**
+ * 把仓库的 lib/ 闭包搬进 Sidecar：engine/bin/typescript-runtime.mjs 与 engine/lib/**。
+ * 过滤口径与 copyTree 不同（见 isSidecarEngineNoise）：这里只装运行时真要的。
+ */
+function copySidecarEngine(fromRoot, readerDir) {
+  const engineLib = path.join(readerDir, 'engine', 'lib');
+  const engineBin = path.join(readerDir, 'engine', 'bin');
+  fs.mkdirSync(engineLib, { recursive: true });
+  fs.mkdirSync(engineBin, { recursive: true });
+  fs.copyFileSync(path.join(fromRoot, 'bin', 'typescript-runtime.mjs'), path.join(engineBin, 'typescript-runtime.mjs'));
+  const walk = (relative) => {
+    const from = path.join(fromRoot, 'lib', relative);
+    const to = path.join(engineLib, relative);
+    const stat = fs.lstatSync(from);
+    if (stat.isSymbolicLink()) throw new Error(`插件资源不能是符号链接：${from}`);
+    if (stat.isDirectory()) {
+      fs.mkdirSync(to, { recursive: true });
+      for (const name of fs.readdirSync(from).sort()) {
+        if (isSidecarEngineNoise(name)) continue;
+        walk(path.join(relative, name));
+      }
+    } else if (stat.isFile()) {
+      if (isSidecarEngineNoise(path.basename(from))) return;
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.copyFileSync(from, to);
+    }
+  };
+  walk('');
+}
+
+/** dist/ 的客户端构建产物（存在才复制；缺失时 main.mjs 会回退到 engine/lib/client.js）。 */
+function copySidecarClient(fromRoot, readerDir) {
+  for (const file of ['client.js', 'client.notes.js']) {
+    const from = path.join(fromRoot, 'dist', file);
+    if (!fs.existsSync(from)) continue;
+    const to = path.join(readerDir, 'client', file);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(from, to);
+  }
+}
+
+/**
+ * 构建期生成 React vendor（五个文件，全部 LF）。
+ *
+ * 先 probeGlobal: false 快速确定性命中仓库 node_modules；没命中再允许问 npm root -g。
+ * 一个都找不到时只 warn：main.mjs 运行期还会再兜一次，没装 React 的测试机器不该
+ * 因此打断 build-antigravity。
+ */
+function writeSidecarVendor(readerDir) {
+  let sources;
+  try {
+    sources = resolveReact({ probeGlobal: false });
+  } catch {
+    try {
+      sources = resolveReact();
+    } catch (error) {
+      if (!(error instanceof ReactMissingError)) throw error;
+      console.warn(`StudyMate：未找到 React，Sidecar 的 vendor/ 暂不生成（运行时再兜底）。${error.message}`);
+      return;
+    }
+  }
+  const vendorDir = path.join(readerDir, 'vendor');
+  fs.mkdirSync(vendorDir, { recursive: true });
+  for (const [key, relative] of Object.entries(VENDOR_FILES)) {
+    const file = path.join(vendorDir, path.basename(relative));
+    fs.writeFileSync(file, normalizeEol(vendorFile(VENDOR_MODULES[key], fs.readFileSync(sources[key], 'utf8'))));
+  }
+  // 第五个：react/jsx-runtime（阅读端构建按这个键取 React 的 JSX 运行时）。
+  const jsxRuntime = path.join(path.dirname(sources.react), 'react-jsx-runtime.production.js');
+  if (fs.existsSync(jsxRuntime)) {
+    fs.writeFileSync(
+      path.join(vendorDir, 'react-jsx-runtime.production.js'),
+      normalizeEol(vendorFile('react/jsx-runtime', fs.readFileSync(jsxRuntime, 'utf8'))),
+    );
+  }
+}
 
 function inside(parent, child) {
   const relative = path.relative(parent, child);
@@ -55,7 +152,7 @@ export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity
   }
   const realOutput = path.join(fs.realpathSync(existing), ...suffix);
   // 技能源在 preset/skills：产物不许落进构建输入里（原来这条列的是 .dsh，技能搬家后跟着走）
-  for (const name of ['preset', 'bin', 'scripts', 'schemas', 'templates', 'docs', 'antigravity']) {
+  for (const name of ['preset', 'bin', 'scripts', 'schemas', 'templates', 'docs', 'antigravity', 'lib', 'client']) {
     if (inside(path.join(fs.realpathSync(source), name), realOutput)) {
       throw new Error(`输出目录不能位于构建源文件内：${outputDir}`);
     }
@@ -116,6 +213,15 @@ export function buildAntigravityPlugin({ output = path.resolve('dist/antigravity
 
     copyTree(path.join(source, 'docs', 'images', 'logo.png'), path.join(plugin, 'assets', 'logo.png'));
     copyTree(path.join(source, 'LICENSE'), path.join(plugin, 'LICENSE'));
+
+    // 4b. 原生 Sidecar 阅读面板的可运行闭包：引擎、客户端产物与 React vendor。
+    //     源文件（sidecar.json/main.mjs/host.js/boot.js/index.html）随第 1 步的 copyTree 已经在位。
+    const readerDir = path.join(plugin, 'sidecars', 'reader');
+    if (fs.existsSync(readerDir)) {
+      copySidecarEngine(source, readerDir);
+      copySidecarClient(source, readerDir);
+      writeSidecarVendor(readerDir);
+    }
 
     fs.writeFileSync(path.join(plugin, marker), `${JSON.stringify({ generator: packageInfo.name, version: packageInfo.version })}\n`);
 

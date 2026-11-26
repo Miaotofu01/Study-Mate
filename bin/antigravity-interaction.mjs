@@ -31,7 +31,8 @@ export const AGY_HOST_GUIDE = `## Antigravity 宿主约定（导出时生成）
 
 - **引擎定位与只读资产**：本文件位于 \`<root>/skills/<技能名>/SKILL.md\`；从实际文件路径定位包含 \`skills/\`、\`agents/\`、\`templates/\`、\`schemas/\`、\`rules/\`、\`docs/\` 的插件根目录，记为 \`<root>\`。插件安装目录属于只读静态资产，严禁在 \`<root>\` 下写入临时脚本、数据、测试文件或编译缓存。所有相对的模板、schema、文档路径均相对 \`<root>\` 解析。
 - **没有引擎脚本**：这个插件只有技能、角色、schema、工作区数据骨架与文档，**不含任何校验器或生成器**（DSH 侧的 \`studymate_\` 系列工具在这里一个都调不到，Python 引擎也已退役）。正文里点名原生工具的地方，导出时已经换成**本宿主的做法**：按 \`<root>/schemas/*.schema.json\` 与技能里的格式要求逐项自查，并把自查结论如实报出。缺的能力如实说明，**不要假装调用过工具**，也不要凭空说“已通过校验”。
-- **导出**：学生的阅读体验全靠导出。课完（或学生要一份能离线看的）在 \`run_command\` 里跑 \`npx -y @yunmiao/studymate@latest export\`——没有参数也能跑，产物落在 \`<LEARN_WORKSPACE>/export/\`，入口是 \`index.html\`；随后把它的绝对路径给成可点链接。它要一份 React（\`npm i -g react react-dom\`，或设 \`STUDYMATE_REACT_DIR\` 指过去）。跑不了就如实说明缺什么，不要用别的写法假装导过。
+- **原生阅读面板（StudyMate Reader）**：**读课件的主入口**是 Antigravity 自带的 Sidecar 侧栏面板，链接形如 \`[StudyMate Reader](sidecar://studymate/reader/)\`。建好课、产出课件或学生要继续学习时，在回复里给出这个胶囊链接（**每次只发 1 个 pill**，不要和导出链接堆在一起），并说明学生在面板里可以直接：阅读课件与公式、作答（判分写回 \`attempts/\`）、划选标注（\`annotations/\`）、跑实验、记笔记，以及把选中段落一键发进当前 Antigravity 对话提问。面板读写的就是 \`<LEARN_WORKSPACE>\` 这份学习工作区，不需要额外安装什么。
+- **离线导出（便携副本）**：需要一份不依赖 Antigravity 的静态副本（存档、换机器、分享）时，在 \`run_command\` 里跑 \`npx -y @yunmiao/studymate@latest export\`——没有参数也能跑，产物落在 \`<LEARN_WORKSPACE>/export/\`，入口是 \`index.html\`；随后把它的绝对路径给成可点链接。它要一份 React（\`npm i -g react react-dom\`，或设 \`STUDYMATE_REACT_DIR\` 指过去）。跑不了就如实说明缺什么，不要用别的写法假装导过。
 - **原生多智能体协同（invoke_subagent）**：总控调度专业角色时，必须使用宿主原生 \`invoke_subagent\` 工具委派对应角色（TypeName 为 \`resource-scout\`、\`image-scout\`、\`curriculum-designer\`、\`learning-coach\`、\`practice-evaluator\`，角色规格在 \`<root>/agents/<角色名>.md\` 中声明）。角色在独立的后台子会话中执行，完成后宿主通过事件驱动通知自动唤醒总控，**严禁使用 sleep 循环或 manage_task 频繁轮询状态**。
   - **调度协同节奏**：资源收集（\`resource-scout\`）先行；资源就绪后，建图片池（\`image-scout\`）与拟大纲（\`curriculum-designer\`）通过 \`invoke_subagent\` 单次数组**并发派发**；课件阶段保持**严格串行**（讲解角色 \`learning-coach\` 交付正文与锚点后，再派 \`practice-evaluator\` 配套出题与设计 Lab）。
   - **边界与通道隔离**：子代理无面向用户的会话通道，不向用户提问，不调用 \`ask_question\`。若缺少上下文或遇到异常，在完成报告中说明并交回总控。
@@ -46,14 +47,14 @@ export const AGY_HOST_GUIDE = `## Antigravity 宿主约定（导出时生成）
   - **沙箱策略（run_command）**：优先在标准沙箱执行（\`BypassSandbox: false\`）；仅在需要外部网络抓取（\`image-scout\` 采图、\`learning-coach\` 读来源原文）、调用 \`npx\` 导出或工作区外部目录搬移时提权使用 \`BypassSandbox: true\`，且提权时保持 \`toolAction\` 与 \`toolSummary\` 逐字一致。
 - **逐次显式传参与状态幂等**：工具调用之间不假设环境变量、工作目录（Cwd）或 shell 状态保留；导出与外部命令每次都在同一条命令里写全参数。跨会话只信任盘上真实存在的文件（\`MEMORY.yaml\`、\`curriculum.yaml\`、\`progress.yaml\`、\`misconceptions.yaml\`、\`learning-records/\`），严禁以聊天记忆替代磁盘恢复。
 - **原样无损搬运与质量防线**：子代理交付物从 \`.stage/.../deliver/\` 搬入科目目录时，必须保留原有相对路径，用标准文件复制工具原样合并，严禁通过 LLM 转录重写导致长文本或代码截断。合并前按各自领域的自查清单逐项核对（大纲按 \`<root>/schemas/curriculum.schema.json\`、图片库按 \`pool.md\` 七列与命名规范、课件内容格式按 \`::: \` 指令与锚点逐字对账）；自查没过严禁合盘。
-- **导出产物呈现与导读 Artifact**：导出完成后，总控在回复中提供可点击的绝对文件超链接（\`[打开课件：<标题>](file://<绝对路径>)\`），提示学生用现代浏览器打开享受阅读与离线 KaTeX 公式；同时可在 \`<appDataDir>/brain/<conversation-id>/\` 输出一份伴学 Markdown Artifact（如包含 Mermaid 依赖拓扑的路线图或本节核心导读），提升伴学阅读体验。
+- **课件呈现与导读 Artifact**：课件就绪后，总控在回复里给出 \`[StudyMate Reader](sidecar://studymate/reader/)\` 胶囊链接（**一次 1 个 pill**），学生在侧栏面板里就能读到刚产出的课件、做练习与标注；确实需要离线副本时才另跑一次导出，并给可点击的绝对文件超链接（\`[打开课件：<标题>](file://<绝对路径>)\`）。同时可在 \`<appDataDir>/brain/<conversation-id>/\` 输出一份伴学 Markdown Artifact（如包含 Mermaid 依赖拓扑的路线图或本节核心导读），提升伴学阅读体验。
 - **局部答疑与打扰控制（local-qa）**：学生在阅读中截取课文或代码提问时，**阅读端的一段答疑会话就地回答**（不经过总控、只带当前课件 + 选中文本 + 共享记忆，控制在 200 字内，指出根因与正误对比），答完停在原地、**不写误解记录**、不派角色、不安排课程，引导学生返回课件原位置继续阅读，不强行打断主线，不重新触发全套大纲盘问；面板不可用时由总控按 \`local-qa\` 的同一套规则就地答。
 - **学习过程与备课工作隔离**：资料检索、图片抓取、课程设计、课件编写、出题与校验等流水线应自动连续执行并在各环节输出简短进度；课件交付后控制权移交学生，等待学生真实阅读、提问或提交练习代码，严禁 AI 替学生自动作答或无限向下刷课。
 `;
 
 export const AGY_BOOTSTRAP = `0. **定位工作区与引擎**：按“Antigravity 宿主约定”从本技能文件定位 \`<root>\`。学习工作区按以下顺序选定并记为 \`<LEARN_WORKSPACE>\`：用户本次明确指定的目录 → 非空环境变量 \`STUDYMATE_WORKSPACE\` → 非空 \`LEARN_WORKSPACE\` → 默认使用 \`~/StudyMate\`。
    - **首次初始化**：在选定工作区创建 \`.learning/subjects/\`，并在缺失时从 \`<root>/templates/MEMORY.yaml\` 复制初始化 \`.learning/MEMORY.yaml\`；保留已有科目与记忆。向学生清晰说明实际学习工作区。
-   - **执行准备**：本插件不含引擎脚本，校验按“Antigravity 宿主约定”逐项自查，导出用 \`npx -y @yunmiao/studymate@latest export\`（需要 Node 与一份 React）。工作区直接就是配置好的那一个，不另建临时工作区。`;
+   - **执行准备**：本插件不含引擎脚本，校验按“Antigravity 宿主约定”逐项自查；读课件主入口是 \`[StudyMate Reader](sidecar://studymate/reader/)\` 侧栏面板（**一次 1 个 pill**），需要便携副本时才用 \`npx -y @yunmiao/studymate@latest export\`（需要 Node 与一份 React）。工作区直接就是配置好的那一个，不另建临时工作区。`;
 
 export const AGY_INTAKE = `## 新科目盘问（总控执行，交互式单题推进）
 
@@ -76,6 +77,7 @@ export const AGY_DIALOGUE = `## Antigravity 对话与多智能体调度衔接
   - 派发子智能体后，总控停止调用工具等待系统异步唤醒，**严禁使用 sleep 循环轮询状态**。
 - **工作与学习分开**：用户已确认的学习工作连续执行（资料收集→大纲设计→正文撰写→出题制作→渲染校验），期间输出简要进度；课件交付后停在学生行动处，等待学生真实阅读、提问或提交练习代码，严禁替学生自动做练习或无限向后刷课。
 - **自然推进与下一步**：每轮交付或回复的最后一行必须保持标准格式：\`**下一步**：<谁做什么> —— <怎么触发>\`。
+- **交付后指向原生面板**：课件落盘后，在回复里给一次 \`[StudyMate Reader](sidecar://studymate/reader/)\` 胶囊链接（**一次 1 个 pill**，不与导出链接堆叠），让学生直接在侧栏面板阅读、作答、标注、跑实验或就着选中段落向当前对话提问。
 - **局部答疑与打扰控制**：学生贴回课文/代码提问时，由阅读端那段答疑会话就地按 \`local-qa\` 规范在 200 字内解答、**不写误解记录**（面板不可用时总控按同一套规则就地答），不打断学习主线。
 - **保存与休眠**：学生说“今天到这”立即停止新增任务，按 \`record-keeping\` 更新学习进度、误解记录与学习记录，展示已保存位置与下次恢复点，不再弹出继续挽留卡片。
 `;

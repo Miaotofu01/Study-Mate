@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StudyMate 学习面板</title>
+<!-- Sidecar 平台把 window.sidecar 等宿主能力注入这一份 preload，必须最先加载 -->
+<script src="/preload.js"></script>
+<style>
+  /* 把 Antigravity Sidecar 注入的主题 token 映射到阅读端用的 --dsw-alias-* 变量，
+     让面板跟随宿主亮/暗主题；每个变量都留了 fallback。 */
+  :root {
+    --dsw-alias-bg-base: var(--background, #f6f7f9);
+    --dsw-alias-bg-layer-1: var(--card, #ffffff);
+    --dsw-alias-bg-layer-2: var(--content, #f1f3f7);
+    --dsw-alias-border-l1: var(--border, #e6e8ee);
+    --dsw-alias-border-l2: var(--border, #d5d9e2);
+    --dsw-alias-label-primary: var(--foreground, #1b1f27);
+    --dsw-alias-label-primary-inverted: var(--primary-foreground, #ffffff);
+    --dsw-alias-label-secondary: var(--muted-foreground, #4d5666);
+    --dsw-alias-label-tertiary: var(--muted-foreground, #6b7280);
+    --dsw-alias-label-caption: var(--muted-foreground, #8b95a5);
+    --dsw-alias-brand-primary: var(--primary, #2563eb);
+    --dsw-alias-link: var(--primary, #2563eb);
+    --dsw-alias-fill-l2: var(--secondary, rgba(127, 127, 127, 0.14));
+    --dsw-alias-fill-tertiary: var(--secondary, rgba(127, 127, 127, 0.08));
+    --dsw-alias-interactive-bg-hover: var(--accent, rgba(127, 127, 127, 0.14));
+    --dsw-alias-markdown-code-block: var(--content, rgba(127, 127, 127, 0.10));
+    --dsw-alias-markdown-code-block-banner: var(--border, rgba(127, 127, 127, 0.16));
+    --dsw-alias-markdown-code-segment-selected: var(--accent, rgba(37, 99, 235, 0.18));
+    --dsw-alias-markdown-inline-code: var(--secondary, rgba(127, 127, 127, 0.16));
+    --dsw-alias-markdown-tag: var(--secondary, rgba(127, 127, 127, 0.14));
+    --dsw-alias-scrollbar-bg-l1: var(--border, rgba(127, 127, 127, 0.25));
+    --dsw-alias-state-business-primary: var(--primary, #2563eb);
+    --dsw-alias-state-success-primary: #16a34a;
+    --dsw-alias-state-error-primary: #dc2626;
+    --dsw-alias-state-warn-primary: #d97706;
+    --dsw-alias-state-idle-primary: var(--muted-foreground, #6b7280);
+  }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--background, #f6f7f9);
+    color: var(--foreground, #1b1f27);
+    font: 13px/1.65 system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+  }
+  /* 画布自己收住滚动：无界笔记画布把滚动条画在自己里面，不能让页面整块滚走。 */
+  #studymate-reader {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #studymate-reader > * {
+    height: 100%;
+    min-height: 0;
+  }
+  .smb-export-error {
+    max-width: 46em;
+    margin: 12vh auto;
+    padding: 16px 18px;
+    border: 1px solid var(--border, #e6e8ee);
+    border-radius: 10px;
+    background: var(--card, #fff);
+    line-height: 1.7;
+  }
+  .smb-export-error p {
+    margin: 8px 0 0;
+    color: var(--muted-foreground, #4d5666);
+  }
+  /* 问答面板（boot.js 里的 AntigravityAskBox） */
+  .smb-ag-ask {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 12px;
+    border: 1px solid var(--dsw-alias-border-l1);
+    border-radius: 10px;
+    background: var(--dsw-alias-bg-layer-2);
+  }
+  .smb-ag-ask__title {
+    font-weight: 600;
+    font-size: 12.5px;
+    color: var(--dsw-alias-label-primary);
+  }
+  .smb-ag-ask__textarea {
+    width: 100%;
+    min-height: 74px;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid var(--dsw-alias-border-l2);
+    border-radius: 8px;
+    background: var(--dsw-alias-bg-layer-1);
+    color: var(--dsw-alias-label-primary);
+    font: inherit;
+    resize: vertical;
+  }
+  .smb-ag-ask__actions,
+  .smb-ag-ask__quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .smb-ag-ask__chip {
+    padding: 3px 8px;
+    border: 1px solid var(--dsw-alias-border-l1);
+    border-radius: 99px;
+    background: var(--dsw-alias-bg-layer-1);
+    color: var(--dsw-alias-label-secondary);
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .smb-ag-ask__chip:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+  .smb-ag-ask__btn {
+    padding: 6px 12px;
+    border: 1px solid var(--dsw-alias-border-l2);
+    border-radius: 7px;
+    background: var(--dsw-alias-bg-layer-1);
+    color: var(--dsw-alias-label-primary);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .smb-ag-ask__btn--primary {
+    border-color: var(--dsw-alias-brand-primary);
+    background: var(--dsw-alias-brand-primary);
+    color: var(--dsw-alias-label-primary-inverted);
+  }
+  .smb-ag-ask__btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .smb-ag-ask__status {
+    font-size: 12px;
+    color: var(--dsw-alias-label-secondary);
+    line-height: 1.5;
+  }
+  .smb-ag-ask__history {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--dsw-alias-border-l1);
+  }
+  .smb-ag-ask__item {
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: var(--dsw-alias-bg-layer-1);
+    border: 1px solid var(--dsw-alias-border-l1);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div id="studymate-reader"></div>
+<!--
+  脚本顺序就是依赖顺序，别调换：
+    1. /host.js            —— 先立起模块表（__smDefine/__smRequire）与 fetch 拦截器；
+    2. /vendor/*.js        —— 五个 React 运行时按各自依赖排：scheduler → react → react-dom →
+                              react-dom/client → jsx-runtime（每个都只是往模块表登记工厂，懒执行）；
+    3. /studymate-client.js —— 阅读端本体，往 window.__ModuleLoader__ 登记工厂；
+    4. /boot.js            —— 最后挂载（此刻模块表、阅读端、宿主 bridge 都已就位）。
+  KaTeX 不在这里：公式 JS/CSS/字体统一走 /api/studymate/math/* 一条真相。
+-->
+<script src="/host.js"></script>
+<script src="/vendor/scheduler.production.js"></script>
+<script src="/vendor/react.production.js"></script>
+<script src="/vendor/react-dom.production.js"></script>
+<script src="/vendor/react-dom-client.production.js"></script>
+<script src="/vendor/react-jsx-runtime.production.js"></script>
+<script src="/studymate-client.js"></script>
+<script src="/boot.js"></script>
+</body>
+</html>
