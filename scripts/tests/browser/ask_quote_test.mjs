@@ -1019,7 +1019,8 @@ try {
       return { text: el?.textContent, hosts: refs.map(ref => ref.closest('p, li, td')?.tagName),
         marks: el?.querySelectorAll('mark').length, line: !!el?.querySelector('[data-no="112"]'),
         original: document.querySelectorAll('.smb-code__line--match').length,
-        markerInGap: gutter.right < markerLeft && markerRight < glyph.getBoundingClientRect().left
+        markerInGap: gutter.right < markerLeft && markerRight < code.closest('pre').getBoundingClientRect().left
+          && markerRight < glyph.getBoundingClientRect().left
           && gutter.top === code.getBoundingClientRect().top,
         scroll: body.scrollTop, height: body.scrollHeight,
         row: document.querySelector('.smb-table-wrap').getBoundingClientRect().top,
