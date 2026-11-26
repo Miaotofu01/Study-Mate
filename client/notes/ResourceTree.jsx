@@ -2,10 +2,9 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom';
 import { ChevronRight, ChevronDown, Folder, FolderOpen, NotebookPen, FileText, Link2, BookOpen, Image, FileCode, LayoutGrid, MoreHorizontal, Pencil, Trash2, Archive, Copy } from 'lucide-react';
 import {
-  initialParent, resourceFolder, folderDeleteBlockReason,
+  resourceFolder, folderDeleteBlockReason, planResourceMove,
   canRenameResource, validateFolderName, validateFileTitle, FOLDER_NAME_MAX, FILE_TITLE_MAX,
 } from './resource-tree-model.js';
-import { isUnsupportedNote } from './note-types.js';
 import { useNotesLocale } from './locale.js';
 import './resource-tree-menu.css';
 
@@ -57,10 +56,45 @@ export default function ResourceTree({
   folders, resources, search, selectedId, selectedFolder,
   onFolderSelect, onSelect, onOpenDocument, onCanvas,
   canEdit = true, onRenameFolder, onDeleteFolder, onRenameResource, hasCanvasContent,
-  onCopyMarkdown, canCopyMarkdown, onManageNotebook, getNotebookBindingLabel, onPickEntry,
+  onCopyMarkdown, canCopyMarkdown, onManageNotebook, getNotebookBindingLabel, onPickEntry, onMoveEntry,
 }) {
   const t = useNotesLocale();
   const [closed, setClosed] = useState(new Set());
+  const dragEntry = useRef(null);
+  const [dropTarget, setDropTarget] = useState(null);
+  const startDrag = (event, kind, id) => {
+    if (event.target !== event.currentTarget) return;
+    if (kind === 'file') {
+      event.dataTransfer.setData('application/studymate-resource', id);
+      event.dataTransfer.effectAllowed = onMoveEntry ? 'copyMove' : 'copy';
+    } else {
+      event.dataTransfer.setData('application/studymate-folder', id);
+      event.dataTransfer.effectAllowed = 'move';
+    }
+    dragEntry.current = { kind, id };
+  };
+  const endDrag = () => { dragEntry.current = null; setDropTarget(null); };
+  const canDrop = (id) => canEdit && onMoveEntry && dragEntry.current
+    && planResourceMove(folders, resources, dragEntry.current, id);
+  const dragOverFolder = (event, id) => {
+    if (!canDrop(id)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDropTarget(id);
+  };
+  const dropOnFolder = (event, id) => {
+    const entry = dragEntry.current;
+    const accepted = canDrop(id);
+    endDrag();
+    if (!accepted) return;
+    event.preventDefault();
+    if (onMoveEntry(entry, id)) setClosed(previous => {
+      if (!previous.has(id)) return previous;
+      const next = new Set(previous);
+      next.delete(id);
+      return next;
+    });
+  };
   const query = search.trim().toLocaleLowerCase();
   const matches = (resource) => !resource.trashed && (!query || (resource.title + ' ' + (resource.markdown || resource.summary || '')).toLocaleLowerCase().includes(query));
   const hasMatches = (folder) => Object.values(resources).some((resource) => resourceFolder(resource) === folder.id && matches(resource)) || folders.some((child) => child.parent === folder.id && hasMatches(child));
@@ -364,7 +398,11 @@ export default function ResourceTree({
     const binding = bindingOf(folder);
     return <div key={folder.id} role="treeitem" aria-expanded={!!open} aria-level={depth + 1}>
       <div className={'tree-row' + (folderActive(folder.id) ? ' is-active' : '') + (folder.kind === 'notebook' ? ' is-notebook' : '')}
-        style={{ paddingLeft: 8 + depth * 16 }}>
+        style={{ paddingLeft: 8 + depth * 16 }} data-drop-target={dropTarget === folder.id || undefined}
+        draggable={canEdit && Boolean(onMoveEntry) && folder.kind === 'folder' && Boolean(folder.parent) && renaming?.id !== folder.id}
+        onDragStart={event => startDrag(event, 'folder', folder.id)} onDragEnd={endDrag}
+        onDragOver={event => dragOverFolder(event, folder.id)} onDrop={event => dropOnFolder(event, folder.id)}
+        onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(previous => previous === folder.id ? null : previous); }}>
         {renameField('folder', folder.id, t('rename_named', { name: folder.name })) || <button className="tree-row-label" aria-label={t('folder', { name: folder.name })} onClick={() => {
           pickFolder(folder.id);
           onFolderSelect(folder.id);
@@ -382,9 +420,9 @@ export default function ResourceTree({
         {files.map((resource) => {
           const IconForFile = icons[resource.type] || FileText;
           return <div className={'tree-row tree-file' + (fileActive(resource.id) ? ' is-active' : '')} key={resource.id} style={{ paddingLeft: 24 + (depth + 1) * 16 }}
-            role="treeitem" aria-level={depth + 2} draggable={canEdit} onDragStart={(event) => { event.dataTransfer.setData('application/studymate-resource', resource.id); event.dataTransfer.effectAllowed = 'copy'; }}>
+            role="treeitem" aria-level={depth + 2} draggable={canEdit && renaming?.id !== resource.id}
+            onDragStart={event => startDrag(event, 'file', resource.id)} onDragEnd={endDrag}>
             {renameField('file', resource.id, t('rename_named', { name: resource.title })) || <button className="tree-file-open" aria-label={t('open', { name: resource.title })} onClick={() => { pickFile(resource.id); onSelect(resource.id); reportPick('file', resource.id); }} onDoubleClick={() => onOpenDocument(resource.id)}><IconForFile size={15} className="tree-icon" /><span className="tree-label">{resource.title || t('untitled')}</span></button>}
-            {isUnsupportedNote(resource) && <span className="tree-binding" title="改回支持的 Markdown 扩展名可恢复">不支持的文件类型</span>}
             {resource.origin && <span className="resource-origin-badge" data-origin={resource.origin.mode === 'reference' ? 'link' : 'local'} title={t(resource.origin.mode === 'reference' ? 'reference_hint' : 'copy_hint')}>{t(resource.origin.mode === 'reference' ? 'reference' : 'copy')}</span>}
             {renderMoreButton({ kind: 'file', id: resource.id }, resource.title || t('untitled'))}
           </div>;

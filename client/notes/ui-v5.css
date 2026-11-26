@@ -25,7 +25,6 @@
 /* ── 1. 动画原语：与主题无关 ───────────────────────────────────────── */
 .app-shell.v5 {
   --v5-dur: var(--smb-motion, 200ms);
-  --v5-rail-width: 32px;
   --v5-ease: cubic-bezier(.2, .7, .3, 1);
   /* 过渡时长倍率；减少动效时归零。不写 0s：过渡表里总有 time 项，不存在「无匹配属性」。 */
   --v5-motion: 1;
@@ -58,63 +57,42 @@
 .app-shell.v5 .left-panel.is-collapsed > .panel-inner { transform: translateX(-100%); }
 .app-shell.v5 .right-panel.is-collapsed > .panel-inner { transform: translateX(100%); }
 
-/* ── 2. 左栏窄轨：常驻挂载，0 ↔ 32px；收起后它就是恢复入口 ─────────── */
-.app-shell.v5 .panel-rail {
-  position: relative; z-index: 12; display: flex; width: var(--v5-rail-width); min-width: 0;
-  flex: 0 0 var(--v5-rail-width); align-items: flex-start; justify-content: center;
-  padding-top: 8px; overflow: hidden; visibility: visible;
-  transition-property: width, flex-basis, padding-top, visibility;
-  transition-duration: calc(var(--v5-dur, 200ms) * var(--v5-motion)), calc(var(--v5-dur, 200ms) * var(--v5-motion)), calc(var(--v5-dur, 200ms) * var(--v5-motion)), 0s;
-  transition-timing-function: var(--v5-ease, ease), var(--v5-ease, ease), var(--v5-ease, ease), linear;
-  transition-delay: 0s, 0s, 0s, 0s;
-}
-.app-shell.v5 .panel-rail.is-hidden {
-  width: 0; flex-basis: 0; padding-top: 0; visibility: hidden;
-  transition-delay: 0s, 0s, 0s, calc(var(--v5-dur, 200ms) * var(--v5-motion)); /* 左栏滑完才藏 */
-}
-.app-shell.v5 .panel-rail.is-hidden > * { pointer-events: none; }
-/* 满宽时窄轨不占位（theme-v3 ≥700px 与 v4 原本就用 display 切换）：布局让位，非开合动画 */
-@media (min-width: 700px) {
-  .app-shell.v5 .left-panel:not(.is-collapsed) + .panel-rail--left { display: none; }
-}
-
-/* ── 3. 拖宽闩锁 / 断点切换：失效，不参与动画 ──────────────────────── */
-.app-shell.v5[data-resizing="true"] :is(.side-panel, .panel-inner, .panel-rail),
-.app-shell.v5[data-breakpoint-changing="true"] :is(.side-panel, .panel-inner, .panel-rail) {
+/* ── 2. 拖宽闩锁 / 断点切换：失效，不参与动画 ──────────────────────── */
+.app-shell.v5[data-resizing="true"] :is(.side-panel, .panel-inner),
+.app-shell.v5[data-breakpoint-changing="true"] :is(.side-panel, .panel-inner) {
   transition: none !important; visibility: visible;
 }
 
-/* ── 4. 浮层断点：≤1099 右栏浮层；≤699 左栏浮层，窄屏恢复入口留在顶栏 ── */
+/* ── 3. 浮层断点：≤1099 右栏浮层；≤699 左栏浮层，左右恢复入口均在顶栏 ── */
 @media (max-width: 1099px) {
   .app-shell.v5 .right-panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 25; box-shadow: -8px 0 24px rgb(0 0 0 / 12%); }
   .app-shell.v5 .right-panel.is-collapsed { box-shadow: none; }
-  .app-shell.v5 .panel-rail--right { position: absolute; top: 0; right: 0; bottom: 0; z-index: 26; }
 }
 @media (max-width: 699px) {
-  /* 覆盖 v4 的 min(320px, 100vw-…) 上限：按 app 容器而非视口，给恢复入口留位 */
-  .app-shell.v5 .left-panel { position: absolute; top: 0; bottom: 0; left: 0; z-index: 26; max-width: calc(100% - var(--v5-rail-width) - 8px); box-shadow: 8px 0 24px rgb(0 0 0 / 12%); }
+  /* 覆盖 v4 的 100vw 上限：按 app 容器约束宽度，顶栏按钮控制开合，不再为窄轨预留宽度 */
+  .app-shell.v5 .left-panel { position: absolute; top: 0; bottom: 0; left: 0; z-index: 26; max-width: min(320px, calc(100% - 16px)); box-shadow: 8px 0 24px rgb(0 0 0 / 12%); }
   .app-shell.v5 .left-panel.is-collapsed { box-shadow: none; }
-  .app-shell.v5 .panel-rail--left { position: absolute; top: 0; bottom: 0; left: 0; z-index: 27; padding-top: 6px; }
 }
 
 /* ── 5. 折叠卡片：48px，只留页头（行内调节手柄在卡片外，无需改节点尺寸） ── */
 .app-shell.v5 .knowledge-card.is-collapsed {
-  min-height: 48px; height: 48px;
+  min-height: 48px; height: 48px; overflow: hidden;
   transition: height var(--v5-dur, 200ms) var(--v5-ease, ease), box-shadow var(--v5-dur, 150ms) ease, border-color var(--v5-dur, 150ms) ease;
 }
 .app-shell.v5 .knowledge-card.is-collapsed > .card-drag-handle { height: 100%; min-height: 0; border-bottom: 0; }
 .app-shell.v5 .knowledge-card.is-collapsed > .card-body { display: none; }
 /* 内联用 flex + min-height 0：行内 height:100% 的卡片自然压到页头高度。
-   标签外框随卡片内容高度走；若行内写死的像素高度也要 48px，只能由宿主清掉（见交付说明）。 */
+   外框保持 overflow:visible，避免左右连线点外半边被裁切；折叠正文裁切交由内部 .knowledge-card.is-collapsed。 */
 .app-shell.v5 .react-flow__node:has(> .knowledge-card.is-collapsed) {
   display: flex; flex-direction: column; min-height: 0;
-  overflow: hidden !important;      /* 旧正文、媒体外框一律裁掉，不留透明溢出 */
+  overflow: visible !important;
   /* React Flow 会在节点上写行内 pointer-events:all；这里必须 !important 才压得住。
-     压掉外框后，只有真实可见的 48px 页头还能接收指针。 */
+     压掉外框后，只有真实可见的 48px 页头与连线点还能接收指针。 */
   pointer-events: none !important;
 }
-/* 只有真实可见的 48px 页头还能抓取；事件仍冒泡给节点，所以拖动、点选照常。 */
-.app-shell.v5 .react-flow__node:has(> .knowledge-card.is-collapsed) > .knowledge-card > .card-drag-handle {
+/* 只有真实可见的 48px 页头与连线点还能抓取；事件仍冒泡给节点，所以拖动、点选与连线照常。 */
+.app-shell.v5 .react-flow__node:has(> .knowledge-card.is-collapsed) > .knowledge-card > .card-drag-handle,
+.app-shell.v5 .react-flow__node:has(> .knowledge-card.is-collapsed) > .react-flow__handle {
   pointer-events: auto;
 }
 

@@ -5,9 +5,9 @@
 .app-shell.v2 .tree-file-open { display:flex;align-items:center;gap:7px;flex:1;min-width:0;align-self:stretch;border:0;background:none;color:inherit;text-align:left;padding:0;cursor:pointer;font:inherit; }
 .app-shell.v2 .tree-file-open .tree-icon { flex-shrink:0; }
 .app-shell.v2 .tree-actions { flex-shrink:0; }
-.app-shell.v2 .notes-create-control { position:relative; }
-.app-shell.v2 .notes-create-trigger { display:flex; align-items:center; gap:3px; white-space:nowrap; padding-inline:7px; }
-.app-shell.v2 .notes-create-menu { inset:calc(100% + 4px) 0 auto auto; min-width:138px; width:max-content; z-index:8; }
+.app-shell.v2 .notes-create-control { position:relative; display:inline-flex; }
+.app-shell.v2 .notes-create-trigger { flex:0 0 auto; }
+.app-shell.v2 .notes-create-menu { min-width:0; width:max-content; }
 .app-shell.v2 .notes-create-menu button { min-width:0; }
 .app-shell.v2 .tree-footer { margin-top:auto;align-items:center; }
 .app-shell.v2 .resource-detail { padding:16px;gap:16px; }

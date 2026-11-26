@@ -17,6 +17,36 @@ export const initialParent = (resource) => resource.type === 'note' ? (resource.
 // 资源的归属目录：显式 parent 优先，缺省回退到示例数据的默认目录。
 export const resourceFolder = (resource) => resource.parent || initialParent(resource);
 
+function folderTrail(folders, id) {
+  const trail = [];
+  const visited = new Set();
+  while (id) {
+    const folder = folders.find(item => item.id === id);
+    if (!folder || visited.has(id)) return null;
+    trail.push(folder);
+    visited.add(id);
+    id = folder.parent;
+  }
+  return trail;
+}
+
+// 拖动只改变原件所在目录，不重建 ID。无效目标不能接住拖动，也不能写入布局。
+export function planResourceMove(folders, resources, entry, targetId) {
+  const fromTree = entry.kind === 'folder';
+  const source = fromTree ? folders.find(folder => folder.id === entry.id) : resources[entry.id];
+  if (!source || (fromTree ? source.kind !== 'folder' || !source.parent : source.trashed)) return null;
+  const parent = fromTree ? source.parent : resourceFolder(source);
+  if (targetId === parent) return null;
+  const targetTrail = folderTrail(folders, targetId);
+  if (!targetTrail?.length || (fromTree && targetTrail.includes(source))) return null;
+  const fromNotebook = folderTrail(folders, parent)?.find(folder => folder.kind === 'notebook');
+  const toNotebook = targetTrail.find(folder => folder.kind === 'notebook');
+  // 旧库可有放在公共目录下的笔记本，但拖动包含该本的目录不能造成笔记本嵌套。
+  if (fromTree && toNotebook && folders.some(folder => folder.kind === 'notebook'
+    && folderTrail(folders, folder.parent)?.includes(source))) return null;
+  return { source, crossesNotebook: fromNotebook?.id !== toNotebook?.id };
+}
+
 // 与 App 新建文件夹输入框一致的名称上限（persistence.js 的目录 name 硬上限是 200）。
 export const FOLDER_NAME_MAX = 80;
 // 与文档标题输入框一致的标题上限（commands.rename 的代码点上限 2000 远宽于此）。
