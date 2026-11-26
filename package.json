@@ -142,7 +142,7 @@
     "vite": "8.3.8"
   },
   "peerDependencies": {
-    "@deepseek-ai/schemastery": "~3.19.0"
+    "@deepseek-ai/schemastery": ">=3.19.0 <4.0.0-0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/schemastery": {
