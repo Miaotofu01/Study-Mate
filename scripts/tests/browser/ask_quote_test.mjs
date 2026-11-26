@@ -1028,14 +1028,19 @@ try {
     check('[手动引用] 清除选区后隐藏入口，保留原引用', cleared.floatChip === null && cleared.chips[0].ref === before.chips[0].ref);
     const again = await ctx.evaluate(selectTargetIn('小结', 30));
     await dragSelect(session, again);
-    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').focus()`);
-    await session.send('Input.dispatchKeyEvent', {type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
-    await session.send('Input.dispatchKeyEvent', {type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    const focused = await ctx.evaluate(`(() => {
+      const button = document.querySelector('[data-proto="qa-chip"]');
+      button.focus({ preventScroll: true });
+      return document.activeElement === button;
+    })()`);
+    check('[手动引用] 划选入口支持键盘焦点', focused);
+    await session.send('Input.dispatchKeyEvent', {type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32});
+    await session.send('Input.dispatchKeyEvent', {type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});
     await ctx.sleep(250);
     const replaced = await ctx.evaluate(CHIP_PROBE);
     check('[手动引用] 明确换引用保留已写问题，问答保持展开',
       replaced.embedded && replaced.chipCount === 1 && replaced.chips[0].ref !== before.chips[0].ref
-      && replaced.draftText.includes('我手写的问题') && replaced.serialized[0].includes(again.text.trim()));
+      && replaced.draftText.includes('我手写的问题') && replaced.serialized[0].includes(again.text.trim()), JSON.stringify(replaced));
     return { selection, draft: replaced.draftText };
   });
 
