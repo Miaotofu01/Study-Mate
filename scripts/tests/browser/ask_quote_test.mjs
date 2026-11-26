@@ -17,7 +17,7 @@
    外加 #106 那条链（引用 chip 是承重件：#92 只把选中的那段冻成一条数据，这里才让它跟着
    **下一条消息**走）：
 
-     · 点击「就这段问一句」进入选择模式，再用真鼠标划正文 → 面板输入框上方出现一颗 chip（原文 + 来源小节），**而且它已经进了
+     · 用真鼠标划正文，再点击「就这段问一句」 → 面板输入框上方出现一颗 chip（原文 + 来源小节），**而且它已经进了
        那条会话的草稿**——宿主没有提交钩子，草稿里没有它，消息就不会带上它；
      · 提交那一刻送出去的文字 = 我们注册的引用来源的 `codec.serialize(ref)`（探针照宿主那条
        调用走一遍：按 `occurrence.source` 找 owner，拿它序列化）；
@@ -524,7 +524,7 @@ async function clickAt(session, point) {
 }
 
 /** 真拖拽划词：按下 → 分几步挪过去 → 抬起。几步是必要的，一步到位浏览器不认成划选。 */
-async function dragSelect(session, target) {
+async function dragSelect(session, target, release = target.to) {
   await session.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: target.from.x, y: target.from.y, button: 'left', buttons: 1, clickCount: 1 });
   const steps = 6;
   for (let i = 1; i <= steps; i++) {
@@ -536,7 +536,7 @@ async function dragSelect(session, target) {
     });
     await session.sleep(25);
   }
-  await session.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: target.to.x, y: target.to.y, button: 'left', buttons: 0, clickCount: 1 });
+  await session.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: release.x, y: release.y, button: 'left', buttons: 0, clickCount: 1 });
   await session.sleep(250);
 }
 
@@ -614,14 +614,10 @@ try {
   /* ── 二、划一段 → chip 进草稿；点输入框 / 切 tab 都不丢；点得开、删得掉 ────── */
   await session.scene('ask-session-keep', async (ctx) => {
     await openLesson(ctx);
-    // 点击入口先进入选择模式；普通划选不能写入问答草稿。
-    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
     const target = await ctx.evaluate(SELECT_TARGET);
     check('[保持] 取到了要划的那一段正文', !!target && target.text.trim().length >= 8, JSON.stringify(target));
     if (target) await dragSelect(session, target);
-    const chipped = await ctx.evaluate(`(() => { const el = document.querySelector('[data-proto="qa-chip"]'); return el ? el.textContent.trim() : null; })()`);
-    check('[保持] 选择提问完成后入口可再次使用', chipped === '就这段问一句', String(chipped));
-
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
     await ctx.sleep(600);
     const opened = await ctx.evaluate(SESSION_PROBE);
     check('[保持] 从正文发问打开的面板带着那条引用（原文 + 来源小节）',
@@ -692,8 +688,8 @@ try {
     await openLesson(ctx);
     const first = await ctx.evaluate(selectTargetIn('绑定', 40));
     check('[换掉] 取到了第一段（绑定）', !!first && first.text.trim().length >= 8, JSON.stringify(first));
-    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
     if (first) await dragSelect(session, first);
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
     await ctx.sleep(600);
     const before = await ctx.evaluate(CHIP_PROBE);
     check('[换掉] 第一段已经进了草稿', before.chipCount === 1, JSON.stringify(before.chips));
@@ -706,9 +702,6 @@ try {
     const ordinary = await ctx.evaluate(CHIP_PROBE);
     check('[换掉] 普通划选不替换原来的引用', ordinary.chips[0].ref === before.chips[0].ref);
     await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
-    // 切到选择模式会清除旧选区；重新量一次，避免桩渲染器换节点后使用过期坐标。
-    const explicit = await ctx.evaluate(selectTargetIn('小结', 40));
-    if (explicit) await dragSelect(session, explicit);
     await ctx.sleep(400);
     const after = await ctx.evaluate(CHIP_PROBE);
 
@@ -729,8 +722,8 @@ try {
   await session.scene('ask-chip-drop', async (ctx) => {
     await openLesson(ctx);
     const target = await ctx.evaluate(SELECT_TARGET);
-    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
     if (target) await dragSelect(session, target);
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
     await ctx.sleep(600);
     const before = await ctx.evaluate(CHIP_PROBE);
     check('[删掉] 划一段之后草稿里有一颗', before.chipCount === 1, JSON.stringify(before.chips));
@@ -758,7 +751,7 @@ try {
     check('[太短] 两字的误触不产生 chip（面板上没有、草稿里也没有）',
       seen.panelChip === null && seen.chipCount === 0,
       `panel=${JSON.stringify(seen.panelChip)} chips=${JSON.stringify(seen.chips)}`);
-    check('[太短] 提问入口保持可见，误选不会自动进入提问模式', seen.floatChip === '就这段问一句', String(seen.floatChip));
+    check('[太短] 误选时隐藏提问入口', seen.floatChip === null, String(seen.floatChip));
 
     return { chips: seen.chipCount };
   });
@@ -995,30 +988,28 @@ try {
 
   await session.scene('manual-quote-real-react', async (ctx) => {
     await openLesson(ctx);
+    check('[手动引用] 没有选区时不显示提问入口', (await ctx.evaluate(CHIP_PROBE)).floatChip === null);
     const target = await ctx.evaluate(SELECT_TARGET);
-    await dragSelect(session, target);
+    const release = await ctx.evaluate(`(() => {
+      const doc = document.querySelector('.smb-doc');
+      const r = doc.getBoundingClientRect();
+      const y = ${target.to.y};
+      const x = Math.floor(r.left - 6);
+      return { x, y, outside: !doc.contains(document.elementFromPoint(x, y)) };
+    })()`);
+    check('[手动引用] 模拟在正文外松手', release.outside, JSON.stringify(release));
+    await dragSelect(session, target, release);
     const plain = await ctx.evaluate(CHIP_PROBE);
     const selection = await ctx.evaluate('String(window.getSelection())');
-    check('[手动引用] 普通划选不建会话、不写引用，选区仍可复制',
-      plain.chipCount === 0 && !plain.panelChip && selection.trim().length >= 4
-      && await ctx.evaluate('window.__QA.calls.length') === 0);
-    await ctx.evaluate(`(() => {
-      const range = window.getSelection().getRangeAt(0).getBoundingClientRect();
-      document.querySelector('article.smb-doc').dispatchEvent(new MouseEvent('contextmenu', {
-        bubbles: true, clientX: range.left + 4, clientY: range.top + 4 }));
-    })()`);
-    await ctx.sleep(100);
-    const menu = await ctx.evaluate(`(() => {
-      const el = document.querySelector('[data-proto="quote-context-menu"]');
-      const r = el && el.getBoundingClientRect();
-      return { open: !!el && el.matches(':popover-open'),
-        inside: !!r && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight,
-        focused: document.activeElement && document.activeElement.textContent };
-    })()`);
-    check('[手动引用] 右键菜单在视口内打开并聚焦明确的添加操作',
-      menu.open && menu.inside && menu.focused === '添加到问答聊天中', JSON.stringify(menu));
-    check('[手动引用] 仅打开菜单仍不创建会话', await ctx.evaluate('window.__QA.calls.length') === 0);
-    await ctx.evaluate(`document.querySelector('[data-proto="quote-add"]').click()`);
+    check('[手动引用] 拖到正文外松手仍显示入口，普通划选不建会话、原文仍可复制',
+      plain.chipCount === 0 && !plain.panelChip && plain.floatChip === '就这段问一句'
+      && selection.trim().length >= 4 && await ctx.evaluate('window.__QA.calls.length') === 0);
+    const nativeMenu = await ctx.evaluate(`document.querySelector('article.smb-doc').dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`);
+    check('[手动引用] 系统右键菜单可用', nativeMenu);
+    const edge = await ctx.evaluate(`(() => { const r = document.querySelector('[data-proto="qa-chip"]').getBoundingClientRect();
+      return { x: Math.round(r.left + 6), y: Math.round(r.top + r.height / 2) }; })()`);
+    await clickAt(session, edge);
     await ctx.sleep(650);
     const added = await ctx.evaluate(CHIP_PROBE);
     check('[手动引用] 明确添加才打开问答并导入所选原文',
@@ -1031,30 +1022,21 @@ try {
     const after = await ctx.evaluate(CHIP_PROBE);
     check('[手动引用] 问答已打开时复制其他正文也不替换引用或草稿',
       after.chips[0].ref === before.chips[0].ref && after.draftText === before.draftText);
-    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
-    check('[选择提问] 点击入口先显示提示，原引用仍在',
-      await ctx.evaluate(`!!document.querySelector('[data-proto="qa-pick-cancel"]')`));
-    await ctx.evaluate(`document.querySelector('[data-proto="qa-pick-cancel"]').click()`);
-    const canceled = await ctx.evaluate(CHIP_PROBE);
-    check('[选择提问] 取消不更改原引用', canceled.chips[0].ref === before.chips[0].ref);
+    await ctx.evaluate(`window.getSelection().removeAllRanges()`);
+    await ctx.sleep(150);
+    const cleared = await ctx.evaluate(CHIP_PROBE);
+    check('[手动引用] 清除选区后隐藏入口，保留原引用', cleared.floatChip === null && cleared.chips[0].ref === before.chips[0].ref);
     const again = await ctx.evaluate(selectTargetIn('小结', 30));
     await dragSelect(session, again);
-    await ctx.evaluate(`(() => { const r = window.getSelection().getRangeAt(0).getBoundingClientRect();
-      document.querySelector('article.smb-doc').dispatchEvent(new MouseEvent('contextmenu', {
-        bubbles:true,clientX:r.left+4,clientY:r.top+4 })); })()`);
-    await ctx.sleep(100);
-    await ctx.evaluate(`document.querySelector('[data-proto="quote-add"]').click()`);
+    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').focus()`);
+    await session.send('Input.dispatchKeyEvent', {type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    await session.send('Input.dispatchKeyEvent', {type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
     await ctx.sleep(250);
     const replaced = await ctx.evaluate(CHIP_PROBE);
     check('[手动引用] 明确换引用保留已写问题，问答保持展开',
       replaced.embedded && replaced.chipCount === 1 && replaced.chips[0].ref !== before.chips[0].ref
       && replaced.draftText.includes('我手写的问题') && replaced.serialized[0].includes(again.text.trim()));
-    await ctx.evaluate(`document.querySelector('[data-proto="qa-chip"]').click()`);
-    await session.send('Input.dispatchKeyEvent', {type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
-    await session.send('Input.dispatchKeyEvent', {type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
-    check('[选择提问] Esc 可取消等待选区的状态',
-      await ctx.evaluate(`!document.querySelector('[data-proto="qa-pick-cancel"]')`));
-    return { menu, selection, draft: after.draftText };
+    return { selection, draft: replaced.draftText };
   });
 
 } catch (error) {
