@@ -1007,9 +1007,20 @@ try {
       const el = document.querySelector('[data-proto="code-peek"]');
       const body = document.querySelector('.smb-center__body');
       const refs = [...document.querySelectorAll('[data-proto="code-reference"]')];
+      const number = document.querySelector('.smb-code__ln--match');
+      const code = document.querySelector('.smb-code__line--match');
+      const marker = getComputedStyle(number, '::after');
+      const glyph = document.createRange();
+      glyph.setStart(code.firstChild, 0);
+      glyph.setEnd(code.firstChild, 1);
+      const gutter = number.getBoundingClientRect();
+      const markerLeft = gutter.left + parseFloat(marker.left);
+      const markerRight = markerLeft + parseFloat(marker.width);
       return { text: el?.textContent, hosts: refs.map(ref => ref.closest('p, li, td')?.tagName),
         marks: el?.querySelectorAll('mark').length, line: !!el?.querySelector('[data-no="112"]'),
         original: document.querySelectorAll('.smb-code__line--match').length,
+        markerInGap: gutter.right < markerLeft && markerRight < glyph.getBoundingClientRect().left
+          && gutter.top === code.getBoundingClientRect().top,
         scroll: body.scrollTop, height: body.scrollHeight,
         row: document.querySelector('.smb-table-wrap').getBoundingClientRect().top,
         expanded: refs.map(ref => ref.getAttribute('aria-expanded')),
@@ -1019,6 +1030,7 @@ try {
       JSON.stringify(peek.hosts) === JSON.stringify(['P', 'P', 'LI', 'TD'])
       && peek.marks === 1 && peek.line && peek.original === 1 && peek.underline === 'solid'
       && peek.text.includes('query_points({ limit: 2 })'), JSON.stringify(peek));
+    check('[代码对照] 匹配行强调线位于行号与首字符之间', peek.markerInGap, JSON.stringify(peek));
     check('[代码对照] 只有点击的那一处展开，预览不推动正文',
       peek.expanded.join(',') === 'false,true,false,false'
       && peek.scroll === before.scroll && peek.height === before.height && peek.row === before.row, JSON.stringify({ before, peek }));
