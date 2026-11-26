@@ -1022,6 +1022,13 @@ try {
     check('[代码对照] 只有点击的那一处展开，预览不推动正文',
       peek.expanded.join(',') === 'false,true,false,false'
       && peek.scroll === before.scroll && peek.height === before.height && peek.row === before.row, JSON.stringify({ before, peek }));
+    await ctx.evaluate(`(() => {
+      const jump = document.querySelector('[data-proto="code-peek"] button');
+      jump.focus();
+      jump.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); }
+      });
+    })()`);
     await session.send('Input.dispatchKeyEvent', {type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     await session.send('Input.dispatchKeyEvent', {type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     check('[代码对照] Esc 关闭浮窗、撤销高亮并把焦点还给第二个同名词', await ctx.evaluate(`
