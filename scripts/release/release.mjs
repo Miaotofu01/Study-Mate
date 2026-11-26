@@ -305,10 +305,18 @@ function githubReleaseBody(notes, version) {
 export async function ensureGithubRelease(state, notes, request = github) {
   let release = await request(`/releases/tags/${state.tag}`, { missing: true });
   if (!release) {
-    return request('/releases', { method: 'POST', body: {
-      tag_name: state.tag, target_commitish: state.commit, name: state.tag, make_latest: 'legacy',
-      body: githubReleaseBody(notes, state.version), draft: false, prerelease: false,
-    } });
+    try {
+      release = await request('/releases', { method: 'POST', body: {
+        tag_name: state.tag, target_commitish: state.commit, name: state.tag, make_latest: 'legacy',
+        body: githubReleaseBody(notes, state.version), draft: false, prerelease: false,
+      } });
+    } catch (error) {
+      // GitHub 可能在建成 Release 之后才丢响应（2026-11-25 的 502：Release 已 published，
+      // 工作流却按失败退出，ZIP 与 latest 都跟着丢）。按 tag 回读一次：建成了就当作已有
+      // Release 继续走下面的校验；确实没建成再把原错误抛回去，别把 5xx 当「没建成」。
+      release = await request(`/releases/tags/${state.tag}`, { missing: true });
+      if (!release) throw error;
+    }
   }
   if (release.draft || release.prerelease || release.tag_name !== state.tag) {
     throw new Error(`GitHub ${state.tag} is not the expected stable release; inspect it before retrying.`);
@@ -318,6 +326,35 @@ export async function ensureGithubRelease(state, notes, request = github) {
     release = await request(`/releases/${release.id}`, { method: 'PATCH', body: { body } });
   }
   return release;
+}
+
+/** `v2.1.0` 与历史两位 tag `v0.1` 的统一比较；认不出的 tag 返回 `null`，交给调用方决定不比。 */
+export function compareReleaseTags(left, right) {
+  const parse = value => {
+    const match = typeof value === 'string' ? RELEASE_TAG.exec(value) : null;
+    return match ? [BigInt(match[1]), BigInt(match[2]), BigInt(match[3] || 0)] : null;
+  };
+  const a = parse(left), b = parse(right);
+  if (!a || !b) return null;
+  for (let index = 0; index < 3; index++) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+  }
+  return 0;
+}
+
+/** 发布成功不等于 latest 指对了：创建请求的响应可能丢在 `make_latest` 生效之前（2026-11-25）。
+ * 这里显式对账，并在当前 latest 比本次新时收手——重跑旧版本不能把更新的 Release 顶掉。 */
+export async function ensureReleaseLatest(release, version, request = github) {
+  const tag = `v${version}`;
+  const latest = await request('/releases/latest', { missing: true });
+  if (latest?.tag_name === tag) return { release, changed: false };
+  if (latest && compareReleaseTags(latest.tag_name, tag) === 1) return { release, changed: false };
+  const updated = await request(`/releases/${release.id}`, { method: 'PATCH', body: { make_latest: 'true' } });
+  const confirmed = await request('/releases/latest', { missing: true });
+  if (confirmed?.tag_name !== tag) {
+    throw new Error(`GitHub release ${tag} is not the repository latest after the update; check the release's latest setting before retrying.`);
+  }
+  return { release: updated, changed: true };
 }
 
 async function matchingReleaseAsset(release, name, request) {
@@ -542,6 +579,8 @@ async function publish() {
   const notes = notesFromChangelog(readFileSync('CHANGELOG.md', 'utf8'), state.version);
   const release = await ensureGithubRelease(state, notes);
   const uploaded = await ensureReleaseAsset(release, plugin);
+  // latest 放在附件之后：ZIP 没传成功的半成品 Release 不该先拿到 Latest 标记。
+  await ensureReleaseLatest(release, state.version);
   summary(`Published [${PACKAGE}@${state.version}](https://www.npmjs.com/package/${PACKAGE}/v/${state.version}) and [${state.tag}](https://github.com/${REPOSITORY}/releases/tag/${state.tag}) with [${OPENAI_ASSET}](https://github.com/${REPOSITORY}/releases/download/${state.tag}/${OPENAI_ASSET})${uploaded.skipped ? ' (verified existing ZIP)' : ''}. ZIP SHA256: \`${plugin.digest.slice('sha256:'.length)}\`.`);
 }
 

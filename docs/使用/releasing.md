@@ -51,7 +51,7 @@ GitHub 发布 job 引用 `npm` environment，不要求设置审批人。仓库�
 
 重跑旧任务仍使用当时的 commit，不会包含后来推送的修复。如果检查失败后已修复代码，且本次版本 tag 尚未创建，请在 **Actions → Release → Run workflow** 从最新 `main` 新建一次发布。
 
-如果只是网络等临时故障，代码没有变化，或本次版本 commit/tag 已经推送，在原任务点击 **Re-run failed jobs**。版本 tag 保存了源 commit 和发布信息，流程会继续这个版本；如果 npm 已经发布相同 tarball，则跳过发布并补齐 Release 和 ZIP。已有同名 ZIP 必须通过 SHA-256 内容核对；相同则复用，冲突则停止，不删除或覆盖。若同一 npm 版本内容不同、tag 来源不同、registry 状态不明，流程也会失败并保留现场。
+如果只是网络等临时故障，代码没有变化，或本次版本 commit/tag 已经推送，在原任务点击 **Re-run failed jobs**。版本 tag 保存了源 commit 和发布信息，流程会继续这个版本；如果 npm 已经发布相同 tarball，则跳过发布并补齐 Release 和 ZIP。已有同名 ZIP 必须通过 SHA-256 内容核对；相同则复用，冲突则停止，不删除或覆盖。建 Release 的请求返回 5xx 时（2026-11-25 遇到过 502），流程会按 tag 回读：Release 实际已建成则继续补 ZIP，没有建成才报错；收尾还会确认仓库的 latest 指向本次版本，指向更旧或缺失时会 `PATCH` 更正，比本次新则不动。若同一 npm 版本内容不同、tag 来源不同、registry 状态不明，流程也会失败并保留现场。
 
 如果等待窗口内 registry 上一直没出现这个版本（报错里会给出查过的 URL 和已等时长），先打开报错里的 npm 页面确认包是否已经入库——迟到的包仍然会被重跑认领，重跑不会重复发包；确认包真没发出去，再用更长的 `RELEASE_NPM_WAIT_SECONDS` 重跑。等待窗口落空时失败发生在 GitHub Release 之前，所以现场可能是「npm 有、tag 有、Release 没有」，重跑会补齐缺的那一半。
 

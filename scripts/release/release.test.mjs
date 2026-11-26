@@ -8,7 +8,8 @@ import { createHash } from 'node:crypto';
 import { addChangelog, bumpVersion, mergedPullRequests, notesFromChangelog, registryVersion,
   releaseNotes, releasePlan, validatePack, verifyPublished, verifyPublishOrder, publishWaitSeconds,
   publicationPending, waitForPublished, CLIENT_ENTRY, CLIENT_CHUNK, CLIENT_NOTICES,
-  buildReleasePlugin, ensureGithubRelease, ensureReleaseAsset, withInstallationNotes } from './release.mjs';
+  buildReleasePlugin, ensureGithubRelease, ensureReleaseAsset, ensureReleaseLatest,
+  compareReleaseTags, withInstallationNotes } from './release.mjs';
 
 const repository = 'Miaotofu01/Study-Mate';
 const name = '@yunmiao/studymate';
@@ -393,6 +394,80 @@ test('GitHub release creation and retry update only missing installation informa
     return { ...release, body: options.body.body };
   });
   await assert.rejects(ensureGithubRelease(state, '版本说明', async () => ({ ...release, draft: true })), /expected stable release/);
+});
+
+test('a lost POST response still adopts the release GitHub created', async () => {
+  const { release } = assetFixture();
+  const state = { tag: 'v0.2.0', version: '0.2.0', commit: 'a'.repeat(40) };
+  const body = withInstallationNotes('版本说明', '0.2.0');
+  const calls = [];
+  let lookups = 0;
+  const found = await ensureGithubRelease(state, '版本说明', async (path, options) => {
+    calls.push(path);
+    if (path === '/releases/tags/v0.2.0') {
+      lookups += 1;
+      return lookups === 1 ? null : { ...release, body };
+    }
+    assert.equal(path, '/releases');
+    assert.equal(options.method, 'POST');
+    // 502 时 GitHub 已经建出了 Release：响应丢了，服务端状态没丢。
+    throw new Error('GitHub POST /releases: HTTP 502 Server Error');
+  });
+  assert.equal(found.tag_name, 'v0.2.0');
+  assert.deepEqual(calls, ['/releases/tags/v0.2.0', '/releases', '/releases/tags/v0.2.0']);
+});
+
+test('a failed creation with no release behind it keeps the original error', async () => {
+  const state = { tag: 'v0.2.0', version: '0.2.0', commit: 'a'.repeat(40) };
+  const calls = [];
+  await assert.rejects(ensureGithubRelease(state, '版本说明', async path => {
+    calls.push(path);
+    if (path === '/releases/tags/v0.2.0') return null;
+    throw new Error('GitHub POST /releases: HTTP 502 Server Error');
+  }), /HTTP 502/);
+  assert.deepEqual(calls, ['/releases/tags/v0.2.0', '/releases', '/releases/tags/v0.2.0']);
+});
+
+test('latest is pointed at the published release and confirmed', async () => {
+  const { release } = assetFixture();
+  const calls = [];
+  let reads = 0;
+  const result = await ensureReleaseLatest(release, '0.2.0', async (path, options) => {
+    calls.push([path, options]);
+    if (path === '/releases/latest') return ++reads === 1 ? { tag_name: 'v0.1.0' } : { tag_name: 'v0.2.0' };
+    assert.equal(path, '/releases/12');
+    assert.equal(options.method, 'PATCH');
+    assert.deepEqual(options.body, { make_latest: 'true' });
+    return { ...release, tag_name: 'v0.2.0' };
+  });
+  assert.equal(result.changed, true);
+  assert.deepEqual(calls.map(([path]) => path), ['/releases/latest', '/releases/12', '/releases/latest']);
+});
+
+test('latest is left alone when it already points here or at a newer release', async () => {
+  const { release } = assetFixture();
+  for (const tag_name of ['v0.2.0', 'v0.3.0']) {
+    let calls = 0;
+    const result = await ensureReleaseLatest(release, '0.2.0', async () => { calls += 1; return { tag_name }; });
+    assert.deepEqual(result, { release, changed: false });
+    assert.equal(calls, 1);
+  }
+});
+
+test('latest update fails loudly when the badge still points elsewhere', async () => {
+  const { release } = assetFixture();
+  await assert.rejects(ensureReleaseLatest(release, '0.2.0', async path => {
+    if (path === '/releases/latest') return { tag_name: 'v0.1.0' };
+    return release;
+  }), /is not the repository latest/);
+});
+
+test('release tags compare numerically, including historical two-part tags', () => {
+  assert.equal(compareReleaseTags('v0.1', 'v0.1.0'), 0);
+  assert.equal(compareReleaseTags('v2.0.4', 'v2.1.0'), -1);
+  assert.equal(compareReleaseTags('v2.10.0', 'v2.9.0'), 1);
+  assert.equal(compareReleaseTags('v2.1.0', 'v2.1.0'), 0);
+  assert.equal(compareReleaseTags('v2.1.0', 'nightly'), null);
 });
 
 test('new release assets upload ZIP bytes with the API media type and verified digest', async () => {
